@@ -31,6 +31,11 @@ export function getSubscriptionExpiryWarning(
     }
 }
 
-export function getSubscriptionExpiryWarningSeenKey(workspaceId: string, expiresAtIso: string) {
-    return `atlas_subscription_expiry_warning_seen:${workspaceId}:${expiresAtIso}`
+export function getSubscriptionExpiryWarningSeenKey(
+    workspaceId: string,
+    expiresAtIso: string,
+    billingMode?: string
+) {
+    const modeSegment = billingMode ? `:${billingMode}` : ''
+    return `atlas_subscription_expiry_warning_seen:${workspaceId}${modeSegment}:${expiresAtIso}`
 }

@@ -21,6 +21,7 @@ import {
     formatWorkspacePaymentDecimal,
     grantWorkspaceSubscriptionExtraDays,
     getWorkspacePaymentAlertKind,
+    getWorkspaceBillingMode,
     getWorkspacePaymentExpiryDate,
     getWorkspacePaymentQrPath,
     isWorkspacePaymentAccessExpired,
@@ -34,7 +35,6 @@ import {
     normalizeWorkspacePaymentSummary,
     normalizeWorkspacePaygSummary,
     normalizeWorkspaceSubscriptionExtraDays,
-    shouldApplyWorkspaceSubscriptionExpiry,
     shouldWorkspacePaymentLockAccess,
     submitWorkspacePayment,
     submitWorkspacePaygPayment,
@@ -240,7 +240,7 @@ describe('workspace payments', () => {
         })
 
         expect(getWorkspacePaymentAlertKind(exhausted)).toBe('usage_exhausted')
-        expect(getWorkspacePaymentAlertKind(renewalDue)).toBe('subscription_expired')
+        expect(getWorkspacePaymentAlertKind(renewalDue)).toBe('usage_renewal_due')
         expect(getWorkspacePaymentAlertKind(expired)).toBe('subscription_expired')
         expect(shouldWorkspacePaymentLockAccess(expired)).toBe(true)
         expect(shouldWorkspacePaymentLockAccess(null)).toBe(false)
@@ -304,51 +304,32 @@ describe('workspace payments', () => {
         const now = new Date('2026-07-15T00:00:00.000Z')
 
         expect(getWorkspacePaymentExpiryDate({
-            subscriptionExpiresAt: '2026-08-01T00:00:00.000Z',
             renewalDueAt,
-            hasUsageLimits: true,
             summary: null
         })).toBe(renewalDueAt)
 
         expect(isWorkspacePaymentAccessExpired({
-            subscriptionExpiresAt: '2026-08-01T00:00:00.000Z',
             renewalDueAt,
-            hasUsageLimits: true,
             summary: null,
             now
         })).toBe(true)
     })
 
-    it('does not fall back to the legacy subscription expiry for usage billing', () => {
+    it('does not expire a workspace when the centralized billing deadline is empty', () => {
         const now = new Date('2026-07-15T00:00:00.000Z')
 
         expect(getWorkspacePaymentExpiryDate({
-            subscriptionExpiresAt: '2026-07-01T00:00:00.000Z',
             renewalDueAt: null,
-            hasUsageLimits: true,
             summary: null
         })).toBeNull()
 
         expect(isWorkspacePaymentAccessExpired({
-            subscriptionExpiresAt: '2026-07-01T00:00:00.000Z',
             renewalDueAt: null,
-            hasUsageLimits: true,
             summary: null,
             now
         })).toBe(false)
-    })
 
-    it('does not apply subscription expiry after the server enables usage billing', () => {
-        const usageBilling = summary({
-            eligibility: {
-                subscription_expired: false,
-                usage_exhausted: false,
-                usage_renewal_due: false,
-                alert_reason: null,
-                payment_enabled: true
-            }
-        })
-        const subscriptionBilling = summary({
+        const configuredWithoutDeadline = summary({
             configuration: {
                 id: 'configuration-1',
                 workspace_id: 'workspace-1',
@@ -360,42 +341,62 @@ describe('workspace payments', () => {
                 renewal_due_at: null
             }
         })
+        expect(getWorkspacePaymentExpiryDate({
+            renewalDueAt: '2026-07-14T00:00:00.000Z',
+            summary: configuredWithoutDeadline
+        })).toBeNull()
+        expect(isWorkspacePaymentAccessExpired({
+            renewalDueAt: '2026-07-14T00:00:00.000Z',
+            summary: configuredWithoutDeadline,
+            now
+        })).toBe(false)
+    })
 
-        expect(shouldApplyWorkspaceSubscriptionExpiry({
-            hasUsageLimits: false,
-            summary: usageBilling
-        })).toBe(true)
-        expect(shouldApplyWorkspaceSubscriptionExpiry({
-            hasUsageLimits: false,
-            summary: subscriptionBilling
-        })).toBe(true)
-        expect(shouldApplyWorkspaceSubscriptionExpiry({
-            hasUsageLimits: true,
-            summary: null
-        })).toBe(true)
-        expect(shouldApplyWorkspaceSubscriptionExpiry({
-            hasUsageLimits: false,
-            summary: null
-        })).toBe(true)
+    it('uses the centralized renewal deadline for each billing mode', () => {
+        const cases = [
+            { billing_interval: 'monthly', usage_enabled: false, payg_enabled: false, mode: 'subscription' },
+            { billing_interval: 'monthly', usage_enabled: true, payg_enabled: false, mode: 'usage' },
+            { billing_interval: 'prepaid_term', usage_enabled: true, payg_enabled: false, mode: 'prepaidTerm' },
+            { billing_interval: 'monthly', usage_enabled: false, payg_enabled: true, mode: 'payg' }
+        ] as const
+
+        for (const billingCase of cases) {
+            const billingSummary = summary({
+                configuration: {
+                    id: 'configuration-1',
+                    workspace_id: 'workspace-1',
+                    subscription_amount: 30_000,
+                    currency: 'IQD',
+                    is_payment_enabled: true,
+                    usage_enabled: billingCase.usage_enabled,
+                    payg_enabled: billingCase.payg_enabled,
+                    billing_interval: billingCase.billing_interval,
+                    gb_per_payment: 15,
+                    renewal_due_at: '2026-07-15T00:00:00.000Z'
+                }
+            })
+
+            expect(getWorkspaceBillingMode(billingSummary, false)).toBe(billingCase.mode)
+            expect(getWorkspacePaymentExpiryDate({ summary: billingSummary })).toBe('2026-07-15T00:00:00.000Z')
+            expect(isWorkspacePaymentAccessExpired({
+                summary: billingSummary,
+                now: new Date('2026-07-15T00:00:00.000Z')
+            })).toBe(billingCase.mode !== 'payg')
+        }
+
+        expect(getWorkspaceBillingMode(null, true, true)).toBe('payg')
     })
 
     it('detects realtime access-state changes that require an immediate payment refresh', () => {
         const current = {
-            lockedWorkspace: false,
-            subscriptionExpiresAt: '2026-08-01T00:00:00.000Z'
+            lockedWorkspace: false
         }
 
         expect(hasWorkspacePaymentAccessStateUpdate(current, {
-            locked_workspace: true,
-            subscription_expires_at: current.subscriptionExpiresAt
+            locked_workspace: true
         })).toBe(true)
         expect(hasWorkspacePaymentAccessStateUpdate(current, {
-            locked_workspace: false,
-            subscription_expires_at: '2026-09-01T00:00:00.000Z'
-        })).toBe(true)
-        expect(hasWorkspacePaymentAccessStateUpdate(current, {
-            locked_workspace: false,
-            subscription_expires_at: current.subscriptionExpiresAt
+            locked_workspace: false
         })).toBe(false)
     })
 

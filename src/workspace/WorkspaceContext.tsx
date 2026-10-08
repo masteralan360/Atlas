@@ -44,10 +44,12 @@ import {
 import {
     getWorkspacePaymentSummary,
     hasWorkspacePaymentAccessStateUpdate,
+    getWorkspaceBillingMode,
     isWorkspacePaymentAccessExpired,
     shouldWorkspacePaymentLockAccess,
     getWorkspacePaygSummary,
     type WorkspacePaymentSummary,
+    type WorkspaceBillingMode,
     type WorkspacePaygSummary
 } from '@/lib/workspacePayments'
 import {
@@ -121,8 +123,8 @@ export interface WorkspaceFeatures {
     a4_template: 'primary' | 'modern' | 'professional'
     print_quality: 'high'
     thermal_printing: boolean
-    subscription_expires_at: string | null
     renewal_due_at: string | null
+    billing_mode: WorkspaceBillingMode | null
     has_usage_limits: boolean
     upload_limit_mb: number | null
     visibility: 'private' | 'public' | 'link_only'
@@ -286,8 +288,8 @@ const defaultFeatures: WorkspaceFeatures = {
     a4_template: 'professional',
     print_quality: 'high' as const,
     thermal_printing: false,
-    subscription_expires_at: null,
     renewal_due_at: null,
+    billing_mode: null,
     has_usage_limits: false,
     upload_limit_mb: null,
     visibility: 'private',
@@ -316,7 +318,6 @@ const WORKSPACE_FEATURE_COLUMNS = [
     'print_qr',
     'receipt_template',
     'a4_template',
-    'subscription_expires_at',
     'upload_limit_mb',
     'visibility',
     'store_slug',
@@ -373,17 +374,17 @@ function mergeWorkspaceFeatures(
 }
 
 function isWorkspaceCurrentlyLocked(
-    features: Pick<WorkspaceFeatures, 'locked_workspace' | 'subscription_expires_at' | 'renewal_due_at' | 'has_usage_limits'>,
+    features: Pick<WorkspaceFeatures, 'locked_workspace' | 'renewal_due_at' | 'billing_mode' | 'has_usage_limits'>,
     summary?: WorkspacePaymentSummary | null,
-    now?: Date
+    now?: Date,
+    paygEnabled = false
 ) {
     if (features.locked_workspace) return true
 
     return isWorkspacePaymentAccessExpired({
-        subscriptionExpiresAt: features.subscription_expires_at,
         renewalDueAt: features.renewal_due_at,
-        hasUsageLimits: features.has_usage_limits,
         summary,
+        billingMode: features.billing_mode ?? getWorkspaceBillingMode(summary, features.has_usage_limits, paygEnabled),
         now
     })
 }
@@ -418,8 +419,8 @@ function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeat
         a4_template: localWorkspace.a4_template ?? 'professional',
         print_quality: 'high' as const,
         thermal_printing: localWorkspace.thermal_printing ?? false,
-        subscription_expires_at: localWorkspace.subscription_expires_at ?? null,
         renewal_due_at: localWorkspace.renewal_due_at ?? null,
+        billing_mode: localWorkspace.billing_mode ?? null,
         has_usage_limits: localWorkspace.has_usage_limits ?? false,
         upload_limit_mb: localWorkspace.upload_limit_mb ?? null,
         visibility: localWorkspace.visibility ?? 'private',
@@ -606,8 +607,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             receipt_template: persistedLocallyOwned.receipt_template ?? nextFeatures.receipt_template,
             a4_template: persistedLocallyOwned.a4_template ?? nextFeatures.a4_template,
             thermal_printing: persistedLocallyOwned.thermal_printing ?? nextFeatures.thermal_printing,
-            subscription_expires_at: nextFeatures.subscription_expires_at,
             renewal_due_at: nextFeatures.renewal_due_at,
+            billing_mode: nextFeatures.billing_mode,
             has_usage_limits: nextFeatures.has_usage_limits,
             upload_limit_mb: persistedLocallyOwned.upload_limit_mb ?? nextFeatures.upload_limit_mb,
             visibility: nextFeatures.visibility,
@@ -778,10 +779,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 ? usageStatusResult.data[0]
                 : null
             const currentFeatures = featuresRef.current
+            const persistedWorkspace = await db.workspaces.get(workspaceId)
             const renewalDueAt = paymentSummaryResult.error
                 ? cachedSnapshot?.features?.renewal_due_at ?? currentFeatures.renewal_due_at
                 : paymentSummaryResult.summary?.configuration?.renewalDueAt ?? null
-            const persistedWorkspace = await db.workspaces.get(workspaceId)
+            const billingMode = paymentSummaryResult.error
+                ? cachedSnapshot?.features?.billing_mode ?? persistedWorkspace?.billing_mode ?? currentFeatures.billing_mode
+                : getWorkspaceBillingMode(
+                    paymentSummaryResult.summary,
+                    Boolean(usageStatus?.has_limits),
+                    Boolean(paygSummaryResult.summary?.enabled)
+                )
             const localThermalPrinting = cachedSnapshot?.features?.thermal_printing
                 ?? persistedWorkspace?.thermal_printing
                 ?? currentFeatures.thermal_printing
@@ -826,8 +834,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 a4_template: resolvedLocallyOwned.a4_template ?? workspaceRow.a4_template ?? currentFeatures.a4_template,
                 print_quality: 'high' as const,
                 thermal_printing: resolvedLocallyOwned.thermal_printing ?? localThermalPrinting,
-                subscription_expires_at: workspaceRow.subscription_expires_at ?? currentFeatures.subscription_expires_at,
                 renewal_due_at: renewalDueAt,
+                billing_mode: billingMode,
                 has_usage_limits: Boolean(usageStatus?.has_limits),
                 upload_limit_mb: resolvedLocallyOwned.upload_limit_mb ?? workspaceRow.upload_limit_mb ?? null,
                 visibility: workspaceRow.visibility ?? currentFeatures.visibility,
@@ -982,6 +990,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         const nextPaygSummary = summary.enabled ? summary : null
         paygSummaryRef.current = nextPaygSummary
         setPaygSummary(nextPaygSummary)
+
+        const currentFeatures = featuresRef.current
+        const billingMode = getWorkspaceBillingMode(
+            paymentSummaryRef.current,
+            currentFeatures.has_usage_limits,
+            Boolean(nextPaygSummary?.enabled)
+        )
+        if (currentFeatures.billing_mode !== billingMode) {
+            const updatedFeatures = mergeWorkspaceFeatures({
+                ...currentFeatures,
+                billing_mode: billingMode
+            }, overridesRef.current)
+            setFeatures(updatedFeatures)
+            writeWorkspaceCache({
+                workspaceId,
+                features: updatedFeatures,
+                workspaceName: workspaceNameRef.current ?? user.workspaceName ?? 'My Workspace',
+                overrides: overridesRef.current
+            })
+            await db.workspaces.update(workspaceId, { billing_mode: billingMode })
+        }
         return nextPaygSummary
     }, [isAuthenticated, user?.workspaceId, user?.workspaceMode])
 
@@ -1050,8 +1079,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                         const currentFeatures = featuresRef.current
                         const persistedWorkspaceUpdate = await db.workspaces.get(user.workspaceId)
                         const accessStateChanged = hasWorkspacePaymentAccessStateUpdate({
-                            lockedWorkspace: currentFeatures.locked_workspace,
-                            subscriptionExpiresAt: currentFeatures.subscription_expires_at
+                            lockedWorkspace: currentFeatures.locked_workspace
                         }, data)
                         const resolvedLocallyOwnedUpdate = resolveFetchedWorkspaceSettings({
                             workspaceMode: data.data_mode,
@@ -1093,7 +1121,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                             a4_template: resolvedLocallyOwnedUpdate.a4_template ?? data.a4_template ?? currentFeatures.a4_template,
                             print_quality: 'high' as const,
                             thermal_printing: resolvedLocallyOwnedUpdate.thermal_printing ?? currentFeatures.thermal_printing,
-                            subscription_expires_at: data.subscription_expires_at ?? currentFeatures.subscription_expires_at,
                             renewal_due_at: currentFeatures.renewal_due_at,
                             has_usage_limits: currentFeatures.has_usage_limits,
                             visibility: data.visibility ?? currentFeatures.visibility,
@@ -1131,10 +1158,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
                                     const currentFeatures = featuresRef.current
                                     const renewalDueAt = summary.configuration?.renewalDueAt ?? null
-                                    if (currentFeatures.renewal_due_at !== renewalDueAt) {
+                                    const billingMode = getWorkspaceBillingMode(
+                                        summary,
+                                        currentFeatures.has_usage_limits,
+                                        Boolean(paygSummaryRef.current?.enabled)
+                                    )
+                                    if (currentFeatures.renewal_due_at !== renewalDueAt || currentFeatures.billing_mode !== billingMode) {
                                         const updatedFeatures = mergeWorkspaceFeatures({
                                             ...currentFeatures,
-                                            renewal_due_at: renewalDueAt
+                                            renewal_due_at: renewalDueAt,
+                                            billing_mode: billingMode
                                         }, overridesRef.current)
                                         setFeatures(updatedFeatures)
                                         const nextWorkspaceName = workspaceNameRef.current ?? user.workspaceName ?? 'My Workspace'
@@ -1249,7 +1282,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 event === 'wake'
                 || event === 'online'
                 || (event === 'heartbeat' && (
-                    isWorkspaceCurrentlyLocked(featuresRef.current, paymentSummaryRef.current)
+                    isWorkspaceCurrentlyLocked(
+                        featuresRef.current,
+                        paymentSummaryRef.current,
+                        undefined,
+                        Boolean(paygSummaryRef.current?.enabled)
+                    )
                     || shouldWorkspacePaymentLockAccess(paymentSummaryRef.current)
                     || Boolean(paygSummaryRef.current?.paygLimitState?.locked)
                 ))
@@ -1306,10 +1344,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
             const currentFeatures = featuresRef.current
             const renewalDueAt = summary.configuration?.renewalDueAt ?? null
-            if (currentFeatures.renewal_due_at !== renewalDueAt) {
+            const billingMode = getWorkspaceBillingMode(
+                summary,
+                currentFeatures.has_usage_limits,
+                Boolean(paygSummaryRef.current?.enabled)
+            )
+            if (currentFeatures.renewal_due_at !== renewalDueAt || currentFeatures.billing_mode !== billingMode) {
                 const updatedFeatures = mergeWorkspaceFeatures({
                     ...currentFeatures,
-                    renewal_due_at: renewalDueAt
+                    renewal_due_at: renewalDueAt,
+                    billing_mode: billingMode
                 }, overridesRef.current)
                 setFeatures(updatedFeatures)
                 const nextWorkspaceName = workspaceNameRef.current ?? user.workspaceName ?? 'My Workspace'
@@ -1455,7 +1499,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 receipt_template: newFeatures.receipt_template,
                 a4_template: newFeatures.a4_template,
                 thermal_printing: newFeatures.thermal_printing,
-                subscription_expires_at: newFeatures.subscription_expires_at,
                 renewal_due_at: newFeatures.renewal_due_at,
                 upload_limit_mb: newFeatures.upload_limit_mb,
                 visibility: newFeatures.visibility,
@@ -1698,7 +1741,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         workspaceId: user?.workspaceId,
         resolvingWorkspaceId: currentWorkspaceIdRef.current
     })
-    const isLocked = isWorkspaceCurrentlyLocked(features, paymentSummary, new Date(billingNowMs))
+    const isLocked = isWorkspaceCurrentlyLocked(
+        features,
+        paymentSummary,
+        new Date(billingNowMs),
+        Boolean(paygSummary?.enabled)
+    )
         || shouldWorkspacePaymentLockAccess(paymentSummary)
         || Boolean(paygSummary?.paygLimitState?.locked)
     const planCapabilities = overrides.length

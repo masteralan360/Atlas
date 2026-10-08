@@ -44,6 +44,7 @@ describe('createDemoWorkspace', () => {
       id: result.workspaceId,
       data_mode: 'demo',
       default_currency: 'iqd',
+      demo_expires_at: '2026-09-01T12:15:00.000Z',
     }))
     expect(mocks.profilePut).toHaveBeenCalledWith(expect.objectContaining({
       id: result.userId,

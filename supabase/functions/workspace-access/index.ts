@@ -263,7 +263,6 @@ type BranchSourceWorkspace = WorkspaceMetadataRow & {
     print_qr?: boolean | null
     receipt_template?: string | null
     a4_template?: string | null
-    subscription_expires_at?: string | null
     visibility?: string | null
     store_slug?: string | null
     store_description?: string | null
@@ -287,7 +286,6 @@ const BRANCH_SOURCE_SELECT_COLUMNS = [
     'print_qr',
     'receipt_template',
     'a4_template',
-    'subscription_expires_at',
     'visibility',
     'store_slug',
     'store_description'
@@ -546,7 +544,6 @@ async function handleCreateWorkspace(adminClient: AdminClient, body: CreateWorks
         .insert({
             name: workspaceName,
             plan: 'basic',
-            subscription_expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
             locked_workspace: false
         })
         .select('id, name, code, data_mode, plan')
@@ -554,6 +551,18 @@ async function handleCreateWorkspace(adminClient: AdminClient, body: CreateWorks
 
     if (error || !data) {
         return errorResponse(error?.message ?? 'Failed to create workspace', 500)
+    }
+
+    const renewalDueAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+    const { error: billingError } = await adminClient.rpc('admin_set_workspace_monthly_subscription_expiry', {
+        p_workspace_id: data.id,
+        p_renewal_due_at: renewalDueAt,
+        p_actor: 'workspace-provisioning'
+    })
+
+    if (billingError) {
+        await adminClient.from('workspaces').delete().eq('id', data.id)
+        return errorResponse(billingError.message ?? 'Failed to initialize workspace billing', 500)
     }
 
     return jsonResponse(data)
@@ -960,7 +969,6 @@ async function handleCreateBranch(
         print_qr: sourceWorkspace.print_qr ?? false,
         receipt_template: sourceWorkspace.receipt_template ?? 'primary',
         a4_template: sourceWorkspace.a4_template ?? 'professional',
-        subscription_expires_at: sourceWorkspace.subscription_expires_at ?? null,
         visibility: 'private',
         store_slug: null,
         store_description: sourceWorkspace.store_description ?? null

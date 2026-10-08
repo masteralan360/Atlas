@@ -68,7 +68,7 @@ export async function createDemoWorkspace(
     iqd_display_preference: 'د.ع',
     locked_workspace: false,
     is_configured: true,
-    subscription_expires_at: new Date(Date.now() + minutes * 60000).toISOString(),
+    demo_expires_at: new Date(Date.now() + minutes * 60000).toISOString(),
     syncStatus: 'synced',
     lastSyncedAt: null,
     version: 1,

@@ -37,11 +37,10 @@ SELECT ok(
   'workspace users cannot call the Admin mismatch reader'
 );
 
-INSERT INTO public.workspaces (id, name, subscription_expires_at, data_mode)
+INSERT INTO public.workspaces (id, name, data_mode)
 VALUES (
   'a7000000-0000-4000-8000-000000000001',
   'Inventory transaction integrity test',
-  now() + interval '10 days',
   'cloud'
 );
 

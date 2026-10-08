@@ -11,6 +11,7 @@ import { NotificationCenter } from './NotificationCenter'
 import { ThemeAwareTitleLogo } from './ThemeAwareTitleLogo'
 import { LanguageSwitcher } from './LanguageSwitcher'
 import { useSubscriptionExpiryWarning } from '@/hooks/useSubscriptionExpiryWarning'
+import { getWorkspaceBillingMode, getWorkspacePaymentExpiryDate } from '@/lib/workspacePayments'
 import { WorkspacePaygChargeButton, WorkspacePaygLimitGaugeButton, WorkspaceUsageButton, WorkspaceUsageCircleButton, WorkspaceUsageModal } from './WorkspaceUsageModal'
 import { useWorkspaceUsageMeter } from './workspaceUsageMeter'
 import { useNavigationHistory } from '@/hooks/useNavigationHistory'
@@ -22,7 +23,7 @@ export function TitleBar() {
     const [isMaximized, setIsMaximized] = useState(false)
     const [usageModalOpen, setUsageModalOpen] = useState(false)
     const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth)
-    const { workspaceName, branchInfo, pendingUpdate, isFullscreen, features, isLocalMode, isDemoMode, activeWorkspace } = useWorkspace()
+    const { workspaceName, branchInfo, pendingUpdate, isFullscreen, features, isLocalMode, isDemoMode, activeWorkspace, paymentSummary, isPaymentSummaryLoading, paygSummary: workspacePaygSummary } = useWorkspace()
     const { theme, setTheme, style } = useTheme()
     const { t, i18n } = useTranslation()
     const { isEnabled: isNavigationRailPreferenceEnabled } = useNavigationRailDisplay()
@@ -30,8 +31,15 @@ export function TitleBar() {
     const isTauri = !!window.__TAURI_INTERNALS__
     const showNavigationRail = isNavigationRailEnabled(viewportWidth, isNavigationRailPreferenceEnabled)
     const isRtl = getLanguageDirection(i18n.resolvedLanguage || i18n.language) === 'rtl'
-    const subscriptionWarning = useSubscriptionExpiryWarning(
-        isTauri && !isDemoMode ? features.subscription_expires_at : null
+    const billingMode = features.billing_mode ?? getWorkspaceBillingMode(paymentSummary, features.has_usage_limits, Boolean(workspacePaygSummary?.enabled))
+    const billingDeadline = getWorkspacePaymentExpiryDate({
+        renewalDueAt: features.renewal_due_at,
+        summary: paymentSummary
+    })
+    const billingWarning = useSubscriptionExpiryWarning(
+        isTauri && !isDemoMode && !(isPaymentSummaryLoading && !paymentSummary)
+            ? billingDeadline
+            : null
     )
     const { canGoBack, canGoForward, back, forward } = useNavigationHistory()
     const {
@@ -269,25 +277,23 @@ export function TitleBar() {
                         )}
                     </div>
                 )}
-                {subscriptionWarning && (
+                {billingWarning && (
                     <button
                         onClick={() => window.dispatchEvent(new CustomEvent('open-subscription-expiry-warning'))}
                         className="me-2 flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-400/15 px-2.5 py-1.5 text-amber-700 transition-colors hover:bg-amber-400/25 dark:text-amber-300"
-                        title={t('subscriptionExpiryWarning.indicatorTooltip', {
-                            count: subscriptionWarning.daysRemaining,
-                            date: formatDate(subscriptionWarning.expiresAt),
-                            defaultValue: 'Subscription expires in {{count}} days on {{date}}'
+                        title={t(`subscriptionExpiryWarning.modes.${billingMode}.indicatorTooltip`, {
+                            count: billingWarning.daysRemaining,
+                            date: formatDate(billingWarning.expiresAt)
                         })}
-                        aria-label={t('subscriptionExpiryWarning.indicatorTooltip', {
-                            count: subscriptionWarning.daysRemaining,
-                            date: formatDate(subscriptionWarning.expiresAt),
-                            defaultValue: 'Subscription expires in {{count}} days on {{date}}'
+                        aria-label={t(`subscriptionExpiryWarning.modes.${billingMode}.indicatorTooltip`, {
+                            count: billingWarning.daysRemaining,
+                            date: formatDate(billingWarning.expiresAt)
                         })}
                     >
                         <AlertTriangle className="h-3.5 w-3.5" />
                         <span className="text-xs font-semibold">
                             {t('subscriptionExpiryWarning.indicatorShort', {
-                                count: subscriptionWarning.daysRemaining,
+                                count: billingWarning.daysRemaining,
                                 defaultValue: '{{count}}d left'
                             })}
                         </span>

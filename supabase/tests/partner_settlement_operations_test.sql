@@ -4,10 +4,10 @@ CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path = public, extensions;
 SELECT plan(4);
 
-INSERT INTO public.workspaces (id, name, plan, subscription_expires_at, data_mode)
+INSERT INTO public.workspaces (id, name, plan, data_mode)
 VALUES
-  ('c1000000-0000-0000-0000-000000000001', 'Settlement workspace one', 'enterprise', now() + interval '10 days', 'cloud'),
-  ('c1000000-0000-0000-0000-000000000002', 'Settlement workspace two', 'enterprise', now() + interval '10 days', 'cloud');
+  ('c1000000-0000-0000-0000-000000000001', 'Settlement workspace one', 'enterprise', 'cloud'),
+  ('c1000000-0000-0000-0000-000000000002', 'Settlement workspace two', 'enterprise', 'cloud');
 
 INSERT INTO auth.users (
   instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,

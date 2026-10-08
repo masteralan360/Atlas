@@ -3048,8 +3048,10 @@ export interface Workspace extends BaseEntity {
   receipt_template?: 'primary' | 'modern'
   a4_template?: 'primary' | 'modern' | 'professional'
   thermal_printing?: boolean
-  subscription_expires_at?: string | null
+  /** Local-only demo timer; paid workspace deadlines live in billing configuration. */
+  demo_expires_at?: string | null
   renewal_due_at?: string | null
+  billing_mode?: 'subscription' | 'usage' | 'prepaidTerm' | 'payg' | null
   has_usage_limits?: boolean
   upload_limit_mb?: number | null
   visibility?: WorkspaceVisibility

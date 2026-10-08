@@ -7,12 +7,11 @@ SELECT no_plan();
 
 -- Fixed, transaction-scoped fixtures keep the policy and validation checks
 -- readable. ROLLBACK removes every row at the end of the test.
-INSERT INTO public.workspaces (id, name, plan, subscription_expires_at)
+INSERT INTO public.workspaces (id, name, plan)
 VALUES (
   'a1000000-0000-0000-0000-000000000001',
   'Capital pools test',
-  'enterprise',
-  now() + INTERVAL '10 days'
+  'enterprise'
 );
 
 INSERT INTO auth.users (

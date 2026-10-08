@@ -19,7 +19,6 @@ CREATE TABLE public.workspaces (
   member_count integer NULL DEFAULT 0,
   print_lang text NULL DEFAULT 'auto'::text,
   print_qr boolean NULL DEFAULT false,
-  subscription_expires_at timestamp with time zone NULL,
   receipt_template text NULL DEFAULT 'primary'::text,
   a4_template text NULL DEFAULT 'professional'::text,
 

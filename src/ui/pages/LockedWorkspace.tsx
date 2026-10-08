@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertCircle, CalendarPlus, Clock, CreditCard, Copy, Gauge, HardDrive, Lock, LogOut, Mail, Phone } from 'lucide-react'
 import { Button } from '@/ui/components/button'
@@ -9,10 +9,13 @@ import { useWorkspace } from '@/workspace'
 import { WorkspacePaygLimitDialog } from '@/ui/components/WorkspacePaygLimitDialog'
 import {
     OPEN_WORKSPACE_PAYMENT_DIALOG_EVENT,
+    OPEN_WORKSPACE_PAYMENT_STATUS_DIALOG_EVENT,
+    getWorkspaceBillingMode,
     getWorkspacePaymentAlertKind,
     isWorkspacePaymentAccessExpired,
     openWorkspaceExtraDaysDialog,
     openWorkspacePaymentDialog,
+    openWorkspacePaymentStatusDialog,
 } from '@/lib/workspacePayments'
 
 const ADMIN_PHONE_NUMBER = '0770 199 0012'
@@ -41,34 +44,29 @@ export function LockedWorkspace() {
     const handledRenewalPromptKeysRef = useRef(new Set<string>())
 
     const isExpired = isWorkspacePaymentAccessExpired({
-        subscriptionExpiresAt: features.subscription_expires_at,
         renewalDueAt: features.renewal_due_at,
-        hasUsageLimits: features.has_usage_limits,
-        summary: paymentSummary
+        summary: paymentSummary,
+        billingMode: features.billing_mode ?? getWorkspaceBillingMode(paymentSummary, features.has_usage_limits, Boolean(paygSummary?.enabled))
     })
     const paymentAlertKind = getWorkspacePaymentAlertKind(paymentSummary)
+    const billingMode = features.billing_mode ?? getWorkspaceBillingMode(paymentSummary, features.has_usage_limits, Boolean(paygSummary?.enabled))
     const pendingTransaction = paymentSummary?.pendingTransaction ?? null
     const showPaymentAction = Boolean(paymentAlertKind || isExpired || pendingTransaction)
     const canRenewSubscription = user?.role === 'admin' && showPaymentAction
-    const showsRenewSubscriptionLabel = !(isPaymentSummaryLoading && !paymentSummary) && !pendingTransaction
-    const shouldAutoOpenRenewalDialog = Boolean(!isLoading && canRenewSubscription && showsRenewSubscriptionLabel)
+    const showsBillingActionLabel = !(isPaymentSummaryLoading && !paymentSummary) && !pendingTransaction
+    const shouldAutoOpenRenewalDialog = Boolean(!isLoading && canRenewSubscription && showsBillingActionLabel)
     const renewalWorkspaceId = activeWorkspace?.id || user?.workspaceId || user?.sourceWorkspaceId
     const renewalPromptKey = renewalWorkspaceId
         ? [
             renewalWorkspaceId,
             user?.id ?? 'unknown-user',
-            features.renewal_due_at ?? features.subscription_expires_at ?? 'current-cycle'
+            features.renewal_due_at ?? 'current-cycle'
         ].join(':')
         : null
     const formattedRenewalCountdown = renewalCountdownSeconds === null
         ? null
         : new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language || 'en').format(renewalCountdownSeconds)
-    const canAddExtraDays = Boolean(
-        canRenewSubscription
-        && paymentSummary?.configuration
-        && !paymentSummary.configuration.usageEnabled
-        && !paymentSummary.configuration.paygEnabled
-    )
+    const canAddExtraDays = Boolean(canRenewSubscription && billingMode === 'subscription')
     const pendingExtraDays = paymentSummary?.pendingExtraDays ?? null
     const paygLimit = paygSummary?.paygLimitState?.limit ?? null
     const isPaygLimitLocked = Boolean(paygSummary?.paygLimitState?.locked && paygLimit)
@@ -94,6 +92,34 @@ export function LockedWorkspace() {
         }
         : null
 
+    const expiredPaymentCopy = (() => {
+        switch (billingMode) {
+            case 'usage':
+                return {
+                    title: t('workspacePayments.usageRenewalDueTitle'),
+                    description: t('workspacePayments.usageRenewalDueDescription'),
+                    icon: Clock
+                }
+            case 'prepaidTerm':
+                return {
+                    title: t('workspacePayments.prepaidTerm.renewalDueTitle'),
+                    description: t('workspacePayments.prepaidTerm.renewalDueDescription'),
+                    icon: Clock
+                }
+            case 'payg':
+                return {
+                    title: t('workspacePayments.payg.renewalDueTitle'),
+                    description: t('workspacePayments.payg.renewalDueDescription'),
+                    icon: CreditCard
+                }
+            default:
+                return {
+                    title: t('workspacePayments.subscriptionExpiredTitle'),
+                    description: t('workspacePayments.subscriptionExpiredDescription'),
+                    icon: Clock
+                }
+        }
+    })()
     const paymentCopy = paygLimitCopy ?? (() => {
         switch (paymentAlertKind) {
             case 'payg_renewal_due':
@@ -108,20 +134,24 @@ export function LockedWorkspace() {
                     description: t('workspacePayments.usageExhaustedDescription'),
                     icon: HardDrive
                 }
-            case 'subscription_expired':
-                return {
-                    title: t('workspacePayments.subscriptionExpiredTitle'),
-                    description: t('workspacePayments.subscriptionExpiredDescription'),
-                    icon: Clock
-                }
-            default:
-                if (isExpired) {
-                    return {
-                        title: t('workspacePayments.subscriptionExpiredTitle'),
-                        description: t('workspacePayments.subscriptionExpiredDescription'),
+            case 'usage_renewal_due':
+                return billingMode === 'prepaidTerm'
+                    ? {
+                        title: t('workspacePayments.prepaidTerm.renewalDueTitle'),
+                        description: t('workspacePayments.prepaidTerm.renewalDueDescription'),
                         icon: Clock
                     }
-                }
+                    : billingMode === 'payg'
+                        ? expiredPaymentCopy
+                        : {
+                            title: t('workspacePayments.usageRenewalDueTitle'),
+                            description: t('workspacePayments.usageRenewalDueDescription'),
+                            icon: Clock
+                        }
+            case 'subscription_expired':
+                return expiredPaymentCopy
+            default:
+                if (isExpired) return expiredPaymentCopy
                 return {
                     title: t('lockedWorkspace.title'),
                     description: t('lockedWorkspace.message'),
@@ -130,6 +160,32 @@ export function LockedWorkspace() {
         }
     })()
     const LockIcon = paymentCopy.icon
+    const paymentActionLabelKey = pendingTransaction
+        ? 'workspacePayments.viewPaymentStatus'
+        : billingMode === 'prepaidTerm'
+            ? 'workspacePayments.viewPaymentStatus'
+            : billingMode === 'usage'
+                ? 'workspacePayments.renewUsageCredit'
+                : billingMode === 'payg'
+                    ? 'workspacePayments.payg.renewalAction'
+                    : 'workspacePayments.renewSubscription'
+
+    const handleOpenBillingAction = useCallback(() => {
+        if (renewalPromptKey) {
+            handledRenewalPromptKeysRef.current.add(renewalPromptKey)
+        }
+        if (renewalCountdownIntervalRef.current !== null) {
+            window.clearInterval(renewalCountdownIntervalRef.current)
+            renewalCountdownIntervalRef.current = null
+        }
+        setRenewalCountdownSeconds(null)
+
+        if (billingMode === 'prepaidTerm') {
+            openWorkspacePaymentStatusDialog()
+            return
+        }
+        openWorkspacePaymentDialog()
+    }, [billingMode, renewalPromptKey])
 
     useEffect(() => {
         if (!shouldAutoOpenRenewalDialog || !renewalPromptKey) {
@@ -153,7 +209,7 @@ export function LockedWorkspace() {
                 renewalCountdownIntervalRef.current = null
                 handledRenewalPromptKeysRef.current.add(renewalPromptKey)
                 setRenewalCountdownSeconds(null)
-                openWorkspacePaymentDialog()
+                handleOpenBillingAction()
                 return
             }
 
@@ -167,10 +223,10 @@ export function LockedWorkspace() {
                 renewalCountdownIntervalRef.current = null
             }
         }
-    }, [renewalPromptKey, shouldAutoOpenRenewalDialog])
+    }, [handleOpenBillingAction, renewalPromptKey, shouldAutoOpenRenewalDialog])
 
     useEffect(() => {
-        const handlePaymentDialogOpen = () => {
+        const handleBillingDialogOpen = () => {
             if (renewalPromptKey) {
                 handledRenewalPromptKeysRef.current.add(renewalPromptKey)
             }
@@ -181,8 +237,12 @@ export function LockedWorkspace() {
             setRenewalCountdownSeconds(null)
         }
 
-        window.addEventListener(OPEN_WORKSPACE_PAYMENT_DIALOG_EVENT, handlePaymentDialogOpen)
-        return () => window.removeEventListener(OPEN_WORKSPACE_PAYMENT_DIALOG_EVENT, handlePaymentDialogOpen)
+        window.addEventListener(OPEN_WORKSPACE_PAYMENT_DIALOG_EVENT, handleBillingDialogOpen)
+        window.addEventListener(OPEN_WORKSPACE_PAYMENT_STATUS_DIALOG_EVENT, handleBillingDialogOpen)
+        return () => {
+            window.removeEventListener(OPEN_WORKSPACE_PAYMENT_DIALOG_EVENT, handleBillingDialogOpen)
+            window.removeEventListener(OPEN_WORKSPACE_PAYMENT_STATUS_DIALOG_EVENT, handleBillingDialogOpen)
+        }
     }, [renewalPromptKey])
 
     useEffect(() => {
@@ -208,18 +268,6 @@ export function LockedWorkspace() {
     const handleSignOut = async () => {
         await signOut()
         setLocation('/login')
-    }
-
-    const handleOpenPaymentDialog = () => {
-        if (renewalPromptKey) {
-            handledRenewalPromptKeysRef.current.add(renewalPromptKey)
-        }
-        if (renewalCountdownIntervalRef.current !== null) {
-            window.clearInterval(renewalCountdownIntervalRef.current)
-            renewalCountdownIntervalRef.current = null
-        }
-        setRenewalCountdownSeconds(null)
-        openWorkspacePaymentDialog()
     }
 
     if (isLoading) {
@@ -279,16 +327,14 @@ export function LockedWorkspace() {
                             <Button
                                 allowViewer={true}
                                 size="lg"
-                                onClick={handleOpenPaymentDialog}
+                                onClick={handleOpenBillingAction}
                                 className="h-auto min-h-12 w-full max-w-[320px] gap-2 whitespace-normal px-3 py-2 text-sm"
                             >
                                 <CreditCard className="h-5 w-5 shrink-0" />
                                 <span className="min-w-0 flex-1 whitespace-normal text-center leading-snug">
                                     {isPaymentSummaryLoading && !paymentSummary
                                         ? t('workspacePayments.loading')
-                                        : pendingTransaction
-                                            ? t('workspacePayments.viewPaymentStatus')
-                                            : t('workspacePayments.renewSubscription')}
+                                            : t(paymentActionLabelKey)}
                                 </span>
                                 {shouldAutoOpenRenewalDialog && renewalCountdownSeconds !== null && formattedRenewalCountdown !== null && (
                                     <span

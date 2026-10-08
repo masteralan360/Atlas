@@ -130,7 +130,7 @@ export function ProductAvatar({
                 <TooltipContent
                     side={previewSide}
                     sideOffset={8}
-                    collisionBoundary={collisionBoundary ?? 'clippingAncestors'}
+                    collisionBoundary={collisionBoundary ?? undefined}
                     collisionPadding={12}
                     className="overflow-visible rounded-none border-0 bg-transparent p-0 shadow-none"
                 >

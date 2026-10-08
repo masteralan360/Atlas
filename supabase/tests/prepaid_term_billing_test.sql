@@ -15,11 +15,10 @@ SELECT is(
   'month-end prepaid terms clamp to leap-day'
 );
 
-INSERT INTO public.workspaces (id, name, subscription_expires_at, data_mode)
+INSERT INTO public.workspaces (id, name, data_mode)
 VALUES (
   '95000000-0000-0000-0000-000000000001',
   'Prepaid term workspace',
-  now() + interval '1 year',
   'cloud'
 );
 
@@ -251,11 +250,10 @@ SELECT results_eq(
   'a full-term pool retains charged usage because it has no monthly reset boundary'
 );
 
-INSERT INTO public.workspaces (id, name, subscription_expires_at, data_mode)
+INSERT INTO public.workspaces (id, name, data_mode)
 VALUES (
   '95000000-0000-0000-0000-000000000002',
   'Monthly reset prepaid workspace',
-  now() + interval '1 year',
   'cloud'
 );
 

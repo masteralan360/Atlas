@@ -49,7 +49,12 @@ import { ReactQRCode } from '@lglab/react-qr-code'
 import { BranchManager } from '@/ui/components/workspace/BranchManager'
 import { canManageClinicalRegistryType } from '@/i18n/clinicalRegistry'
 import { setClinicalRegistryType, useClinicalRegistryType } from '@/local-db/clinicalPresets'
-import { openWorkspacePaymentStatusDialog } from '@/lib/workspacePayments'
+import {
+    getWorkspaceBillingMode,
+    getWorkspacePaymentAlertKind,
+    getWorkspacePaymentExpiryDate,
+    openWorkspacePaymentStatusDialog
+} from '@/lib/workspacePayments'
 import {
     areApplicationUpdatesDisabled,
     setApplicationUpdatesDisabled,
@@ -83,7 +88,7 @@ export function Settings() {
     const { syncState, pendingCount, lastSyncTime, sync, isSyncing, isOnline } = useSyncStatus()
     const { theme, setTheme, style, setStyle } = useTheme()
     const { preference: navigationRailPreference, setPreference: setNavigationRailPreference } = useNavigationRailDisplay()
-    const { features, updateSettings, refreshFeatures, workspaceName, isLocked, isLocalMode, isDemoMode, isHybridMode, hasFeature, hasCapability, planCapabilities } = useWorkspace()
+    const { features, updateSettings, refreshFeatures, workspaceName, isLocked, isLocalMode, isDemoMode, isHybridMode, hasFeature, hasCapability, planCapabilities, paymentSummary, paygSummary } = useWorkspace()
     const { streamUrl, status: kdsStatus, startStream } = useKdsStream(true)
 
     useEffect(() => {
@@ -95,6 +100,31 @@ export function Settings() {
     const { toast } = useToast()
     const { t, i18n } = useTranslation()
     const { alerts, forceAlert } = useExchangeRate()
+    const billingMode = features.billing_mode ?? getWorkspaceBillingMode(paymentSummary, features.has_usage_limits, Boolean(paygSummary?.enabled))
+    const billingDeadline = getWorkspacePaymentExpiryDate({
+        renewalDueAt: features.renewal_due_at,
+        summary: paymentSummary
+    })
+    const paymentAlertKind = getWorkspacePaymentAlertKind(paymentSummary)
+    const expiredBillingStatusKey = {
+        subscription: 'workspacePayments.subscriptionExpiredTitle',
+        usage: 'workspacePayments.usageRenewalDueTitle',
+        prepaidTerm: 'workspacePayments.prepaidTerm.renewalDueTitle',
+        payg: 'workspacePayments.payg.renewalDueTitle'
+    }[billingMode]
+    const paymentAlertStatusKey = paymentAlertKind === 'subscription_expired'
+        ? expiredBillingStatusKey
+        : paymentAlertKind === 'usage_renewal_due'
+            ? billingMode === 'prepaidTerm'
+                ? 'workspacePayments.prepaidTerm.renewalDueTitle'
+                : 'workspacePayments.usageRenewalDueTitle'
+            : paymentAlertKind === 'payg_renewal_due'
+                ? 'workspacePayments.payg.renewalDueTitle'
+                : paymentAlertKind === 'usage_exhausted'
+                    ? 'workspacePayments.usageExhaustedTitle'
+                    : null
+    const billingStatusKey = paymentAlertStatusKey
+        ?? (isLocked ? 'workspacePayments.accessLocked' : 'workspacePayments.active')
     const restaurantTableSettings = useRestaurantTableSettings(user?.workspaceId)
     const restaurantTickets = useRestaurantPosTickets(user?.workspaceId, restaurantTableSettings?.liveSyncEnabled === true)
     const [copied, setCopied] = useState(false)
@@ -3623,7 +3653,7 @@ export function Settings() {
                                             <p className="font-medium capitalize">{features.plan}</p>
                                         </div>
                                         <div className="md:col-span-2">
-                                            <Label className="text-muted-foreground">Workspace Subscription</Label>
+                                            <Label className="text-muted-foreground">{t('workspacePayments.billingModeLabel')}</Label>
                                             <div className="flex flex-wrap items-center gap-3 mt-1.5 p-3 bg-secondary/20 rounded-lg border border-border w-full max-w-sm">
                                                 <div className={cn(
                                                     "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
@@ -3631,12 +3661,17 @@ export function Settings() {
                                                         ? "bg-destructive/20 text-destructive border border-destructive/30"
                                                         : "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
                                                 )}>
-                                                    {isLocked ? 'Expired' : 'Active'}
+                                                    {t(billingStatusKey)}
                                                 </div>
-                                                <p className="text-sm font-medium">
-                                                    {features.subscription_expires_at
-                                                        ? formatDateTime(features.subscription_expires_at)
-                                                        : 'Lifetime'}
+                                                <p className="text-sm font-medium">{t(`workspacePayments.billingModes.${billingMode}`)}</p>
+                                                <p className="w-full text-sm font-medium text-muted-foreground">
+                                                    {billingDeadline
+                                                        ? t(`workspacePayments.billingDeadlineLabels.${billingMode}`, {
+                                                            date: formatDateTime(billingDeadline)
+                                                        })
+                                                        : billingMode === 'subscription'
+                                                            ? t('workspacePayments.lifetime')
+                                                            : t('workspacePayments.noBillingDeadline')}
                                                 </p>
                                             </div>
                                         </div>

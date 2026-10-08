@@ -7,14 +7,14 @@ Product Load Before Image
 #
 Remove Subscription Expiry and make billing's payment configuration authoritative
 
-Partner Account Statement Back
-
+Ai Assistance Payment maker with Transaction send to admin dashboard
 User Plan Control in Billing
 
 Make Workspace Payment Invoices
 
 #
 
+Partner Account Statement Back
 Make Account Statement Faster
 
 Make Orders Faster

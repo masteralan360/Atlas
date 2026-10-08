@@ -16,42 +16,42 @@ import { useSubscriptionExpiryWarning } from '@/hooks/useSubscriptionExpiryWarni
 import { getSubscriptionExpiryWarningSeenKey } from '@/lib/subscriptionExpiryWarning'
 import { formatDate } from '@/lib/utils'
 import {
+    getWorkspaceBillingMode,
     getWorkspacePaymentExpiryDate,
     openWorkspaceExtraDaysDialog,
     openWorkspacePaymentDialog,
-    shouldApplyWorkspaceSubscriptionExpiry
+    openWorkspacePaymentStatusDialog
 } from '@/lib/workspacePayments'
 
 export function SubscriptionExpiryWarningModal() {
     const { t } = useTranslation()
     const { user } = useAuth()
-    const { activeWorkspace, features, isDemoMode, isLoading, paymentSummary } = useWorkspace()
-    const shouldWarnForSubscription = shouldApplyWorkspaceSubscriptionExpiry({
-        hasUsageLimits: features.has_usage_limits,
-        summary: paymentSummary
-    })
-    const expiryDateToCheck = getWorkspacePaymentExpiryDate({
-        subscriptionExpiresAt: features.subscription_expires_at,
+    const { activeWorkspace, features, isDemoMode, isLoading, paymentSummary, isPaymentSummaryLoading, paygSummary } = useWorkspace()
+    const billingMode = features.billing_mode ?? getWorkspaceBillingMode(paymentSummary, features.has_usage_limits, Boolean(paygSummary?.enabled))
+    const billingDeadline = getWorkspacePaymentExpiryDate({
         renewalDueAt: features.renewal_due_at,
-        hasUsageLimits: features.has_usage_limits,
         summary: paymentSummary
     })
     const warning = useSubscriptionExpiryWarning(
-        isDemoMode || !shouldWarnForSubscription ? null : expiryDateToCheck
+        isDemoMode
+            || (isPaymentSummaryLoading && !paymentSummary)
+            ? null
+            : billingDeadline
     )
     const [open, setOpen] = useState(false)
     const canRenewSubscription = user?.role === 'admin'
     const canAddExtraDays = Boolean(
         canRenewSubscription
         && paymentSummary?.configuration
-        && !paymentSummary.configuration.usageEnabled
+        && billingMode === 'subscription'
     )
+    const canOpenBillingAction = canRenewSubscription && (billingMode === 'subscription' || billingMode === 'usage' || billingMode === 'prepaidTerm')
     const hasPendingExtraDays = Boolean(paymentSummary?.pendingExtraDays)
 
     const seenKey = useMemo(() => {
         if (!activeWorkspace?.id || !warning) return null
-        return getSubscriptionExpiryWarningSeenKey(activeWorkspace.id, warning.expiresAtIso)
-    }, [activeWorkspace?.id, warning])
+        return getSubscriptionExpiryWarningSeenKey(activeWorkspace.id, warning.expiresAtIso, billingMode)
+    }, [activeWorkspace?.id, billingMode, warning])
 
     const dismiss = useCallback(() => {
         if (seenKey) {
@@ -96,9 +96,13 @@ export function SubscriptionExpiryWarningModal() {
 
     const daysRemaining = warning.daysRemaining
     const expiryDate = formatDate(warning.expiresAt)
-    const renew = () => {
+    const openBillingAction = () => {
         dismiss()
-        openWorkspacePaymentDialog()
+        if (billingMode === 'prepaidTerm') {
+            openWorkspacePaymentStatusDialog()
+        } else {
+            openWorkspacePaymentDialog()
+        }
     }
 
     return (
@@ -117,14 +121,11 @@ export function SubscriptionExpiryWarningModal() {
                         </div>
                         <div className="min-w-0 space-y-2 text-start">
                             <DialogTitle>
-                                {t('subscriptionExpiryWarning.title', {
-                                    defaultValue: 'Subscription expiring soon'
-                                })}
+                                {t(`subscriptionExpiryWarning.modes.${billingMode}.title`)}
                             </DialogTitle>
                             <DialogDescription className="leading-relaxed">
-                                {t('subscriptionExpiryWarning.description', {
-                                    count: daysRemaining,
-                                    defaultValue: 'Your subscription is expiring in {{count}} days. Please renew it to keep using this workspace without interruption.'
+                                {t(`subscriptionExpiryWarning.modes.${billingMode}.description`, {
+                                    count: daysRemaining
                                 })}
                             </DialogDescription>
                         </div>
@@ -135,9 +136,8 @@ export function SubscriptionExpiryWarningModal() {
                     <div className="flex items-center gap-2">
                         <CalendarClock className="h-4 w-4 shrink-0" />
                         <span className="font-medium">
-                            {t('subscriptionExpiryWarning.expiresOn', {
-                                date: expiryDate,
-                                defaultValue: 'Expires on {{date}}'
+                            {t(`subscriptionExpiryWarning.modes.${billingMode}.dateLabel`, {
+                                date: expiryDate
                             })}
                         </span>
                     </div>
@@ -149,11 +149,17 @@ export function SubscriptionExpiryWarningModal() {
                             defaultValue: 'Got it'
                         })}
                     </Button>
-                    {canRenewSubscription && (
+                    {(canOpenBillingAction || canAddExtraDays) && (
                         <div className="flex flex-col gap-2">
-                            <Button allowViewer={true} onClick={renew}>
-                                {t('workspacePayments.renewSubscription')}
-                            </Button>
+                            {canOpenBillingAction && (
+                                <Button allowViewer={true} onClick={openBillingAction}>
+                                    {billingMode === 'prepaidTerm'
+                                        ? t('workspacePayments.viewPaymentStatus')
+                                        : t(billingMode === 'usage'
+                                            ? 'workspacePayments.renewUsageCredit'
+                                            : 'workspacePayments.renewSubscription')}
+                                </Button>
+                            )}
                             {canAddExtraDays && (
                                 <Button
                                     allowViewer={true}

@@ -4,11 +4,10 @@ CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET LOCAL search_path = public, extensions;
 SELECT no_plan();
 
-INSERT INTO public.workspaces (id, name, subscription_expires_at, data_mode)
+INSERT INTO public.workspaces (id, name, data_mode)
 VALUES (
   'a6000000-0000-0000-0000-000000000001',
   'Stock adjustment replay test',
-  now() + interval '10 days',
   'cloud'
 );
 

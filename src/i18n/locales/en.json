@@ -452,7 +452,33 @@
     "expiresOn": "Expires on {{date}}",
     "acknowledge": "Got it",
     "indicatorShort": "{{count}}d left",
-    "indicatorTooltip": "Subscription expires in {{count}} days on {{date}}"
+    "indicatorTooltip": "Subscription expires in {{count}} days on {{date}}",
+    "modes": {
+      "subscription": {
+        "title": "Subscription expiring soon",
+        "description": "Your monthly subscription expires in {{count}} days. Renew it to keep using this workspace without interruption.",
+        "dateLabel": "Subscription ends on {{date}}",
+        "indicatorTooltip": "Subscription ends in {{count}} days on {{date}}"
+      },
+      "usage": {
+        "title": "Prepaid usage renewal approaching",
+        "description": "The next prepaid usage renewal is due in {{count}} days. Renew the usage credit by the date shown to avoid an access interruption.",
+        "dateLabel": "Usage renewal due by {{date}}",
+        "indicatorTooltip": "Prepaid usage renewal is due in {{count}} days, by {{date}}"
+      },
+      "prepaidTerm": {
+        "title": "Prepaid term ending soon",
+        "description": "This workspace's prepaid term ends in {{count}} days. Contact the platform administrator to arrange the next term.",
+        "dateLabel": "Paid through {{date}}",
+        "indicatorTooltip": "Prepaid term ends in {{count}} days, on {{date}}"
+      },
+      "payg": {
+        "title": "PAYG cycle closing soon",
+        "description": "This PAYG cycle closes in {{count}} days. A payment will be due only if the closed cycle has a billable amount.",
+        "dateLabel": "Cycle closes on {{date}}",
+        "indicatorTooltip": "PAYG cycle closes in {{count}} days, on {{date}}"
+      }
+    }
   },
   "workspacePayments": {
     "renewSubscription": "Renew monthly subscription",
@@ -461,10 +487,31 @@
     "historyDescription": "Review current and previous renewal payment submissions and their administrator-review status.",
     "subscriptionExpiredTitle": "Subscription expired",
     "subscriptionExpiredDescription": "This workspace subscription has expired. Submit a renewal payment to restore access after administrator approval.",
+    "billingModeLabel": "Billing mode",
+    "billingModes": {
+      "subscription": "Monthly subscription",
+      "usage": "Prepaid usage",
+      "prepaidTerm": "Prepaid term",
+      "payg": "PAYG (pay as you go)"
+    },
+    "billingDeadlineLabels": {
+      "subscription": "Subscription ends on {{date}}",
+      "usage": "Usage renewal due {{date}}",
+      "prepaidTerm": "Paid through {{date}}",
+      "payg": "Current PAYG cycle closes {{date}}"
+    },
+    "lifetime": "No expiry date",
+    "noBillingDeadline": "Billing deadline unavailable",
+    "active": "Active",
+    "accessLocked": "Access locked",
     "usageExhaustedTitle": "Prepaid usage exhausted",
     "usageExhaustedDescription": "This workspace has used its available usage credit. Submit a Prepaid usage payment to restore access after administrator approval.",
     "usageRenewalDueTitle": "Prepaid usage renewal is due",
     "usageRenewalDueDescription": "This Prepaid usage workspace must renew its usage credit. Submit a payment for administrator approval.",
+    "renewUsageCredit": "Renew usage credit",
+    "usage": {
+      "dialogTitle": "Prepaid usage credit payment"
+    },
     "dialogTitle": "Monthly subscription payment",
     "dialogDescription": "Choose a payment provider, complete the payment outside Atlas, then press and hold the confirmation button.",
     "selectProvider": "Select a payment provider",
@@ -484,6 +531,8 @@
       "amountPaid": "Amount paid",
       "startedAt": "Term started",
       "paidThrough": "Paid through",
+      "renewalDueTitle": "Prepaid term ended",
+      "renewalDueDescription": "This prepaid term has ended. Contact the platform administrator to activate the next term.",
       "noRollover": "The monthly allowance resets each cycle; unused GB does not roll over.",
       "termPoolNoMonthlyReset": "This allowance is shared across the complete prepaid term and does not reset monthly."
     },
@@ -528,6 +577,7 @@
     "close": "Close",
     "pendingAlreadyExists": "A payment is already waiting for administrator confirmation.",
     "payg": {
+      "renewalAction": "Submit PAYG payment",
       "paymentSubmission": "PAYG payment submission",
       "paymentSubmissionDescription": "Pay the exact frozen amount for this PAYG cycle, then submit it for administrator approval.",
       "paymentNotDue": "No PAYG cycle payment is currently due.",

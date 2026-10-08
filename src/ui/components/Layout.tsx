@@ -377,6 +377,7 @@ export function Layout({ children }: LayoutProps) {
     workspaceId: activeWorkspace?.id
   })
   const [demoRemainingSec, setDemoRemainingSec] = useState<number | null>(null)
+  const [demoExpiresAt, setDemoExpiresAt] = useState<string | null>(null)
   const [updatesDisabled, setUpdatesDisabled] = useState(() => areApplicationUpdatesDisabled())
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(() => {
@@ -812,6 +813,19 @@ export function Layout({ children }: LayoutProps) {
     }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    setDemoExpiresAt(null)
+
+    if (!isDemoMode || !user?.workspaceId) return
+
+    void db.workspaces.get(user.workspaceId).then((workspace) => {
+      if (!cancelled) setDemoExpiresAt(workspace?.demo_expires_at ?? null)
+    })
+
+    return () => { cancelled = true }
+  }, [isDemoMode, user?.workspaceId])
+
   // Demo workspace expiration auto-delete
   useEffect(() => {
     if (demoExpiryRef.current) {
@@ -819,8 +833,8 @@ export function Layout({ children }: LayoutProps) {
       demoExpiryRef.current = null
     }
 
-    if (user?.workspaceCode && isDemoWorkspace(user.workspaceCode) && features.subscription_expires_at) {
-      const expiresAt = new Date(features.subscription_expires_at).getTime()
+    if (user?.workspaceCode && isDemoWorkspace(user.workspaceCode) && demoExpiresAt) {
+      const expiresAt = new Date(demoExpiresAt).getTime()
       const now = Date.now()
       const remaining = expiresAt - now
 
@@ -840,24 +854,24 @@ export function Layout({ children }: LayoutProps) {
         clearTimeout(demoExpiryRef.current)
       }
     }
-  }, [features.subscription_expires_at, signOut, user?.workspaceCode])
+  }, [demoExpiresAt, signOut, user?.workspaceCode])
 
   // Demo countdown timer for sidebar display
   useEffect(() => {
-    if (!user?.workspaceCode || !isDemoWorkspace(user.workspaceCode) || !features.subscription_expires_at) {
+    if (!user?.workspaceCode || !isDemoWorkspace(user.workspaceCode) || !demoExpiresAt) {
       setDemoRemainingSec(null)
       return
     }
 
     const update = () => {
-      const remaining = new Date(features.subscription_expires_at!).getTime() - Date.now()
+      const remaining = new Date(demoExpiresAt).getTime() - Date.now()
       setDemoRemainingSec(Math.max(0, Math.floor(remaining / 1000)))
     }
 
     update()
     const interval = setInterval(update, 1000)
     return () => clearInterval(interval)
-  }, [user?.workspaceCode, features.subscription_expires_at])
+  }, [user?.workspaceCode, demoExpiresAt])
 
   // Server-side demo expiry poll: periodically check the demos table
   // to enforce the time limit independently of the client clock.

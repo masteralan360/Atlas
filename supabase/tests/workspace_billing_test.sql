@@ -7,28 +7,28 @@ SELECT no_plan();
 
 -- Fixed, test-only UUIDs make cross-query assertions readable. Everything in
 -- this file is rolled back, including auth users and audit rows.
-INSERT INTO public.workspaces (id, name, subscription_expires_at)
+INSERT INTO public.workspaces (id, name)
 VALUES
-  ('91000000-0000-0000-0000-000000000001', 'Billing test - disabled', now() + INTERVAL '10 days'),
-  ('91000000-0000-0000-0000-000000000002', 'Billing test - future subscription', now() + INTERVAL '10 days'),
-  ('91000000-0000-0000-0000-000000000003', 'Billing test - expired subscription', now() - INTERVAL '5 days'),
-  ('91000000-0000-0000-0000-000000000004', 'Billing test - usage', '2026-01-31T00:00:00Z'),
-  ('91000000-0000-0000-0000-000000000005', 'Billing test - rejection', now() + INTERVAL '15 days'),
-  ('91000000-0000-0000-0000-000000000006', 'Billing test - legacy usage', now() - INTERVAL '5 days'),
-  ('91000000-0000-0000-0000-000000000007', 'Billing test - usage branch', '2026-01-31T00:00:00Z'),
-  ('91000000-0000-0000-0000-000000000008', 'Billing test - family root', now() + INTERVAL '20 days'),
-  ('91000000-0000-0000-0000-000000000009', 'Billing test - family branch', now() + INTERVAL '20 days'),
-  ('91000000-0000-0000-0000-000000000010', 'Billing test - nested family branch', now() + INTERVAL '20 days'),
-  ('91000000-0000-0000-0000-000000000011', 'Billing test - future nested branch', now() + INTERVAL '20 days'),
-  ('91000000-0000-0000-0000-000000000012', 'Billing test - attachment root', now() + INTERVAL '20 days'),
-  ('91000000-0000-0000-0000-000000000013', 'Billing test - preconfigured usage branch', now() + INTERVAL '20 days'),
-  ('91000000-0000-0000-0000-000000000014', 'Billing test - conflicting branch', now() + INTERVAL '20 days'),
-  ('91000000-0000-0000-0000-000000000015', 'Billing test - restore root', now() + INTERVAL '20 days'),
-  ('91000000-0000-0000-0000-000000000016', 'Billing test - archived branch', now() + INTERVAL '20 days'),
-  ('91000000-0000-0000-0000-000000000017', 'Billing test - legacy usage attachment root', now() + INTERVAL '20 days'),
-  ('91000000-0000-0000-0000-000000000018', 'Billing test - legacy usage attachment target', now() + INTERVAL '20 days'),
-  ('91000000-0000-0000-0000-000000000019', 'Billing test - renewal attachment root', now() + INTERVAL '20 days'),
-  ('91000000-0000-0000-0000-000000000020', 'Billing test - renewal attachment target', now() + INTERVAL '20 days');
+  ('91000000-0000-0000-0000-000000000001', 'Billing test - disabled'),
+  ('91000000-0000-0000-0000-000000000002', 'Billing test - future subscription'),
+  ('91000000-0000-0000-0000-000000000003', 'Billing test - expired subscription'),
+  ('91000000-0000-0000-0000-000000000004', 'Billing test - usage'),
+  ('91000000-0000-0000-0000-000000000005', 'Billing test - rejection'),
+  ('91000000-0000-0000-0000-000000000006', 'Billing test - legacy usage'),
+  ('91000000-0000-0000-0000-000000000007', 'Billing test - usage branch'),
+  ('91000000-0000-0000-0000-000000000008', 'Billing test - family root'),
+  ('91000000-0000-0000-0000-000000000009', 'Billing test - family branch'),
+  ('91000000-0000-0000-0000-000000000010', 'Billing test - nested family branch'),
+  ('91000000-0000-0000-0000-000000000011', 'Billing test - future nested branch'),
+  ('91000000-0000-0000-0000-000000000012', 'Billing test - attachment root'),
+  ('91000000-0000-0000-0000-000000000013', 'Billing test - preconfigured usage branch'),
+  ('91000000-0000-0000-0000-000000000014', 'Billing test - conflicting branch'),
+  ('91000000-0000-0000-0000-000000000015', 'Billing test - restore root'),
+  ('91000000-0000-0000-0000-000000000016', 'Billing test - archived branch'),
+  ('91000000-0000-0000-0000-000000000017', 'Billing test - legacy usage attachment root'),
+  ('91000000-0000-0000-0000-000000000018', 'Billing test - legacy usage attachment target'),
+  ('91000000-0000-0000-0000-000000000019', 'Billing test - renewal attachment root'),
+  ('91000000-0000-0000-0000-000000000020', 'Billing test - renewal attachment target');
 
 UPDATE public.workspaces
 SET deleted_at = now()
@@ -167,6 +167,10 @@ SELECT lives_ok(
   )$$,
   'an administrator can edit an existing configuration'
 );
+
+UPDATE billing.workspace_payment_configurations
+SET renewal_due_at = now() + INTERVAL '10 days'
+WHERE workspace_id = '91000000-0000-0000-0000-000000000002';
 
 SELECT is(
   (
@@ -846,9 +850,9 @@ CREATE TEMP TABLE workspace_billing_test_state (
 ) ON COMMIT DROP;
 
 INSERT INTO workspace_billing_test_state (key, value)
-SELECT 'future_expiry', subscription_expires_at::text
-FROM public.workspaces
-WHERE id = '91000000-0000-0000-0000-000000000002';
+SELECT 'future_expiry', renewal_due_at::text
+FROM billing.workspace_payment_configurations
+WHERE workspace_id = '91000000-0000-0000-0000-000000000002';
 
 SELECT set_config('request.jwt.claims', '{"role":"service_role"}', true);
 SELECT lives_ok(
@@ -869,9 +873,9 @@ SELECT lives_ok(
 
 SELECT is(
   (
-    SELECT subscription_expires_at
-    FROM public.workspaces
-    WHERE id = '91000000-0000-0000-0000-000000000002'
+    SELECT renewal_due_at
+    FROM billing.workspace_payment_configurations
+    WHERE workspace_id = '91000000-0000-0000-0000-000000000002'
   ),
   (
     SELECT value::timestamptz + INTERVAL '1 month'
@@ -929,6 +933,10 @@ SELECT lives_ok(
   'the expired subscription receives a payment configuration'
 );
 
+UPDATE billing.workspace_payment_configurations
+SET renewal_due_at = now() - INTERVAL '5 days'
+WHERE workspace_id = '91000000-0000-0000-0000-000000000003';
+
 UPDATE public.workspaces
 SET
   locked_workspace = true,
@@ -941,6 +949,11 @@ SELECT lives_ok(
   )$$,
   'an expired subscription workspace can be converted to usage billing'
 );
+
+UPDATE billing.workspace_payment_configurations
+SET renewal_due_at = now() + INTERVAL '30 days'
+WHERE workspace_id = '91000000-0000-0000-0000-000000000003';
+SELECT billing.reconcile_workspace_payment_renewal_lock('91000000-0000-0000-0000-000000000003');
 
 SELECT ok(
   (
@@ -958,6 +971,11 @@ SELECT lives_ok(
   )$$,
   'the workspace can return to subscription billing when no usage limit exists'
 );
+
+UPDATE billing.workspace_payment_configurations
+SET renewal_due_at = now() - INTERVAL '5 days'
+WHERE workspace_id = '91000000-0000-0000-0000-000000000003';
+SELECT billing.reconcile_workspace_payment_renewal_lock('91000000-0000-0000-0000-000000000003');
 
 SELECT ok(
   (
@@ -993,9 +1011,9 @@ SET
   last_consumption_recorded_at = NULL
 WHERE workspace_id = '91000000-0000-0000-0000-000000000003';
 
-UPDATE public.workspaces
-SET subscription_expires_at = now() + INTERVAL '3 days'
-WHERE id = '91000000-0000-0000-0000-000000000003';
+UPDATE billing.workspace_payment_configurations
+SET renewal_due_at = now() + INTERVAL '3 days'
+WHERE workspace_id = '91000000-0000-0000-0000-000000000003';
 
 SET LOCAL ROLE authenticated;
 SELECT set_config(
@@ -1027,9 +1045,9 @@ SELECT lives_ok(
 
 SELECT is(
   (
-    SELECT subscription_expires_at
-    FROM public.workspaces
-    WHERE id = '91000000-0000-0000-0000-000000000003'
+    SELECT renewal_due_at
+    FROM billing.workspace_payment_configurations
+    WHERE workspace_id = '91000000-0000-0000-0000-000000000003'
   ),
   now() + INTERVAL '1 month',
   'approval after two temporary days deducts only the remaining three-day duration'
@@ -1323,10 +1341,14 @@ SELECT lives_ok(
   'the rejection workspace receives a configuration'
 );
 
+UPDATE billing.workspace_payment_configurations
+SET renewal_due_at = now() + INTERVAL '15 days'
+WHERE workspace_id = '91000000-0000-0000-0000-000000000005';
+
 INSERT INTO workspace_billing_test_state (key, value)
-SELECT 'rejection_expiry', subscription_expires_at::text
-FROM public.workspaces
-WHERE id = '91000000-0000-0000-0000-000000000005';
+SELECT 'rejection_expiry', renewal_due_at::text
+FROM billing.workspace_payment_configurations
+WHERE workspace_id = '91000000-0000-0000-0000-000000000005';
 
 SET LOCAL ROLE authenticated;
 SELECT set_config(
@@ -1370,9 +1392,9 @@ SELECT ok(
 
 SELECT is(
   (
-    SELECT subscription_expires_at
-    FROM public.workspaces
-    WHERE id = '91000000-0000-0000-0000-000000000005'
+    SELECT renewal_due_at
+    FROM billing.workspace_payment_configurations
+    WHERE workspace_id = '91000000-0000-0000-0000-000000000005'
   ),
   (
     SELECT value::timestamptz
@@ -1424,8 +1446,7 @@ SELECT ok(
 );
 
 -- Legacy usage-limit workspaces may not have a payment config yet. Their
--- subscription_expires_at is a reset-day anchor and must not be reported as an
--- expired subscription.
+-- usage state must not be classified as a monthly subscription expiry.
 INSERT INTO public.workspace_usage_limits (
   workspace_id,
   monthly_data_transfer_limit_bytes,

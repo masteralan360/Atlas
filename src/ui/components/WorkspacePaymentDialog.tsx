@@ -76,6 +76,8 @@ function getAlertTitle(kind: WorkspacePaymentAlertKind | null, t: ReturnType<typ
     switch (kind) {
         case 'payg_renewal_due':
             return t('workspacePayments.payg.renewalDueTitle')
+        case 'usage_renewal_due':
+            return t('workspacePayments.usageRenewalDueTitle')
         case 'subscription_expired':
             return t('workspacePayments.subscriptionExpiredTitle')
         case 'usage_exhausted':
@@ -526,10 +528,18 @@ export function WorkspacePaymentController() {
     const isFreeRenewal = Boolean(!paygMode && configuration && Number(configuration.subscriptionAmount) === 0)
     const alertKind = getWorkspacePaymentAlertKind(paymentSummary)
     const alertTitle = prepaidTermActive
-        ? t('workspacePayments.prepaidTerm.title')
+        ? alertKind === 'usage_renewal_due' || alertKind === 'subscription_expired'
+            ? t('workspacePayments.prepaidTerm.renewalDueTitle')
+            : t('workspacePayments.prepaidTerm.title')
         : paygPaymentDue
             ? t('workspacePayments.payg.paymentSubmission')
-            : getAlertTitle(alertKind, t)
+            : configuration?.usageEnabled
+                ? alertKind === 'usage_exhausted'
+                    ? t('workspacePayments.usageExhaustedTitle')
+                    : alertKind === 'usage_renewal_due' || alertKind === 'subscription_expired'
+                        ? t('workspacePayments.usageRenewalDueTitle')
+                        : t('workspacePayments.usage.dialogTitle')
+                : getAlertTitle(alertKind, t)
     const pendingTransaction = paymentSummary?.pendingTransaction ?? null
     const hasWorkspacePendingTransaction = paymentSummary?.hasWorkspacePendingTransaction ?? false
     const paymentEnabled = paygMode

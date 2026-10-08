@@ -112,11 +112,10 @@ WHERE workspace_id = '93000000-0000-0000-0000-000000000001';
 DELETE FROM public.workspaces
 WHERE id = '93000000-0000-0000-0000-000000000001';
 
-INSERT INTO public.workspaces (id, name, subscription_expires_at)
+INSERT INTO public.workspaces (id, name)
 VALUES (
   '93000000-0000-0000-0000-000000000001',
-  'Billing concurrency test',
-  now() + INTERVAL '10 days'
+  'Billing concurrency test'
 );
 
 INSERT INTO auth.users (
@@ -686,19 +685,17 @@ SELECT is(
 -- A branch attachment must serialize before a submitter resolves its billing
 -- owner. If the submitter wins, the pending immutable snapshot blocks the
 -- attachment instead of being stranded under the former owner.
-INSERT INTO public.workspaces (id, name, plan, subscription_expires_at)
+INSERT INTO public.workspaces (id, name, plan)
 VALUES
   (
     '93000000-0000-0000-0000-000000000002',
     'Billing attachment concurrency root',
-    'enterprise',
-    now() + INTERVAL '10 days'
+    'enterprise'
   ),
   (
     '93000000-0000-0000-0000-000000000003',
     'Billing attachment concurrency branch',
-    'business',
-    now() + INTERVAL '10 days'
+    'business'
   );
 
 INSERT INTO auth.users (
@@ -950,13 +947,12 @@ SELECT is(
 
 -- Opposite branch inserts are serialized by one topology lock. The waiter
 -- re-resolves after the winner and rejects the edge that would close a cycle.
-INSERT INTO public.workspaces (id, name, plan, subscription_expires_at)
+INSERT INTO public.workspaces (id, name, plan)
 VALUES
   (
     '93000000-0000-0000-0000-000000000004',
     'Billing opposite attachment A',
-    'enterprise',
-    now() + INTERVAL '10 days'
+    'enterprise'
   ),
   (
     '93000000-0000-0000-0000-000000000005',
@@ -1174,13 +1170,12 @@ WHERE workspace_id = '93000000-0000-0000-0000-000000000005';
 
 -- An overlapping waiter is valid, but it must resolve the source through the
 -- winner rather than snapshotting the source as an independent owner.
-INSERT INTO public.workspaces (id, name, plan, subscription_expires_at)
+INSERT INTO public.workspaces (id, name, plan)
 VALUES
   (
     '93000000-0000-0000-0000-000000000006',
     'Billing overlapping attachment root',
-    'enterprise',
-    now() + INTERVAL '10 days'
+    'enterprise'
   ),
   (
     '93000000-0000-0000-0000-000000000007',
@@ -1297,11 +1292,10 @@ SELECT public.admin_upsert_workspace_payment_configuration(
 
 UPDATE public.workspaces
 SET
-  subscription_expires_at = now() - INTERVAL '1 day',
-  locked_workspace = false,
+  locked_workspace = true,
   usage_limit_locked = false,
   payment_renewal_locked = false,
-  subscription_expiry_locked = false
+  subscription_expiry_locked = true
 WHERE id = '93000000-0000-0000-0000-000000000006';
 
 SELECT is(
@@ -1325,8 +1319,7 @@ SELECT is(
         FROM row_lock_signal
       )
       UPDATE public.workspaces AS workspace_row
-      SET subscription_expires_at = workspace_row.subscription_expires_at
-        + INTERVAL '1 second'
+      SET subscription_expiry_locked = NOT workspace_row.subscription_expiry_locked
       FROM delayed_update
       WHERE workspace_row.id = '93000000-0000-0000-0000-000000000007'
       RETURNING workspace_row.id

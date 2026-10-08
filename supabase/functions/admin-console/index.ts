@@ -537,7 +537,7 @@ async function listUsers(adminClient: ReturnType<typeof createAdminClient>) {
 async function listWorkspaces(adminClient: ReturnType<typeof createAdminClient>) {
     const { data, error } = await adminClient
         .from('workspaces')
-        .select('id, name, code, created_at, data_mode, plan, is_configured, locked_workspace, deleted_at, coordination, logo_url, subscription_expires_at')
+        .select('id, name, code, created_at, data_mode, plan, is_configured, locked_workspace, deleted_at, coordination, logo_url')
         .order('created_at', { ascending: false })
 
     if (error) {
@@ -705,33 +705,24 @@ async function updateWorkspaceSubscription(
             && String((value as Record<string, unknown>).workspace_id ?? '') === workspaceId
         )) as Record<string, unknown> | undefined
         : undefined
-    const usageEnabled = Boolean(
-        typedUsageStatus?.has_limits
-        || paymentConfiguration?.usage_enabled === true
-    )
-    if (usageEnabled) {
-        return errorResponse('Usage-based workspaces use Renewal due. Update that deadline instead of the subscription expiry.', 400)
+    const usageEnabled = Boolean(typedUsageStatus?.has_limits || paymentConfiguration?.usage_enabled === true)
+    const paygEnabled = paymentConfiguration?.payg_enabled === true
+    const prepaidTerm = paymentConfiguration?.billing_interval === 'prepaid_term'
+    if (usageEnabled || paygEnabled || prepaidTerm) {
+        return errorResponse('This workspace uses a different billing mode. Update its billing configuration instead.', 400)
     }
 
-    const subscriptionExpired = parsedExpiry.getTime() < Date.now()
-    const update = {
-        subscription_expires_at: parsedExpiry.toISOString(),
-        locked_workspace: subscriptionExpired,
-        usage_limit_locked: false,
-        payment_renewal_locked: false,
-        subscription_expiry_locked: subscriptionExpired
-    }
-
-    const { error } = await adminClient
-        .from('workspaces')
-        .update(update)
-        .eq('id', workspaceId)
+    const { error } = await adminClient.rpc('admin_set_workspace_monthly_subscription_expiry', {
+        p_workspace_id: workspaceId,
+        p_renewal_due_at: parsedExpiry.toISOString(),
+        p_actor: 'admin-console-passkey'
+    })
 
     if (error) {
         return errorResponse(error.message, 500)
     }
 
-    return jsonResponse({ success: true, usageEnabled: false })
+    return jsonResponse({ success: true, usageEnabled: false, paygEnabled: false, billingInterval: 'monthly' })
 }
 
 async function listOverrides(

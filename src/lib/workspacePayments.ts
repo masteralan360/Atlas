@@ -13,10 +13,12 @@ export type WorkspacePaymentTransactionProvider = WorkspacePaymentProvider | 'ma
 export type WorkspacePaymentStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'unknown'
 export type WorkspacePaymentType = 'subscription' | 'usage' | 'payg' | 'prepaid_term' | 'unknown'
 export type WorkspaceBillingInterval = 'monthly' | 'prepaid_term'
+export type WorkspaceBillingMode = 'subscription' | 'usage' | 'prepaidTerm' | 'payg'
 export type WorkspacePrepaidAllowanceMode = 'monthly_reset' | 'term_pool'
 export type WorkspacePaymentAlertKind =
     | 'subscription_expired'
     | 'usage_exhausted'
+    | 'usage_renewal_due'
     | 'payg_renewal_due'
 
 export interface WorkspacePaymentConfiguration {
@@ -599,12 +601,10 @@ export function getWorkspacePaymentAlertKind(
     if (summary.eligibility.usageExhausted || summary.eligibility.alertReason === 'usage_exhausted') {
         return 'usage_exhausted'
     }
-    // Usage renewal now behaves like subscription expiry — the server maps
-    // usage_renewal_due to subscription_expired in alert_reason.
-    if (summary.eligibility.subscriptionExpired || summary.eligibility.alertReason === 'subscription_expired') {
-        return 'subscription_expired'
-    }
     if (summary.eligibility.usageRenewalDue || summary.eligibility.alertReason === 'usage_renewal_due') {
+        return 'usage_renewal_due'
+    }
+    if (summary.eligibility.subscriptionExpired || summary.eligibility.alertReason === 'subscription_expired') {
         return 'subscription_expired'
     }
 
@@ -615,45 +615,44 @@ export function shouldWorkspacePaymentLockAccess(summary?: WorkspacePaymentSumma
     return getWorkspacePaymentAlertKind(summary) !== null
 }
 
-export function shouldApplyWorkspaceSubscriptionExpiry(_options: {
-    hasUsageLimits: boolean
-    summary?: WorkspacePaymentSummary | null
-}): boolean {
-    // Usage workspaces now behave like subscription workspaces — their
-    // renewal_due_at expiry triggers the same locked/expired state.
-    return true
+export function getWorkspaceBillingMode(
+    summary: WorkspacePaymentSummary | null | undefined,
+    hasUsageLimits: boolean,
+    paygEnabled = false
+): WorkspaceBillingMode {
+    const configuration = summary?.configuration
+
+    if (configuration) {
+        if (configuration.paygEnabled) return 'payg'
+        if (configuration.billingInterval === 'prepaid_term') return 'prepaidTerm'
+        return configuration.usageEnabled ? 'usage' : 'subscription'
+    }
+
+    if (paygEnabled) return 'payg'
+    if (hasUsageLimits) return 'usage'
+    return 'subscription'
 }
 
 export function getWorkspacePaymentExpiryDate(options: {
-    subscriptionExpiresAt: string | null
     renewalDueAt?: string | null
-    hasUsageLimits: boolean
     summary?: WorkspacePaymentSummary | null
 }): string | null {
-    const isUsageMode = Boolean(
-        options.summary?.configuration?.usageEnabled || options.hasUsageLimits
-    )
-
-    return isUsageMode
-        ? options.summary?.configuration?.renewalDueAt
-            ?? options.renewalDueAt
-            ?? null
-        : options.subscriptionExpiresAt
+    // Every configured billing mode exposes its deadline through the central
+    // configuration; monthly subscriptions no longer use workspace metadata.
+    if (options.summary?.configuration) {
+        return options.summary.configuration.renewalDueAt
+    }
+    return options.renewalDueAt ?? null
 }
 
 export function isWorkspacePaymentAccessExpired(options: {
-    subscriptionExpiresAt: string | null
     renewalDueAt?: string | null
-    hasUsageLimits: boolean
     summary?: WorkspacePaymentSummary | null
+    billingMode?: WorkspaceBillingMode
     now?: Date
 }): boolean {
-    if (!shouldApplyWorkspaceSubscriptionExpiry({
-        hasUsageLimits: options.hasUsageLimits,
-        summary: options.summary
-    })) {
-        return false
-    }
+    const billingMode = options.billingMode ?? getWorkspaceBillingMode(options.summary, false)
+    if (billingMode === 'payg') return false
 
     const expiryDate = getWorkspacePaymentExpiryDate(options)
     if (!expiryDate) return false
@@ -667,22 +666,13 @@ export function isWorkspacePaymentAccessExpired(options: {
 export function hasWorkspacePaymentAccessStateUpdate(
     current: {
         lockedWorkspace: boolean
-        subscriptionExpiresAt: string | null
     },
     incoming: {
         locked_workspace?: unknown
-        subscription_expires_at?: unknown
     }
 ): boolean {
-    const lockedChanged = typeof incoming.locked_workspace === 'boolean'
+    return typeof incoming.locked_workspace === 'boolean'
         && incoming.locked_workspace !== current.lockedWorkspace
-    const hasExpiry = Object.prototype.hasOwnProperty.call(incoming, 'subscription_expires_at')
-    const nextExpiry = incoming.subscription_expires_at === null
-        || typeof incoming.subscription_expires_at === 'string'
-        ? incoming.subscription_expires_at
-        : current.subscriptionExpiresAt
-
-    return lockedChanged || (hasExpiry && nextExpiry !== current.subscriptionExpiresAt)
 }
 
 export function hasNewlyApprovedWorkspacePayment(

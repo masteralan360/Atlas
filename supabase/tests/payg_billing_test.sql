@@ -36,14 +36,14 @@ SELECT throws_ok(
   'pricing totals cannot decrease'
 );
 
-INSERT INTO public.workspaces (id, name, subscription_expires_at, data_mode)
+INSERT INTO public.workspaces (id, name, data_mode)
 VALUES
-  ('93000000-0000-0000-0000-000000000001', 'PAYG family source', now() + interval '1 year', 'cloud'),
-  ('93000000-0000-0000-0000-000000000002', 'PAYG family branch', now() + interval '1 year', 'hybrid'),
-  ('93000000-0000-0000-0000-000000000003', 'PAYG free cycle', now() + interval '1 year', 'cloud'),
-  ('93000000-0000-0000-0000-000000000004', 'PAYG local rejected', now() + interval '1 year', 'local'),
-  ('93000000-0000-0000-0000-000000000005', 'PAYG staged monthly switch', now() + interval '1 year', 'cloud'),
-  ('93000000-0000-0000-0000-000000000006', 'Existing free monthly subscription', now() + interval '1 year', 'cloud');
+  ('93000000-0000-0000-0000-000000000001', 'PAYG family source', 'cloud'),
+  ('93000000-0000-0000-0000-000000000002', 'PAYG family branch', 'hybrid'),
+  ('93000000-0000-0000-0000-000000000003', 'PAYG free cycle', 'cloud'),
+  ('93000000-0000-0000-0000-000000000004', 'PAYG local rejected', 'local'),
+  ('93000000-0000-0000-0000-000000000005', 'PAYG staged monthly switch', 'cloud'),
+  ('93000000-0000-0000-0000-000000000006', 'Existing free monthly subscription', 'cloud');
 
 INSERT INTO public.workspace_branches (source_workspace_id, branch_workspace_id, name)
 VALUES ('93000000-0000-0000-0000-000000000001', '93000000-0000-0000-0000-000000000002', 'PAYG branch');
