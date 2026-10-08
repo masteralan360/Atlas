@@ -238,7 +238,11 @@ function LedgerCard({
                     ].map(([key, fallback, amount], index) => (
                         <div key={String(key)} className={cn('min-w-0 p-3 sm:p-4', index > 1 && 'border-t sm:border-t-0')}>
                             <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                                {t(String(key), { defaultValue: String(fallback) })}
+                                <span className="inline-flex items-center gap-1.5">
+                                    {index === 1 ? <TrendingUp className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" /> : null}
+                                    {index === 2 ? <TrendingDown className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" /> : null}
+                                    {t(String(key), { defaultValue: String(fallback) })}
+                                </span>
                             </div>
                             <div
                                 className="mt-1 truncate text-sm font-black tabular-nums"
@@ -264,7 +268,14 @@ function LedgerCard({
                                             columnId === 'commissionPerProduct' && 'min-w-32'
                                         )}
                                     >
-                                        {statementColumnLabel(columnId, t)}
+                                        {columnId === 'debit' || columnId === 'credit' ? (
+                                            <span className="flex w-full items-center justify-end gap-1.5">
+                                                {columnId === 'debit'
+                                                    ? <TrendingUp className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                                                    : <TrendingDown className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />}
+                                                {statementColumnLabel(columnId, t)}
+                                            </span>
+                                        ) : statementColumnLabel(columnId, t)}
                                     </TableHead>
                                 ))}
                             </TableRow>

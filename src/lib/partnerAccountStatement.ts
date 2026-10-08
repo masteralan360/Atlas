@@ -297,7 +297,11 @@ function isBeforePeriod(value: string, period: PartnerAccountStatementPeriod) {
 
 function compareEntries(left: PartnerAccountStatementEntry, right: PartnerAccountStatementEntry) {
   const dateDifference = new Date(left.date).getTime() - new Date(right.date).getTime()
-  return dateDifference || left.reference.localeCompare(right.reference) || left.id.localeCompare(right.id)
+  const referenceDifference = left.reference.localeCompare(right.reference)
+  if (dateDifference || referenceDifference) return dateDifference || referenceDifference
+  if (left.kind === 'sales_order_return' && right.kind === 'loan_repayment') return -1
+  if (left.kind === 'loan_repayment' && right.kind === 'sales_order_return') return 1
+  return left.id.localeCompare(right.id)
 }
 
 function paymentKind(transaction: PaymentTransaction): PartnerAccountStatementEntryKind {
@@ -482,7 +486,7 @@ function paymentStatementPresentation(
 }
 
 function loanPaymentStatementPresentation(
-  payment: LoanPayment,
+  payment: Pick<LoanPayment, 'paidAt' | 'createdAt'> & { note?: string | null },
   lent: boolean
 ): {
   description: string
@@ -520,7 +524,28 @@ function originalSalesOrderAmount(order: SalesOrder) {
 
 function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountStatementEntry[] {
   const sourceOrders = data.statementOrders || [...data.salesOrders, ...data.purchaseOrders]
-  const loanIds = new Set((data.loans || []).map((loan) => loan.id))
+  const loansById = new Map((data.loans || []).map((loan) => [loan.id, loan]))
+  const loanIds = new Set(loansById.keys())
+  const refundTransactionsByReturnId = new Map<string, PaymentTransaction[]>()
+  const refundTransactionsById = new Map<string, PaymentTransaction>(
+    [...(data.settlementTransactions || []), ...(data.loanPaymentTransactions || [])]
+      .filter((transaction) => !transaction.isDeleted)
+      .map((transaction): [string, PaymentTransaction] => [transaction.id, transaction])
+  )
+  for (const transaction of refundTransactionsById.values()) {
+    const returnId = metadataText(transaction.metadata, 'orderReturnId')
+    const isReturnRefund = Boolean(
+      returnId && (
+        transaction.reversalOfTransactionId
+        || metadataFlag(transaction.metadata, 'loanRepaymentRefund')
+        || metadataFlag(transaction.metadata, 'financingInitialPaymentRefund')
+      )
+    )
+    if (!returnId || !isReturnRefund) continue
+    const transactions = refundTransactionsByReturnId.get(returnId) || []
+    transactions.push(transaction)
+    refundTransactionsByReturnId.set(returnId, transactions)
+  }
   const returnsByOrderId = new Map<string, OrderReturn[]>()
   const returnItemsByReturnId = new Map<string, OrderReturnItem[]>()
   for (const orderReturn of data.salesOrderReturns || []) {
@@ -544,9 +569,19 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
 
   for (const order of sourceOrders) {
     if (order.isDeleted || order.status === 'draft' || order.status === 'cancelled') continue
+    const linkedSalesLoan = isSalesOrder(order) && order.linkedLoanId
+      ? loansById.get(order.linkedLoanId)
+      : undefined
+    const projectFinancedSalesOrderAsLedger = Boolean(
+      !data.isAgentCommissionStatement
+      && linkedSalesLoan?.source === 'order'
+      && linkedSalesLoan.orderType === 'sales'
+      && linkedSalesLoan.orderId === order.id
+    )
     // When an order created the loan, the loan is the accounting source of
-    // truth. Do not post both rows into the partner account.
-    if (order.linkedLoanId && loanIds.has(order.linkedLoanId)) continue
+    // truth for agent statements. Customer statements use the original order,
+    // payment, return, and reversal rows so returns remain visible by date.
+    if (order.linkedLoanId && loanIds.has(order.linkedLoanId) && !projectFinancedSalesOrderAsLedger) continue
     const sales = isSalesOrder(order)
     if (!sales) {
       entries.push({
@@ -631,21 +666,47 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
         note: salesOrder.notes,
         totalProductCommission: orderProductCommissionTotal,
         currency: salesOrder.currency,
-        delta: shouldItemizeSalesOrders
+        delta: shouldItemizeSalesOrders || projectFinancedSalesOrderAsLedger
           ? originalSalesOrderAmount(salesOrder)
           : Math.abs(Number(salesOrder.total || 0)),
         source: { recordType: 'order', recordId: salesOrder.id }
       })
     }
 
-    // The normal account statement predates itemized agent sales accounts.
-    // Keep it byte-for-byte equivalent in accounting terms: one sales
-    // order row at the current order total, without standalone returns.
-    if (!shouldItemizeSalesOrders) continue
+    // Ordinary sales orders retain their document-level presentation unless
+    // item detail is enabled. Financed customer orders still emit dated return
+    // rows so their statement reflects each return as a separate movement.
+    if (!shouldItemizeSalesOrders && !projectFinancedSalesOrderAsLedger) continue
 
     const itemsByOrderItemId = new Map((salesOrder.items || []).map((item) => [item.id, item]))
     for (const orderReturn of returnsByOrderId.get(salesOrder.id) || []) {
       const returnItems = returnItemsByReturnId.get(orderReturn.id) || []
+      if (projectFinancedSalesOrderAsLedger) {
+        const recordedRefund = roundStatementAmount(
+          (refundTransactionsByReturnId.get(orderReturn.id) || [])
+            .reduce((sum, transaction) => sum + Math.abs(Number(transaction.amount || 0)), 0)
+        )
+        const returnAmount = Math.abs(Number(orderReturn.refundAmount || 0))
+        // When the loan records the full return value as an actual refund,
+        // that payment reversal is the statement movement. Don't also post
+        // the same amount as a return credit.
+        if (returnAmount > 0 && Math.abs(recordedRefund - returnAmount) <= 0.000001) continue
+      }
+      if (!shouldItemizeSalesOrders) {
+        entries.push({
+          id: `sales-order-return:${orderReturn.id}`,
+          date: orderReturn.returnedAt || orderReturn.createdAt,
+          reference: `${salesOrder.orderNumber} · ${orderReturn.id}`,
+          kind: 'sales_order_return',
+          description: 'Sales order return',
+          descriptionKey: 'salesOrderReturn',
+          returnReason: orderReturn.reason,
+          currency: salesOrder.currency,
+          delta: -Math.abs(Number(orderReturn.refundAmount || 0)),
+          source: { recordType: 'order', recordId: salesOrder.id }
+        })
+        continue
+      }
       if (returnItems.length === 0) {
         entries.push({
           id: `sales-order-return:${orderReturn.id}`,
@@ -818,6 +879,28 @@ function getAutomaticCommissionSettlements(data: PartnerAccountStatementData): A
 function createPaymentEntries(data: PartnerAccountStatementData): PartnerAccountStatementEntry[] {
   const sourceOrders = data.statementOrders || data.salesOrders
   const salesOrdersById = new Map(sourceOrders.filter(isSalesOrder).map((order) => [order.id, order]))
+  const orderLoansById = new Map<string, Loan>(
+    (data.loans || [])
+      .filter((loan) => (
+        loan.source === 'order'
+        && loan.orderType === 'sales'
+        && loan.orderId
+        && salesOrdersById.has(loan.orderId)
+      ))
+      .map((loan): [string, Loan] => [loan.id, loan])
+  )
+  const orderLoanTransactions = data.isAgentCommissionStatement
+    ? []
+    : (data.loanPaymentTransactions || []).filter((transaction) => (
+      !transaction.isDeleted
+      && transaction.sourceModule === 'loans'
+      && orderLoansById.has(transaction.sourceRecordId)
+    ))
+  const transactionsById = new Map<string, PaymentTransaction>(
+    [...(data.settlementTransactions || []), ...orderLoanTransactions]
+      .filter((transaction) => !transaction.isDeleted)
+      .map((transaction): [string, PaymentTransaction] => [transaction.id, transaction])
+  )
   const salesAccountAgentIds = new Set(data.salesAccountAgentIds || [])
   const settlementOperationsById = new Map(
     (data.settlementOperations || []).filter((operation) => !operation.isDeleted).map((operation) => [operation.id, operation])
@@ -826,17 +909,52 @@ function createPaymentEntries(data: PartnerAccountStatementData): PartnerAccount
   const collapsedPayoutIds = new Set(
     getAutomaticCommissionSettlements(data).map((settlement) => settlement.payoutEntryId)
   )
-  return (data.settlementTransactions || [])
-    .filter((transaction) => !transaction.isDeleted)
+  return Array.from(transactionsById.values())
     .filter((transaction) => !collapsedPayoutIds.has(transaction.sourceSubrecordId || ''))
     .filter((transaction) => !isSalesAccountAgentPartialReturnReversal(transaction, salesOrdersById, salesAccountAgentIds))
     .map((transaction) => {
       const rawAmount = Number(transaction.amount || 0)
       const multiplier = transaction.direction === 'incoming' ? -1 : 1
-      const presentation = paymentStatementPresentation(
-        transaction,
-        transaction.sourceType === 'sales_order' ? salesOrdersById.get(transaction.sourceRecordId) : undefined
+      const orderLoan = orderLoansById.get(transaction.sourceRecordId)
+      const linkedLoanOrder = orderLoan?.orderId ? salesOrdersById.get(orderLoan.orderId) : undefined
+      const isOrderLoanMovement = Boolean(orderLoan && !data.isAgentCommissionStatement)
+      const presentation = isOrderLoanMovement
+        ? transaction.reversalOfTransactionId
+          ? paymentStatementPresentation(transaction)
+          : loanPaymentStatementPresentation(transaction, orderLoan!.direction !== 'borrowed')
+        : paymentStatementPresentation(
+          transaction,
+          transaction.sourceType === 'sales_order' ? salesOrdersById.get(transaction.sourceRecordId) : undefined
+        )
+      const loanOrderReference = linkedLoanOrder
+        ? [
+          data.linkedOrderCodes?.[linkedLoanOrder.id] || linkedLoanOrder.orderNumber,
+          transaction.referenceLabel || orderLoan?.loanNo
+        ].filter(Boolean).join(' · ')
+        : null
+      const orderReturnId = metadataText(transaction.metadata, 'orderReturnId')
+      const refundOrder = linkedLoanOrder || salesOrdersById.get(metadataText(transaction.metadata, 'orderId') || '')
+      const orderReturnReference = orderReturnId && refundOrder
+        ? [refundOrder.orderNumber, orderReturnId].filter(Boolean).join(' · ')
+        : null
+      const isCustomerOrderReturnRefund = Boolean(
+        !data.isAgentCommissionStatement
+        && orderReturnId
+        && (
+          transaction.reversalOfTransactionId
+          || metadataFlag(transaction.metadata, 'loanRepaymentRefund')
+          || metadataFlag(transaction.metadata, 'financingInitialPaymentRefund')
+        )
       )
+      const commissionReference = transaction.sourceType === 'agent_commission_payout'
+        || transaction.sourceType === 'agent_commission_recovery'
+        ? data.linkedOrderCodes?.[metadataText(transaction.metadata, 'orderId') || '']
+          || transaction.referenceLabel
+          || transaction.sourceRecordId
+        : transaction.referenceLabel || transaction.sourceRecordId
+      const reference = transaction.sourceType === 'direct_transaction'
+        ? formatDirectTransactionVoucherNumber(transaction)
+        : orderReturnReference || loanOrderReference || commissionReference
       const settlementOperationId = transaction.settlementOperationId || null
       const settlementOperation = settlementOperationId
         ? settlementOperationsById.get(settlementOperationId)
@@ -844,20 +962,16 @@ function createPaymentEntries(data: PartnerAccountStatementData): PartnerAccount
       return {
         id: `payment:${transaction.id}`,
         date: transaction.paidAt || transaction.createdAt,
-        reference: transaction.sourceType === 'direct_transaction'
-          ? formatDirectTransactionVoucherNumber(transaction)
-          : (transaction.sourceType === 'agent_commission_payout' || transaction.sourceType === 'agent_commission_recovery')
-            ? data.linkedOrderCodes?.[metadataText(transaction.metadata, 'orderId') || ''] ||
-              transaction.referenceLabel ||
-              transaction.sourceRecordId
-            : transaction.referenceLabel || transaction.sourceRecordId,
-        kind: paymentKind(transaction),
+        reference,
+        kind: isOrderLoanMovement ? 'loan_repayment' : paymentKind(transaction),
         ...presentation,
         currency: transaction.currency,
-        // Retain the stored sign so a reversal remains a visible audit row.
-        delta: multiplier * rawAmount,
-        source:
-          transaction.sourceType === 'sales_order' || transaction.sourceType === 'purchase_order'
+        // A customer order-return refund is a credit movement on the partner
+        // account. Agent statements retain their existing reversal signs.
+        delta: isCustomerOrderReturnRefund ? -Math.abs(rawAmount) : multiplier * rawAmount,
+        source: isCustomerOrderReturnRefund && refundOrder
+          ? { recordType: 'order', recordId: refundOrder.id }
+          : transaction.sourceType === 'sales_order' || transaction.sourceType === 'purchase_order'
             ? { recordType: 'order', recordId: transaction.sourceRecordId }
             : { recordType: 'payment_transaction', recordId: transaction.id },
         settlementOperationId,
@@ -964,9 +1078,16 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
       .filter(isSalesOrder)
       .map((order) => [order.id, order])
   )
-  // Product snapshots are informational: the linked loan remains the sole
-  // balance movement for a financed order, while these snapshots keep the
-  // sale and agent commission audit trail visible on the statement.
+  const isProjectedSalesOrderLoan = (loan: Loan | undefined) => Boolean(
+    !data.isAgentCommissionStatement
+    && loan?.source === 'order'
+    && loan.orderType === 'sales'
+    && loan.orderId
+    && salesOrderById.has(loan.orderId)
+  )
+  // Product snapshots are informational for agent statements. Customer
+  // statements project financed orders from order, payment, return, and
+  // reversal rows instead of reusing the loan's mutable summary balances.
   const productCommissionEntries = (data.agentProductCommissionEntries || [])
     .filter((entry) => !entry.isDeleted)
   const returnsByOrderId = new Map<string, OrderReturn[]>()
@@ -986,6 +1107,7 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
   const entries: PartnerAccountStatementEntry[] = []
 
   for (const loan of loans) {
+    if (isProjectedSalesOrderLoan(loan)) continue
     if (loan.isDeleted || loan.status === 'cancelled') continue
     const lent = loan.direction !== 'borrowed'
     const linkedSalesOrder = loan.orderId ? salesOrderById.get(loan.orderId) : undefined
@@ -1100,10 +1222,8 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
       })
     })
 
-    // A return against an order-financing loan already changes the loan
-    // principal and/or its repayment transactions. Keep that financial effect
-    // out of this presentation-only return row, but retain the returned item
-    // and its product-commission reversal for an auditable agent statement.
+    // Agent return rows remain informational because the loan summary and
+    // payment rows already carry their accounting effect in that statement.
     if (!linkedSalesOrder || orderSaleItems.length === 0) continue
 
     const itemsByOrderItemId = new Map((linkedSalesOrder.items || []).map((item) => [item.id, item]))
@@ -1165,6 +1285,7 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
 
   for (const payment of payments) {
     const loan = loanById.get(payment.loanId)
+    if (isProjectedSalesOrderLoan(loan)) continue
     if (!loan || payment.isDeleted || loan.isDeleted || loan.status === 'cancelled') continue
     const lent = loan.direction !== 'borrowed'
     const linkedOrderCode = loan.orderId ? data.linkedOrderCodes?.[loan.orderId]?.trim() : undefined
@@ -1317,9 +1438,8 @@ export function buildPartnerAccountStatementLedger(
     Math.abs(entry.delta) > 0.000001
     || entry.descriptionKey === 'commissionSettledAutomatically'
     || entry.totalProductCommission != null
-    // A financed-order return is already reflected by the linked loan or its
-    // repayment transaction. Preserve its item audit row even when no product
-    // commission rule applied, without treating it as another balance move.
+    // Agent financed-order return rows are informational. Preserve their item
+    // audit rows even when no commission rule applied, without adding balance.
     || (entry.kind === 'sales_order_return' && entry.itemName != null)
   ))
   const trackedCommissionTotals = data.trackedCommissionEntries
@@ -1420,6 +1540,7 @@ export function applySalesAgentStatementCreditToOrderLoans(
     getPartnerAccountStatementClosingBalances({
       ...data,
       itemizeSalesOrders: true,
+      isAgentCommissionStatement: true,
       salesAccountAgentIds
     }).map(({ currency, closingBalance }) => [currency.toLowerCase(), closingBalance])
   )

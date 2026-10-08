@@ -324,13 +324,13 @@ export function usePartnerAccountStatement(
     [loanIdKey]
   )
   const loanPayments = useMemo(() => queriedLoanPayments ?? EMPTY_LOAN_PAYMENTS, [queriedLoanPayments])
-  const loanPaymentTransactionIds = useMemo(
-    () => new Set(loanPayments.map((payment) => payment.paymentTransactionId).filter((id): id is string => !!id)),
-    [loanPayments]
-  )
   const loanPaymentTransactions = useMemo(
-    () => paymentTransactions.filter((transaction) => !transaction.isDeleted && loanPaymentTransactionIds.has(transaction.id)),
-    [loanPaymentTransactionIds, paymentTransactions]
+    () => paymentTransactions.filter((transaction) => (
+      !transaction.isDeleted
+      && transaction.sourceModule === 'loans'
+      && partnerLoanIds.includes(transaction.sourceRecordId)
+    )),
+    [partnerLoanIds, paymentTransactions]
   )
   const salesAccountCommissionEntries = useMemo(
     () => commissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId) && isPayableCommissionEntry(entry)),
@@ -420,6 +420,14 @@ export function usePartnerAccountStatement(
       if (transaction.sourceType === 'sales_order') return salesOrderIds.has(transaction.sourceRecordId)
       if (transaction.sourceType === 'purchase_order') return purchaseOrderIds.has(transaction.sourceRecordId)
       if (
+        commissionAgents.length === 0
+        && transaction.sourceType === 'order_return'
+        && typeof transaction.metadata?.orderId === 'string'
+        && salesOrderIds.has(transaction.metadata.orderId)
+        && (transaction.metadata.loanRepaymentRefund === true
+          || transaction.metadata.financingInitialPaymentRefund === true)
+      ) return true
+      if (
         (transaction.sourceType === 'installment_sale_down_payment' ||
           transaction.sourceType === 'installment_sale_installment') &&
         transaction.metadata?.businessPartnerId === partnerId
@@ -435,7 +443,7 @@ export function usePartnerAccountStatement(
         isDirectTransactionPartnerAccountEffect(transaction.metadata?.partnerAccountEffect)
       )
     })
-  }, [commissionAgentIds, partnerId, partnerPurchaseOrders, partnerSalesOrders, paymentTransactions, settlementOperationIds])
+  }, [commissionAgentIds, commissionAgents.length, partnerId, partnerPurchaseOrders, partnerSalesOrders, paymentTransactions, settlementOperationIds])
 
   const merchantDeliveryEntries = useMemo(() => {
     if (!partnerId) return []
