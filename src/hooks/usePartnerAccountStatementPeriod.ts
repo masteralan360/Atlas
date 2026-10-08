@@ -9,7 +9,7 @@ import type {
 } from '@/lib/partnerAccountStatement'
 
 type PeriodStatementResponse = {
-  partner: Pick<BusinessPartner, 'id' | 'workspaceId' | 'partnerName' | 'phone' | 'address' | 'city' | 'role'>
+  partner: Pick<BusinessPartner, 'id' | 'workspaceId' | 'partnerName' | 'phone' | 'address' | 'city' | 'role' | 'netExposure' | 'defaultCurrency'>
   ledgers: PartnerAccountStatementCurrencyLedger[]
   isAgentCommissionStatement: boolean
 }

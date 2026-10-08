@@ -605,7 +605,9 @@ async function loadPartnerStatement(
       phone: visiblePartner.phone,
       address: visiblePartner.address,
       city: visiblePartner.city,
-      role: visiblePartner.role
+      role: visiblePartner.role,
+      netExposure: visiblePartner.netExposure,
+      defaultCurrency: visiblePartner.defaultCurrency
     },
     ledgers,
     isAgentCommissionStatement: agents.length > 0

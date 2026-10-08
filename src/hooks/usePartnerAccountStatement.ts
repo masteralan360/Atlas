@@ -241,7 +241,7 @@ export function usePartnerAccountStatement(
             : currentState
         ))
       }
-    }, productCommissionScope === 'partner' ? partnerId : undefined)
+    }, productCommissionScope === 'partner' ? partnerId ?? undefined : undefined)
       .then(() => {
         const hydration = readWorkspaceDataHydration(
           workspaceId,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { BarcodeScanner, type DetectedBarcode } from 'react-barcode-scanner'
+import { useCamera, useScanning, type DetectedBarcode } from 'react-barcode-scanner'
 import 'react-barcode-scanner/polyfill'
 
 const CAMERA_SCAN_OPTIONS = {
@@ -21,6 +21,8 @@ const CAMERA_SCAN_OPTIONS = {
 interface CameraBarcodeScannerProps {
     selectedCameraId: string
     onCapture: (barcodes: DetectedBarcode[]) => void
+    onCameraStateChange?: (state: { isReady: boolean; error?: Error }) => void
+    paused?: boolean
 }
 
 /**
@@ -28,12 +30,18 @@ interface CameraBarcodeScannerProps {
  * opens a new MediaStream whenever `trackConstraints` changes, so recreating
  * that object during ordinary POS renders makes the camera preview stutter.
  */
-export function CameraBarcodeScanner({ selectedCameraId, onCapture }: CameraBarcodeScannerProps) {
+export function CameraBarcodeScanner({ selectedCameraId, onCapture, onCameraStateChange, paused = false }: CameraBarcodeScannerProps) {
+    const videoRef = useRef<HTMLVideoElement>(null)
     const onCaptureRef = useRef(onCapture)
+    const onCameraStateChangeRef = useRef(onCameraStateChange)
 
     useEffect(() => {
         onCaptureRef.current = onCapture
     }, [onCapture])
+
+    useEffect(() => {
+        onCameraStateChangeRef.current = onCameraStateChange
+    }, [onCameraStateChange])
 
     const handleCapture = useCallback((barcodes: DetectedBarcode[]) => {
         onCaptureRef.current(barcodes)
@@ -51,11 +59,51 @@ export function CameraBarcodeScanner({ selectedCameraId, onCapture }: CameraBarc
         advanced: []
     }), [selectedCameraId])
 
+    // Keep the package's camera and BarcodeDetector hooks, options, and
+    // constraints, while exposing readiness and permission errors to the
+    // reusable scanner dialog. The public BarcodeScanner component doesn't
+    // expose its useCamera error state.
+    const { isCameraReady, error } = useCamera(videoRef, trackConstraints)
+    const { detectedBarcodes, startScan, stopScan } = useScanning(videoRef, CAMERA_SCAN_OPTIONS)
+
+    useEffect(() => {
+        if (detectedBarcodes !== undefined) {
+            handleCapture(detectedBarcodes)
+        }
+    }, [detectedBarcodes, handleCapture])
+
+    useEffect(() => {
+        onCameraStateChangeRef.current?.({ isReady: isCameraReady, error })
+    }, [error, isCameraReady])
+
+    useEffect(() => {
+        if (isCameraReady && !paused) {
+            startScan()
+        } else {
+            stopScan()
+        }
+    }, [isCameraReady, paused, startScan, stopScan])
+
+    useEffect(() => {
+        const video = videoRef.current
+        if (!video) return
+        if (isCameraReady && !paused) {
+            video.play().catch((playError: unknown) => {
+                if (playError instanceof DOMException && playError.name === 'AbortError') return
+                console.error('[CameraBarcodeScanner] Failed to play camera preview:', playError)
+            })
+        } else {
+            video.pause()
+        }
+    }, [isCameraReady, paused])
+
     return (
-        <BarcodeScanner
-            onCapture={handleCapture}
-            trackConstraints={trackConstraints}
-            options={CAMERA_SCAN_OPTIONS}
+        <video
+            ref={videoRef}
+            autoPlay
+            muted
+            playsInline
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
         />
     )
 }

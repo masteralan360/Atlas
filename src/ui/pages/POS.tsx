@@ -127,6 +127,7 @@ import {
     Barcode,
     Camera,
     ScanBarcode,
+    ScanLine,
     Trash2,
     TrendingUp,
     Menu,
@@ -154,6 +155,7 @@ import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { ExchangeRateList } from '@/ui/components'
 import { CheckoutSuccessModal, HeldSalesModal, type HeldSale, StorageSelector, CrossStorageWarningModal } from '@/ui/components'
 import { BarcodeScannerModal } from '@/ui/components/pos/BarcodeScannerModal'
+import { CameraBarcodeScannerModal } from '@/ui/components/pos/CameraBarcodeScannerModal'
 import { PosAdjust } from '@/ui/components/pos/PosAdjust'
 import { usePosReceiptPrinter } from '@/ui/components/pos/usePosReceiptPrinter'
 import type { StorageSelectorOption } from '@/ui/components/pos/StorageSelector'
@@ -557,6 +559,12 @@ export function POS() {
     const isActivitiesCart = cart.some((item) => item.storageId === ACTIVITIES_STORAGE_ID)
     const isActivitiesCheckout = cart.length > 0 ? isActivitiesCart : isActivitiesStorage
     const [unitSelectionProduct, setUnitSelectionProduct] = useState<PosCatalogProduct | null>(null)
+    const pendingCameraScannerAdd = useRef<{ productId: string; resolve: (succeeded: boolean) => void } | null>(null)
+    useEffect(() => () => {
+        const pending = pendingCameraScannerAdd.current
+        pendingCameraScannerAdd.current = null
+        pending?.resolve(false)
+    }, [])
     const [dynamicUnitModal, setDynamicUnitModal] = useState<{ type: string; itemKey: string } | null>(null)
     const [dynamicInputBuffer, setDynamicInputBuffer] = useState<Record<string, string>>({})
     const [isSkuModalOpen, setIsSkuModalOpen] = useState(false)
@@ -573,6 +581,9 @@ export function POS() {
     const posCheckoutAttempt = useRef(new PosCheckoutAttempt())
     const [isPreprinting, setIsPreprinting] = useState(false)
     const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false)
+    const [isCameraProductScannerOpen, setIsCameraProductScannerOpen] = useState(false)
+    const isCameraProductScannerOpenRef = useRef(false)
+    isCameraProductScannerOpenRef.current = isCameraProductScannerOpen
     const [isPosAdjustOpen, setIsPosAdjustOpen] = useState(false)
     const [isCameraScannerAutoEnabled, setIsCameraScannerAutoEnabled] = useState(() => {
         return localStorage.getItem('scanner_auto_enabled') === 'true'
@@ -600,7 +611,7 @@ export function POS() {
     const [scanDelay, setScanDelay] = useState(() => {
         return Number(localStorage.getItem('scanner_scan_delay')) || 500
     })
-    const isScannerAutoActive = isCameraScannerAutoEnabled || isDeviceScannerAutoEnabled
+    const isScannerAutoActive = !isCameraProductScannerOpen && (isCameraScannerAutoEnabled || isDeviceScannerAutoEnabled)
 
     const updateCameraScannerAutoEnabled = (val: boolean) => {
         setIsCameraScannerAutoEnabled(val)
@@ -1707,7 +1718,7 @@ export function POS() {
 
         const handleNavigation = (e: KeyboardEvent) => {
             // Disable if modals are open
-            if (isSkuModalOpen || isBarcodeModalOpen || isPosAdjustOpen || editingPriceItemKey) return
+            if (isCameraProductScannerOpenRef.current || isSkuModalOpen || isBarcodeModalOpen || isPosAdjustOpen || editingPriceItemKey) return
 
             // If search is focused, only handle Escape and Enter
             if (document.activeElement === searchInputRef.current) {
@@ -1850,11 +1861,12 @@ export function POS() {
 
         window.addEventListener('keydown', handleNavigation)
         return () => window.removeEventListener('keydown', handleNavigation)
-    }, [isPosKeyboardSelectionEnabled, isSkuModalOpen, isBarcodeModalOpen, isPosAdjustOpen, editingPriceItemKey, focusedProductIndex, focusedSection, focusedCartIndex, filteredProducts, cart, search, getCartItemKey])
+    }, [isPosKeyboardSelectionEnabled, isSkuModalOpen, isBarcodeModalOpen, isCameraProductScannerOpen, isPosAdjustOpen, editingPriceItemKey, focusedProductIndex, focusedSection, focusedCartIndex, filteredProducts, cart, search, getCartItemKey])
 
     // Hotkey listener
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (isCameraProductScannerOpenRef.current) return
             // Automatic keyboard-wedge scanning must classify the opening
             // characters before they are allowed to trigger POS shortcuts.
             if (isDeviceScannerAutoEnabled) return
@@ -1862,33 +1874,37 @@ export function POS() {
             const skuHotkey = localStorage.getItem('pos_hotkey') || ''
             const barcodeHotkey = localStorage.getItem('barcode_hotkey') || ''
 
-            if (e.key.toLowerCase() === skuHotkey.toLowerCase() && !isSkuModalOpen && !isBarcodeModalOpen) {
+            if (e.key.toLowerCase() === skuHotkey.toLowerCase() && !isSkuModalOpen && !isBarcodeModalOpen && !isCameraProductScannerOpen) {
                 e.preventDefault()
                 setIsSkuModalOpen(true)
             }
-            if (e.key.toLowerCase() === barcodeHotkey.toLowerCase() && !isBarcodeModalOpen && !isSkuModalOpen) {
+            if (e.key.toLowerCase() === barcodeHotkey.toLowerCase() && !isBarcodeModalOpen && !isSkuModalOpen && !isCameraProductScannerOpen) {
                 e.preventDefault()
                 setIsBarcodeModalOpen(true)
             }
         }
         window.addEventListener('keydown', handleKeyDown)
         return () => window.removeEventListener('keydown', handleKeyDown)
-    }, [isSkuModalOpen, isBarcodeModalOpen, isDeviceScannerAutoEnabled])
+    }, [isSkuModalOpen, isBarcodeModalOpen, isDeviceScannerAutoEnabled, isCameraProductScannerOpen])
 
     // Fetch cameras
     useEffect(() => {
-        if (isBarcodeModalOpen) {
+        if (isBarcodeModalOpen || isCameraProductScannerOpen) {
+            if (!navigator.mediaDevices?.enumerateDevices) {
+                setCameras([])
+                return
+            }
             navigator.mediaDevices.enumerateDevices().then(devices => {
                 const videoDevices = devices.filter(d => d.kind === 'videoinput')
                 setCameras(videoDevices)
-                if (!selectedCameraId && videoDevices.length > 0) {
+                if (isBarcodeModalOpen && !selectedCameraId && videoDevices.length > 0) {
                     setSelectedCameraId(videoDevices[0].deviceId)
                 }
             }).catch(err => {
                 console.error('Error listing cameras:', err)
             })
         }
-    }, [isBarcodeModalOpen, selectedCameraId])
+    }, [isBarcodeModalOpen, isCameraProductScannerOpen, selectedCameraId])
 
     // Focus SKU input when modal opens
     useEffect(() => {
@@ -1917,7 +1933,7 @@ export function POS() {
         })
     }, [resolveDiscountForPrice, selectedPriceBookId])
 
-    const addSelectedUnitToCart = useCallback((product: PosCatalogProduct, unitSelection?: PosUnitSelection) => {
+    const addSelectedUnitToCart = useCallback((product: PosCatalogProduct, unitSelection?: PosUnitSelection): boolean => {
         const isInfiniteActivity = product.isInfiniteActivity === true
         const isNonInventoryService = isService(product)
         if (!canAddPosCartItemFromStorage(cart, product.storageId, ACTIVITIES_STORAGE_ID)) {
@@ -1928,7 +1944,7 @@ export function POS() {
                     defaultValue: 'Activities must be checked out separately from products and services.'
                 })
             })
-            return
+            return false
         }
         const priceBookPricing = isInfiniteActivity ? null : getPriceBookPricing(product)
         const effectivePrice = unitSelection?.price ?? priceBookPricing?.price ?? product.price
@@ -1945,7 +1961,7 @@ export function POS() {
                 description: t('businessPartners.agent.productCategoryExcluded', { defaultValue: 'This product category is not available to this user.' })
             })
             hapticTrigger('error')
-            return
+            return false
         }
         if (!isInfiniteActivity && !isNonInventoryService && !hasValidProductCost(effectiveCostPrice)) {
             toast({
@@ -1954,9 +1970,13 @@ export function POS() {
                 description: getMissingProductCostMessage(product.name)
             })
             hapticTrigger('error')
-            return
+            return false
         }
-        if (!isInfiniteActivity && product.inventoryQuantity <= 0) return // Out of stock
+        const committedInventoryQuantity = cart
+            .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
+            .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
+        if (!isInfiniteActivity && !isNonInventoryService
+            && committedInventoryQuantity + sellingFactor > product.inventoryQuantity + 0.000001) return false
         const activeDiscount = getActiveDiscountForProduct(product, effectivePrice, effectiveCurrency)
 
         if (!currencyConversionEnabled && !isInfiniteActivity) {
@@ -1967,7 +1987,7 @@ export function POS() {
                     title: t('messages.error'),
                     description: t('pos.currencyConversionSingleCurrencyCart', 'Currency conversion is disabled. A sale can contain products in only one currency.')
                 })
-                return
+                return false
             }
         }
 
@@ -1978,7 +1998,7 @@ export function POS() {
                 title: t('messages.error'),
                 description: t('pos.eurDisabled') || 'Euro products represent a currency that is currently disabled in settings.',
             })
-            return
+            return false
         }
 
         if (effectiveCurrency === 'try' && !features.allowed_currencies.includes('try')) {
@@ -1987,7 +2007,7 @@ export function POS() {
                 title: t('messages.error'),
                 description: t('pos.tryDisabled') || 'TRY conversion is disabled.',
             })
-            return
+            return false
         }
 
         setCart((prev) => {
@@ -2043,6 +2063,7 @@ export function POS() {
             ]
         })
         hapticTrigger('selection')
+        return true
     }, [canSelectProduct, cart, cartCurrencies, currencyConversionEnabled, features, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, t, toast, hapticTrigger])
 
     const addFreeOnlyProductToCart = useCallback((product: PosCatalogProduct) => {
@@ -2143,9 +2164,9 @@ export function POS() {
         const options = !product.isInfiniteActivity && !isService(product) ? getProductUomOptions(product) : []
         if (options.length > 1) {
             setUnitSelectionProduct(product)
-            return
+            return false
         }
-        addSelectedUnitToCart(product, options[0] ? buildPosUnitSelection(product, options[0]) : undefined)
+        return addSelectedUnitToCart(product, options[0] ? buildPosUnitSelection(product, options[0]) : undefined)
     }, [addSelectedUnitToCart, buildPosUnitSelection, getProductUomOptions])
 
     const addScannedProduct = useCallback((product: PosCatalogProduct, scannedCode: string) => {
@@ -2153,10 +2174,9 @@ export function POS() {
         const uomId = barcodeUomMap.get(normalized) ?? barcodeUomMap.get(normalized.toLowerCase())
         const uom = uomId ? getProductUomOptions(product).find((row) => row.id === uomId) : undefined
         if (uom) {
-            addSelectedUnitToCart(product, buildPosUnitSelection(product, uom))
-            return
+            return addSelectedUnitToCart(product, buildPosUnitSelection(product, uom))
         }
-        addToCart(product)
+        return addToCart(product)
     }, [addSelectedUnitToCart, addToCart, barcodeUomMap, buildPosUnitSelection, getProductUomOptions])
 
     const openMobileFreeOnlyProduct = useCallback((product: PosCatalogProduct) => {
@@ -2196,8 +2216,13 @@ export function POS() {
         const uom = getProductUomOptions(product).find((row) => row.id === uomId)
         if (!uom) return
         const selection = buildPosUnitSelection(product, uom)
+        const succeeded = addSelectedUnitToCart(product, selection)
+        const pendingCameraAdd = pendingCameraScannerAdd.current
+        if (pendingCameraAdd?.productId === product.id) {
+            pendingCameraScannerAdd.current = null
+            pendingCameraAdd.resolve(succeeded)
+        }
         setUnitSelectionProduct(null)
-        addSelectedUnitToCart(product, selection)
     }, [addSelectedUnitToCart, buildPosUnitSelection, getProductUomOptions, unitSelectionProduct])
 
     const removeFromCart = (itemKey: string) => {
@@ -2435,6 +2460,7 @@ export function POS() {
     }
 
     const handleBarcodeDetected = useCallback((barcodes: any[], source: 'camera' | 'device') => {
+        if (isCameraProductScannerOpenRef.current) return
         const isEnabled = source === 'camera' ? isCameraScannerAutoEnabled : isDeviceScannerAutoEnabled
         if (!isEnabled || barcodes.length === 0) return
         const text = normalizeBarcodeScannerText(String(barcodes[0].rawValue ?? ''))
@@ -2475,6 +2501,67 @@ export function POS() {
         }
     }, [isCameraScannerAutoEnabled, isDeviceScannerAutoEnabled, scanDelay, barcodeMap, scannableProducts, addScannedProduct, t, toast, selectedStorageId, storages, hapticTrigger])
 
+    const handleCameraScannerProductScan = useCallback((scannedValue: string) => {
+        const normalized = normalizeBarcodeScannerText(scannedValue)
+        if (!normalized) return false
+
+        const candidates = findPosBarcodeCandidates(normalized, scannableProducts, barcodeMap)
+        const exactMatch = candidates.find((product) => product.storageId === selectedStorageId)
+        const otherMatch = candidates.find((product) => product.storageId !== selectedStorageId)
+
+        if (!exactMatch) {
+            if (otherMatch) {
+                const storageName = storages.find((storage) => storage.id === otherMatch.storageId)?.name
+                    || t('pos.unknownStorage', { defaultValue: 'Unknown storage' })
+                setCrossStorageWarning({ product: otherMatch, foundStorageName: storageName })
+            } else {
+                toast({
+                    variant: 'destructive',
+                    title: t('messages.error'),
+                    description: `${t('pos.skuNotFound')}: ${normalized}`,
+                    duration: 2000
+                })
+                hapticTrigger('error')
+            }
+            return false
+        }
+
+        const isInfiniteActivity = 'isInfiniteActivity' in exactMatch && exactMatch.isInfiniteActivity === true
+        const options = !isInfiniteActivity && !isService(exactMatch)
+            ? getProductUomOptions(exactMatch)
+            : []
+        const uomId = barcodeUomMap.get(normalized) ?? barcodeUomMap.get(normalized.toLowerCase())
+        const scannedUom = uomId ? options.find((row) => row.id === uomId) : undefined
+
+        const finishAdd = (succeeded: boolean) => {
+            if (succeeded) {
+                toast({
+                    title: t('messages.success'),
+                    description: `${exactMatch.name} ${t('common.added')}`,
+                    duration: 2000
+                })
+            }
+            return succeeded
+        }
+
+        if (scannedUom) {
+            return finishAdd(addSelectedUnitToCart(exactMatch, buildPosUnitSelection(exactMatch, scannedUom)))
+        }
+
+        if (options.length > 1) {
+            return new Promise<boolean>((resolve) => {
+                pendingCameraScannerAdd.current?.resolve(false)
+                pendingCameraScannerAdd.current = { productId: exactMatch.id, resolve: (succeeded) => resolve(finishAdd(succeeded)) }
+                setUnitSelectionProduct(exactMatch)
+            })
+        }
+
+        return finishAdd(addSelectedUnitToCart(
+            exactMatch,
+            options[0] ? buildPosUnitSelection(exactMatch, options[0]) : undefined
+        ))
+    }, [addSelectedUnitToCart, barcodeMap, barcodeUomMap, buildPosUnitSelection, getProductUomOptions, hapticTrigger, scannableProducts, selectedStorageId, storages, t, toast])
+
     useEffect(() => {
         const clearDeviceScanTimeout = () => {
             if (deviceScanTimeout.current) {
@@ -2494,6 +2581,7 @@ export function POS() {
 
         if (
             !isDeviceScannerAutoEnabled
+            || isCameraProductScannerOpen
             || isSkuModalOpen
             || isLoanRegistrationModalOpen
             || editingPriceItemKey
@@ -2557,6 +2645,10 @@ export function POS() {
         }
 
         const onKeyDown = (event: KeyboardEvent) => {
+            if (isCameraProductScannerOpenRef.current) {
+                resetDeviceScanState()
+                return
+            }
             if (event.ctrlKey || event.metaKey || event.altKey) return
             if (isBarcodeScannerIgnoredKey(event.key)) return
 
@@ -2648,6 +2740,7 @@ export function POS() {
         canImmediatelySubmitDeviceScan,
         handleBarcodeDetected,
         isBluetoothScannerModeEnabled,
+        isCameraProductScannerOpen,
         isDeviceScannerAutoEnabled,
         isDeviceScannerImmediateSubmitEnabled,
         isLoanRegistrationModalOpen,
@@ -3499,6 +3592,7 @@ export function POS() {
                                 setSearch={setSearch}
                                 setIsSkuModalOpen={setIsSkuModalOpen}
                                 setIsBarcodeModalOpen={setIsBarcodeModalOpen}
+                                setIsCameraProductScannerOpen={setIsCameraProductScannerOpen}
                                 isDeviceScannerAutoEnabled={isDeviceScannerAutoEnabled}
                                 filteredProducts={filteredProducts}
                                 cart={cart}
@@ -4471,7 +4565,7 @@ export function POS() {
             }
 
             {/* --- Shared Modals (Available in both Mobile & Desktop) --- */}
-            {isCameraScannerAutoEnabled && !isBarcodeModalOpen && (
+            {isCameraScannerAutoEnabled && !isBarcodeModalOpen && !isCameraProductScannerOpen && (
                 <div className="fixed left-2 top-2 h-2 w-2 opacity-0 pointer-events-none">
                     <CameraBarcodeScanner
                         selectedCameraId={selectedCameraId}
@@ -4498,6 +4592,20 @@ export function POS() {
                 scanDelay={scanDelay}
                 setScanDelay={setScanDelay}
                 cameras={cameras}
+            />
+
+            <CameraBarcodeScannerModal
+                open={isCameraProductScannerOpen}
+                onOpenChange={setIsCameraProductScannerOpen}
+                modes={['single', 'multiple']}
+                defaultMode="single"
+                onScan={handleCameraScannerProductScan}
+                selectedCameraId={selectedCameraId}
+                cameras={cameras}
+                onCameraChange={(cameraId) => {
+                    setSelectedCameraId(cameraId)
+                    localStorage.setItem('scanner_camera_id', cameraId)
+                }}
             />
 
             <PosAdjust
@@ -4644,7 +4752,16 @@ export function POS() {
                 </DialogContent>
             </Dialog>
 
-            <SmallDialog open={unitSelectionProduct !== null} onOpenChange={(open) => { if (!open) setUnitSelectionProduct(null) }}>
+            <SmallDialog open={unitSelectionProduct !== null} onOpenChange={(open) => {
+                if (!open) {
+                    const pending = pendingCameraScannerAdd.current
+                    if (pending && pending.productId === unitSelectionProduct?.id) {
+                        pendingCameraScannerAdd.current = null
+                        pending.resolve(false)
+                    }
+                    setUnitSelectionProduct(null)
+                }
+            }}>
                 <SmallDialogContent>
                     <SmallDialogHeader>
                         <SmallDialogTitle className="flex items-center gap-2">
@@ -5635,6 +5752,7 @@ interface MobileGridProps {
     setSearch: (s: string) => void
     setIsSkuModalOpen: (o: boolean) => void
     setIsBarcodeModalOpen: (o: boolean) => void
+    setIsCameraProductScannerOpen: (o: boolean) => void
     isDeviceScannerAutoEnabled: boolean
     filteredProducts: PosCatalogProduct[]
     cart: CartItem[]
@@ -5660,7 +5778,7 @@ interface MobileGridProps {
     showCategories: boolean
 }
 
-function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, isDeviceScannerAutoEnabled, filteredProducts, cart, addToCart, onHoldForFreeOnlyOrder, canUseOrderFreeBonus, quickOrderEnabled, updateQuantity, features, getDisplayImageUrl, categories, selectedCategory, setSelectedCategory, getActiveDiscount, getPriceBookPricing, showQuantityIndicator, showCategories }: MobileGridProps) {
+function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, setIsCameraProductScannerOpen, isDeviceScannerAutoEnabled, filteredProducts, cart, addToCart, onHoldForFreeOnlyOrder, canUseOrderFreeBonus, quickOrderEnabled, updateQuantity, features, getDisplayImageUrl, categories, selectedCategory, setSelectedCategory, getActiveDiscount, getPriceBookPricing, showQuantityIndicator, showCategories }: MobileGridProps) {
     const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const suppressCatalogClickRef = useRef(false)
 
@@ -5702,12 +5820,24 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                     size="icon"
                     className="h-12 w-12 rounded-2xl border-none bg-muted/30"
                     onClick={() => setIsBarcodeModalOpen(true)}
+                    title={t('pos.barcodeScanner', { defaultValue: 'Barcode Scanner' })}
+                    aria-label={t('pos.barcodeScanner', { defaultValue: 'Barcode Scanner' })}
                 >
                     {isDeviceScannerAutoEnabled ? (
                         <ScanBarcode className="w-5 h-5 text-muted-foreground" />
                     ) : (
                         <Camera className="w-5 h-5 text-muted-foreground" />
                     )}
+                </Button>
+                <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-12 w-12 rounded-2xl border-none bg-primary/10 text-primary hover:bg-primary/15"
+                    onClick={() => setIsCameraProductScannerOpen(true)}
+                    title={t('pos.cameraScanner.title', { defaultValue: 'Camera Barcode Scanner' })}
+                    aria-label={t('pos.cameraScanner.title', { defaultValue: 'Camera Barcode Scanner' })}
+                >
+                    <ScanLine className="h-5 w-5" />
                 </Button>
             </div>
 
