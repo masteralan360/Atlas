@@ -1,7 +1,5 @@
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide 
 
-One-Click QR phones
-
 Select Batch on POS
 
 Allow orders atlas standards line to move
@@ -17,7 +15,6 @@ Make Workspace Payment Invoices
 #
 
 Partner Account Statement Back
-Make Account Statement Faster
 
 Make Orders Faster
 
