@@ -9,17 +9,27 @@ import { CameraBarcodeScanner } from './CameraBarcodeScanner'
 
 export type CameraBarcodeScanMode = 'single' | 'multiple'
 
+export type CameraBarcodeScannerTabOption = {
+    id: string
+    label: string
+    mode: CameraBarcodeScanMode
+}
+
 export type CameraBarcodeScannerModalProps = {
     open: boolean
     onOpenChange: (open: boolean) => void
     /** Expose one or both scan modes to the consuming feature. */
     modes: readonly CameraBarcodeScanMode[]
     /** A resolved `false` or a thrown error marks the scan as rejected. */
-    onScan: (barcode: string, mode: CameraBarcodeScanMode) => void | boolean | Promise<void | boolean>
+    onScan: (barcode: string, mode: CameraBarcodeScanMode, tabOptionId?: string) => void | boolean | Promise<void | boolean>
     selectedCameraId?: string
     cameras?: readonly MediaDeviceInfo[]
     onCameraChange?: (cameraId: string) => void
     defaultMode?: CameraBarcodeScanMode
+    /** Optional per-instance labels and selection values mapped to scan behavior. */
+    tabOptions?: readonly CameraBarcodeScannerTabOption[]
+    defaultTabOptionId?: string
+    tabOptionsLabel?: string
     title?: string
     className?: string
 }
@@ -53,6 +63,9 @@ export function CameraBarcodeScannerModal({
     cameras = [],
     onCameraChange,
     defaultMode = 'single',
+    tabOptions,
+    defaultTabOptionId,
+    tabOptionsLabel,
     title,
     className
 }: CameraBarcodeScannerModalProps) {
@@ -61,15 +74,24 @@ export function CameraBarcodeScannerModal({
         () => modes.length > 0 ? [...new Set(modes)] : ['single'],
         [modes]
     )
-    const initialMode = availableModes.includes(defaultMode) ? defaultMode : availableModes[0]
+    const customTabs = useMemo(
+        () => (tabOptions ?? []).filter((option) => availableModes.includes(option.mode)),
+        [availableModes, tabOptions]
+    )
+    const selectedDefaultTab = customTabs.find((option) => option.id === defaultTabOptionId) ?? customTabs[0]
+    const initialTabOptionId = selectedDefaultTab?.id ?? defaultTabOptionId ?? defaultMode
+    const initialMode = selectedDefaultTab?.mode ?? (availableModes.includes(defaultMode) ? defaultMode : availableModes[0])
     const [mode, setMode] = useState<CameraBarcodeScanMode>(initialMode)
+    const [selectedTabOptionId, setSelectedTabOptionId] = useState(initialTabOptionId)
     const [cameraInstance, setCameraInstance] = useState(0)
     const [cameraReady, setCameraReady] = useState(false)
     const [cameraError, setCameraError] = useState<Error | undefined>()
     const [feedback, setFeedback] = useState<ScannerFeedback>('ready')
     const [lastBarcode, setLastBarcode] = useState('')
     const [isProcessing, setIsProcessing] = useState(false)
+    const [isScanArmed, setIsScanArmed] = useState(false)
     const inFlightRef = useRef(false)
+    const scanArmedRef = useRef(false)
     const lastHandledBarcodeRef = useRef('')
     const sessionRef = useRef(0)
     const mountedRef = useRef(false)
@@ -102,13 +124,18 @@ export function CameraBarcodeScannerModal({
         if (!open) {
             sessionRef.current += 1
             inFlightRef.current = false
+            scanArmedRef.current = false
+            setIsScanArmed(false)
             setIsProcessing(false)
             return
         }
 
         sessionRef.current += 1
         lastHandledBarcodeRef.current = ''
+        scanArmedRef.current = false
+        setIsScanArmed(false)
         setMode(initialMode)
+        setSelectedTabOptionId(initialTabOptionId)
         setLastBarcode('')
         setFeedback('ready')
         setCameraReady(false)
@@ -119,7 +146,7 @@ export function CameraBarcodeScannerModal({
         unlockAudio()
     // `unlockAudio` intentionally stays stable for the component lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [initialMode, open])
+    }, [initialMode, initialTabOptionId, open])
 
     const unlockAudio = useCallback(() => {
         if (typeof window === 'undefined') return
@@ -194,17 +221,28 @@ export function CameraBarcodeScannerModal({
 
     const handleCapture = useCallback(async (barcodes: Array<{ rawValue?: string }>) => {
         const barcode = normalizeBarcodeScannerText(String(barcodes[0]?.rawValue ?? ''))
-        if (!open || !barcode || inFlightRef.current || barcode === lastHandledBarcodeRef.current) return
+        if (
+            !open ||
+            !barcode ||
+            inFlightRef.current ||
+            (mode === 'multiple' && !scanArmedRef.current) ||
+            barcode === lastHandledBarcodeRef.current
+        ) return
 
         const activeSession = sessionRef.current
         const activeMode = mode
+        const activeTabOptionId = customTabs.find((option) => option.id === selectedTabOptionId)?.id ?? selectedTabOptionId
         inFlightRef.current = true
+        if (activeMode === 'multiple') {
+            scanArmedRef.current = false
+            setIsScanArmed(false)
+        }
         setIsProcessing(true)
         setFeedback('processing')
         setLastBarcode(barcode)
 
         try {
-            const result = await onScanRef.current(barcode, activeMode)
+            const result = await onScanRef.current(barcode, activeMode, activeTabOptionId)
             if (result === false) throw new Error('scan-rejected')
             lastHandledBarcodeRef.current = barcode
             if (!mountedRef.current || sessionRef.current !== activeSession) return
@@ -226,12 +264,22 @@ export function CameraBarcodeScannerModal({
                 setIsProcessing(false)
             }
         }
-    }, [mode, open, playFeedbackSound, requestOpenChange])
+    }, [customTabs, mode, open, playFeedbackSound, requestOpenChange, selectedTabOptionId])
 
     const handleIntentionalRescan = () => {
         unlockAudio()
         lastHandledBarcodeRef.current = ''
         setFeedback(cameraReady ? 'ready' : cameraError ? 'camera-error' : 'ready')
+    }
+
+    const armScan = () => {
+        if (!cameraReady || cameraError || isProcessing || mode !== 'multiple') return
+        unlockAudio()
+        lastHandledBarcodeRef.current = ''
+        setLastBarcode('')
+        setFeedback('ready')
+        scanArmedRef.current = true
+        setIsScanArmed(true)
     }
 
     const restartCamera = () => {
@@ -253,6 +301,15 @@ export function CameraBarcodeScannerModal({
                     : cameraReady
                         ? t('pos.cameraScanner.ready', { defaultValue: 'Point the camera at a barcode.' })
                         : t('pos.cameraScanner.startingCamera', { defaultValue: 'Starting camera…' })
+    const tabChoices = customTabs.length > 0
+        ? customTabs.map((option) => ({ id: option.id, label: option.label, mode: option.mode }))
+        : availableModes.map((availableMode) => ({
+            id: availableMode,
+            label: availableMode === 'single'
+                ? t('pos.cameraScanner.singleScan', { defaultValue: 'Single scan' })
+                : t('pos.cameraScanner.multipleScans', { defaultValue: 'Multiple scans' }),
+            mode: availableMode
+        }))
 
     return (
         <AppDialog open={open} onOpenChange={requestOpenChange}>
@@ -268,20 +325,28 @@ export function CameraBarcodeScannerModal({
                 </AppDialogHeader>
 
                 <AppDialogBody className="space-y-4 sm:space-y-5">
-                    {availableModes.length > 1 && (
-                        <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-muted/30 p-1.5" aria-label={t('pos.cameraScanner.mode', { defaultValue: 'Scan mode' })}>
-                            {availableModes.map((availableMode) => {
-                                const isSelected = mode === availableMode
-                                const Icon = availableMode === 'single' ? ScanBarcode : RotateCcw
+                    {tabChoices.length > 1 && (
+                        <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-muted/30 p-1.5" aria-label={tabOptionsLabel ?? t('pos.cameraScanner.mode', { defaultValue: 'Scan mode' })}>
+                            {tabChoices.map((choice) => {
+                                const isSelected = customTabs.length > 0
+                                    ? selectedTabOptionId === choice.id
+                                    : mode === choice.mode
+                                const Icon = choice.mode === 'single' ? ScanBarcode : RotateCcw
                                 return (
                                     <button
-                                        key={availableMode}
+                                        key={choice.id}
                                         type="button"
                                         disabled={isProcessing}
                                         onClick={() => {
                                             unlockAudio()
-                                            setMode(availableMode)
-                                            setFeedback('ready')
+                                            const modeChanged = mode !== choice.mode
+                                            setMode(choice.mode)
+                                            setSelectedTabOptionId(choice.id)
+                                            if (modeChanged || customTabs.length === 0) {
+                                                scanArmedRef.current = false
+                                                setIsScanArmed(false)
+                                                setFeedback('ready')
+                                            }
                                         }}
                                         className={cn(
                                             'flex min-h-11 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition-colors disabled:opacity-60',
@@ -290,9 +355,7 @@ export function CameraBarcodeScannerModal({
                                         aria-pressed={isSelected}
                                     >
                                         <Icon className="h-4 w-4 shrink-0" />
-                                        {availableMode === 'single'
-                                            ? t('pos.cameraScanner.singleScan', { defaultValue: 'Single scan' })
-                                            : t('pos.cameraScanner.multipleScans', { defaultValue: 'Multiple scans' })}
+                                        {choice.label}
                                     </button>
                                 )
                             })}
@@ -327,7 +390,7 @@ export function CameraBarcodeScannerModal({
                                 selectedCameraId={selectedCameraId}
                                 onCapture={handleCapture}
                                 onCameraStateChange={handleCameraStateChange}
-                                paused={isProcessing}
+                                paused={isProcessing || (mode === 'multiple' && !isScanArmed)}
                             />
                         )}
                         {!cameraReady && !cameraError && (
@@ -360,12 +423,25 @@ export function CameraBarcodeScannerModal({
                                     ? <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
                                     : <ScanBarcode className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />}
                         <div className="min-w-0 flex-1 space-y-1">
-                            <p className="text-sm leading-5">{statusMessage}</p>
+                            {mode === 'multiple' && cameraReady && !cameraError && feedback !== 'processing' && !isScanArmed ? (
+                                <Button type="button" size="sm" className="min-h-9" onClick={armScan} disabled={isProcessing}>
+                                    <ScanBarcode className="me-2 h-4 w-4" />
+                                    {t('pos.cameraScanner.scan', { defaultValue: 'Scan' })}
+                                </Button>
+                            ) : (
+                                <p className="text-sm leading-5">{statusMessage}</p>
+                            )}
                             {lastBarcode && feedback !== 'processing' && (
                                 <p className="truncate font-mono text-xs text-muted-foreground" dir="ltr">{lastBarcode}</p>
                             )}
                         </div>
-                        {(feedback === 'failure' || (feedback === 'success' && mode === 'multiple')) && (
+                        {mode === 'multiple' && cameraReady && !cameraError && feedback === 'processing' && (
+                            <Button type="button" size="sm" className="min-h-9 shrink-0" disabled>
+                                <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                                {t('pos.cameraScanner.scanning', { defaultValue: 'Scanning…' })}
+                            </Button>
+                        )}
+                        {mode === 'single' && feedback === 'failure' && (
                             <Button type="button" variant="ghost" size="sm" className="h-auto min-h-9 shrink-0 px-2 text-xs" onClick={handleIntentionalRescan}>
                                 <RotateCcw className="me-1.5 h-3.5 w-3.5" />
                                 {t('pos.cameraScanner.scanSameAgain', { defaultValue: 'Scan same again' })}

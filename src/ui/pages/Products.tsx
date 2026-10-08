@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
-import { ArrowDown, ArrowUp, ArrowUpDown, Barcode, BookOpen, Boxes, ChevronDown, ChevronRight, CircleAlert, Copy, FileSpreadsheet, GitBranch, Info, LayoutGrid, List as ListIcon, Loader2, Package, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Tags, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, Barcode, BookOpen, Boxes, Camera, ChevronDown, ChevronRight, CircleAlert, Copy, FileSpreadsheet, GitBranch, Info, LayoutGrid, List as ListIcon, Loader2, Package, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Tags, Trash2 } from 'lucide-react'
 
 import { useAuth } from '@/auth'
 import {
@@ -12,6 +12,7 @@ import {
     usePriceBookCatalogState,
     useInventory,
     useProducts,
+    useWorkspaceProductBarcodes,
     useStorages,
     type CurrencyCode,
     type Product
@@ -37,6 +38,7 @@ import { useWorkspace } from '@/workspace'
 import { useHideCosts } from '@/permissions'
 import { hasValidProductCost } from '@/lib/productCost'
 import { isService } from '@/lib/catalogItem'
+import { findProductByOrderBarcode } from '@/lib/orderBarcodeScan'
 import { UiAccessGate, useUiAccess } from '@/context/UiAccessContext'
 import { getBarcodeLabelData, isProductSelectableForBarcodePrint } from '@/lib/barcodeLabel'
 import {
@@ -54,6 +56,7 @@ import { printPdfBlob } from '@/services/pdfPrintService'
 import { PriceBookManagementDialog } from '@/ui/components/PriceBookManagementDialog'
 import { ProductImportPreviewModal } from '@/ui/components/ProductImportPreviewModal'
 import { ProductCategoryManagerDialog } from '@/ui/components/products/ProductCategoryManagerDialog'
+import { CameraBarcodeScannerModal, type CameraBarcodeScanMode, type CameraBarcodeScannerTabOption } from '@/ui/components/pos/CameraBarcodeScannerModal'
 import { ProductAvatar } from '@/ui/components/ProductAvatars'
 import { useProductQuantityPresentation } from '@/ui/hooks/useProductQuantityFormatter'
 import {
@@ -249,6 +252,7 @@ export function Products() {
     const categories = useCategories(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
     const workspaceId = user?.workspaceId || ''
+    const productBarcodes = useWorkspaceProductBarcodes(workspaceId || undefined)
     const getProductQuantityPresentation = useProductQuantityPresentation(workspaceId || undefined)
     const formatProductQuantity = useCallback(
         (productId: string, quantity: number, unit: string) =>
@@ -373,6 +377,9 @@ export function Products() {
     const isBranchWorkspace = Boolean(branchInfo?.isBranch)
 
     const [search, setSearch] = useState('')
+    const [isCameraSearchScannerOpen, setIsCameraSearchScannerOpen] = useState(false)
+    const [selectedScannerCameraId, setSelectedScannerCameraId] = useState(() => localStorage.getItem('scanner_camera_id') || '')
+    const [scannerCameras, setScannerCameras] = useState<MediaDeviceInfo[]>([])
     const [catalogType, setCatalogType] = useState<'all' | 'products' | 'services'>('all')
     const [filters, setFilters] = useState<ProductFilterState>(DEFAULT_PRODUCT_FILTERS)
     const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
@@ -419,6 +426,45 @@ export function Products() {
     const [selectedCloneTargetStorageId, setSelectedCloneTargetStorageId] = useState('')
     const [isBranchCloning, setIsBranchCloning] = useState(false)
     const canCloneToBranch = canCloneProducts && cloneTargets.length > 0
+
+    const productsScannerTabOptions = useMemo<CameraBarcodeScannerTabOption[]>(() => ([
+        { id: 'barcode', label: t('products.barcodePrint.barcode', { defaultValue: 'Barcode' }), mode: 'single' },
+        { id: 'productName', label: t('invoice.productName', { defaultValue: 'Product Name' }), mode: 'single' }
+    ]), [t])
+
+    const handleProductsCameraScan = useCallback((barcode: string, mode: CameraBarcodeScanMode, tabOptionId?: string) => {
+        if (mode !== 'single') return false
+
+        const searchValue = tabOptionId === 'productName'
+            ? findProductByOrderBarcode(products, productBarcodes, barcode)?.name
+            : barcode
+        if (searchValue === undefined) return false
+
+        setSearch(searchValue)
+        return true
+    }, [productBarcodes, products])
+
+    useEffect(() => {
+        if (!isCameraSearchScannerOpen) return
+        const mediaDevices = navigator.mediaDevices
+        if (!mediaDevices?.enumerateDevices) {
+            setScannerCameras([])
+            return
+        }
+
+        let isActive = true
+        void mediaDevices.enumerateDevices()
+            .then((devices) => {
+                if (isActive) setScannerCameras(devices.filter((device) => device.kind === 'videoinput'))
+            })
+            .catch(() => {
+                if (isActive) setScannerCameras([])
+            })
+
+        return () => {
+            isActive = false
+        }
+    }, [isCameraSearchScannerOpen])
 
     const cancelStockRowHold = useCallback(() => {
         if (stockRowHoldTimeoutRef.current) {
@@ -682,15 +728,37 @@ export function Products() {
             .join(', ')
     }
 
+    const productBarcodeValuesByProductId = useMemo(() => {
+        const barcodeValuesByProductId = new Map<string, string[]>()
+        const addBarcode = (productId: string, barcode: string | undefined) => {
+            if (!barcode) return
+            const values = barcodeValuesByProductId.get(productId) ?? []
+            values.push(barcode)
+            barcodeValuesByProductId.set(productId, values)
+        }
+
+        for (const product of products) {
+            addBarcode(product.id, product.barcode)
+            product.barcodes?.forEach((barcode) => addBarcode(product.id, barcode))
+        }
+        for (const productBarcode of productBarcodes) {
+            addBarcode(productBarcode.productId, productBarcode.barcode)
+        }
+
+        return barcodeValuesByProductId
+    }, [productBarcodes, products])
+
     const filteredProducts = useMemo(() => {
+        const searchTerm = search.toLowerCase()
         let result = products.filter((product) =>
             (hasFeature('services') || !isService(product))
             && (catalogType === 'all' || (catalogType === 'services' ? isService(product) : !isService(product)))
             && (
-                (product.name ?? '').toLowerCase().includes(search.toLowerCase()) ||
-                (product.sku ?? '').toLowerCase().includes(search.toLowerCase()) ||
-                getCategoryName(product.categoryId).toLowerCase().includes(search.toLowerCase()) ||
-                getStorageName(product.storageId).toLowerCase().includes(search.toLowerCase())
+                (product.name ?? '').toLowerCase().includes(searchTerm) ||
+                (product.sku ?? '').toLowerCase().includes(searchTerm) ||
+                getCategoryName(product.categoryId).toLowerCase().includes(searchTerm) ||
+                getStorageName(product.storageId).toLowerCase().includes(searchTerm) ||
+                productBarcodeValuesByProductId.get(product.id)?.some((barcode) => barcode.toLowerCase().includes(searchTerm))
             )
         )
 
@@ -737,7 +805,7 @@ export function Products() {
         })
 
         return result
-    }, [products, search, getCategoryName, getStorageName, filters, catalogType, hasFeature])
+    }, [products, productBarcodeValuesByProductId, search, getCategoryName, getStorageName, filters, catalogType, hasFeature])
 
     const productById = useMemo(
         () => new Map(products.map((product) => [product.id, product] as const)),
@@ -1467,6 +1535,15 @@ export function Products() {
                         className="pl-10"
                     />
                 </div>
+                <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 shrink-0 rounded-2xl border-border/60 md:hidden"
+                    onClick={() => setIsCameraSearchScannerOpen(true)}
+                >
+                    <Camera className="me-2 h-4 w-4" />
+                    {t('products.cameraScanner.open', { defaultValue: 'Scan with camera' })}
+                </Button>
                 <div className="inline-flex h-11 rounded-2xl border border-border/60 bg-muted/30 p-1 text-sm">
                     {(['all', 'products', ...(hasFeature('services') ? ['services'] as const : [])] as const).map((type) => (
                         <Button
@@ -2152,6 +2229,24 @@ export function Products() {
                     )}
                 </CardContent>
             </Card>
+
+            <CameraBarcodeScannerModal
+                open={isCameraSearchScannerOpen}
+                onOpenChange={setIsCameraSearchScannerOpen}
+                modes={['single']}
+                defaultMode="single"
+                tabOptions={productsScannerTabOptions}
+                defaultTabOptionId="barcode"
+                tabOptionsLabel={t('products.cameraScanner.output', { defaultValue: 'Search value' })}
+                onScan={handleProductsCameraScan}
+                title={t('pos.cameraScanner.title', { defaultValue: 'Camera Barcode Scanner' })}
+                selectedCameraId={selectedScannerCameraId}
+                cameras={scannerCameras}
+                onCameraChange={(cameraId) => {
+                    setSelectedScannerCameraId(cameraId)
+                    localStorage.setItem('scanner_camera_id', cameraId)
+                }}
+            />
 
             <PrintFlow
                 isOpen={isBarcodePrintOpen}

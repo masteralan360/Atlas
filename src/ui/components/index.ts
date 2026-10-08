@@ -112,7 +112,7 @@ export { CheckoutSuccessModal } from './pos/CheckoutSuccessModal'
 export { HeldSalesModal } from './pos/HeldSalesModal'
 export type { HeldSale } from './pos/HeldSalesModal'
 export { StorageSelector } from './pos/StorageSelector'
-export { CameraBarcodeScannerModal, type CameraBarcodeScanMode, type CameraBarcodeScannerModalProps } from './pos/CameraBarcodeScannerModal'
+export { CameraBarcodeScannerModal, type CameraBarcodeScanMode, type CameraBarcodeScannerModalProps, type CameraBarcodeScannerTabOption } from './pos/CameraBarcodeScannerModal'
 export { CrossStorageWarningModal } from './pos/CrossStorageWarningModal'
 export {
     Pagination,

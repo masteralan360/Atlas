@@ -87,7 +87,8 @@ export function CameraBarcodeScanner({ selectedCameraId, onCapture, onCameraStat
     useEffect(() => {
         const video = videoRef.current
         if (!video) return
-        if (isCameraReady && !paused) {
+        // Keep the camera preview live when decoding is paused between scans.
+        if (isCameraReady) {
             video.play().catch((playError: unknown) => {
                 if (playError instanceof DOMException && playError.name === 'AbortError') return
                 console.error('[CameraBarcodeScanner] Failed to play camera preview:', playError)
@@ -95,7 +96,7 @@ export function CameraBarcodeScanner({ selectedCameraId, onCapture, onCameraStat
         } else {
             video.pause()
         }
-    }, [isCameraReady, paused])
+    }, [isCameraReady])
 
     return (
         <video
