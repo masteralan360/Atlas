@@ -35,12 +35,12 @@ import {
 } from '@/lib/partnerAccountStatementTemplates'
 import {
   buildPartnerAccountStatementLedger,
-  createPartnerAccountStatementPeriod,
   type PartnerAccountStatementCurrencyLedger,
     type PartnerAccountStatementEntry,
     type PartnerAccountStatementEntryKind,
     type PartnerAccountStatementPeriod
 } from '@/lib/partnerAccountStatement'
+import { createPartnerAccountStatementPeriod } from '@/lib/partnerAccountStatementPeriod'
 import { buildPartnerAccountStatementDisplayEntries } from '@/lib/partnerAccountStatementDisplay'
 import { PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES } from '@/lib/partnerAccountStatementLiveData'
 import {
@@ -53,6 +53,8 @@ import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseR
 import type { CustomTemplateLayout } from '@/lib/printPreviewEditorStore'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
 import { usePartnerAccountStatement } from '@/hooks/usePartnerAccountStatement'
+import { usePartnerAccountStatementPeriod } from '@/hooks/usePartnerAccountStatementPeriod'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import {
     deleteLocalCustomTemplate,
     isAgentBusinessPartnerRole,
@@ -92,8 +94,9 @@ import { useWorkspace } from '@/workspace'
 
 const ACCOUNT_STATEMENT_PATH = '/business-partners/account-statement'
 
-function readPartnerSelection(location: string) {
-    const searchParams = new URLSearchParams(location.split('?')[1] || '')
+function readPartnerSelection(hash: string) {
+    const queryIndex = hash.indexOf('?')
+    const searchParams = new URLSearchParams(queryIndex >= 0 ? hash.slice(queryIndex + 1) : '')
     return {
         id: searchParams.get('partnerId'),
         partnerName: searchParams.get('partnerName') || ''
@@ -470,8 +473,8 @@ export function AccountStatements() {
     const arePartnersLoading = useBusinessPartnersLoading(workspaceId, {
         includeAgentRoles: hasFeature('agent_sales_accounts')
     })
-    const [location, navigate] = useLocation()
-    const urlPartnerSelection = useMemo(() => readPartnerSelection(location), [location])
+    const [, navigate] = useLocation()
+    const [urlPartnerSelection, setUrlPartnerSelection] = useState(() => readPartnerSelection(window.location.hash))
     const [selectedPartnerId, setSelectedPartnerId] = useState<string | null>(urlPartnerSelection.id)
     const [partnerQuery, setPartnerQuery] = useState(urlPartnerSelection.partnerName)
     const [dateRange, setDateRange] = useState<DateRangeType>('month')
@@ -483,6 +486,14 @@ export function AccountStatements() {
     const [selectedStatementTemplateId, setSelectedStatementTemplateId] = useState<string | null>(null)
     const workspaceContacts = useWorkspaceContacts(workspaceId)
     const canManageStatementTemplates = user?.role === 'admin' && (isLocalMode || isSupabaseConfigured)
+
+    useEffect(() => {
+        const updatePartnerSelectionFromHash = () => {
+            setUrlPartnerSelection(readPartnerSelection(window.location.hash))
+        }
+        window.addEventListener('hashchange', updatePartnerSelectionFromHash)
+        return () => window.removeEventListener('hashchange', updatePartnerSelectionFromHash)
+    }, [])
 
     useEffect(() => {
         setSelectedPartnerId(urlPartnerSelection.id)
@@ -544,14 +555,47 @@ export function AccountStatements() {
         }
     }, [selectedStatementTemplateId, statementTemplates])
 
-    const {
-        partner,
-        statementData,
-        isRefreshing,
-        refreshError,
-        liveRefreshProgress,
-        retryLiveRefresh
-    } = usePartnerAccountStatement(workspaceId, selectedPartnerId, statementPeriod)
+    const online = useNetworkStatus()
+    const useScopedRemoteStatement = Boolean(workspaceId && !isLocalMode && online)
+    const remoteStatement = usePartnerAccountStatementPeriod(
+        workspaceId,
+        selectedPartnerId,
+        statementPeriod,
+        {
+            enabled: useScopedRemoteStatement,
+            itemizeSalesOrders: activeStatementTemplate.configuration.showOrderItems,
+            itemizePosSaleLoans: activeStatementTemplate.configuration.showPosSaleItems
+        }
+    )
+    const useLegacyStatement = !useScopedRemoteStatement || remoteStatement.fallbackRequired
+    const legacyStatement = usePartnerAccountStatement(
+        useLegacyStatement ? workspaceId : undefined,
+        selectedPartnerId,
+        statementPeriod,
+        undefined,
+        {
+            productCommissionScope: 'partner'
+        }
+    )
+    const isRemoteStatementActive = useScopedRemoteStatement && !remoteStatement.fallbackRequired
+    const partner = isRemoteStatementActive
+        ? (remoteStatement.partner || legacyStatement.partner)
+        : legacyStatement.partner
+    const statementData = isRemoteStatementActive
+        ? remoteStatement.statementData
+        : legacyStatement.statementData
+    const isRefreshing = isRemoteStatementActive
+        ? remoteStatement.isLoading
+        : legacyStatement.isRefreshing
+    const refreshError = isRemoteStatementActive ? remoteStatement.error : legacyStatement.refreshError
+    const liveRefreshProgress = isRemoteStatementActive ? null : legacyStatement.liveRefreshProgress
+    const retryLiveRefresh = useCallback(() => {
+        if (useScopedRemoteStatement) {
+            remoteStatement.retry()
+            return
+        }
+        legacyStatement.retryLiveRefresh()
+    }, [legacyStatement.retryLiveRefresh, remoteStatement.retry, useScopedRemoteStatement])
     const liveRefreshProgressPercent = liveRefreshProgress && liveRefreshProgress.totalSources > 0
         ? Math.min(100, Math.round((liveRefreshProgress.completedSources / liveRefreshProgress.totalSources) * 100))
         : 0
@@ -924,22 +968,33 @@ export function AccountStatements() {
                     <CardContent className="flex min-h-72 flex-col items-center justify-center p-8 text-center">
                         <Loader2 className="mb-4 h-10 w-10 animate-spin text-primary" />
                         <h2 className="text-lg font-semibold">
-                            {t('businessPartners.accountStatement.refreshingLiveData')}
+                            {isRemoteStatementActive
+                                ? t('businessPartners.accountStatement.loadingPeriodStatement')
+                                : t('businessPartners.accountStatement.refreshingLiveData')}
                         </h2>
                         <p className="mt-1 max-w-lg text-sm text-muted-foreground">
-                            {t('businessPartners.accountStatement.refreshingLiveDataDescription')}
+                            {isRemoteStatementActive
+                                ? t('businessPartners.accountStatement.loadingPeriodStatementDescription')
+                                : t('businessPartners.accountStatement.refreshingLiveDataDescription')}
                         </p>
-                        <div className="mt-5 w-full max-w-lg space-y-2" aria-live="polite">
-                            <Progress
-                                value={liveRefreshProgressPercent}
-                                className="h-2.5 bg-primary/15"
-                                indicatorClassName="bg-primary"
-                                aria-valuetext={liveRefreshProgressLabel}
-                            />
-                            <p className="text-xs font-medium text-muted-foreground">
-                                {liveRefreshProgressLabel}
-                            </p>
-                        </div>
+                        {liveRefreshProgress || isRemoteStatementActive ? (
+                            <div className="mt-5 w-full max-w-lg space-y-2" aria-live="polite">
+                                <Progress
+                                    value={isRemoteStatementActive ? null : liveRefreshProgressPercent}
+                                    indeterminate={isRemoteStatementActive}
+                                    className="h-2.5 bg-primary/15"
+                                    indicatorClassName="bg-primary"
+                                    aria-valuetext={isRemoteStatementActive
+                                        ? t('businessPartners.accountStatement.loadingPeriodStatement')
+                                        : liveRefreshProgressLabel}
+                                />
+                                <p className="text-xs font-medium text-muted-foreground">
+                                    {isRemoteStatementActive
+                                        ? t('businessPartners.accountStatement.loadingPeriodStatement')
+                                        : liveRefreshProgressLabel}
+                                </p>
+                            </div>
+                        ) : null}
                     </CardContent>
                 </Card>
             ) : refreshError ? (

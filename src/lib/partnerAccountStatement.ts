@@ -13,11 +13,9 @@ import type {
   PaymentTransaction,
   PurchaseOrder,
   SalesOrder
-} from '@/local-db'
-import { formatDirectTransactionVoucherNumber } from '@/lib/directTransactionVoucher'
-import { getCommissionEntryMode, isPayableCommissionEntry } from '@/local-db/commissionMode'
-import type { DateRangeType } from '@/context/DateRangeContext'
-import { getDateRangeBounds, type DateRangeCustomDates } from '@/lib/dateRangeFilters'
+} from '../local-db/models.ts'
+import { formatDirectTransactionVoucherNumber } from './directTransactionVoucher.ts'
+import { getCommissionEntryMode, isPayableCommissionEntry } from '../local-db/commissionMode.ts'
 
 type StatementOrder = SalesOrder | PurchaseOrder
 
@@ -25,21 +23,6 @@ export type PartnerAccountStatementPeriod = {
   type: 'today' | 'month' | 'lastMonth' | 'allTime' | 'custom'
   start?: string
   end?: string
-}
-
-/** Converts the shared date-range selection into this statement's inclusive period shape. */
-export function createPartnerAccountStatementPeriod(
-  dateRange: DateRangeType,
-  customDates: DateRangeCustomDates
-): PartnerAccountStatementPeriod {
-  if (dateRange === 'allTime') return { type: 'allTime' }
-
-  const { start, end } = getDateRangeBounds(dateRange, customDates)
-  return {
-    type: dateRange === 'yesterday' ? 'custom' : dateRange,
-    start: start?.toISOString(),
-    end: end ? new Date(end.getTime() - 1).toISOString() : undefined
-  }
 }
 
 /** Immutable product-line snapshot used to present a financed POS sale. */
@@ -108,6 +91,8 @@ export type PartnerAccountStatementData = {
   deliveryLedgerEntries?: DeliveryLedgerEntry[]
   deliveryShipmentReferences?: Record<string, string>
   deliverySettlementReferences?: Record<string, string>
+  /** Server-computed ledger for period-scoped remote statement reads. */
+  precomputedLedgers?: PartnerAccountStatementCurrencyLedger[]
 }
 
 export type PartnerAccountStatementEntryKind =
@@ -1403,6 +1388,8 @@ function createDeliveryEntries(data: PartnerAccountStatementData): PartnerAccoun
 export function buildPartnerAccountStatementLedger(
   data: PartnerAccountStatementData
 ): PartnerAccountStatementCurrencyLedger[] {
+  if (data.precomputedLedgers) return data.precomputedLedgers
+
   const entries = [
     ...createOrderEntries(data),
     ...createMarketplaceDeliveryProductCommissionEntries(data),

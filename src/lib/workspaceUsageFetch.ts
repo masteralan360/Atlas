@@ -264,6 +264,21 @@ function getRestRpcName(url: URL, supabaseUrl: string): string | null {
     return segments[1] || null
 }
 
+function getSupabaseFunctionName(url: URL, supabaseUrl: string): string | null {
+    let baseUrl: URL
+    try {
+        baseUrl = new URL(supabaseUrl)
+    } catch {
+        return null
+    }
+
+    if (url.origin !== baseUrl.origin) return null
+    const basePath = baseUrl.pathname.replace(/\/+$/, '')
+    const functionsPrefix = `${basePath}/functions/v1/`.replace(/\/{2,}/g, '/')
+    if (!url.pathname.startsWith(functionsPrefix)) return null
+    return url.pathname.slice(functionsPrefix.length).split('/').filter(Boolean)[0] || null
+}
+
 function extractUuidFromPostgrestFilter(value: string): string[] {
     const matches = value.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi)
     return matches?.filter(isUuid) ?? []
@@ -373,26 +388,28 @@ function getWorkspaceTransferContext(
 
     const tableName = getRestTableName(url, supabaseUrl)
     const rpcName = getRestRpcName(url, supabaseUrl)
+    const functionName = getSupabaseFunctionName(url, supabaseUrl)
     const method = getRequestMethod(input, init)
     const storageTransfer = getStorageObjectTransfer(url, method, supabaseUrl)
-    if (!tableName && !rpcName && !storageTransfer) return null
+    if (!tableName && !rpcName && !functionName && !storageTransfer) return null
     if (rpcName && UNMETERED_RPC_NAMES.has(rpcName)) return null
 
     const isTableFetch = Boolean(tableName && method === 'GET')
     const isTableWrite = Boolean(tableName && TABLE_WRITE_METHODS.has(method))
     const isRpcTransfer = Boolean(rpcName && RPC_METHODS.has(method))
-    if (!isTableFetch && !isTableWrite && !isRpcTransfer && !storageTransfer) return null
+    const isFunctionTransfer = Boolean(functionName && ['GET', 'POST'].includes(method))
+    if (!isTableFetch && !isTableWrite && !isRpcTransfer && !isFunctionTransfer && !storageTransfer) return null
 
     const authHeader = headers.get('Authorization')
     const workspaceId = storageTransfer
         ? resolveStorageWorkspaceId(url, storageTransfer, authHeader)
-        : resolveWorkspaceId(url, tableName ?? rpcName ?? '', authHeader)
+        : resolveWorkspaceId(url, tableName ?? rpcName ?? functionName ?? '', authHeader)
     if (!workspaceId || isLocalWorkspaceMode(workspaceId)) return null
 
     return {
         workspaceId,
         authHeader,
-        countRequestBody: Boolean(storageTransfer?.direction === 'upload') || isTableWrite || (isRpcTransfer && method !== 'GET'),
+        countRequestBody: Boolean(storageTransfer?.direction === 'upload') || isTableWrite || (isRpcTransfer && method !== 'GET') || (isFunctionTransfer && method !== 'GET'),
         countResponseBody: true,
         source: storageTransfer
             ? `storage_${storageTransfer.direction}:${storageTransfer.bucketId}`
@@ -400,7 +417,9 @@ function getWorkspaceTransferContext(
                 ? `table_fetch:${tableName}`
                 : isTableWrite
                     ? `table_write:${tableName}`
-                    : `rpc_transfer:${rpcName}`,
+                    : isRpcTransfer
+                        ? `rpc_transfer:${rpcName}`
+                        : `function_fetch:${functionName}`,
         gateway: storageTransfer ? 'storage' : 'rest'
     }
 }

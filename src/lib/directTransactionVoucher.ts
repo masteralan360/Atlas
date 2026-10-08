@@ -1,4 +1,4 @@
-import type { PaymentTransaction } from '@/local-db/models'
+import type { PaymentTransaction } from '../local-db/models.ts'
 
 export function formatDirectTransactionVoucherNumber(transaction: Pick<PaymentTransaction, 'id' | 'voucherNumber'>) {
   return transaction.voucherNumber && transaction.voucherNumber > 0

@@ -24,7 +24,8 @@ import { formatCommissionPlanTerms, summarizeCommissionEntries } from './agentCo
 import { useCommissionAgentDirectory } from './useCommissionAgentDirectory'
 import { AgentCommissionSettlementDialog } from './AgentCommissionSettlementDialog'
 import { filterAgentCommissionPeriod } from './agentCommissionDateRange'
-import { createPartnerAccountStatementPeriod, sumTrackedCommissionEntriesByCurrency } from '@/lib/partnerAccountStatement'
+import { sumTrackedCommissionEntriesByCurrency } from '@/lib/partnerAccountStatement'
+import { createPartnerAccountStatementPeriod } from '@/lib/partnerAccountStatementPeriod'
 
 export function AgentCommissionAdminOverview({
     workspaceId,

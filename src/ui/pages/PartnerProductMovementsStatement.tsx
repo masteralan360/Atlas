@@ -27,7 +27,8 @@ import {
     type PartnerProductMovementsTemplateConfiguration
 } from '@/lib/partnerProductMovementsTemplates'
 import { buildPartnerProductMovements } from '@/lib/partnerProductMovements'
-import { createPartnerAccountStatementPeriod, type PartnerAccountStatementPeriod } from '@/lib/partnerAccountStatement'
+import type { PartnerAccountStatementPeriod } from '@/lib/partnerAccountStatement'
+import { createPartnerAccountStatementPeriod } from '@/lib/partnerAccountStatementPeriod'
 import { PartnerProductMovementsTable } from '@/ui/components/crm/PartnerProductMovementsTable'
 import { PARTNER_PRODUCT_MOVEMENTS_FRESHNESS_TABLE_NAMES } from '@/lib/partnerProductMovementsLiveData'
 import type { CustomTemplateLayout } from '@/lib/printPreviewEditorStore'

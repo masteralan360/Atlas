@@ -21,7 +21,8 @@ import {
   useSalesOrderReturnItemsForWorkspace,
   useSalesOrderReturnsForWorkspace,
   useSales,
-  useSalesOrders
+  useSalesOrders,
+  refreshPartnerStatementProductCommissionEntries
 } from '@/local-db'
 import { getCommissionEntryMode, isPayableCommissionEntry } from '@/local-db/commissionMode'
 import type { PurchaseOrder, Sale, SalesOrder } from '@/local-db/models'
@@ -51,6 +52,13 @@ const EMPTY_LOAN_PAYMENTS: NonNullable<PartnerAccountStatementData['loanPayments
 const EMPTY_SETTLEMENT_OPERATIONS: NonNullable<PartnerAccountStatementData['settlementOperations']> = []
 const ALL_TIME_PERIOD: PartnerAccountStatementData['period'] = {
   type: 'allTime'
+}
+const PARTNER_SCOPED_FRESHNESS_TABLE_NAMES = PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES
+  .filter((tableName) => tableName !== 'agent_product_commission_entries')
+
+export type PartnerAccountStatementReadOptions = {
+  /** Use targeted product-commission reads for a single selected partner. */
+  productCommissionScope?: 'workspace' | 'partner'
 }
 
 type PartnerAccountStatementLiveRefreshState = {
@@ -131,8 +139,10 @@ export function usePartnerAccountStatement(
   workspaceId: string | undefined,
   partnerId: string | null | undefined,
   period: PartnerAccountStatementData['period'],
-  refreshToken?: string | number
+  refreshToken?: string | number,
+  options: PartnerAccountStatementReadOptions = {}
 ) {
+  const productCommissionScope = options.productCommissionScope ?? 'workspace'
   const online = useNetworkStatus()
   const [liveRefreshGeneration, setLiveRefreshGeneration] = useState(0)
   const [statementReadGeneration, setStatementReadGeneration] = useState(0)
@@ -145,7 +155,6 @@ export function usePartnerAccountStatement(
   const rawPartner = useBusinessPartner(partnerId || undefined)
   const agents = useAgents(workspaceId)
   const commissionEntries = useAgentCommissionEntries(workspaceId)
-  const productCommissionEntries = useAgentProductCommissionEntries(workspaceId)
   const salesOrderAgentAssignments = useSalesOrderAgentAssignments(workspaceId)
   const salesOrders = useSalesOrders(workspaceId)
   const sales = useSales(workspaceId)
@@ -190,11 +199,13 @@ export function usePartnerAccountStatement(
   const deliveryShipments = useDeliveryShipments(workspaceId)
   const deliverySettlements = useDeliverySettlements(workspaceId)
 
-  // Statement sources are refreshed for the whole workspace. Keep this key
-  // stable as a consumer walks through partners so a batch audit refreshes
-  // once instead of refetching every source for each partner.
+  // Workspace-scope consumers keep one refresh key across partners so a batch
+  // audit refreshes once. The account statement page includes its partner in
+  // the key because its product-commission read is partner-scoped.
   const liveRefreshKey = workspaceId && partnerId && online && !isLocalWorkspaceMode(workspaceId)
-    ? `${workspaceId}:${liveRefreshGeneration}:${refreshToken ?? ''}`
+    ? productCommissionScope === 'partner'
+      ? `${workspaceId}:${partnerId}:partner:${liveRefreshGeneration}:${refreshToken ?? ''}`
+      : `${workspaceId}:${liveRefreshGeneration}:${refreshToken ?? ''}`
     : null
 
   useEffect(() => {
@@ -219,6 +230,9 @@ export function usePartnerAccountStatement(
         await fetchTableFromSupabase(tableName, db[tableName], targetWorkspaceId)
       },
       refreshSales: syncSalesFromSupabase,
+      ...(productCommissionScope === 'partner'
+        ? { refreshPartnerProductCommissions: refreshPartnerStatementProductCommissionEntries }
+        : {}),
       onProgress: (progress) => {
         if (cancelled) return
         setLiveRefreshState((currentState) => (
@@ -227,12 +241,14 @@ export function usePartnerAccountStatement(
             : currentState
         ))
       }
-    })
+    }, productCommissionScope === 'partner' ? partnerId : undefined)
       .then(() => {
         const hydration = readWorkspaceDataHydration(
           workspaceId,
           'supabase',
-          PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES
+          productCommissionScope === 'partner'
+            ? PARTNER_SCOPED_FRESHNESS_TABLE_NAMES
+            : PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES
         )
         if (hydration?.lastResult?.state === 'error') {
           throw new Error('One or more partner account statement sources could not be refreshed')
@@ -266,7 +282,7 @@ export function usePartnerAccountStatement(
     return () => {
       cancelled = true
     }
-  }, [liveRefreshKey, workspaceId])
+  }, [liveRefreshKey, productCommissionScope, partnerId, workspaceId])
 
   const isRefreshing = Boolean(
     liveRefreshKey
@@ -301,9 +317,16 @@ export function usePartnerAccountStatement(
       : [],
     [agents, partnerId, workspaceId]
   )
-  const commissionAgentIds = useMemo(
-    () => new Set(commissionAgents.map((agent) => agent.id)),
+  const commissionAgentIdList = useMemo(
+    () => commissionAgents.map((agent) => agent.id),
     [commissionAgents]
+  )
+  const commissionAgentIds = useMemo(() => new Set(commissionAgentIdList), [commissionAgentIdList])
+  const productCommissionEntries = useAgentProductCommissionEntries(
+    workspaceId,
+    productCommissionScope === 'partner'
+      ? { hydrateRemote: false, agentIds: commissionAgentIdList }
+      : undefined
   )
   const partnerSalesOrders = useMemo(
     () =>

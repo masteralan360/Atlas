@@ -38,6 +38,8 @@ export interface PartnerAccountStatementLiveDataRefreshers {
     workspaceId: string
   ) => Promise<void>
   refreshSales: (workspaceId: string) => Promise<void>
+  /** Partner-scoped replacement for the full product-commission table refresh. */
+  refreshPartnerProductCommissions?: (workspaceId: string, partnerId: string) => Promise<void>
   onProgress?: (progress: PartnerAccountStatementLiveDataProgress) => void
 }
 
@@ -47,7 +49,8 @@ export interface PartnerAccountStatementLiveDataRefreshers {
  */
 export async function refreshPartnerAccountStatementLiveData(
   workspaceId: string,
-  refreshers: PartnerAccountStatementLiveDataRefreshers
+  refreshers: PartnerAccountStatementLiveDataRefreshers,
+  partnerId?: string
 ) {
   const totalSources = PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES.length
   let completedSources = 0
@@ -56,14 +59,24 @@ export async function refreshPartnerAccountStatementLiveData(
     refreshers.onProgress?.({ completedSources, totalSources })
   }
 
+  const refreshPartnerProductCommissions = refreshers.refreshPartnerProductCommissions
+  const usesPartnerScopedProductCommissions = Boolean(partnerId && refreshPartnerProductCommissions)
   await Promise.all([
-    ...PARTNER_ACCOUNT_STATEMENT_LIVE_TABLE_NAMES.map(async (tableName) => {
-      await refreshers.refreshTable(tableName, workspaceId)
-      reportSourceCompletion()
-    }),
+    ...PARTNER_ACCOUNT_STATEMENT_LIVE_TABLE_NAMES
+      .filter((tableName) => !usesPartnerScopedProductCommissions || tableName !== 'agent_product_commission_entries')
+      .map(async (tableName) => {
+        await refreshers.refreshTable(tableName, workspaceId)
+        reportSourceCompletion()
+      }),
     (async () => {
       await refreshers.refreshSales(workspaceId)
       reportSourceCompletion()
-    })()
+    })(),
+    ...(partnerId && refreshPartnerProductCommissions
+      ? [(async () => {
+          await refreshPartnerProductCommissions(workspaceId, partnerId)
+          reportSourceCompletion()
+        })()]
+      : [])
   ])
 }

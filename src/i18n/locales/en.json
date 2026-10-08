@@ -2227,6 +2227,8 @@
       "refreshingLiveData": "Loading current account activity",
       "refreshingLiveDataDescription": "Checking for the latest orders, loans, repayments, and payments before showing this statement.",
       "refreshingLiveDataProgress": "Loading {{completed}} of {{total}} sources ({{percentage}}%)",
+      "loadingPeriodStatement": "Loading statement for the selected dates",
+      "loadingPeriodStatementDescription": "Calculating the opening balance and retrieving account activity for this date range.",
       "liveDataUnavailable": "Current account activity could not be loaded",
       "liveDataUnavailableDescription": "The statement is hidden to prevent showing or printing an incomplete balance. Check the connection and try again.",
       "accountActivity": "Account Activity",

@@ -5,10 +5,11 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
-import { generateId, toSnakeCase } from '@/lib/utils'
+import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
+import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import { fetchTableFromSupabase } from './hooks'
 import { sortLiveCollection, useLiveCollection } from './liveCollection'
 import type {
@@ -230,20 +231,33 @@ export async function replaceProductCommissionRule(
     return rule
 }
 
-function useRows<T extends ProductCommissionEntity>(table: ProductCommissionTable, workspaceId?: string) {
+function useRows<T extends ProductCommissionEntity>(
+    table: ProductCommissionTable,
+    workspaceId?: string,
+    options: { hydrateRemote?: boolean; agentIds?: readonly string[] } = {}
+) {
     const online = useNetworkStatus()
+    const hydrateRemote = options.hydrateRemote ?? true
+    const agentIds = options.agentIds
+    const agentIdKey = agentIds ? [...agentIds].sort().join('|') : null
     const rows = useLiveQuery(async () => {
         if (!workspaceId) return [] as T[]
-        return (getTable(table) as unknown as Table<T, string>)
-            .where('workspaceId').equals(workspaceId)
+        const dexieTable = getTable(table) as unknown as Table<T, string>
+        if (agentIds) {
+            if (agentIds.length === 0) return [] as T[]
+            return dexieTable.where('agentId').anyOf([...agentIds])
+                .and((row) => row.workspaceId === workspaceId && !row.isDeleted)
+                .toArray()
+        }
+        return dexieTable.where('workspaceId').equals(workspaceId)
             .and((row) => !row.isDeleted).toArray()
-    }, [table, workspaceId])
+    }, [agentIdKey, table, workspaceId])
     useEffect(() => {
-        if (!workspaceId || !online || !shouldUseCloudData(workspaceId)) return
+        if (!hydrateRemote || !workspaceId || !online || !shouldUseCloudData(workspaceId)) return
         void fetchTableFromSupabase(table, getTable(table), workspaceId).catch((error) => {
             console.error(`[Product commissions] Failed to hydrate ${table}:`, error)
         })
-    }, [online, table, workspaceId])
+    }, [hydrateRemote, online, table, workspaceId])
     return useLiveCollection(rows, Boolean(workspaceId) && rows === undefined)
 }
 
@@ -259,13 +273,88 @@ export function useProductCommissionRuleAgents(workspaceId?: string) {
     return useRows<ProductCommissionRuleAgent>(RULE_AGENT_TABLE, workspaceId)
 }
 
-export function useAgentProductCommissionEntries(workspaceId?: string) {
-    const rows = useRows<AgentProductCommissionEntry>(LINE_ENTRY_TABLE, workspaceId)
+export function useAgentProductCommissionEntries(
+    workspaceId?: string,
+    options: { hydrateRemote?: boolean; agentIds?: readonly string[] } = {}
+) {
+    const rows = useRows<AgentProductCommissionEntry>(LINE_ENTRY_TABLE, workspaceId, options)
     return useMemo(() => sortLiveCollection(
         rows,
         (left, right) => String(right.occurredAt || right.updatedAt || right.createdAt || '')
             .localeCompare(String(left.occurredAt || left.updatedAt || left.createdAt || '')),
     ), [rows])
+}
+
+/**
+ * Refresh only one partner's product commission rows for the account statement.
+ * This deliberately does not mark the workspace table fully hydrated: other
+ * consumers still need the normal complete-table reconciliation.
+ */
+export async function refreshPartnerStatementProductCommissionEntries(
+    workspaceId: string,
+    partnerId: string
+) {
+    if (!shouldUseCloudData(workspaceId) || !await canReconcileCloudWorkspaceData(workspaceId)) return
+
+    // The statement refresh also hydrates agents in parallel. Share that
+    // hydration lease here so the partner-to-agent mapping is current before
+    // constructing the commission query.
+    await fetchTableFromSupabase('agents', db.agents, workspaceId)
+    if (!await canReconcileCloudWorkspaceData(workspaceId)) return
+
+    const agents = await db.agents
+        .where('workspaceId')
+        .equals(workspaceId)
+        .and((agent) => !agent.isDeleted && agent.agentType === 'field_agent' && agent.businessPartnerId === partnerId)
+        .toArray()
+    const agentIds = [...new Set(agents.map((agent) => agent.id))]
+    if (agentIds.length === 0) return
+
+    const client = getSupabaseClientForTable(LINE_ENTRY_TABLE)
+    const remoteRows: Record<string, unknown>[] = []
+    for (let from = 0; ; from += 1000) {
+        const { data, error } = await client
+            .from(LINE_ENTRY_TABLE)
+            .select('*')
+            .eq('workspace_id', workspaceId)
+            .eq('is_deleted', false)
+            .in('agent_id', agentIds)
+            .order('occurred_at', { ascending: false })
+            .order('id', { ascending: true })
+            .range(from, from + 999)
+
+        if (error) throw error
+        if (!data) throw new Error('No product commission rows returned for the partner statement')
+        remoteRows.push(...data as Record<string, unknown>[])
+        if (data.length < 1000) break
+    }
+
+    if (!await canReconcileCloudWorkspaceData(workspaceId)) return
+    const syncedAt = new Date().toISOString()
+    const remoteItems = remoteRows.map((remoteRow) => ({
+        ...toCamelCase(remoteRow),
+        syncStatus: 'synced',
+        lastSyncedAt: syncedAt
+    } as unknown as AgentProductCommissionEntry))
+    const remoteIds = new Set(remoteItems.map((entry) => entry.id))
+
+    // Reconcile only the selected agents' synced cache slice. Pending local
+    // mutations and all other agents' rows remain untouched.
+    await db.transaction('rw', db.agent_product_commission_entries, async () => {
+        const localRows = await db.agent_product_commission_entries
+            .where('workspaceId')
+            .equals(workspaceId)
+            .toArray()
+        const staleIds = localRows
+            .filter((entry) => (
+                agentIds.includes(entry.agentId)
+                && entry.syncStatus === 'synced'
+                && !remoteIds.has(entry.id)
+            ))
+            .map((entry) => entry.id)
+        if (staleIds.length) await db.agent_product_commission_entries.bulkDelete(staleIds)
+        if (remoteItems.length) await db.agent_product_commission_entries.bulkPut(remoteItems)
+    })
 }
 
 /**

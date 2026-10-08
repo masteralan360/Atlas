@@ -5809,6 +5809,8 @@
       "refreshingLiveData": "چالاکیی نوێی هەژمار بار دەکرێت",
       "refreshingLiveDataDescription": "پێش پیشاندانی ئەم ڕاپۆرتە، نوێترین داواکارییەکان، قەرزەکان و پارەدانەکان پشکنین دەکرێن.",
       "refreshingLiveDataProgress": "{{completed}} لە {{total}} سەرچاوە بار دەکرێت ({{percentage}}٪)",
+      "loadingPeriodStatement": "ڕاپۆرتی ماوەی دیاریکراو بار دەکرێت",
+      "loadingPeriodStatementDescription": "باڵانسی دەستپێک هەژمار دەکرێت و چالاکیی ناو ئەم ماوەیە دەهێنرێت.",
       "liveDataUnavailable": "نەتوانرا چالاکیی نوێی هەژمار بار بکرێت",
       "liveDataUnavailableDescription": "بۆ ئەوەی باڵانسێکی ناتەواو پیشان یان چاپ نەکرێت، ڕاپۆرتەکە شاردراوەتەوە. پەیوەندییەکە بپشکنە و دووبارە هەوڵ بدە.",
       "accountActivity": "چالاکیی هەژمار",

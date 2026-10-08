@@ -3,7 +3,7 @@ import type {
   AgentProductCommissionEntry,
   SalesAgentCommissionMode,
   SalesOrder,
-} from './models'
+} from './models.ts'
 
 /** Older workspaces, orders, and entries predate the mode flag and remain payable. */
 export function normalizeSalesAgentCommissionMode(

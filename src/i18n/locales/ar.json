@@ -5811,6 +5811,8 @@
       "refreshingLiveData": "جاري تحميل حركة الحساب الحالية",
       "refreshingLiveDataDescription": "يتم التحقق من أحدث الطلبات والقروض ودفعات القروض والمدفوعات قبل عرض هذا الكشف.",
       "refreshingLiveDataProgress": "جارٍ تحميل {{completed}} من {{total}} مصدر ({{percentage}}٪)",
+      "loadingPeriodStatement": "جارٍ تحميل كشف الفترة المحددة",
+      "loadingPeriodStatementDescription": "يتم احتساب الرصيد الافتتاحي وجلب حركة الحساب ضمن هذا النطاق الزمني.",
       "liveDataUnavailable": "تعذر تحميل حركة الحساب الحالية",
       "liveDataUnavailableDescription": "تم إخفاء الكشف لمنع عرض أو طباعة رصيد غير مكتمل. تحقق من الاتصال ثم حاول مرة أخرى.",
       "accountActivity": "حركة الحساب",
