@@ -134,6 +134,13 @@ export function normalizeSupabaseActionError(error: unknown): Error {
         return new SupabaseNetworkError(RETRY_ERROR_MESSAGE, getErrorStatus(error))
     }
 
+    const message = getErrorMessage(error)
+    if (/^(?:Insufficient regular stock for |The selected (?:stock )?(?:Quick Order )?batch|Selected batch quantity)/i.test(message)) {
+        return new Error(i18n.t('pos.stockSource.changed', {
+            defaultValue: 'The selected stock source no longer has enough stock. Refresh inventory and choose another source.'
+        }))
+    }
+
     const localizedPaymentAccountError = localizePaymentAccountInsufficientFundsError(error)
     if (localizedPaymentAccountError) {
         return localizedPaymentAccountError

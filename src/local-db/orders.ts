@@ -1368,7 +1368,9 @@ async function deductInventoryForSalesOrder(
                     fulfilledQuantity: inventoryQuantity,
                     costPrice,
                     convertedCostPrice,
-                    batchAllocations: salePlan.allocations.length > 0 ? salePlan.allocations : null
+                    batchAllocations: salePlan.allocations.length > 0
+                        ? salePlan.allocations
+                        : item.stockSourceType === 'regular' ? [] : null
                 }
             }
 

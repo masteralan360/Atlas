@@ -70,6 +70,7 @@ vi.mock('@/workspace/workspaceMode', () => ({
 }))
 
 import {
+    calculateStockBatchSourceAvailability,
     calculateStockBatchUnitCost,
     getStockBatchSalePlans,
     planStockBatchTransfer,
@@ -169,6 +170,39 @@ describe('stock batch costing', () => {
         ], 10, 'usd', undefined, 5)
 
         expect(result).toBe(11.6)
+    })
+})
+
+describe('stock source availability', () => {
+    it('keeps regular stock separate from batch stock and reserves cart lines by source', () => {
+        const availability = calculateStockBatchSourceAvailability(20, [
+            createBatch({ id: 'batch-early', batchNumber: 'EARLY', quantity: 5, expiryDate: '2027-01-01' }),
+            createBatch({ id: 'batch-late', batchNumber: 'LATE', quantity: 4, expiryDate: '2028-01-01' })
+        ], [
+            { quantity: 3 },
+            { quantity: 2, sourceType: 'regular' },
+            { quantity: 2, sourceType: 'batch', batchId: 'batch-late' }
+        ])
+
+        expect(availability.inventoryQuantity).toBe(13)
+        expect(availability.regularQuantity).toBe(9)
+        expect(availability.batches.map(({ id, availableQuantity }) => [id, availableQuantity])).toEqual([
+            ['batch-early', 2],
+            ['batch-late', 2]
+        ])
+    })
+
+    it('does not expose batch quantity beyond the authoritative total inventory', () => {
+        const availability = calculateStockBatchSourceAvailability(5, [
+            createBatch({ id: 'batch-early', batchNumber: 'EARLY', quantity: 4, expiryDate: '2027-01-01' }),
+            createBatch({ id: 'batch-late', batchNumber: 'LATE', quantity: 4, expiryDate: '2028-01-01' })
+        ])
+
+        expect(availability.regularQuantity).toBe(0)
+        expect(availability.batches.map(({ id, availableQuantity }) => [id, availableQuantity])).toEqual([
+            ['batch-early', 4],
+            ['batch-late', 1]
+        ])
     })
 })
 

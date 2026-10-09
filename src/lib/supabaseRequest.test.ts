@@ -34,6 +34,14 @@ describe('normalizeSupabaseActionError', () => {
         }).message).toBe('لا يتوفر مخزون كافٍ من قهوة عربية في مخزن غير معروف.')
     })
 
+    it('localizes a stale POS stock-source error', () => {
+        const error = normalizeSupabaseActionError({
+            message: 'The selected Quick Order batch no longer has enough quantity'
+        })
+
+        expect(error.message).toBe('The selected stock source no longer has enough stock. Refresh inventory and choose another source.')
+    })
+
     it('preserves unrelated server validation messages', () => {
         const error = normalizeSupabaseActionError({ message: 'Marketplace order not found' })
 

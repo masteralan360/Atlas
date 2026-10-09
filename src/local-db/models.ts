@@ -1044,6 +1044,11 @@ export interface SalesOrderItem extends OrderLineItem {
   convertedCostPrice: number
   /** POS line metadata, including the optional service-name snapshot. */
   metadata?: Record<string, unknown> | null
+  /** Explicit POS stock-source choice retained while a Quick Order is open. */
+  stockSourceType?: 'regular' | 'batch'
+  stockSourceBatchId?: string | null
+  stockSourceBatchNumber?: string | null
+  stockSourceExpiryDate?: string | null
   /** Cumulative quantity returned from this line. The immutable return rows remain the source of truth. */
   returnedQuantity?: number
   /** Cumulative returned paid quantity in the canonical inventory unit. */

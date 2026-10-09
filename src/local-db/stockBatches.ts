@@ -88,6 +88,18 @@ export interface StockBatchSaleRequest {
     selectedBatchAllocations?: StockBatchTransferSelection[]
 }
 
+export interface StockBatchSourceCommitment {
+    quantity: number
+    sourceType?: 'regular' | 'batch'
+    batchId?: string | null
+}
+
+export interface StockBatchSourceAvailability {
+    inventoryQuantity: number
+    regularQuantity: number
+    batches: Array<StockBatch & { availableQuantity: number }>
+}
+
 export interface StockBatchTransferSelection {
     batchId: string
     quantity: number
@@ -100,6 +112,7 @@ export interface StockBatchTransferPlan {
 }
 
 export type BatchAwareInventoryProduct = InventoryProduct & {
+    stockBatches: StockBatch[]
     hasBatches: boolean
     batchCount: number
     nextBatchNumber: string | null
@@ -431,6 +444,57 @@ function normalizeAllocationList(allocations: StockBatchAllocation[]) {
 function getSellableQuantity(inventoryQuantity: number, batches: StockBatch[]) {
     void batches
     return inventoryQuantity
+}
+
+/**
+ * Computes source availability after reserving the current cart in order.
+ * Unspecified sources retain the normal FEFO allocation behavior used by
+ * barcode and other legacy add-to-cart paths.
+ */
+export function calculateStockBatchSourceAvailability(
+    inventoryQuantity: number,
+    batches: StockBatch[],
+    commitments: StockBatchSourceCommitment[] = []
+): StockBatchSourceAvailability {
+    const sortedBatches = sortBatchesForConsumption(
+        batches.filter((batch) => !batch.isDeleted && batch.quantity > QUANTITY_EPSILON)
+    )
+    const remainingByBatchId = new Map(sortedBatches.map((batch) => [batch.id, batch.quantity]))
+    let remainingInventory = Math.max(0, Number(inventoryQuantity) || 0)
+
+    for (const commitment of commitments) {
+        let remaining = Math.max(0, Number(commitment.quantity) || 0)
+        if (commitment.sourceType === 'batch') {
+            const available = remainingByBatchId.get(commitment.batchId ?? '') ?? 0
+            remainingByBatchId.set(commitment.batchId ?? '', Math.max(0, available - remaining))
+        } else if (commitment.sourceType !== 'regular') {
+            for (const batch of sortedBatches) {
+                if (remaining <= QUANTITY_EPSILON) break
+                const available = remainingByBatchId.get(batch.id) ?? 0
+                const allocated = Math.min(remaining, available)
+                remainingByBatchId.set(batch.id, Math.max(0, available - allocated))
+                remaining = Math.max(0, remaining - allocated)
+            }
+        }
+        remainingInventory = Math.max(0, remainingInventory - Math.max(0, Number(commitment.quantity) || 0))
+    }
+
+    let inventoryAvailableForBatches = remainingInventory
+    const availableBatches = sortedBatches.map((batch) => {
+        const availableQuantity = Math.min(
+            remainingByBatchId.get(batch.id) ?? 0,
+            inventoryAvailableForBatches
+        )
+        inventoryAvailableForBatches = Math.max(0, inventoryAvailableForBatches - availableQuantity)
+        return { ...batch, availableQuantity }
+    })
+    const remainingBatchQuantity = availableBatches.reduce((sum, batch) => sum + batch.availableQuantity, 0)
+
+    return {
+        inventoryQuantity: remainingInventory,
+        regularQuantity: Math.max(0, remainingInventory - remainingBatchQuantity),
+        batches: availableBatches
+    }
 }
 
 async function getProductBatchDefaults(
@@ -1541,6 +1605,7 @@ export function useBatchAwareInventoryProducts(workspaceId: string | undefined, 
             if (sortedBatchRows.length === 0) {
                 return {
                     ...product,
+                    stockBatches: [],
                     hasBatches: false,
                     batchCount: 0,
                     nextBatchNumber: null,
@@ -1558,6 +1623,7 @@ export function useBatchAwareInventoryProducts(workspaceId: string | undefined, 
 
             return {
                 ...product,
+                stockBatches: sortedBatchRows,
                 price: effectivePrice,
                 costPrice: effectiveCostPrice,
                 currency: effectiveCurrency,

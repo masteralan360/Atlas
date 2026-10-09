@@ -5432,6 +5432,15 @@
       "description": "Sell {{product}} using one of its configured units of measure.",
       "stockEffect": "Deducts {{count}} {{unit}} from stock"
     },
+    "stockSource": {
+      "title": "Choose stock source",
+      "description": "Choose regular stock or a specific batch for {{product}}.",
+      "regular": "Regular stock",
+      "batch": "Batch {{batch}}",
+      "availableQuantity": "Available: {{quantity}} {{unit}}",
+      "expiry": "Expires {{date}}",
+      "changed": "The selected stock source no longer has enough stock. Refresh inventory and choose another source."
+    },
     "checkoutPendingRecovery": "Sale {{saleId}} is still awaiting confirmation. Retry the same cart and payment details so Atlas can confirm it safely. Review Sales before changing this checkout.",
     "checkoutCommittedRecovery": "Sale {{saleId}} was saved, but its payment or local display could not be completed. Review it in Sales and Payments before making another sale.",
     "activitiesSeparateCart": "Activities must be checked out separately from products and services.",

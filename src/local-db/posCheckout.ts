@@ -51,6 +51,8 @@ export interface PosCheckoutItem {
     price_book_id: string | null
     total: number
     inventory_snapshot: number | null
+    stock_source_type?: 'regular' | 'batch'
+    stock_source_batch_id?: string
     batch_allocations: {
         batch_id: string; batch_number: string; quantity: number
         price: number | null; cost_price: number | null; currency: CurrencyCode | null

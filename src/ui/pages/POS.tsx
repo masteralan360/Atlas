@@ -4,6 +4,7 @@ import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
 import {
     calculateStockBatchUnitCost,
+    calculateStockBatchSourceAvailability,
     getStockBatchSalePlans,
     getPrimaryStorageFromList,
     useBatchAwareInventoryProducts,
@@ -34,7 +35,8 @@ import {
     type PaymentAccount,
     type SalesOrder,
     type SalesOrderItem,
-    type ProductUom
+    type ProductUom,
+    type StockBatch
 } from '@/local-db'
 import { ACTIVITIES_VIRTUAL_STORAGE_ID, isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
@@ -242,8 +244,19 @@ function isLoanRegistrationData(value: unknown): value is LoanRegistrationData {
         (payload.firstDueDate === null || typeof payload.firstDueDate === 'string')
     )
 }
-function buildCartItemKey(productId: string, storageId?: string | null, sellingUnitRef?: string | null) {
-    return `${productId}:${storageId ?? ''}:${sellingUnitRef ?? ''}`
+function buildCartItemKey(
+    productId: string,
+    storageId?: string | null,
+    sellingUnitRef?: string | null,
+    stockSourceType?: CartItem['stock_source_type'],
+    stockSourceBatchId?: string | null
+) {
+    const sourceKey = stockSourceType === 'regular'
+        ? 'regular'
+        : stockSourceType === 'batch'
+            ? `batch:${stockSourceBatchId ?? ''}`
+            : ''
+    return `${productId}:${storageId ?? ''}:${sellingUnitRef ?? ''}:${sourceKey}`
 }
 
 type PosUnitSelection = {
@@ -259,6 +272,17 @@ type PosUnitSelection = {
     currency: CurrencyCode
     priceBookId?: string
     priceBookName?: string
+}
+
+type PosStockSourceSelection =
+    | { type: 'regular' }
+    | { type: 'batch'; batch: StockBatch }
+
+type PosProductCardStockDisplay = {
+    inventoryQuantity: number
+    batch: StockBatch | null
+    batchAvailableQuantity: number
+    batchCartQuantity: number
 }
 
 function addBarcodeLookupCode(map: Map<string, string>, code: string | undefined | null, productId: string, prefer = false) {
@@ -559,6 +583,8 @@ export function POS() {
     const isActivitiesCart = cart.some((item) => item.storageId === ACTIVITIES_STORAGE_ID)
     const isActivitiesCheckout = cart.length > 0 ? isActivitiesCart : isActivitiesStorage
     const [unitSelectionProduct, setUnitSelectionProduct] = useState<PosCatalogProduct | null>(null)
+    const [unitSelectionStockSource, setUnitSelectionStockSource] = useState<PosStockSourceSelection | null>(null)
+    const [stockSourceSelectionProduct, setStockSourceSelectionProduct] = useState<PosCatalogProduct | null>(null)
     const pendingCameraScannerAdd = useRef<{ productId: string; resolve: (succeeded: boolean) => void } | null>(null)
     useEffect(() => () => {
         const pending = pendingCameraScannerAdd.current
@@ -749,6 +775,7 @@ export function POS() {
                 lastSyncedAt: activity.lastSyncedAt,
                 inventoryId: `activity:${activity.id}`,
                 inventoryQuantity: availableQuantity,
+                stockBatches: [],
                 hasBatches: false,
                 batchCount: 0,
                 nextBatchNumber: null,
@@ -769,6 +796,7 @@ export function POS() {
             unit: '', storageId: SERVICES_VIRTUAL_STORAGE_ID, storageName: 'Services',
             quantity: Number.MAX_SAFE_INTEGER, minStockLevel: 0,
             inventoryId: `service:${service.id}`, inventoryQuantity: Number.MAX_SAFE_INTEGER,
+            stockBatches: [],
             hasBatches: false, batchCount: 0, nextBatchNumber: null, nextBatchExpiryDate: null, nextBatchQuantity: null
         }))
     }, [catalogProducts, filterSelectableProducts, hasFeature])
@@ -863,6 +891,71 @@ export function POS() {
         }
     }, [priceBookItemByProductId])
 
+    const getProductForStockSource = useCallback((
+        product: PosCatalogProduct,
+        stockSource?: PosStockSourceSelection | null
+    ): PosCatalogProduct => {
+        if (!stockSource) return product
+        const regularProduct = catalogProducts.find((candidate) => (
+            candidate.id === product.id && candidate.storageId === product.storageId
+        )) ?? product
+        const batch = stockSource.type === 'batch' ? stockSource.batch : null
+        return {
+            ...product,
+            price: batch?.price ?? regularProduct.price,
+            costPrice: batch?.costPrice ?? regularProduct.costPrice,
+            currency: batch?.currency ?? regularProduct.currency
+        }
+    }, [catalogProducts])
+
+    const getStockSourceAvailability = useCallback((
+        product: PosCatalogProduct,
+        cartItems: CartItem[] = cart
+    ) => calculateStockBatchSourceAvailability(
+        product.inventoryQuantity,
+        product.stockBatches,
+        cartItems
+            .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
+            .map((item) => ({
+                quantity: getCartInventoryQuantity(item),
+                sourceType: item.stock_source_type,
+                batchId: item.stock_source_batch_id
+            }))
+    ), [cart])
+
+    const getProductCardStockDisplay = useCallback((
+        product: PosCatalogProduct,
+        cartItems: CartItem[]
+    ): PosProductCardStockDisplay => {
+        const availability = getStockSourceAvailability(product, cartItems)
+        const productCartItems = cartItems.filter((item) => (
+            item.product_id === product.id && item.storageId === product.storageId
+        ))
+        const selectedBatchId = [...productCartItems]
+            .reverse()
+            .find((item) => item.stock_source_type === 'batch')
+            ?.stock_source_batch_id
+        const batch = (selectedBatchId
+            ? product.stockBatches.find((candidate) => candidate.id === selectedBatchId)
+            : null)
+            ?? availability.batches.find((candidate) => candidate.availableQuantity > 0.000001)
+            ?? product.stockBatches[0]
+            ?? null
+
+        return {
+            inventoryQuantity: availability.inventoryQuantity,
+            batch,
+            batchAvailableQuantity: batch
+                ? availability.batches.find((candidate) => candidate.id === batch.id)?.availableQuantity ?? 0
+                : 0,
+            batchCartQuantity: batch
+                ? productCartItems
+                    .filter((item) => item.stock_source_type === 'batch' && item.stock_source_batch_id === batch.id)
+                    .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
+                : 0
+        }
+    }, [getStockSourceAvailability])
+
     const getProductUomOptions = useCallback((product: Pick<PosCatalogProduct, 'id' | 'unit' | 'price' | 'costPrice' | 'minimumSellingPrice' | 'currency'>) => (
         getActiveProductUoms(product, unitContextsByProductId.get(product.id) ?? [], unitDescriptors)
     ), [unitContextsByProductId, unitDescriptors])
@@ -870,7 +963,9 @@ export function POS() {
     const buildPosUnitSelection = useCallback((
         product: PosCatalogProduct,
         uom: ProductUom,
+        stockSource?: PosStockSourceSelection | null,
     ): PosUnitSelection => {
+        const pricingProduct = getProductForStockSource(product, stockSource)
         const options = getProductUomOptions(product)
         const base = options.find((row) => row.isBase) ?? options[0]
         const priceBookPricing = getPriceBookPricing(product)
@@ -888,22 +983,22 @@ export function POS() {
             baseUnitRef: base?.unitRef ?? uom.unitRef,
             baseUnitCode: base?.unitCode ?? product.unit,
             factor: uom.coefficient,
-            price: priceBookUnitPrice?.price ?? (uom.isBase ? priceBookPricing?.price ?? product.price : uom.sellingPrice),
+            price: priceBookUnitPrice?.price ?? (uom.isBase ? priceBookPricing?.price ?? pricingProduct.price : uom.sellingPrice),
             costPrice: uom.isBase
-                ? priceBookPricing?.costPrice ?? product.costPrice
-                : uom.costPrice ?? ((product.costPrice ?? 0) * uom.coefficient),
+                ? priceBookPricing?.costPrice ?? pricingProduct.costPrice
+                : uom.costPrice ?? ((pricingProduct.costPrice ?? 0) * uom.coefficient),
             minimumSellingPrice: uom.minimumSellingPrice
                 ?? (product.minimumSellingPrice == null ? null : product.minimumSellingPrice * uom.coefficient),
-            currency: (priceBookUnitPrice?.currency ?? (uom.isBase ? priceBookPricing?.currency : product.currency) ?? product.currency) as CurrencyCode,
+            currency: (priceBookUnitPrice?.currency ?? (uom.isBase ? priceBookPricing?.currency : pricingProduct.currency) ?? pricingProduct.currency) as CurrencyCode,
             priceBookId: priceBookUnitPrice?.priceBookId ?? (uom.isBase ? priceBookPricing?.priceBookId : undefined),
             priceBookName: priceBook?.name ?? (uom.isBase ? priceBookPricing?.priceBookName : undefined),
         }
-    }, [getPriceBookPricing, getProductUomOptions, priceBookById, priceBookUomPrices, selectedPriceBookId])
+    }, [getPriceBookPricing, getProductForStockSource, getProductUomOptions, priceBookById, priceBookUomPrices, selectedPriceBookId])
 
-    const getDefaultPosUnitSelection = useCallback((product: PosCatalogProduct) => {
+    const getDefaultPosUnitSelection = useCallback((product: PosCatalogProduct, stockSource?: PosStockSourceSelection | null) => {
         const options = getProductUomOptions(product)
         const selected = options.find((row) => row.isDefaultSelling) ?? options.find((row) => row.isBase) ?? options[0]
-        return selected ? buildPosUnitSelection(product, selected) : undefined
+        return selected ? buildPosUnitSelection(product, selected, stockSource) : undefined
     }, [buildPosUnitSelection, getProductUomOptions])
 
     const getEffectiveProductCurrency = useCallback((product: PosCatalogProduct | undefined) => {
@@ -929,8 +1024,14 @@ export function POS() {
         return matches.length === 1 ? matches[0] : undefined
     }, [activityProducts, products, selectedStorageId, serviceProducts])
 
-    const getCartItemKey = useCallback((item: Pick<CartItem, 'product_id' | 'storageId' | 'selling_unit_ref'>) => {
-        return buildCartItemKey(item.product_id, item.storageId, item.selling_unit_ref)
+    const getCartItemKey = useCallback((item: Pick<CartItem, 'product_id' | 'storageId' | 'selling_unit_ref' | 'stock_source_type' | 'stock_source_batch_id'>) => {
+        return buildCartItemKey(
+            item.product_id,
+            item.storageId,
+            item.selling_unit_ref,
+            item.stock_source_type,
+            item.stock_source_batch_id
+        )
     }, [])
 
     const [mobileView, setMobileView] = useState<'grid' | 'cart'>(() => {
@@ -1820,7 +1921,12 @@ export function POS() {
                 case ' ': // Space to Add
                 case 'Enter':
                     if (focusedProductIndex >= 0 && focusedProductIndex < filteredProducts.length) {
-                        addToCart(filteredProducts[focusedProductIndex])
+                        const product = filteredProducts[focusedProductIndex]
+                        if (product.hasBatches && !product.isInfiniteActivity && !isService(product)) {
+                            setStockSourceSelectionProduct(product)
+                        } else {
+                            addToCart(product)
+                        }
                         e.preventDefault()
 
                         // Visual feedback animation on the button
@@ -1933,7 +2039,11 @@ export function POS() {
         })
     }, [resolveDiscountForPrice, selectedPriceBookId])
 
-    const addSelectedUnitToCart = useCallback((product: PosCatalogProduct, unitSelection?: PosUnitSelection): boolean => {
+    const addSelectedUnitToCart = useCallback((
+        product: PosCatalogProduct,
+        unitSelection?: PosUnitSelection,
+        stockSource?: PosStockSourceSelection | null
+    ): boolean => {
         const isInfiniteActivity = product.isInfiniteActivity === true
         const isNonInventoryService = isService(product)
         if (!canAddPosCartItemFromStorage(cart, product.storageId, ACTIVITIES_STORAGE_ID)) {
@@ -1946,14 +2056,23 @@ export function POS() {
             })
             return false
         }
+        const pricingProduct = getProductForStockSource(product, stockSource)
         const priceBookPricing = isInfiniteActivity ? null : getPriceBookPricing(product)
-        const effectivePrice = unitSelection?.price ?? priceBookPricing?.price ?? product.price
-        const effectiveCurrency = (unitSelection?.currency ?? priceBookPricing?.currency ?? product.currency) as CurrencyCode
-        const effectiveCostPrice = unitSelection?.costPrice ?? priceBookPricing?.costPrice ?? product.costPrice
+        const effectivePrice = unitSelection?.price ?? priceBookPricing?.price ?? pricingProduct.price
+        const effectiveCurrency = (unitSelection?.currency ?? priceBookPricing?.currency ?? pricingProduct.currency) as CurrencyCode
+        const effectiveCostPrice = unitSelection?.costPrice ?? priceBookPricing?.costPrice ?? pricingProduct.costPrice
         const sellingFactor = unitSelection?.factor ?? 1
+        const sourceAvailability = !isInfiniteActivity && !isNonInventoryService
+            ? getStockSourceAvailability(product)
+            : null
+        const availableSourceQuantity = stockSource?.type === 'batch'
+            ? sourceAvailability?.batches.find((batch) => batch.id === stockSource.batch.id)?.availableQuantity ?? 0
+            : stockSource?.type === 'regular'
+                ? sourceAvailability?.regularQuantity ?? 0
+                : sourceAvailability?.inventoryQuantity ?? product.inventoryQuantity
         const maxSellingQuantity = (isInfiniteActivity || isNonInventoryService)
             ? ACTIVITY_POS_QUANTITY_LIMIT
-            : inventoryQuantityToSellingAvailability(product.inventoryQuantity, sellingFactor)
+            : inventoryQuantityToSellingAvailability(availableSourceQuantity, sellingFactor)
         if (!canSelectProduct(product)) {
             toast({
                 variant: 'destructive',
@@ -1977,6 +2096,15 @@ export function POS() {
             .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
         if (!isInfiniteActivity && !isNonInventoryService
             && committedInventoryQuantity + sellingFactor > product.inventoryQuantity + 0.000001) return false
+        if (stockSource && !isInfiniteActivity && !isNonInventoryService
+            && sellingFactor > availableSourceQuantity + 0.000001) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('pos.stockSource.changed')
+            })
+            return false
+        }
         const activeDiscount = getActiveDiscountForProduct(product, effectivePrice, effectiveCurrency)
 
         if (!currencyConversionEnabled && !isInfiniteActivity) {
@@ -2011,13 +2139,29 @@ export function POS() {
         }
 
         setCart((prev) => {
-            const itemKey = buildCartItemKey(product.id, product.storageId, unitSelection?.sellingUnitRef)
+            const itemKey = buildCartItemKey(
+                product.id,
+                product.storageId,
+                unitSelection?.sellingUnitRef,
+                stockSource?.type,
+                stockSource?.type === 'batch' ? stockSource.batch.id : null
+            )
             const existing = prev.find((item) => getCartItemKey(item) === itemKey)
             const committedInventoryQuantity = prev
                 .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
                 .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
             if (!isInfiniteActivity && !isNonInventoryService
                 && committedInventoryQuantity + sellingFactor > product.inventoryQuantity + 0.000001) return prev
+            const latestSourceAvailability = stockSource && !isInfiniteActivity && !isNonInventoryService
+                ? getStockSourceAvailability(product, prev)
+                : null
+            const latestAvailableSourceQuantity = stockSource?.type === 'batch'
+                ? latestSourceAvailability?.batches.find((batch) => batch.id === stockSource.batch.id)?.availableQuantity ?? 0
+                : stockSource?.type === 'regular'
+                    ? latestSourceAvailability?.regularQuantity ?? 0
+                    : null
+            if (latestAvailableSourceQuantity !== null
+                && sellingFactor > latestAvailableSourceQuantity + 0.000001) return prev
             if (existing) {
                 return prev.map((item) =>
                     getCartItemKey(item) === itemKey
@@ -2038,6 +2182,10 @@ export function POS() {
                     name: product.name,
                     price: effectivePrice,
                     effective_currency: effectiveCurrency,
+                    stock_source_type: stockSource?.type,
+                    stock_source_batch_id: stockSource?.type === 'batch' ? stockSource.batch.id : undefined,
+                    stock_source_batch_number: stockSource?.type === 'batch' ? stockSource.batch.batchNumber : undefined,
+                    stock_source_expiry_date: stockSource?.type === 'batch' ? stockSource.batch.expiryDate ?? null : undefined,
                     discounted_price: activeDiscount?.discountPrice,
                     discount_type: activeDiscount?.discountType,
                     discount_value: activeDiscount?.discountValue,
@@ -2064,7 +2212,7 @@ export function POS() {
         })
         hapticTrigger('selection')
         return true
-    }, [canSelectProduct, cart, cartCurrencies, currencyConversionEnabled, features, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, t, toast, hapticTrigger])
+    }, [canSelectProduct, cart, cartCurrencies, currencyConversionEnabled, features, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, getProductForStockSource, getStockSourceAvailability, t, toast, hapticTrigger])
 
     const addFreeOnlyProductToCart = useCallback((product: PosCatalogProduct) => {
         if (!canUseOrderFreeBonus || !quickOrderEnabled || isActivitiesStorage || product.isInfiniteActivity) return false
@@ -2160,14 +2308,34 @@ export function POS() {
         return true
     }, [canSelectProduct, canUseOrderFreeBonus, cart, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, getDefaultPosUnitSelection, hapticTrigger, isActivitiesStorage, quickOrderEnabled, t, toast])
 
-    const addToCart = useCallback((product: PosCatalogProduct) => {
+    const addToCart = useCallback((product: PosCatalogProduct, stockSource?: PosStockSourceSelection | null) => {
         const options = !product.isInfiniteActivity && !isService(product) ? getProductUomOptions(product) : []
         if (options.length > 1) {
             setUnitSelectionProduct(product)
+            setUnitSelectionStockSource(stockSource ?? null)
             return false
         }
-        return addSelectedUnitToCart(product, options[0] ? buildPosUnitSelection(product, options[0]) : undefined)
+        return addSelectedUnitToCart(
+            product,
+            options[0] ? buildPosUnitSelection(product, options[0], stockSource) : undefined,
+            stockSource
+        )
     }, [addSelectedUnitToCart, buildPosUnitSelection, getProductUomOptions])
+
+    const selectCatalogProduct = useCallback((product: PosCatalogProduct) => {
+        if (product.hasBatches && !product.isInfiniteActivity && !isService(product)) {
+            setStockSourceSelectionProduct(product)
+            return false
+        }
+        return addToCart(product)
+    }, [addToCart])
+
+    const chooseStockSource = useCallback((stockSource: PosStockSourceSelection) => {
+        const product = stockSourceSelectionProduct
+        if (!product) return
+        setStockSourceSelectionProduct(null)
+        addToCart(product, stockSource)
+    }, [addToCart, stockSourceSelectionProduct])
 
     const addScannedProduct = useCallback((product: PosCatalogProduct, scannedCode: string) => {
         const normalized = normalizeBarcodeScannerText(scannedCode)
@@ -2215,15 +2383,16 @@ export function POS() {
         if (!product) return
         const uom = getProductUomOptions(product).find((row) => row.id === uomId)
         if (!uom) return
-        const selection = buildPosUnitSelection(product, uom)
-        const succeeded = addSelectedUnitToCart(product, selection)
+        const selection = buildPosUnitSelection(product, uom, unitSelectionStockSource)
+        const succeeded = addSelectedUnitToCart(product, selection, unitSelectionStockSource)
         const pendingCameraAdd = pendingCameraScannerAdd.current
         if (pendingCameraAdd?.productId === product.id) {
             pendingCameraScannerAdd.current = null
             pendingCameraAdd.resolve(succeeded)
         }
+        setUnitSelectionStockSource(null)
         setUnitSelectionProduct(null)
-    }, [addSelectedUnitToCart, buildPosUnitSelection, getProductUomOptions, unitSelectionProduct])
+    }, [addSelectedUnitToCart, buildPosUnitSelection, getProductUomOptions, unitSelectionProduct, unitSelectionStockSource])
 
     const removeFromCart = (itemKey: string) => {
         setCart((prev) => prev.filter((item) => getCartItemKey(item) !== itemKey))
@@ -2251,14 +2420,24 @@ export function POS() {
                     const newQty = Math.max(0, item.quantity + delta)
                     if (!canSetPosPaidQuantity(item, newQty)) return item
                     const product = findStockProduct(item.product_id, item.storageId)
-                    const maxStock = product
-                        ? inventoryQuantityToSellingAvailability(product.inventoryQuantity, item.unit_factor ?? 1)
-                        : item.max_stock
-                    const otherInventoryQuantity = prev
-                        .filter((other) => other !== item && other.product_id === item.product_id && other.storageId === item.storageId)
+                    const otherItems = prev.filter((other) => other !== item)
+                    const otherInventoryQuantity = otherItems
+                        .filter((other) => other.product_id === item.product_id && other.storageId === item.storageId)
                         .reduce((sum, other) => sum + getCartInventoryQuantity(other), 0)
+                    const sourceAvailability = product && item.stock_source_type
+                        ? getStockSourceAvailability(product, otherItems)
+                        : null
+                    const sourceAvailableQuantity = item.stock_source_type === 'batch'
+                        ? sourceAvailability?.batches.find((batch) => batch.id === item.stock_source_batch_id)?.availableQuantity ?? 0
+                        : item.stock_source_type === 'regular'
+                            ? sourceAvailability?.regularQuantity ?? 0
+                            : product ? Math.max(0, product.inventoryQuantity - otherInventoryQuantity) : item.max_stock
+                    const maxStock = inventoryQuantityToSellingAvailability(sourceAvailableQuantity, item.unit_factor ?? 1)
                     const nextItem = { ...item, quantity: newQty, max_stock: maxStock }
-                    if (product && otherInventoryQuantity + getCartInventoryQuantity(nextItem) > product.inventoryQuantity + 0.000001) {
+                    if (delta > 0 && product && (
+                        otherInventoryQuantity + getCartInventoryQuantity(nextItem) > product.inventoryQuantity + 0.000001
+                        || getCartInventoryQuantity(nextItem) > sourceAvailableQuantity + 0.000001
+                    )) {
                         return { ...item, max_stock: maxStock }
                     }
                     return shouldRemovePosCartItem(nextItem) ? null : nextItem
@@ -2280,19 +2459,20 @@ export function POS() {
             prev.map((item) => {
                 if (getCartItemKey(item) === itemKey) {
                     const product = findStockProduct(item.product_id, item.storageId)
-                    const maxStock = product
-                        ? inventoryQuantityToSellingAvailability(product.inventoryQuantity, item.unit_factor ?? 1)
-                        : item.max_stock
-                    const otherInventoryQuantity = prev
-                        .filter((other) => other !== item && other.product_id === item.product_id && other.storageId === item.storageId)
+                    const otherItems = prev.filter((other) => other !== item)
+                    const otherInventoryQuantity = otherItems
+                        .filter((other) => other.product_id === item.product_id && other.storageId === item.storageId)
                         .reduce((sum, other) => sum + getCartInventoryQuantity(other), 0)
-                    const availableForLine = product
-                        ? Math.max(
-                            0,
-                            inventoryQuantityToSellingAvailability(product.inventoryQuantity - otherInventoryQuantity, item.unit_factor ?? 1)
-                                - getOrderLineFreeBonusQuantity(item)
-                        )
-                        : Math.max(0, maxStock - getOrderLineFreeBonusQuantity(item))
+                    const sourceAvailability = product && item.stock_source_type
+                        ? getStockSourceAvailability(product, otherItems)
+                        : null
+                    const sourceAvailableQuantity = item.stock_source_type === 'batch'
+                        ? sourceAvailability?.batches.find((batch) => batch.id === item.stock_source_batch_id)?.availableQuantity ?? 0
+                        : item.stock_source_type === 'regular'
+                            ? sourceAvailability?.regularQuantity ?? 0
+                            : product ? Math.max(0, product.inventoryQuantity - otherInventoryQuantity) : 0
+                    const maxStock = inventoryQuantityToSellingAvailability(sourceAvailableQuantity, item.unit_factor ?? 1)
+                    const availableForLine = Math.max(0, maxStock - getOrderLineFreeBonusQuantity(item))
                     const nextItem = { ...item, quantity: Math.max(0, Math.min(quantity, availableForLine)), max_stock: maxStock }
                     return shouldRemovePosCartItem(nextItem) ? null : nextItem
                 }
@@ -2330,13 +2510,21 @@ export function POS() {
 
         const product = findStockProduct(cartItem.product_id, cartItem.storageId)
         const nextItem = { ...cartItem, freeBonusQuantity }
-        const otherInventoryQuantity = cart
-            .filter((item) => getCartItemKey(item) !== freeBonusEditorItemKey
-                && item.product_id === cartItem.product_id
-                && item.storageId === cartItem.storageId)
+        const otherItems = cart.filter((item) => getCartItemKey(item) !== freeBonusEditorItemKey)
+        const otherInventoryQuantity = otherItems
+            .filter((item) => item.product_id === cartItem.product_id && item.storageId === cartItem.storageId)
             .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
         const availableQuantity = product?.inventoryQuantity ?? cartItem.max_stock
-        if (otherInventoryQuantity + getCartInventoryQuantity(nextItem) > availableQuantity + 0.000001) {
+        const sourceAvailability = product && cartItem.stock_source_type
+            ? getStockSourceAvailability(product, otherItems)
+            : null
+        const availableSourceQuantity = cartItem.stock_source_type === 'batch'
+            ? sourceAvailability?.batches.find((batch) => batch.id === cartItem.stock_source_batch_id)?.availableQuantity ?? 0
+            : cartItem.stock_source_type === 'regular'
+                ? sourceAvailability?.regularQuantity ?? 0
+                : availableQuantity
+        if (otherInventoryQuantity + getCartInventoryQuantity(nextItem) > availableQuantity + 0.000001
+            || getCartInventoryQuantity(nextItem) > availableSourceQuantity + 0.000001) {
             toast({
                 variant: 'destructive',
                 title: t('messages.error', { defaultValue: 'Error' }),
@@ -3097,10 +3285,19 @@ export function POS() {
                     throw new Error('Storage is required for batched sale items')
                 }
 
+                if (item.stock_source_type === 'batch' && !item.stock_source_batch_id) {
+                    throw new Error(t('pos.stockSource.changed'))
+                }
+
                 return {
                     productId: item.product_id,
                     storageId,
-                    quantity: getCartInventoryQuantity(item)
+                    quantity: getCartInventoryQuantity(item),
+                    selectedBatchAllocations: item.stock_source_type === 'regular'
+                        ? []
+                        : item.stock_source_type === 'batch' && item.stock_source_batch_id
+                            ? [{ batchId: item.stock_source_batch_id, quantity: getCartInventoryQuantity(item) }]
+                            : undefined
                 }
             }))
         } catch (error) {
@@ -3108,7 +3305,9 @@ export function POS() {
             toast({
                 variant: 'destructive',
                 title: t('messages.error'),
-                description: normalized.message || (t('pos.stockMismatch') || 'Unable to allocate stock batches for one or more items.')
+                description: physicalCart.some((item) => item.stock_source_type)
+                    ? t('pos.stockSource.changed')
+                    : normalized.message || (t('pos.stockMismatch') || 'Unable to allocate stock batches for one or more items.')
             })
             setIsLoading(false)
             return
@@ -3180,6 +3379,8 @@ export function POS() {
                 total: convertedUnitPrice * item.quantity,
                 // Immutable inventory snapshot at checkout time
                 inventory_snapshot: service ? null : product?.inventoryQuantity ?? 0,
+                stock_source_type: service ? undefined : item.stock_source_type,
+                stock_source_batch_id: service ? undefined : item.stock_source_batch_id,
                 batch_allocations: !service && (batchPlan?.allocations.length ?? 0) > 0
                     ? batchPlan!.allocations.map((allocation) => ({
                         batch_id: allocation.batchId,
@@ -3388,12 +3589,22 @@ export function POS() {
                     ?? priceBookItem?.costPrice
                     ?? (product.costPrice ?? 0) * coefficient)
                 const freeBonusQuantity = getOrderLineFreeBonusQuantity(item)
+                const selectedStockBatch = item.stock_source_type === 'batch'
+                    ? product.stockBatches.find((batch) => batch.id === item.stock_source_batch_id)
+                    : null
+                if (item.stock_source_type === 'batch' && !selectedStockBatch) {
+                    throw new Error(t('pos.stockSource.changed'))
+                }
 
                 return {
                     id: generateId(),
                     productId: product.id,
                     storageId,
                     productName: formatPosServiceName(product.name, service ? item.service_name_suffix : undefined),
+                    stockSourceType: service ? undefined : item.stock_source_type,
+                    stockSourceBatchId: service ? undefined : item.stock_source_batch_id,
+                    stockSourceBatchNumber: service ? undefined : item.stock_source_batch_number,
+                    stockSourceExpiryDate: service ? undefined : item.stock_source_expiry_date,
                     ...(service
                         ? { metadata: createPosServiceNameMetadata(product.name, item.service_name_suffix) ?? null }
                         : {}),
@@ -3424,9 +3635,22 @@ export function POS() {
                     convertedCostPrice: roundOrderValue(convertPrice(sourceCostPrice, originalCurrency, settlementCurrency)),
                     priceBookId: priceBookItem?.priceBookId ?? item.price_book_id ?? null,
                     priceBookItemId: priceBookItem?.id ?? null,
-                    // Let the normal sales-order completion service allocate the
-                    // appropriate batches at the moment it deducts inventory.
-                    batchAllocations: null
+                    // A null list keeps the normal FEFO allocation behavior;
+                    // an empty list explicitly reserves regular stock only.
+                    batchAllocations: item.stock_source_type === 'regular'
+                        ? []
+                        : selectedStockBatch
+                            ? [{
+                                batchId: selectedStockBatch.id,
+                                batchNumber: selectedStockBatch.batchNumber,
+                                quantity: getCartInventoryQuantity(item),
+                                price: selectedStockBatch.price ?? null,
+                                costPrice: selectedStockBatch.costPrice ?? null,
+                                currency: selectedStockBatch.currency ?? null,
+                                expiryDate: selectedStockBatch.expiryDate ?? null,
+                                manufacturingDate: selectedStockBatch.manufacturingDate ?? null
+                            }]
+                            : null
                 }
             })
             const subtotal = roundOrderValue(orderItems.reduce((sum, item) => sum + item.lineTotal, 0))
@@ -3596,7 +3820,9 @@ export function POS() {
                                 isDeviceScannerAutoEnabled={isDeviceScannerAutoEnabled}
                                 filteredProducts={filteredProducts}
                                 cart={cart}
-                                addToCart={addToCart}
+                                selectCatalogProduct={selectCatalogProduct}
+                                getProductCardStockDisplay={getProductCardStockDisplay}
+                                getCartItemKey={getCartItemKey}
                                 onHoldForFreeOnlyOrder={openMobileFreeOnlyProduct}
                                 canUseOrderFreeBonus={canUseOrderFreeBonus}
                                 quickOrderEnabled={quickOrderEnabled && !isActivitiesStorage}
@@ -3616,6 +3842,7 @@ export function POS() {
                                 cart={cart}
                                 removeFromCart={removeFromCart}
                                 updateQuantity={updateQuantity}
+                                getCartItemKey={getCartItemKey}
                                 features={features}
                                 totalAmount={totalAmount}
                                 settlementCurrency={settlementCurrency}
@@ -3774,9 +4001,15 @@ export function POS() {
                                 {filteredProducts.map((product, index) => {
                                     const productCartItems = cart.filter((item) => item.product_id === product.id && item.storageId === product.storageId)
                                     const inCartQuantity = productCartItems.reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
+                                    const cardStockDisplay = product.hasBatches
+                                        ? getProductCardStockDisplay(product, cart)
+                                        : null
+                                    const displayBatch = cardStockDisplay?.batch ?? null
                                     const isInfiniteActivity = product.isInfiniteActivity === true
                                     const isServiceProduct = isService(product)
-                                    const remainingQuantity = (isInfiniteActivity || isServiceProduct) ? ACTIVITY_POS_QUANTITY_LIMIT : product.quantity - inCartQuantity
+                                    const remainingQuantity = (isInfiniteActivity || isServiceProduct)
+                                        ? ACTIVITY_POS_QUANTITY_LIMIT
+                                        : cardStockDisplay?.inventoryQuantity ?? product.quantity - inCartQuantity
                                     const minStock = product.minStockLevel || 5
                                     const isLowStock = remainingQuantity <= minStock
                                     const isCriticalStock = remainingQuantity <= (minStock / 2)
@@ -3792,7 +4025,7 @@ export function POS() {
                                             data-testid="pos-product-card"
                                             data-product-id={product.id}
                                             ref={el => productRefs.current[index] = el}
-                                            onClick={() => addToCart(product)}
+                                            onClick={() => selectCatalogProduct(product)}
                                             disabled={!isInfiniteActivity && !isServiceProduct && remainingQuantity <= 0}
                                             className={cn(
                                                 "group relative bg-card hover:bg-accent/5 rounded-[1.5rem] border border-border/50 p-4 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/5 hover:-translate-y-1 flex flex-col gap-4 overflow-hidden text-left outline-none",
@@ -3833,31 +4066,40 @@ export function POS() {
                                                     {remainingQuantity} <span className="text-[10px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
                                                 </div>}
 
-                                                {product.hasBatches && product.nextBatchQuantity !== null && (
-                                                    <div className="absolute bottom-2 left-2 bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/20 backdrop-blur-md px-2.5 py-1.5 rounded-2xl text-[12px] font-black uppercase tracking-tighter shadow-md z-10">
-                                                        {product.nextBatchQuantity} <span className="text-[10px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
+                                                {displayBatch && (
+                                                    <div
+                                                        className="absolute bottom-2 left-2 bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/20 backdrop-blur-md px-2.5 py-1.5 rounded-2xl text-[12px] font-black uppercase tracking-tighter shadow-md z-10"
+                                                        data-testid="pos-product-batch-quantity"
+                                                        data-batch-id={displayBatch.id}
+                                                    >
+                                                        {cardStockDisplay?.batchAvailableQuantity ?? 0} <span className="text-[10px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
+                                                        {(cardStockDisplay?.batchCartQuantity ?? 0) > 0 && (
+                                                            <span className="ml-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-black text-emerald-700 dark:text-emerald-300">
+                                                                +{cardStockDisplay?.batchCartQuantity}
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 )}
 
                                                 {activeDiscount && (
                                                     <div className={cn(
                                                         "absolute left-2 rounded-2xl bg-emerald-500 px-2.5 py-1 text-[11px] font-black text-white shadow-md z-10",
-                                                        product.hasBatches && product.nextBatchQuantity !== null ? "bottom-12" : "bottom-2"
+                                                        displayBatch ? "bottom-12" : "bottom-2"
                                                     )}>
                                                         {formatDiscountBadge(activeDiscount, priceCurrency, features.iqd_display_preference)}
                                                     </div>
                                                 )}
 
-                                                {product.hasBatches && product.nextBatchNumber && (
+                                                {displayBatch?.expiryDate && (
                                                     <div className={cn(
                                                         "absolute bottom-2 right-2 rounded-2xl px-2.5 py-1 text-[9px] font-black shadow-md z-10 backdrop-blur-md truncate",
-                                                        getBatchExpiryStatus(product.nextBatchExpiryDate) === 'expired'
+                                                        getBatchExpiryStatus(displayBatch.expiryDate) === 'expired'
                                                             ? "bg-rose-500/90 text-white border border-rose-400/50"
-                                                            : getBatchExpiryStatus(product.nextBatchExpiryDate) === 'soon'
+                                                            : getBatchExpiryStatus(displayBatch.expiryDate) === 'soon'
                                                                 ? "bg-amber-400/90 text-amber-950 border border-amber-300/50"
                                                                 : "bg-background/80 text-sky-700 dark:text-sky-300 border border-border/50"
                                                     )}>
-                                                        EXP {formatBatchExpiryDate(product.nextBatchExpiryDate)}
+                                                        EXP {formatBatchExpiryDate(displayBatch.expiryDate)}
                                                     </div>
                                                 )}
                                             </div>
@@ -3866,9 +4108,9 @@ export function POS() {
                                             <div className="flex-1 space-y-2 flex flex-col">
                                                 <div className="flex items-center justify-between text-[10px] font-mono font-bold text-muted-foreground uppercase tracking-widest opacity-60 gap-2">
                                                     <span className="truncate">{product.sku}</span>
-                                                    {product.hasBatches && product.nextBatchNumber && (
+                                                    {displayBatch?.batchNumber && (
                                                         <span className="text-secondary-foreground/80 shrink-0">
-                                                            BATCH {product.nextBatchNumber}
+                                                            BATCH {displayBatch.batchNumber}
                                                         </span>
                                                     )}
                                                 </div>
@@ -3989,7 +4231,9 @@ export function POS() {
                                         </div>
                                     ) : (
                                         cart.map((item, index) => {
-                                            const productCurrency = findStockProduct(item.product_id, item.storageId)?.currency || 'usd'
+                                            const productCurrency = item.effective_currency
+                                                ?? findStockProduct(item.product_id, item.storageId)?.currency
+                                                ?? 'usd'
                                             const effectivePrice = getCartEffectivePrice(item)
                                             const basePrice = getCartBasePrice(item)
                                             const convertedPrice = convertPrice(effectivePrice, productCurrency, settlementCurrency)
@@ -4029,6 +4273,23 @@ export function POS() {
                                                                 <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
                                                                     <Warehouse className="h-3 w-3 shrink-0" />
                                                                     <span className="truncate">{getCartStorageName(item.storageId || selectedStorageId)}</span>
+                                                                </div>
+                                                            )}
+                                                            {item.stock_source_type && (
+                                                                <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-semibold text-sky-700 dark:text-sky-300">
+                                                                    {item.stock_source_type === 'batch'
+                                                                        ? <Boxes className="h-3 w-3 shrink-0" />
+                                                                        : <Package className="h-3 w-3 shrink-0" />}
+                                                                    <span className="truncate">
+                                                                        {item.stock_source_type === 'batch'
+                                                                            ? t('pos.stockSource.batch', { batch: item.stock_source_batch_number ?? '' })
+                                                                            : t('pos.stockSource.regular')}
+                                                                    </span>
+                                                                    {item.stock_source_type === 'batch' && item.stock_source_expiry_date && (
+                                                                        <span className="shrink-0 text-muted-foreground">
+                                                                            {t('pos.stockSource.expiry', { date: item.stock_source_expiry_date })}
+                                                                        </span>
+                                                                    )}
                                                                 </div>
                                                             )}
                                                         </div>
@@ -4759,6 +5020,7 @@ export function POS() {
                         pendingCameraScannerAdd.current = null
                         pending.resolve(false)
                     }
+                    setUnitSelectionStockSource(null)
                     setUnitSelectionProduct(null)
                 }
             }}>
@@ -4770,6 +5032,13 @@ export function POS() {
                         </SmallDialogTitle>
                         <SmallDialogDescription>
                             {t('pos.unitSelection.description', { product: unitSelectionProduct?.name ?? '' })}
+                            {unitSelectionStockSource && (
+                                <span className="mt-1 block font-semibold text-primary">
+                                    {unitSelectionStockSource.type === 'batch'
+                                        ? t('pos.stockSource.batch', { batch: unitSelectionStockSource.batch.batchNumber })
+                                        : t('pos.stockSource.regular')}
+                                </span>
+                            )}
                         </SmallDialogDescription>
                     </SmallDialogHeader>
                     <SmallDialogBody>
@@ -4782,14 +5051,16 @@ export function POS() {
                             {(() => {
                                 if (!unitSelectionProduct) return null
                                 const options = getProductUomOptions(unitSelectionProduct)
-                                const committedInventoryQuantity = cart
-                                    .filter((item) => item.product_id === unitSelectionProduct.id && item.storageId === unitSelectionProduct.storageId)
-                                    .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
-                                const remainingInventoryQuantity = Math.max(0, unitSelectionProduct.inventoryQuantity - committedInventoryQuantity)
+                                const sourceAvailability = getStockSourceAvailability(unitSelectionProduct)
+                                const remainingInventoryQuantity = unitSelectionStockSource?.type === 'batch'
+                                    ? sourceAvailability.batches.find((batch) => batch.id === unitSelectionStockSource.batch.id)?.availableQuantity ?? 0
+                                    : unitSelectionStockSource?.type === 'regular'
+                                        ? sourceAvailability.regularQuantity
+                                        : sourceAvailability.inventoryQuantity
                                 return (
                                     <div className="grid gap-3 sm:grid-cols-2">
                                         {options.map((uom) => {
-                                            const selection = buildPosUnitSelection(unitSelectionProduct, uom)
+                                            const selection = buildPosUnitSelection(unitSelectionProduct, uom, unitSelectionStockSource)
                                             const canSell = remainingInventoryQuantity + 0.000001 >= uom.coefficient
                                             return (
                                                 <button
@@ -4811,6 +5082,94 @@ export function POS() {
                                 )
                             })()}
                         </div>
+                    </SmallDialogBody>
+                </SmallDialogContent>
+            </SmallDialog>
+
+            <SmallDialog open={stockSourceSelectionProduct !== null} onOpenChange={(open) => {
+                if (!open) setStockSourceSelectionProduct(null)
+            }}>
+                <SmallDialogContent>
+                    <SmallDialogHeader>
+                        <SmallDialogTitle className="flex items-center gap-2">
+                            <Boxes className="h-5 w-5 text-primary" />
+                            {t('pos.stockSource.title')}
+                        </SmallDialogTitle>
+                        <SmallDialogDescription>
+                            {t('pos.stockSource.description', { product: stockSourceSelectionProduct?.name ?? '' })}
+                        </SmallDialogDescription>
+                    </SmallDialogHeader>
+                    <SmallDialogBody>
+                        {stockSourceSelectionProduct && (() => {
+                            const product = stockSourceSelectionProduct
+                            const availability = getStockSourceAvailability(product)
+                            const regularSource: PosStockSourceSelection = { type: 'regular' }
+                            const sources: Array<{
+                                key: string
+                                selection: PosStockSourceSelection
+                                quantity: number
+                                label: string
+                            }> = [
+                                {
+                                    key: 'regular',
+                                    selection: regularSource,
+                                    quantity: availability.regularQuantity,
+                                    label: t('pos.stockSource.regular')
+                                },
+                                ...availability.batches.map((batch) => ({
+                                    key: batch.id,
+                                    selection: { type: 'batch' as const, batch },
+                                    quantity: batch.availableQuantity,
+                                    label: t('pos.stockSource.batch', { batch: batch.batchNumber })
+                                }))
+                            ]
+
+                            return (
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                    {sources.map(({ key, selection, quantity, label }) => {
+                                        const unitSelection = getDefaultPosUnitSelection(product, selection)
+                                        const pricingProduct = getProductForStockSource(product, selection)
+                                        const priceBookPricing = getPriceBookPricing(product)
+                                        const unitCode = unitSelection?.sellingUnitCode ?? product.unit
+                                        const unitFactor = unitSelection?.factor ?? 1
+                                        const price = unitSelection?.price ?? priceBookPricing?.price ?? pricingProduct.price
+                                        const currency = unitSelection?.currency ?? priceBookPricing?.currency ?? pricingProduct.currency
+                                        const displayQuantity = inventoryQuantityToSellingAvailability(quantity, unitFactor)
+                                        const canSelect = quantity > 0.000001
+                                        const batch = selection.type === 'batch' ? selection.batch : null
+
+                                        return (
+                                            <button
+                                                key={key}
+                                                type="button"
+                                                disabled={!canSelect}
+                                                onClick={() => chooseStockSource(selection)}
+                                                className="rounded-2xl border bg-background p-4 text-start transition hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-45"
+                                            >
+                                                {batch ? <Boxes className="mb-3 h-6 w-6 text-primary" /> : <Package className="mb-3 h-6 w-6 text-primary" />}
+                                                <div className="font-black">{label}</div>
+                                                <div className="mt-1 text-sm font-bold text-primary">
+                                                    {formatCurrency(price, currency, features.iqd_display_preference)}
+                                                </div>
+                                                <div className="mt-2 text-xs text-muted-foreground">
+                                                    {t('pos.stockSource.availableQuantity', {
+                                                        quantity: new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }).format(displayQuantity),
+                                                        unit: t(`products.units.${unitCode}`, { defaultValue: unitCode })
+                                                    })}
+                                                </div>
+                                                {batch?.expiryDate && (
+                                                    <div className="mt-1 text-xs text-muted-foreground">
+                                                        {t('pos.stockSource.expiry', {
+                                                            date: new Intl.DateTimeFormat(i18n.language).format(new Date(`${batch.expiryDate}T00:00:00`))
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            )
+                        })()}
                     </SmallDialogBody>
                 </SmallDialogContent>
             </SmallDialog>
@@ -5263,7 +5622,7 @@ export function POS() {
                 foundInStorageName={crossStorageWarning?.foundStorageName || 'Unknown'}
                 onConfirm={() => {
                     if (crossStorageWarning) {
-                        addToCart(crossStorageWarning.product)
+                        selectCatalogProduct(crossStorageWarning.product)
                         setCrossStorageWarning(null)
                     }
                 }}
@@ -5756,7 +6115,9 @@ interface MobileGridProps {
     isDeviceScannerAutoEnabled: boolean
     filteredProducts: PosCatalogProduct[]
     cart: CartItem[]
-    addToCart: (p: PosCatalogProduct) => void
+    selectCatalogProduct: (p: PosCatalogProduct) => boolean
+    getProductCardStockDisplay: (product: PosCatalogProduct, cartItems: CartItem[]) => PosProductCardStockDisplay
+    getCartItemKey: (item: Pick<CartItem, 'product_id' | 'storageId' | 'selling_unit_ref' | 'stock_source_type' | 'stock_source_batch_id'>) => string
     onHoldForFreeOnlyOrder: (p: PosCatalogProduct) => void
     canUseOrderFreeBonus: boolean
     quickOrderEnabled: boolean
@@ -5778,7 +6139,7 @@ interface MobileGridProps {
     showCategories: boolean
 }
 
-function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, setIsCameraProductScannerOpen, isDeviceScannerAutoEnabled, filteredProducts, cart, addToCart, onHoldForFreeOnlyOrder, canUseOrderFreeBonus, quickOrderEnabled, updateQuantity, features, getDisplayImageUrl, categories, selectedCategory, setSelectedCategory, getActiveDiscount, getPriceBookPricing, showQuantityIndicator, showCategories }: MobileGridProps) {
+function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, setIsCameraProductScannerOpen, isDeviceScannerAutoEnabled, filteredProducts, cart, selectCatalogProduct, getProductCardStockDisplay, getCartItemKey, onHoldForFreeOnlyOrder, canUseOrderFreeBonus, quickOrderEnabled, updateQuantity, features, getDisplayImageUrl, categories, selectedCategory, setSelectedCategory, getActiveDiscount, getPriceBookPricing, showQuantityIndicator, showCategories }: MobileGridProps) {
     const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const suppressCatalogClickRef = useRef(false)
 
@@ -5875,9 +6236,15 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                     const productCartItems = cart.filter((item) => item.product_id === product.id && item.storageId === product.storageId)
                     const cartItem = productCartItems.at(-1)
                     const inCartQuantity = productCartItems.reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
+                    const cardStockDisplay = product.hasBatches
+                        ? getProductCardStockDisplay(product, cart)
+                        : null
+                    const displayBatch = cardStockDisplay?.batch ?? null
                     const isInfiniteActivity = product.isInfiniteActivity === true
                     const isServiceProduct = isService(product)
-                    const remainingQuantity = (isInfiniteActivity || isServiceProduct) ? ACTIVITY_POS_QUANTITY_LIMIT : product.quantity - inCartQuantity
+                    const remainingQuantity = (isInfiniteActivity || isServiceProduct)
+                        ? ACTIVITY_POS_QUANTITY_LIMIT
+                        : cardStockDisplay?.inventoryQuantity ?? product.quantity - inCartQuantity
                     const minStock = product.minStockLevel || 5
                     const isLowStock = remainingQuantity <= minStock
                     const isCriticalStock = remainingQuantity <= (minStock / 2)
@@ -5910,7 +6277,7 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                                     e.preventDefault()
                                     return
                                 }
-                                if (isInfiniteActivity || isServiceProduct || remainingQuantity > 0) addToCart(product);
+                                if (isInfiniteActivity || isServiceProduct || remainingQuantity > 0) selectCatalogProduct(product);
                             }}
                             onPointerDown={(event) => {
                                 if (event.pointerType !== 'touch'
@@ -5960,31 +6327,40 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                                     {remainingQuantity} <span className="text-[9px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
                                 </div>}
 
-                                {product.hasBatches && product.nextBatchQuantity !== null && (
-                                    <div className="absolute bottom-2 left-2 backdrop-blur-md px-2.5 py-1 rounded-xl text-[10px] font-black border border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-300 transition-colors duration-300">
-                                        {product.nextBatchQuantity} <span className="text-[9px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
+                                {displayBatch && (
+                                    <div
+                                        className="absolute bottom-2 left-2 backdrop-blur-md px-2.5 py-1 rounded-xl text-[10px] font-black border border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-300 transition-colors duration-300"
+                                        data-testid="pos-product-batch-quantity"
+                                        data-batch-id={displayBatch.id}
+                                    >
+                                        {cardStockDisplay?.batchAvailableQuantity ?? 0} <span className="text-[9px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
+                                        {(cardStockDisplay?.batchCartQuantity ?? 0) > 0 && (
+                                            <span className="ml-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-black text-emerald-700 dark:text-emerald-300">
+                                                +{cardStockDisplay?.batchCartQuantity}
+                                            </span>
+                                        )}
                                     </div>
                                 )}
 
                                 {activeDiscount && (
                                     <div className={cn(
                                         "absolute left-2 rounded-xl bg-emerald-500 px-2 py-1 text-[10px] font-black text-white shadow-sm z-10",
-                                        product.hasBatches && product.nextBatchQuantity !== null ? "bottom-10" : "bottom-2"
+                                        displayBatch ? "bottom-10" : "bottom-2"
                                     )}>
                                         {formatDiscountBadge(activeDiscount, priceCurrency, features.iqd_display_preference)}
                                     </div>
                                 )}
 
-                                {product.hasBatches && product.nextBatchNumber && (
+                                {displayBatch?.expiryDate && (
                                     <div className={cn(
                                         "absolute bottom-2 right-2 rounded-xl px-2 py-1 text-[9px] font-black shadow-sm z-10 backdrop-blur-md truncate",
-                                        getBatchExpiryStatus(product.nextBatchExpiryDate) === 'expired'
+                                        getBatchExpiryStatus(displayBatch.expiryDate) === 'expired'
                                             ? "bg-rose-500/90 text-white border border-rose-400/50"
-                                            : getBatchExpiryStatus(product.nextBatchExpiryDate) === 'soon'
+                                            : getBatchExpiryStatus(displayBatch.expiryDate) === 'soon'
                                                 ? "bg-amber-400/90 text-amber-950 border border-amber-300/50"
                                                 : "bg-background/80 text-sky-700 dark:text-sky-300 border border-border/50"
                                     )}>
-                                        EXP {formatBatchExpiryDate(product.nextBatchExpiryDate)}
+                                        EXP {formatBatchExpiryDate(displayBatch.expiryDate)}
                                     </div>
                                 )}
 
@@ -5996,9 +6372,9 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                             </div>
                             <div className="flex flex-col gap-2 px-1">
                                 <h3 className="font-bold text-sm line-clamp-1">{product.name}</h3>
-                                {product.hasBatches && product.nextBatchNumber && (
+                                {displayBatch?.batchNumber && (
                                     <div className="text-[10px] font-mono font-bold text-secondary-foreground/80 uppercase tracking-widest truncate -mt-1">
-                                        BATCH {product.nextBatchNumber}
+                                        BATCH {displayBatch.batchNumber}
                                     </div>
                                 )}
                                 {activeDiscount ? (
@@ -6030,7 +6406,7 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                                 <MobileCatalogQuantityButton
                                     ariaLabel={t('pos.removeOne')}
                                     disabled={!cartItem}
-                                    onAdjust={() => { if (cartItem) updateQuantity(buildCartItemKey(cartItem.product_id, cartItem.storageId, cartItem.selling_unit_ref), -1) }}
+                                    onAdjust={() => { if (cartItem) updateQuantity(getCartItemKey(cartItem), -1) }}
                                 >
                                     <Minus className="w-3 h-3" />
                                 </MobileCatalogQuantityButton>
@@ -6039,7 +6415,7 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                                     ariaLabel={t('pos.addOne')}
                                     className="text-primary"
                                     disabled={!isInfiniteActivity && remainingQuantity <= 0}
-                                    onAdjust={() => addToCart(product)}
+                                    onAdjust={() => selectCatalogProduct(product)}
                                 >
                                     <Plus className="w-3 h-3" />
                                 </MobileCatalogQuantityButton>
@@ -6082,6 +6458,7 @@ interface MobileCartProps {
     cart: CartItem[]
     removeFromCart: (itemKey: string) => void
     updateQuantity: (itemKey: string, d: number) => void
+    getCartItemKey: (item: Pick<CartItem, 'product_id' | 'storageId' | 'selling_unit_ref' | 'stock_source_type' | 'stock_source_batch_id'>) => string
     features: WorkspaceFeatures
     totalAmount: number
     settlementCurrency: string
@@ -6128,7 +6505,7 @@ interface MobileCartProps {
 }
 
 function MobileCart({
-    cart, removeFromCart, updateQuantity, features, totalAmount,
+    cart, removeFromCart, updateQuantity, getCartItemKey, features, totalAmount,
     settlementCurrency, paymentType, setPaymentType, isOrderPaymentLocked, digitalProvider,
     setDigitalProvider, workspaceId, paymentAccount, setPaymentAccount, quickOrderEnabled, handleCheckout, handleHoldSale, isLoading,
     canPreprintReceipt, handlePreprintReceipt, isPreprinting, isLoadingPreprintTemplate,
@@ -6249,14 +6626,14 @@ function MobileCart({
                             candidate.id === item.product_id
                             && (!item.storageId || candidate.storageId === item.storageId)
                         ))
-                        const originalCurrency = (product?.currency || 'usd') as CurrencyCode
+                        const originalCurrency = (item.effective_currency ?? product?.currency ?? 'usd') as CurrencyCode
                         const settlementCurr = settlementCurrency as CurrencyCode
                         const unitPrice = getCartEffectivePrice(item)
                         const convertedUnitPrice = convertPrice(unitPrice, originalCurrency, settlementCurr)
                         const isExchanged = originalCurrency !== settlementCurr
                         const hasDiscount = hasAutomaticDiscount(item)
                         const minimumViolation = getCartMinimumPriceViolation(item)
-                        const itemKey = buildCartItemKey(item.product_id, item.storageId, item.selling_unit_ref)
+                        const itemKey = getCartItemKey(item)
 
                         return (
                             <div
@@ -6285,6 +6662,23 @@ function MobileCart({
                                                         <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
                                                             <Warehouse className="h-3 w-3 shrink-0" />
                                                             <span className="truncate">{getCartStorageName(item.storageId || fallbackStorageId)}</span>
+                                                        </div>
+                                                    )}
+                                                    {item.stock_source_type && (
+                                                        <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-semibold text-sky-700 dark:text-sky-300">
+                                                            {item.stock_source_type === 'batch'
+                                                                ? <Boxes className="h-3 w-3 shrink-0" />
+                                                                : <Package className="h-3 w-3 shrink-0" />}
+                                                            <span className="truncate">
+                                                                {item.stock_source_type === 'batch'
+                                                                    ? t('pos.stockSource.batch', { batch: item.stock_source_batch_number ?? '' })
+                                                                    : t('pos.stockSource.regular')}
+                                                            </span>
+                                                            {item.stock_source_type === 'batch' && item.stock_source_expiry_date && (
+                                                                <span className="shrink-0 text-muted-foreground">
+                                                                    {t('pos.stockSource.expiry', { date: item.stock_source_expiry_date })}
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     )}
                                                 </div>

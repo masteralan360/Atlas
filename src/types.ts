@@ -207,6 +207,11 @@ export interface CartItem {
     price_book_name?: string
     /** Currency used by the selected product, unit, or Price Book for this line. */
     effective_currency?: CurrencyCode
+    /** Explicit POS stock source; omitted means the established automatic allocation behavior. */
+    stock_source_type?: 'regular' | 'batch'
+    stock_source_batch_id?: string
+    stock_source_batch_number?: string
+    stock_source_expiry_date?: string | null
 }
 
 export interface UniversalInvoiceItem {
