@@ -65,6 +65,7 @@ export interface CommissionEntrySummary {
     recovered: CommissionCurrencyTotals
     /** Cash paid to the agent after recoveries are deducted. */
     netPaid: CommissionCurrencyTotals
+    /** Commission removed by reversals after same-reconciliation replacements are netted out. */
     reversed: CommissionCurrencyTotals
     due: CommissionCurrencyTotals
     orderCount: number
@@ -97,6 +98,48 @@ export interface CommissionHistoryGroup {
 function addCurrencyAmount(totals: CommissionCurrencyTotals, currency: string, amount: number) {
     const normalizedCurrency = currency.toLowerCase()
     totals[normalizedCurrency] = (totals[normalizedCurrency] || 0) + amount
+}
+
+/**
+ * A return reconciliation reverses the previous aggregate commission and then
+ * records the new remaining commission as an adjustment. Count only the net
+ * reduction from that reconciliation, so later returns do not count the same
+ * commission balance as reversed over and over.
+ */
+function getNetReversedByCurrency(entries: AgentCommissionEntry[]): CommissionCurrencyTotals {
+    const reconciliationAmounts = new Map<string, {
+        currency: string
+        reversed: number
+        replacement: number
+    }>()
+
+    for (const entry of entries) {
+        if (entry.isDeleted) continue
+        const isReversal = entry.kind === 'reversal'
+        const isReplacement = entry.kind === 'adjustment' && entry.amount > 0
+        if (!isReversal && !isReplacement) continue
+
+        const currency = entry.currency.toLowerCase()
+        const key = JSON.stringify([
+            entry.orderId || null,
+            entry.assignmentId || null,
+            entry.relatedEntryId || null,
+            getCommissionEntryMode(entry),
+            currency,
+            entry.occurredAt,
+        ])
+        const amounts = reconciliationAmounts.get(key) || { currency, reversed: 0, replacement: 0 }
+        if (isReversal) amounts.reversed += Math.abs(entry.amount)
+        if (isReplacement) amounts.replacement += entry.amount
+        reconciliationAmounts.set(key, amounts)
+    }
+
+    const totals: CommissionCurrencyTotals = {}
+    for (const { currency, reversed, replacement } of reconciliationAmounts.values()) {
+        const netReversed = Math.max(0, reversed - replacement)
+        if (netReversed > 0.000001) addCurrencyAmount(totals, currency, netReversed)
+    }
+    return totals
 }
 
 export function summarizeCommissionEntries(
@@ -140,9 +183,6 @@ export function summarizeCommissionEntries(
             addCurrencyAmount(summary.earned, entry.currency, entry.amount)
             if (commissionMode === 'payable') addCurrencyAmount(summary.due, entry.currency, entry.amount)
         }
-        if (entry.kind === 'reversal') {
-            addCurrencyAmount(summary.reversed, entry.currency, entry.amount)
-        }
         if (entry.kind === 'payout') {
             addCurrencyAmount(summary.paid, entry.currency, Math.abs(entry.amount))
             addCurrencyAmount(summary.due, entry.currency, entry.amount)
@@ -151,6 +191,10 @@ export function summarizeCommissionEntries(
             addCurrencyAmount(summary.recovered, entry.currency, entry.amount)
             addCurrencyAmount(summary.due, entry.currency, entry.amount)
         }
+    }
+
+    for (const [currency, amount] of Object.entries(getNetReversedByCurrency(activeEntries))) {
+        summary.reversed[currency] = -amount
     }
 
     for (const currency of new Set([...Object.keys(summary.paid), ...Object.keys(summary.recovered)])) {
@@ -210,7 +254,6 @@ export function buildCommissionHistoryGroups(entries: AgentCommissionEntry[]): C
         }
         if (entry.kind === 'payout') group.paid += Math.abs(entry.amount)
         if (entry.kind === 'recovery') group.recovered += Math.abs(entry.amount)
-        if (entry.kind === 'reversal') group.reversed += Math.abs(entry.amount)
         if (new Date(entry.occurredAt).getTime() > new Date(group.occurredAt).getTime()) {
             group.occurredAt = entry.occurredAt
         }
@@ -222,7 +265,7 @@ export function buildCommissionHistoryGroups(entries: AgentCommissionEntry[]): C
             group.earned = Math.round(group.earned * 1_000_000) / 1_000_000
             group.paid = Math.round(group.paid * 1_000_000) / 1_000_000
             group.recovered = Math.round(group.recovered * 1_000_000) / 1_000_000
-            group.reversed = Math.round(group.reversed * 1_000_000) / 1_000_000
+            group.reversed = Math.round((getNetReversedByCurrency(group.entries)[group.currency] || 0) * 1_000_000) / 1_000_000
             group.outstanding = Math.round(group.outstanding * 1_000_000) / 1_000_000
             group.entries.sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
 

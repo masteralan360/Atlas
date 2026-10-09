@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 import { useAuth } from '@/auth'
 import { Sale } from '@/types'
-import { applySalesOrderReturnQuantities, useCategories, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles, useExpenseItemsForWorkspace } from '@/local-db'
+import { applySalesOrderReturnQuantities, useCategories, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useAgents, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles, useExpenseItemsForWorkspace } from '@/local-db'
 import { formatCurrency, formatDateTime, formatDate, formatTime } from '@/lib/utils'
 import { buildRevenueSourceSales } from '@/lib/revenueSourceSales'
 import { isActiveSale } from '@/lib/saleArchiving'
@@ -19,7 +19,7 @@ import { useDateRange } from '@/context/DateRangeContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
-import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
+import { PartnerAutocompleteInput, type PartnerAutocompleteAdditionalOption } from '@/ui/components/crm/PartnerAutocompleteInput'
 import {
     Card,
     CardContent,
@@ -125,6 +125,10 @@ interface RevenueFilterState {
     cashier: string
     party: string
     partyPartnerId: string
+    partyAgentId: string
+    partyLinkedUserId: string
+    partyLinkedAgentName: string
+    partyLinkedUserName: string
     partySearch: string
     currency: string
     paymentMethod: string
@@ -147,6 +151,15 @@ interface RevenueFilterState {
     sort: RevenueSortOption
 }
 
+interface RevenueLinkedAgentEntity {
+    agentId: string
+    partnerId: string
+    partnerName: string
+    userId: string
+    userName: string
+    userEmail?: string
+}
+
 const DEFAULT_REVENUE_FILTERS: RevenueFilterState = {
     search: '',
     origin: 'all',
@@ -154,6 +167,10 @@ const DEFAULT_REVENUE_FILTERS: RevenueFilterState = {
     cashier: 'all',
     party: 'all',
     partyPartnerId: '',
+    partyAgentId: '',
+    partyLinkedUserId: '',
+    partyLinkedAgentName: '',
+    partyLinkedUserName: '',
     partySearch: '',
     currency: 'all',
     paymentMethod: 'all',
@@ -472,14 +489,29 @@ function applyRevenueFilters(
         if (filters.party !== 'all') {
             const normalizedParty = normalizeRevenueFilterValue(filters.party)
             const normalizedPartyId = normalizeRevenueFilterValue(filters.partyPartnerId)
+            const normalizedLinkedAgentName = normalizeRevenueFilterValue(filters.partyLinkedAgentName)
+            const normalizedLinkedUserName = normalizeRevenueFilterValue(filters.partyLinkedUserName)
             const recordPartyName = normalizeRevenueFilterValue(record.partyName)
             const recordPartyId = normalizeRevenueFilterValue(record.partyId)
+            const recordCreatorId = normalizeRevenueFilterValue(record.createdBy)
+            const recordSalesAccountAgentId = normalizeRevenueFilterValue(record.salesAccountAgentId)
+            const linkedNameAliases = [normalizedLinkedAgentName, normalizedLinkedUserName].filter(Boolean)
 
-            if (normalizedPartyId) {
-                if (recordPartyId !== normalizedPartyId && recordPartyName !== normalizedParty) return false
-            } else if (!recordPartyName.includes(normalizedParty)) {
-                return false
-            }
+            const matchesExistingCounterparty = normalizedPartyId
+                ? recordPartyId === normalizedPartyId
+                    || recordPartyName === normalizedParty
+                    || linkedNameAliases.some((alias) => recordPartyName.includes(alias))
+                : recordPartyName.includes(normalizedParty)
+
+            const matchesLinkedSalesAccount = Boolean(
+                filters.partyAgentId
+                && recordSalesAccountAgentId === normalizeRevenueFilterValue(filters.partyAgentId)
+            )
+            const matchesLinkedUserCreator = Boolean(
+                filters.partyLinkedUserId
+                && recordCreatorId === normalizeRevenueFilterValue(filters.partyLinkedUserId)
+            )
+            if (!matchesExistingCounterparty && !matchesLinkedSalesAccount && !matchesLinkedUserCreator) return false
         }
         if (filters.currency !== 'all' && record.currency !== filters.currency) return false
         if (filters.paymentMethod !== 'all' && getRevenuePaymentMethod(record) !== filters.paymentMethod) return false
@@ -600,7 +632,11 @@ export function Revenue() {
     const salesOrderReturnItems = useSalesOrderReturnItemsForWorkspace(user?.workspaceId)
     const deliveryShipments = useDeliveryShipments(user?.workspaceId)
     const deliveryMerchantProfiles = useDeliveryMerchantProfiles(user?.workspaceId)
-    const deliveryBusinessPartners = useBusinessPartners(user?.workspaceId)
+    const businessPartners = useBusinessPartners(user?.workspaceId, {
+        includeRealEstateRoles: true,
+        includeAgentRoles: true,
+    })
+    const businessPartnerAgents = useAgents(user?.workspaceId)
     const rentalVehicles = useRentalVehicles(user?.workspaceId)
     const rentalContracts = useRentalContracts(user?.workspaceId)
     const rawExchangeTransactions = useExchangeTransactions(user?.workspaceId)
@@ -633,6 +669,46 @@ export function Revenue() {
         () => new Map(workspaceUsers.map((member) => [member.id, member.name || member.email || member.id] as const)),
         [workspaceUsers]
     )
+    const linkedAgentEntities = useMemo<RevenueLinkedAgentEntity[]>(() => {
+        const partnerById = new Map(businessPartners.map((partner) => [partner.id, partner] as const))
+        const userById = new Map(workspaceUsers.map((member) => [member.id, member] as const))
+
+        return businessPartnerAgents.flatMap((agent) => {
+            const userId = agent.linkedUserId?.trim()
+            const partner = partnerById.get(agent.businessPartnerId)
+            if (!userId || !partner) return []
+
+            const linkedUser = userById.get(userId)
+            return [{
+                agentId: agent.id,
+                partnerId: partner.id,
+                partnerName: partner.partnerName,
+                userId,
+                userName: linkedUser?.name || linkedUser?.email || userNameById.get(userId) || userId,
+                userEmail: linkedUser?.email || undefined,
+            }]
+        })
+    }, [businessPartnerAgents, businessPartners, userNameById, workspaceUsers])
+    const linkedAgentEntityByPartnerId = useMemo(
+        () => new Map(linkedAgentEntities.map((entity) => [entity.partnerId, entity] as const)),
+        [linkedAgentEntities]
+    )
+    const linkedAgentEntityByUserId = useMemo(
+        () => new Map(linkedAgentEntities.map((entity) => [entity.userId, entity] as const)),
+        [linkedAgentEntities]
+    )
+    const linkedUserAutocompleteOptions = useMemo<PartnerAutocompleteAdditionalOption[]>(() => {
+        const uniqueEntities = new Map(linkedAgentEntities.map((entity) => [entity.userId, entity] as const))
+        return Array.from(uniqueEntities.values())
+            .filter((entity) => entity.userName !== entity.userId)
+            .map((entity) => ({
+                id: entity.userId,
+                label: entity.userName,
+                description: entity.userEmail && entity.userEmail !== entity.userName ? entity.userEmail : undefined,
+                badgeLabel: t('businessPartners.agent.linkedUser', { defaultValue: 'Linked User' }),
+            }))
+            .sort((left, right) => left.label.localeCompare(right.label))
+    }, [linkedAgentEntities, t])
     const salesOrders = useMemo(
         () => applySalesOrderReturnQuantities(rawSalesOrders || [], salesOrderReturnItems)
             .filter((order) => !order.isArchived),
@@ -643,9 +719,9 @@ export function Revenue() {
         sales: (rawSales || []).filter(isActiveSale), exchangeTransactions: rawExchangeTransactions || [], realEstateCommissionTransactions,
         travelBookingPayments, clinicalAppointments, clinicalAppointmentTransactions, activityTransactions,
         activityTransactionLines, deliveryShipments, deliveryMerchantProfiles, rentalContracts, rentalVehicles,
-        partnerNameById: new Map(deliveryBusinessPartners.map((partner) => [partner.id, partner.partnerName] as const)),
+        partnerNameById: new Map(businessPartners.map((partner) => [partner.id, partner.partnerName] as const)),
         userNameById, startDate: dateBounds.startDate, endDate: dateBounds.endDate, t,
-    }), [rawSales, rawExchangeTransactions, realEstateCommissionTransactions, travelBookingPayments, clinicalAppointments, clinicalAppointmentTransactions, activityTransactions, activityTransactionLines, deliveryShipments, deliveryMerchantProfiles, rentalContracts, rentalVehicles, deliveryBusinessPartners, userNameById, dateBounds.startDate, dateBounds.endDate, t])
+    }), [rawSales, rawExchangeTransactions, realEstateCommissionTransactions, travelBookingPayments, clinicalAppointments, clinicalAppointmentTransactions, activityTransactions, activityTransactionLines, deliveryShipments, deliveryMerchantProfiles, rentalContracts, rentalVehicles, businessPartners, userNameById, dateBounds.startDate, dateBounds.endDate, t])
     const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
     const [selectedMetric, setSelectedMetric] = useState<MetricType | null>(null)
     const [isMetricModalOpen, setIsMetricModalOpen] = useState(false)
@@ -1190,7 +1266,7 @@ export function Revenue() {
         }
         if (filters.party !== 'all') {
             const partyLabel = filters.partySearch || filters.party
-            chips.push(t('revenue.filters.chipParty', { name: partyLabel, defaultValue: `Party: ${partyLabel}` }))
+            chips.push(t('revenue.filters.chipParty', { name: partyLabel, defaultValue: `Counterparty: ${partyLabel}` }))
         }
         if (filters.currency !== 'all') {
             chips.push(t('revenue.filters.chipCurrency', { code: filters.currency.toUpperCase(), defaultValue: `Currency: ${filters.currency.toUpperCase()}` }))
@@ -2419,7 +2495,7 @@ export function Revenue() {
                                         {t('revenue.filters.dialogTitle', { defaultValue: 'Revenue Analytics Filters' })}
                                     </DialogTitle>
                                     <DialogDescription className="max-w-3xl">
-                                        {t('revenue.filters.dialogDescription', { defaultValue: 'Refine revenue analytics by source, cashier or creator, party, product, return state, profitability, timing, and metric ranges. The page date range stays outside this modal.' })}
+                                        {t('revenue.filters.dialogDescription', { defaultValue: 'Refine revenue analytics by source, cashier or creator, counterparty, product, return state, profitability, timing, and metric ranges. The page date range stays outside this modal.' })}
                                     </DialogDescription>
                                 </DialogHeader>
 
@@ -2457,7 +2533,7 @@ export function Revenue() {
                                                         id="revenue-filter-search"
                                                         value={draftFilters.search}
                                                         onChange={(event) => setDraftFilters((current) => ({ ...current, search: event.target.value }))}
-                                                        placeholder={t('revenue.filters.searchPlaceholder', { defaultValue: 'Search ID, party, staff, product, category...' })}
+                                                        placeholder={t('revenue.filters.searchPlaceholder', { defaultValue: 'Search ID, counterparty, staff, product, category...' })}
                                                         className="ps-9"
                                                     />
                                                 </div>
@@ -2542,7 +2618,7 @@ export function Revenue() {
                                             </div>
 
                                             <div className="space-y-2">
-                                                <Label isLoading={deliveryBusinessPartners.isLoading}>{t('revenue.filters.party', { defaultValue: 'Customer / Party' })}</Label>
+                                                <Label isLoading={businessPartners.isLoading || businessPartnerAgents.isLoading}>{t('revenue.filters.party', { defaultValue: 'Counterparty' })}</Label>
                                                 <div className="grid gap-3">
                                                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
                                                         <PartnerAutocompleteInput
@@ -2551,25 +2627,61 @@ export function Revenue() {
                                                                 ...current,
                                                                 partySearch: value,
                                                                 party: value.trim() ? value.trim() : 'all',
-                                                                partyPartnerId: ''
+                                                                partyPartnerId: '',
+                                                                partyAgentId: '',
+                                                                partyLinkedUserId: '',
+                                                                partyLinkedAgentName: '',
+                                                                partyLinkedUserName: ''
                                                             }))}
-                                                            onSelectPartner={(partner) => setDraftFilters((current) => ({
-                                                                ...current,
-                                                                partySearch: partner.partnerName,
-                                                                party: partner.partnerName,
-                                                                partyPartnerId: partner.id
-                                                            }))}
+                                                            onSelectPartner={(partner) => {
+                                                                const linkedAgent = linkedAgentEntityByPartnerId.get(partner.id)
+                                                                setDraftFilters((current) => ({
+                                                                    ...current,
+                                                                    partySearch: partner.partnerName,
+                                                                    party: partner.partnerName,
+                                                                    partyPartnerId: partner.id,
+                                                                    partyAgentId: linkedAgent?.agentId || '',
+                                                                    partyLinkedUserId: linkedAgent?.userId || '',
+                                                                    partyLinkedAgentName: linkedAgent?.partnerName || '',
+                                                                    partyLinkedUserName: linkedAgent?.userName || ''
+                                                                }))
+                                                            }}
+                                                            additionalOptions={linkedUserAutocompleteOptions}
+                                                            onSelectAdditionalOption={(option) => {
+                                                                const linkedAgent = linkedAgentEntityByUserId.get(option.id)
+                                                                if (!linkedAgent) return
+                                                                setDraftFilters((current) => ({
+                                                                    ...current,
+                                                                    partySearch: linkedAgent.userName,
+                                                                    party: linkedAgent.userName,
+                                                                    partyPartnerId: linkedAgent.partnerId,
+                                                                    partyAgentId: linkedAgent.agentId,
+                                                                    partyLinkedUserId: linkedAgent.userId,
+                                                                    partyLinkedAgentName: linkedAgent.partnerName,
+                                                                    partyLinkedUserName: linkedAgent.userName
+                                                                }))
+                                                            }}
                                                             workspaceId={user?.workspaceId || ''}
-                                                            roles={['customer']}
-                                                            isLoading={deliveryBusinessPartners.isLoading}
-                                                            placeholder={t('revenue.filters.selectParty', { defaultValue: 'Select Customer / Party' })}
+                                                            includeRealEstateRoles
+                                                            includeAgentRoles
+                                                            isLoading={businessPartners.isLoading || businessPartnerAgents.isLoading}
+                                                            placeholder={t('revenue.filters.selectParty', { defaultValue: 'Select Counterparty' })}
                                                             disabled={!user?.workspaceId}
                                                         />
                                                         {draftFilters.party !== 'all' || draftFilters.partySearch ? (
                                                             <Button
                                                                 type="button"
                                                                 variant="outline"
-                                                                onClick={() => setDraftFilters((current) => ({ ...current, party: 'all', partyPartnerId: '', partySearch: '' }))}
+                                                                onClick={() => setDraftFilters((current) => ({
+                                                                    ...current,
+                                                                    party: 'all',
+                                                                    partyPartnerId: '',
+                                                                    partyAgentId: '',
+                                                                    partyLinkedUserId: '',
+                                                                    partyLinkedAgentName: '',
+                                                                    partyLinkedUserName: '',
+                                                                    partySearch: ''
+                                                                }))}
                                                                 className={cn("h-10", style === 'neo-orange' ? "rounded-none" : "rounded-2xl")}
                                                             >
                                                                 <X className="me-2 h-4 w-4" />
@@ -2582,7 +2694,7 @@ export function Revenue() {
                                                             <div className="min-w-0">
                                                                 <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-primary">
                                                                     <Users className="h-3.5 w-3.5" />
-                                                                    {t('revenue.filters.linkedParty', { defaultValue: 'Linked Customer / Party' })}
+                                                                    {t('revenue.filters.linkedParty', { defaultValue: 'Linked Counterparty' })}
                                                                 </div>
                                                                 <div className="truncate text-sm font-semibold">{draftFilters.partySearch}</div>
                                                             </div>
@@ -2591,7 +2703,16 @@ export function Revenue() {
                                                                 variant="ghost"
                                                                 size="sm"
                                                                 className="h-8 shrink-0 px-2 text-muted-foreground"
-                                                                onClick={() => setDraftFilters((current) => ({ ...current, party: 'all', partyPartnerId: '', partySearch: '' }))}
+                                                                onClick={() => setDraftFilters((current) => ({
+                                                                    ...current,
+                                                                    party: 'all',
+                                                                    partyPartnerId: '',
+                                                                    partyAgentId: '',
+                                                                    partyLinkedUserId: '',
+                                                                    partyLinkedAgentName: '',
+                                                                    partyLinkedUserName: '',
+                                                                    partySearch: ''
+                                                                }))}
                                                             >
                                                                 <X className="me-1.5 h-4 w-4" />
                                                                 {t('revenue.filters.clearLink', { defaultValue: 'Clear Link' })}

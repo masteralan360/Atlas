@@ -41,6 +41,7 @@ export interface RevenueAnalysisRecord {
     cashier: string
     partyId?: string | null
     partyName?: string
+    salesAccountAgentId?: string | null
     sequenceId?: number
     paymentMethod?: string | null
     notes?: string | null
@@ -195,6 +196,7 @@ export function toRevenueRecordFromSalesOrder(order: SalesOrder, options: Revenu
         cashier: '',
         partyId: order.businessPartnerId || order.customerId || null,
         partyName: order.customerName,
+        salesAccountAgentId: order.salesAccountAgentId || null,
         paymentMethod: order.paymentMethod || null,
         notes: order.notes || null,
         hasPartialReturn: order.returnStatus === 'partial',

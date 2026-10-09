@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Users } from 'lucide-react'
+import { UserRound, Users } from 'lucide-react'
 
 import { useBusinessPartners, type BusinessPartner, type BusinessPartnerRole } from '@/local-db'
 import { Input } from '@/ui/components'
 import { cn } from '@/lib/utils'
 import { AutocompletePopover } from '@/ui/components/AutocompletePopover'
+
+export interface PartnerAutocompleteAdditionalOption {
+    id: string
+    label: string
+    description?: string
+    badgeLabel?: string
+}
 
 interface PartnerAutocompleteInputProps {
     value: string
@@ -22,6 +29,8 @@ interface PartnerAutocompleteInputProps {
     eligibleAgentPartnerIds?: string[]
     excludePartnerIds?: string[]
     roles?: BusinessPartnerRole[]
+    additionalOptions?: PartnerAutocompleteAdditionalOption[]
+    onSelectAdditionalOption?: (option: PartnerAutocompleteAdditionalOption) => void
     isLoading?: boolean
 }
 
@@ -39,6 +48,8 @@ export function PartnerAutocompleteInput({
     eligibleAgentPartnerIds,
     excludePartnerIds = [],
     roles,
+    additionalOptions = [],
+    onSelectAdditionalOption,
     isLoading: isLoadingOverride
 }: PartnerAutocompleteInputProps) {
     const { t } = useTranslation()
@@ -72,7 +83,16 @@ export function PartnerAutocompleteInput({
             .slice(0, 8)
     }, [eligibleAgentPartnerIdSet, excludedPartnerIds, partners, query, showInitialSuggestions])
 
-    const showDropdown = isFocused && !justSelected && filtered.length > 0
+    const filteredAdditionalOptions = useMemo(() => {
+        if (!query || query.length < 1) {
+            return showInitialSuggestions ? additionalOptions.slice(0, 8) : []
+        }
+        return additionalOptions
+            .filter((option) => `${option.label} ${option.description || ''}`.toLowerCase().includes(query))
+            .slice(0, 8)
+    }, [additionalOptions, query, showInitialSuggestions])
+
+    const showDropdown = isFocused && !justSelected && (filtered.length > 0 || filteredAdditionalOptions.length > 0)
 
     const handleSelect = useCallback((partner: BusinessPartner) => {
         hadFocusRef.current = false
@@ -81,6 +101,14 @@ export function PartnerAutocompleteInput({
         onChange(partner.partnerName)
         onSelectPartner(partner)
     }, [onChange, onSelectPartner])
+
+    const handleSelectAdditionalOption = useCallback((option: PartnerAutocompleteAdditionalOption) => {
+        hadFocusRef.current = false
+        setJustSelected(true)
+        setIsFocused(false)
+        onChange(option.label)
+        onSelectAdditionalOption?.(option)
+    }, [onChange, onSelectAdditionalOption])
 
     useEffect(() => {
         if (justSelected) {
@@ -143,7 +171,7 @@ export function PartnerAutocompleteInput({
             <div className="rounded-xl border bg-popover shadow-lg">
                     {filtered.map((partner) => (
                         <button
-                            key={partner.id}
+                            key={`partner:${partner.id}`}
                             type="button"
                             className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent focus:bg-accent focus:outline-none"
                             onMouseDown={(e) => {
@@ -173,6 +201,30 @@ export function PartnerAutocompleteInput({
                                                         ? t('businessPartners.roles.onlineCustomer', { defaultValue: 'Online Customer' })
                                                 : t('customers.title', { defaultValue: 'Customer' })}
                             </span>
+                        </button>
+                    ))}
+                    {filteredAdditionalOptions.map((option) => (
+                        <button
+                            key={`additional:${option.id}`}
+                            type="button"
+                            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent focus:bg-accent focus:outline-none"
+                            onMouseDown={(e) => {
+                                e.preventDefault()
+                                handleSelectAdditionalOption(option)
+                            }}
+                        >
+                            <UserRound className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <div className="min-w-0 flex-1">
+                                <div className="truncate font-medium">{option.label}</div>
+                                {option.description ? (
+                                    <div className="truncate text-xs text-muted-foreground">{option.description}</div>
+                                ) : null}
+                            </div>
+                            {option.badgeLabel ? (
+                                <span className="shrink-0 rounded-full border bg-muted/40 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+                                    {option.badgeLabel}
+                                </span>
+                            ) : null}
                         </button>
                     ))}
                 </div>
