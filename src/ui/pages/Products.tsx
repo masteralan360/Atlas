@@ -25,6 +25,7 @@ import {
 } from '@/lib/supabaseRequest'
 import { invokeWorkspaceAccess } from '@/lib/workspaceAccess'
 import { cn, formatCurrency } from '@/lib/utils'
+import { quantitiesEqual } from '@/lib/quantity'
 import {
     assignGeneratedProductImportSkus,
     createProductImportPreviewRows,
@@ -159,12 +160,99 @@ type ProductListGroup = {
     variants: Product[]
 }
 
+type ProductPageGroup = {
+    primary: Product
+    variants: Product[]
+    totalVariantCount: number
+    includesPrimary: boolean
+    isContinuation: boolean
+}
+
+type ProductPageRow = {
+    product: Product
+    isContinuation: boolean
+    continuationParentName?: string
+}
+
 type ProductTableRow = {
     product: Product
     isPrimary: boolean
     isVariant: boolean
     hasVisibleVariants: boolean
     isLastVariant: boolean
+    isContinuation: boolean
+    continuationParentName?: string
+}
+
+function paginateProductGroups(
+    groups: ProductListGroup[],
+    pageSize: number,
+    shouldExpandVariants: (group: ProductListGroup) => boolean
+): ProductPageGroup[][] {
+    const safePageSize = Math.max(1, Math.floor(pageSize) || 1)
+    const pages: ProductPageGroup[][] = []
+    let currentPage: ProductPageGroup[] = []
+    let currentPageRowCount = 0
+
+    const finishPage = () => {
+        if (currentPage.length === 0) return
+        pages.push(currentPage)
+        currentPage = []
+        currentPageRowCount = 0
+    }
+
+    for (const group of groups) {
+        const visibleVariants = shouldExpandVariants(group) ? group.variants : []
+        const groupRowCount = 1 + visibleVariants.length
+        const segments: ProductPageGroup[] = []
+
+        if (groupRowCount <= safePageSize) {
+            segments.push({
+                primary: group.primary,
+                variants: visibleVariants,
+                totalVariantCount: group.variants.length,
+                includesPrimary: true,
+                isContinuation: false
+            })
+        } else {
+            // Keep normal product families together. Only split a family that
+            // cannot fit on a page by itself, then mark its following segments.
+            if (currentPageRowCount > 0) finishPage()
+
+            const firstSegmentVariants = visibleVariants.slice(0, safePageSize - 1)
+            segments.push({
+                primary: group.primary,
+                variants: firstSegmentVariants,
+                totalVariantCount: group.variants.length,
+                includesPrimary: true,
+                isContinuation: false
+            })
+
+            for (let offset = firstSegmentVariants.length; offset < visibleVariants.length; offset += safePageSize) {
+                segments.push({
+                    primary: group.primary,
+                    variants: visibleVariants.slice(offset, offset + safePageSize),
+                    totalVariantCount: group.variants.length,
+                    includesPrimary: false,
+                    isContinuation: true
+                })
+            }
+        }
+
+        for (const segment of segments) {
+            const segmentRowCount = (segment.includesPrimary ? 1 : 0) + segment.variants.length
+            if (currentPageRowCount > 0 && currentPageRowCount + segmentRowCount > safePageSize) {
+                finishPage()
+            }
+
+            currentPage.push(segment)
+            currentPageRowCount += segmentRowCount
+            if (currentPageRowCount === safePageSize) finishPage()
+        }
+    }
+
+    finishPage()
+    return pages
 }
 
 function countActiveProductFilters(filters: ProductFilterState) {
@@ -281,24 +369,26 @@ export function Products() {
     // Besides observing local changes, this hook refreshes inventory from the
     // cloud when this page is opened. The direct query that used to live here
     // could leave Add Stock with an empty or stale local snapshot on a fresh load.
-    const inventoryRows = useInventory(workspaceId)
+    const inventoryRows = useInventory(workspaceId, { includeProducts: false })
 
     const productStorageMap = useMemo(() => {
-        const map = new Map<string, { name: string; quantity: number }[]>()
-        const rows = inventoryRows
-        const temp = new Map<string, Map<string, number>>()
-        for (const row of rows) {
+        const map = new Map<string, { storageId: string; name: string; quantity: number }[]>()
+        const temp = new Map<string, Map<string, { name: string; quantity: number }>>()
+        for (const row of inventoryRows) {
             const storage = storageById.get(row.storageId)
             if (!storage) continue
             const productEntry = temp.get(row.productId) ?? new Map()
-            const currentQty = productEntry.get(storage.name) ?? 0
-            productEntry.set(storage.name, currentQty + row.quantity)
+            const currentPosition = productEntry.get(row.storageId)
+            productEntry.set(row.storageId, {
+                name: storage.name,
+                quantity: (currentPosition?.quantity ?? 0) + row.quantity,
+            })
             temp.set(row.productId, productEntry)
         }
         for (const [productId, storageMap] of temp) {
-            const entries: { name: string; quantity: number }[] = []
-            for (const [name, quantity] of storageMap) {
-                entries.push({ name, quantity })
+            const entries: { storageId: string; name: string; quantity: number }[] = []
+            for (const [storageId, position] of storageMap) {
+                entries.push({ storageId, ...position })
             }
             map.set(productId, entries)
         }
@@ -307,6 +397,7 @@ export function Products() {
             const storage = storageById.get(product.storageId)
             if (!storage) continue
             map.set(product.id, [{
+                storageId: product.storageId,
                 name: product.storageName || storage.name,
                 quantity: Number(product.quantity) || 0
             }])
@@ -397,6 +488,12 @@ export function Products() {
     const [isPriceBookDialogOpen, setIsPriceBookDialogOpen] = useState(false)
     const [adjustmentDialogOpen, setAdjustmentDialogOpen] = useState(false)
     const [selectedProductForStock, setSelectedProductForStock] = useState<string | undefined>()
+    const [stockQuantityOverrides, setStockQuantityOverrides] = useState<
+        Record<string, { quantity: number; previousUpdatedAt?: string }>
+    >({})
+    const [storagePositionOverrides, setStoragePositionOverrides] = useState<
+        Record<string, Record<string, { name: string; quantity: number; savedProductUpdatedAt: string }>>
+    >({})
     const [heldStockActionProductId, setHeldStockActionProductId] = useState<string | null>(null)
     const stockRowHoldTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const stockRowHoldOriginRef = useRef<{ productId: string; x: number; y: number } | null>(null)
@@ -639,10 +736,14 @@ export function Products() {
         return storage ? storage.name : ''
     }, [storageById])
 
+    const getDisplayedStockQuantity = (product: Product) =>
+        stockQuantityOverrides[product.id]?.quantity ?? product.quantity
+
     const renderStockQuantity = (product: Product, serviceLabel: string) => {
         if (isService(product)) return serviceLabel
 
-        const { label, smallerUnitTotal } = getProductQuantityPresentation(product.id, product.quantity, product.unit)
+        const quantity = getDisplayedStockQuantity(product)
+        const { label, smallerUnitTotal } = getProductQuantityPresentation(product.id, quantity, product.unit)
         if (!smallerUnitTotal) return label
 
         return (
@@ -662,8 +763,22 @@ export function Products() {
     }
 
     const renderStorage = (productId: string) => {
-        const entries = productStorageMap.get(productId)
-        if (!entries || entries.length === 0) return null
+        const entriesByStorageId = new Map(
+            (productStorageMap.get(productId) ?? []).map((entry) => [entry.storageId, entry] as const)
+        )
+        for (const [storageId, override] of Object.entries(storagePositionOverrides[productId] ?? {})) {
+            if (override.quantity <= 0) {
+                entriesByStorageId.delete(storageId)
+            } else {
+                entriesByStorageId.set(storageId, { storageId, ...override })
+            }
+        }
+        const entries = Array.from(entriesByStorageId.values())
+        if (entries.length === 0) {
+            const hasConfirmedEmptyPosition = Object.values(storagePositionOverrides[productId] ?? {})
+                .some((override) => override.quantity <= 0)
+            return hasConfirmedEmptyPosition ? '' : null
+        }
         if (entries.length === 1) return <>{entries[0].name}</>
         const sorted = [...entries].sort((a, b) => b.quantity - a.quantity)
         return (
@@ -676,7 +791,7 @@ export function Products() {
                     </TooltipTrigger>
                     <TooltipContent side="top" align="start" className="max-w-[240px] space-y-1.5 p-3">
                         {sorted.map((entry) => (
-                            <div key={entry.name} className="flex items-center justify-between gap-4 text-sm">
+                            <div key={entry.storageId} className="flex items-center justify-between gap-4 text-sm">
                                 <span>{entry.name}</span>
                                 <span className="font-mono tabular-nums text-muted-foreground">
                                     {formatProductQuantity(productId, entry.quantity, productById.get(productId)?.unit || 'pcs')}
@@ -812,6 +927,86 @@ export function Products() {
         [products]
     )
 
+    useEffect(() => {
+        setStockQuantityOverrides((current) => {
+            const remaining = Object.entries(current).filter(([productId, override]) => {
+                const product = productById.get(productId)
+                return product
+                    && !quantitiesEqual(product.quantity, override.quantity)
+                    && product.updatedAt === override.previousUpdatedAt
+            })
+            return remaining.length === Object.keys(current).length
+                ? current
+                : Object.fromEntries(remaining)
+        })
+    }, [productById])
+
+    useEffect(() => {
+        setStoragePositionOverrides((current) => {
+            let changed = false
+            const next: typeof current = {}
+            for (const [productId, overrides] of Object.entries(current)) {
+                const product = productById.get(productId)
+                if (!product) {
+                    changed = true
+                    continue
+                }
+                const remaining: typeof overrides = {}
+                for (const [storageId, override] of Object.entries(overrides)) {
+                    const position = inventoryRows.find((row) =>
+                        row.productId === productId && row.storageId === storageId
+                    )
+                    const positionIsCurrent = override.quantity > 0
+                        ? Boolean(position && quantitiesEqual(position.quantity, override.quantity))
+                        : !position && product.updatedAt === override.savedProductUpdatedAt
+                    if (positionIsCurrent) {
+                        changed = true
+                    } else {
+                        remaining[storageId] = override
+                    }
+                }
+                if (Object.keys(remaining).length > 0) next[productId] = remaining
+                else if (Object.keys(overrides).length > 0) changed = true
+            }
+            return changed ? next : current
+        })
+    }, [inventoryRows, productById])
+
+    const handleStockAdjustmentSaved = useCallback((
+        productId: string,
+        storageId: string,
+        positionQuantity: number,
+        totalQuantity: number,
+        savedProductUpdatedAt: string,
+    ) => {
+        const product = productById.get(productId)
+        if (!product || !quantitiesEqual(product.quantity, totalQuantity)) {
+            setStockQuantityOverrides((current) => ({
+                ...current,
+                [productId]: { quantity: totalQuantity, previousUpdatedAt: product?.updatedAt },
+            }))
+        }
+
+        const storageName = storageById.get(storageId)?.name
+        if (!storageName) return
+        const displayedPositionQuantity = productStorageMap.get(productId)
+            ?.find((entry) => entry.storageId === storageId)?.quantity ?? 0
+        const legacyFallbackStillPointsToStorage = positionQuantity <= 0 && product?.storageId === storageId
+        if (quantitiesEqual(displayedPositionQuantity, positionQuantity) && !legacyFallbackStillPointsToStorage) return
+
+        setStoragePositionOverrides((current) => ({
+            ...current,
+            [productId]: {
+                ...current[productId],
+                [storageId]: {
+                    name: storageName,
+                    quantity: positionQuantity,
+                    savedProductUpdatedAt,
+                },
+            },
+        }))
+    }, [productById, productStorageMap, storageById])
+
     const variantsByParentId = useMemo(() => {
         const map = new Map<string, Product[]>()
         for (const product of products) {
@@ -842,46 +1037,68 @@ export function Products() {
     }, [filteredProducts, productById])
 
     const totalCount = filteredProducts.length
-    const paginationCount = productListGroups.length
+    const productPages = useMemo(
+        () => paginateProductGroups(productListGroups, pageSize, (group) => (
+            isMobile()
+            || viewMode === 'grid'
+            || !collapsedPrimaryProductIds.has(group.primary.id)
+        )),
+        [collapsedPrimaryProductIds, pageSize, productListGroups, viewMode]
+    )
+    const paginatedProductGroups = productPages[currentPage - 1] ?? []
 
-    const paginatedProductGroups = useMemo(() => {
-        const from = (currentPage - 1) * pageSize
-        return productListGroups.slice(from, from + pageSize)
-    }, [currentPage, pageSize, productListGroups])
-
-    const paginatedProducts = useMemo(
-        () => paginatedProductGroups.flatMap((group) => [group.primary, ...group.variants]),
+    const paginatedProducts = useMemo<ProductPageRow[]>(
+        () => paginatedProductGroups.flatMap((group) => [
+            ...(group.includesPrimary ? [{ product: group.primary, isContinuation: false }] : []),
+            ...group.variants.map((product, index) => ({
+                product,
+                isContinuation: group.isContinuation && index === 0,
+                continuationParentName: group.isContinuation && index === 0 ? group.primary.name : undefined
+            }))
+        ]),
         [paginatedProductGroups]
     )
 
     const tableProductRows = useMemo<ProductTableRow[]>(() => {
         return paginatedProductGroups.flatMap((group) => {
-            const hasVisibleVariants = group.variants.length > 0
+            const hasVisibleVariants = group.totalVariantCount > 0
             const isPrimary = (variantsByParentId.get(group.primary.id)?.length ?? 0) > 0
-            const primaryRow: ProductTableRow = {
-                product: group.primary,
-                isPrimary,
-                isVariant: Boolean(group.primary.parentProductId),
-                hasVisibleVariants,
-                isLastVariant: false
+            const rows: ProductTableRow[] = []
+
+            if (group.includesPrimary) {
+                rows.push({
+                    product: group.primary,
+                    isPrimary,
+                    isVariant: Boolean(group.primary.parentProductId),
+                    hasVisibleVariants,
+                    isLastVariant: false,
+                    isContinuation: false
+                })
             }
 
-            if (!hasVisibleVariants || collapsedPrimaryProductIds.has(group.primary.id)) {
-                return [primaryRow]
-            }
+            const showVariants = isMobile()
+                || viewMode === 'grid'
+                || !collapsedPrimaryProductIds.has(group.primary.id)
+            if (!showVariants) return rows
 
             return [
-                primaryRow,
+                ...rows,
                 ...group.variants.map((product, index) => ({
                     product,
                     isPrimary: false,
                     isVariant: true,
                     hasVisibleVariants: false,
-                    isLastVariant: index === group.variants.length - 1
+                    isLastVariant: index === group.variants.length - 1,
+                    isContinuation: group.isContinuation && index === 0,
+                    continuationParentName: group.isContinuation && index === 0 ? group.primary.name : undefined
                 }))
             ]
         })
-    }, [collapsedPrimaryProductIds, paginatedProductGroups, variantsByParentId])
+    }, [collapsedPrimaryProductIds, paginatedProductGroups, variantsByParentId, viewMode])
+
+    useEffect(() => {
+        setCurrentPage((page) => Math.min(page, Math.max(productPages.length, 1)))
+    }, [productPages.length])
 
     const isPrimaryProduct = (product: Product) => (variantsByParentId.get(product.id)?.length ?? 0) > 0
 
@@ -1663,7 +1880,8 @@ export function Products() {
                         </Suspense>}
                         <AppPagination
                             currentPage={currentPage}
-                            totalCount={paginationCount}
+                            totalCount={totalCount}
+                            pageCount={productPages.length}
                             pageSize={pageSize}
                             onPageChange={setCurrentPage}
                             onPageSizeChange={(newSize) => {
@@ -1714,13 +1932,17 @@ export function Products() {
                             {isMobile() && (
                                 <div className="grid grid-cols-1 gap-4">
                                     {paginatedProductGroups.map((group) => {
-                                        const groupedProducts = [group.primary, ...group.variants]
+                                        const groupedProducts = [
+                                            ...(group.includesPrimary ? [group.primary] : []),
+                                            ...group.variants
+                                        ]
 
                                         return (
-                                            <div key={group.primary.id} className="space-y-4">
+                                            <div key={`${group.primary.id}-${group.isContinuation ? 'continued' : 'start'}`} className="space-y-4">
                                                 {groupedProducts.map((product, index) => {
-                                                    const isLinkedVariant = index > 0
-                                                    const isAttachedVariant = index === 1
+                                                    const isLinkedVariant = Boolean(product.parentProductId)
+                                                    const isAttachedVariant = group.includesPrimary && index === 1
+                                                    const isContinuationRow = group.isContinuation && index === 0
 
                                                     return (
                                                         <div
@@ -1755,6 +1977,12 @@ export function Products() {
                                                                                         ? t('products.barcodePrint.selectRow', { defaultValue: 'Select item' })
                                                                                         : t('products.branchClone.selectProduct', { defaultValue: 'Select Product' })}
                                                                                 </Label>
+                                                                            </div>
+                                                                        )}
+                                                                        {isContinuationRow && (
+                                                                            <div className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">
+                                                                                <GitBranch className="h-3 w-3 shrink-0" />
+                                                                                <span className="truncate">{t('products.variants.continuedFrom', { parent: group.primary.name })}</span>
                                                                             </div>
                                                                         )}
                                                                         <div className={cn('flex gap-4', isLinkedVariant && 'gap-3')}>
@@ -1804,7 +2032,7 @@ export function Products() {
                                                                                 <div className={cn(
                                                                                     'mt-0.5 text-[11px] font-black uppercase tracking-widest',
                                                                                     isLinkedVariant && 'text-[10px]',
-                                                                                    product.quantity <= product.minStockLevel ? 'text-amber-500' : 'text-muted-foreground/60'
+                                                                                    getDisplayedStockQuantity(product) <= product.minStockLevel ? 'text-amber-500' : 'text-muted-foreground/60'
                                                                                 )}>
                                                                                     {renderStockQuantity(product, t('services.noInventory', { defaultValue: 'No inventory' }))}
                                                                                 </div>
@@ -1882,7 +2110,7 @@ export function Products() {
                                 <>
                                     {viewMode === 'grid' ? (
                                         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                                            {paginatedProducts.map((product) => (
+                                            {paginatedProducts.map(({ product, isContinuation, continuationParentName }) => (
                                                 <ContextMenu key={product.id}>
                                                     <ContextMenuTrigger asChild>
                                                         <div
@@ -1938,6 +2166,12 @@ export function Products() {
 
                                                             <div className="flex-1 space-y-1">
                                                                 <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/60">{product.sku}</div>
+                                                                {isContinuation && (
+                                                                    <div className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">
+                                                                        <GitBranch className="h-3 w-3 shrink-0" />
+                                                                        <span className="truncate">{t('products.variants.continuedFrom', { parent: continuationParentName })}</span>
+                                                                    </div>
+                                                                )}
                                                                 <div className="flex items-start gap-2"><h3 className="line-clamp-2 text-sm font-bold leading-snug text-foreground transition-colors group-hover:text-primary">{product.name}</h3>{isService(product) && <span className="shrink-0 rounded-md border border-violet-500/25 bg-violet-500/10 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">{t('services.badge')}</span>}{isPrimaryProduct(product) && <span className="shrink-0 rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-primary">{t('products.variants.primary', { defaultValue: 'Primary' })}</span>}</div>
                                                                 <div className="text-[11px] font-bold uppercase tracking-wide text-primary/70">{getCategoryName(product.categoryId)}</div>
                                                                 <div className="text-[10px] font-medium text-muted-foreground/80">{isService(product) ? t('services.noInventory', { defaultValue: 'No inventory' }) : (renderStorage(product.id) ?? getStorageName(product.storageId))}</div>
@@ -2076,7 +2310,7 @@ export function Products() {
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
-                                                {tableProductRows.map(({ product, isPrimary, isVariant, hasVisibleVariants, isLastVariant }) => (
+                                                {tableProductRows.map(({ product, isPrimary, isVariant, hasVisibleVariants, isLastVariant, isContinuation, continuationParentName }) => (
                                                     <ContextMenu key={product.id}>
                                                         <ContextMenuTrigger asChild>
                                                             <TableRow
@@ -2155,7 +2389,7 @@ export function Products() {
                                                                     />
                                                                 </TableCell>
                                                                 <TableCell className="font-mono text-sm">{product.sku}</TableCell>
-                                                                <TableCell className="font-medium"><div className="flex items-center gap-2"><span>{product.name}</span>{isService(product) && <span className="inline-flex rounded-md border border-violet-500/25 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">{t('services.badge')}</span>}{isPrimary && <span className="inline-flex rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-primary">{t('products.variants.primary', { defaultValue: 'Primary' })}</span>}{isVariant && <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground"><GitBranch className="h-3 w-3" />{t('products.variants.variant', { defaultValue: 'Variant' })}</span>}</div></TableCell>
+                                                                <TableCell className="font-medium"><div className="flex flex-wrap items-center gap-2">{isContinuation && <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[9px] font-bold text-primary"><GitBranch className="h-3 w-3 shrink-0" />{t('products.variants.continuedFrom', { parent: continuationParentName ?? '' })}</span>}<span>{product.name}</span>{isService(product) && <span className="inline-flex rounded-md border border-violet-500/25 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-violet-700 dark:text-violet-300">{t('services.badge')}</span>}{isPrimary && <span className="inline-flex rounded-md border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-primary">{t('products.variants.primary', { defaultValue: 'Primary' })}</span>}{isVariant && <span className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground"><GitBranch className="h-3 w-3" />{t('products.variants.variant', { defaultValue: 'Variant' })}</span>}</div></TableCell>
                                                                 <TableCell>{getCategoryName(product.categoryId)}</TableCell>
                                                                 <TableCell>{isService(product) ? '—' : (renderStorage(product.id) ?? getStorageName(product.storageId))}</TableCell>
                                                                 {priceBooksEnabled && <TableCell>{renderPriceBooks(product.id)}</TableCell>}
@@ -2163,7 +2397,7 @@ export function Products() {
                                                                     {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
                                                                 </TableCell>
                                                                 <TableCell className="text-right">
-                                                                    <span className={product.quantity <= product.minStockLevel ? 'font-medium text-amber-500' : ''}>
+                                                                    <span className={getDisplayedStockQuantity(product) <= product.minStockLevel ? 'font-medium text-amber-500' : ''}>
                                                                         {renderStockQuantity(product, '—')}
                                                                     </span>
                                                                 </TableCell>
@@ -2577,6 +2811,7 @@ export function Products() {
                 inventory={inventoryRows}
                 workspaceId={workspaceId}
                 userId={user?.id ?? null}
+                onSaved={handleStockAdjustmentSaved}
             />
         </div>
     )

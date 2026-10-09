@@ -102,6 +102,7 @@ const inventorySnapshotConflictCooldowns = new Map<string, InventorySnapshotConf
 
 export interface InventoryWorkspaceFetchOptions {
     storageId?: string
+    includeProducts?: boolean
 }
 
 export interface UseInventoryOptions extends InventoryWorkspaceFetchOptions {
@@ -545,6 +546,25 @@ function getRemoteInventoryProductId(row: Record<string, unknown>) {
     return typeof productId === 'string' ? productId : null
 }
 
+function isLocalRowNewerThanSnapshot(
+    localRow: Record<string, unknown> | undefined,
+    remoteRow: Record<string, unknown> | undefined,
+    fetchedAt: string,
+) {
+    if (!localRow) return false
+    if (localRow.syncStatus && localRow.syncStatus !== 'synced') return true
+
+    const localVersion = Number(localRow.version)
+    const remoteVersion = Number(remoteRow?.version)
+    if (Number.isFinite(localVersion) && Number.isFinite(remoteVersion)) {
+        if (localVersion > remoteVersion) return true
+        if (localVersion < remoteVersion) return false
+    }
+
+    const localTimestamp = Date.parse(String(localRow.lastSyncedAt ?? localRow.updatedAt ?? ''))
+    return Number.isFinite(localTimestamp) && localTimestamp > Date.parse(fetchedAt)
+}
+
 async function fetchProductsForInventoryRows(
     workspaceId: string,
     remoteInventoryRows: Record<string, unknown>[],
@@ -602,6 +622,7 @@ async function fetchInventoryWorkspaceFromSupabaseInternal(
     }
 
     const storageId = options.storageId?.trim()
+    const includeProducts = options.includeProducts !== false
     const fetchedAt = new Date().toISOString()
 
     const [remoteInventory, remoteProducts] = storageId
@@ -617,12 +638,16 @@ async function fetchInventoryWorkspaceFromSupabaseInternal(
 
             return [
                 inventoryRows,
-                await fetchProductsForInventoryRows(workspaceId, inventoryRows, { storageId })
+                includeProducts
+                    ? await fetchProductsForInventoryRows(workspaceId, inventoryRows, { storageId })
+                    : []
             ] as const
         })()
         : await Promise.all([
             fetchPagedWorkspaceRows('inventory', workspaceId),
-            fetchProductsForInventoryRows(workspaceId, [], {})
+            includeProducts
+                ? fetchProductsForInventoryRows(workspaceId, [], {})
+                : Promise.resolve([] as Record<string, unknown>[])
         ])
 
     if (!remoteInventory) {
@@ -653,8 +678,17 @@ async function fetchInventoryWorkspaceFromSupabaseInternal(
     })
 
     const affectedProductIds = new Set<string>()
+    let productsChanged = false
 
-    await db.transaction('rw', [db.inventory, db.products], async () => {
+    const differsFromRemote = (localRow: Record<string, unknown> | undefined, remoteRow: Record<string, unknown>) => {
+        if (!localRow) return true
+        return Object.entries(remoteRow).some(([key, value]) => {
+            if (key === 'syncStatus' || key === 'lastSyncedAt') return false
+            return JSON.stringify(localRow[key]) !== JSON.stringify(value)
+        })
+    }
+
+    const reconcileLocalRows = async () => {
         const remoteInventoryIds = new Set(normalizedRemoteInventory.map((item) => item.id))
         const remoteProductIds = new Set(normalizedRemoteProducts.map((item) => item.id))
 
@@ -663,7 +697,15 @@ async function fetchInventoryWorkspaceFromSupabaseInternal(
             : await db.inventory.where('workspaceId').equals(workspaceId).toArray()
 
         const staleInventoryIds = localInventoryRows
-            .filter((localRow) => !remoteInventoryIds.has(localRow.id) && localRow.syncStatus === 'synced')
+            .filter((localRow) => (
+                !remoteInventoryIds.has(localRow.id)
+                && localRow.syncStatus === 'synced'
+                && !isLocalRowNewerThanSnapshot(
+                    localRow as unknown as Record<string, unknown>,
+                    undefined,
+                    fetchedAt,
+                )
+            ))
             .map((localRow) => {
                 affectedProductIds.add(localRow.productId)
                 return localRow.id
@@ -673,28 +715,73 @@ async function fetchInventoryWorkspaceFromSupabaseInternal(
             await db.inventory.bulkDelete(staleInventoryIds)
         }
 
-        if (!storageId) {
+        if (!storageId && includeProducts) {
             const localProducts = await db.products.where('workspaceId').equals(workspaceId).toArray()
             const staleProductIds = localProducts
-                .filter((localProduct) => !remoteProductIds.has(localProduct.id) && localProduct.syncStatus === 'synced')
+                .filter((localProduct) => (
+                    !remoteProductIds.has(localProduct.id)
+                    && localProduct.syncStatus === 'synced'
+                    && !isLocalRowNewerThanSnapshot(
+                        localProduct as unknown as Record<string, unknown>,
+                        undefined,
+                        fetchedAt,
+                    )
+                ))
                 .map((localProduct) => localProduct.id)
 
             if (staleProductIds.length > 0) {
                 await db.products.bulkDelete(staleProductIds)
+                productsChanged = true
             }
         }
 
-        if (normalizedRemoteProducts.length > 0) {
-            await db.products.bulkPut(normalizedRemoteProducts)
+        if (includeProducts && normalizedRemoteProducts.length > 0) {
+            const localProducts = await db.products.bulkGet(normalizedRemoteProducts.map((item) => item.id))
+            const changedProducts = normalizedRemoteProducts.filter((remoteProduct, index) =>
+                !isLocalRowNewerThanSnapshot(
+                    localProducts[index] as unknown as Record<string, unknown> | undefined,
+                    remoteProduct as unknown as Record<string, unknown>,
+                    fetchedAt,
+                )
+                && differsFromRemote(
+                    localProducts[index] as unknown as Record<string, unknown> | undefined,
+                    remoteProduct as unknown as Record<string, unknown>,
+                )
+            )
+            productsChanged = changedProducts.length > 0
+            if (productsChanged) {
+                await db.products.bulkPut(changedProducts)
+            }
         }
 
         if (normalizedRemoteInventory.length > 0) {
-            for (const row of normalizedRemoteInventory) {
-                affectedProductIds.add(row.productId)
+            const localInventory = await db.inventory.bulkGet(normalizedRemoteInventory.map((item) => item.id))
+            const changedInventory = normalizedRemoteInventory.filter((remoteRow, index) => {
+                const localRow = localInventory[index] as unknown as Record<string, unknown> | undefined
+                if (isLocalRowNewerThanSnapshot(
+                    localRow,
+                    remoteRow as unknown as Record<string, unknown>,
+                    fetchedAt,
+                )) return false
+
+                const changed = differsFromRemote(
+                    localRow,
+                    remoteRow as unknown as Record<string, unknown>,
+                )
+                if (changed) affectedProductIds.add(remoteRow.productId)
+                return changed
+            })
+            if (changedInventory.length > 0) {
+                await db.inventory.bulkPut(changedInventory)
             }
-            await db.inventory.bulkPut(normalizedRemoteInventory)
         }
-    })
+    }
+
+    if (includeProducts) {
+        await db.transaction('rw', [db.inventory, db.products], reconcileLocalRows)
+    } else {
+        await db.transaction('rw', db.inventory, reconcileLocalRows)
+    }
 
     // A scoped storage fetch only contains a partial inventory view. Avoid updating
     // product.quantity snapshots from partial data.
@@ -710,7 +797,9 @@ async function fetchInventoryWorkspaceFromSupabaseInternal(
         ))
     }
 
-    await syncProductBarcodeCachesForWorkspace(workspaceId)
+    if (productsChanged) {
+        await syncProductBarcodeCachesForWorkspace(workspaceId)
+    }
 
     if (affectedIds.length > 0) {
         const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
@@ -734,7 +823,8 @@ export async function fetchInventoryWorkspaceFromSupabase(
     }
 
     const storageId = options.storageId?.trim()
-    const key = `${workspaceId}:${storageId || 'all'}`
+    const includeProducts = options.includeProducts !== false
+    const key = `${workspaceId}:${storageId || 'all'}:products=${includeProducts}`
     const existing = inventoryWorkspaceFetchesInFlight.get(key)
     if (existing) {
         return existing
@@ -744,7 +834,7 @@ export async function fetchInventoryWorkspaceFromSupabase(
         if (!await canReconcileCloudWorkspaceData(workspaceId)) {
             return true
         }
-        return fetchInventoryWorkspaceFromSupabaseInternal(workspaceId, { storageId })
+        return fetchInventoryWorkspaceFromSupabaseInternal(workspaceId, { storageId, includeProducts })
     })()
         .finally(() => {
             if (inventoryWorkspaceFetchesInFlight.get(key) === request) {
@@ -765,7 +855,7 @@ function useInventoryCloudSync(workspaceId: string | undefined, options: UseInve
     useEffect(() => {
         async function syncFromSupabase() {
             if (enabled && syncRemote && online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
-                await fetchInventoryWorkspaceFromSupabase(workspaceId, { storageId })
+                await fetchInventoryWorkspaceFromSupabase(workspaceId, { storageId, includeProducts: options.includeProducts })
             }
         }
 

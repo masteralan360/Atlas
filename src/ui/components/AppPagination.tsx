@@ -23,6 +23,7 @@ interface AppPaginationProps {
     currentPage: number
     totalCount: number
     pageSize: number
+    pageCount?: number
     onPageChange: (page: number) => void
     onPageSizeChange?: (pageSize: number) => void
     pageSizeOptions?: number[]
@@ -33,13 +34,14 @@ export const AppPagination: React.FC<AppPaginationProps> = ({
     currentPage,
     totalCount,
     pageSize,
+    pageCount,
     onPageChange,
     onPageSizeChange,
     pageSizeOptions = [5, 10, 20, 50, 100],
     className
 }) => {
     const { t } = useTranslation()
-    const totalPages = Math.ceil(totalCount / pageSize)
+    const totalPages = pageCount ?? Math.ceil(totalCount / pageSize)
 
     // Only hide if there's no data AND no selector
     if (totalCount === 0 && !onPageSizeChange) return null

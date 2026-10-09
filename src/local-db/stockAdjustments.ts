@@ -32,6 +32,14 @@ const ALLOWED_REASONS: StockAdjustmentReason[] = [
   "other",
 ];
 
+export async function getProductStockSnapshot(productId: string) {
+  const product = await db.products.get(productId);
+  return product && !product.isDeleted ? {
+    quantity: roundQuantity(product.quantity),
+    updatedAt: product.updatedAt,
+  } : null;
+}
+
 export interface StockAdjustmentInput {
   productId: string;
   storageId: string;
@@ -39,7 +47,8 @@ export interface StockAdjustmentInput {
   quantity: number;
   /**
    * The desired quantity after the adjustment. When supplied, it takes
-   * precedence over quantity/adjustmentType after the position is refreshed.
+   * precedence over quantity/adjustmentType. Cloud workspaces apply this
+   * target against the authoritative position inside the stock adjustment RPC.
    */
   targetQuantity?: number;
   reason: StockAdjustmentReason;
@@ -166,14 +175,20 @@ export async function createStockAdjustment(
       return mapTransactionToStockAdjustment(existingTransaction) as StockAdjustment;
     }
   }
-  // Refresh the position before calculating the delta. This makes a final
-  // quantity entered immediately after a fresh app load apply to the real
-  // stock level, rather than to a stale local snapshot.
-  await hydrateInventoryProductStoragesFromSupabase(
-    workspaceId,
-    normalized.productId,
-    [normalized.storageId],
-  );
+  const useAuthoritativeTarget =
+    !isLocalWorkspaceMode(workspaceId) && normalized.targetQuantity !== null;
+
+  // Relative adjustments still need the latest quantity to build their
+  // transaction. Absolute cloud adjustments pass the target to the database,
+  // which calculates the delta under the position lock and avoids this second
+  // round trip after the dialog has already loaded the position.
+  if (!useAuthoritativeTarget) {
+    await hydrateInventoryProductStoragesFromSupabase(
+      workspaceId,
+      normalized.productId,
+      [normalized.storageId],
+    );
+  }
   const previousQuantity = await getInventoryQuantityForProductStorage(
     normalized.productId,
     normalized.storageId,
@@ -187,7 +202,7 @@ export async function createStockAdjustment(
     : roundQuantity(normalized.targetQuantity - previousQuantity);
   const newQuantity = roundQuantity(previousQuantity + quantityDelta);
 
-  if (quantityDelta === 0) {
+  if (quantityDelta === 0 && !useAuthoritativeTarget) {
     throw new Error("Stock is already at the requested quantity");
   }
 
@@ -196,15 +211,22 @@ export async function createStockAdjustment(
   }
 
   if (!isLocalWorkspaceMode(workspaceId)) {
+    // The target RPC replaces these client-side quantities with the exact
+    // authoritative values. If the local snapshot already equals the target,
+    // provide a harmless non-zero placeholder for the shared transaction
+    // validator; the RPC will either apply the target or report a no-op.
+    const transactionPreviousQuantity = quantityDelta === 0 ? 0 : previousQuantity;
+    const transactionQuantityDelta = quantityDelta === 0 ? 1 : quantityDelta;
+    const transactionNewQuantity = quantityDelta === 0 ? 1 : newQuantity;
     const transaction = await createInventoryTransaction(
       workspaceId,
       {
         productId: normalized.productId,
         storageId: normalized.storageId,
         transactionType: STOCK_ADJUSTMENT_TRANSACTION_TYPE,
-        quantityDelta,
-        previousQuantity,
-        newQuantity,
+        quantityDelta: transactionQuantityDelta,
+        previousQuantity: transactionPreviousQuantity,
+        newQuantity: transactionNewQuantity,
         adjustmentReason: normalized.reason,
         referenceId: transactionId,
         referenceType: STOCK_ADJUSTMENT_TRANSACTION_TYPE,
@@ -214,6 +236,9 @@ export async function createStockAdjustment(
       {
         id: transactionId,
         timestamp,
+        targetQuantity: useAuthoritativeTarget
+          ? normalized.targetQuantity ?? undefined
+          : undefined,
       },
     );
 

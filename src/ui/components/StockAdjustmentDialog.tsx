@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import {
     createStockAdjustment,
     getInventoryQuantityForProductStorage,
+    getProductStockSnapshot,
     hydrateInventoryProductStoragesFromSupabase,
     type Product,
     type StockAdjustmentReason,
@@ -84,6 +85,13 @@ interface StockAdjustmentDialogProps {
     workspaceId: string;
     userId: string | null;
     allowAnyStorage?: boolean;
+    onSaved?: (
+        productId: string,
+        storageId: string,
+        positionQuantity: number,
+        totalQuantity: number,
+        savedProductUpdatedAt: string,
+    ) => void;
 }
 
 export function StockAdjustmentDialog({
@@ -96,6 +104,7 @@ export function StockAdjustmentDialog({
     workspaceId,
     userId,
     allowAnyStorage = false,
+    onSaved,
 }: StockAdjustmentDialogProps) {
     const { t } = useTranslation();
     const { toast } = useToast();
@@ -324,6 +333,16 @@ export function StockAdjustmentDialog({
                 notes: form.notes,
                 createdBy: userId ?? null,
             });
+            const savedProduct = await getProductStockSnapshot(form.productId);
+            if (savedProduct) {
+                onSaved?.(
+                    form.productId,
+                    form.storageId,
+                    targetQuantity,
+                    savedProduct.quantity,
+                    savedProduct.updatedAt,
+                );
+            }
             toast({
                 title: t("stockAdjustments.messages.adjustmentSaved", "Adjustment saved"),
                 description: t("stockAdjustments.messages.adjustmentSavedDesc", "Inventory and audit log were updated."),

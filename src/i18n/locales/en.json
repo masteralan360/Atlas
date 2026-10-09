@@ -1725,6 +1725,7 @@
       "variant": "Variant",
       "primary": "Primary",
       "variantOf": "Variant of",
+      "continuedFrom": "Continued from {{parent}}",
       "parentUnavailable": "Primary product unavailable",
       "independentDetails": "Its stock, prices, and product details remain independent.",
       "viewParent": "View primary product",

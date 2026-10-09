@@ -1701,6 +1701,7 @@
       "variant": "نوع",
       "primary": "أساسي",
       "variantOf": "نوع من",
+      "continuedFrom": "تابع لأنواع {{parent}}",
       "parentUnavailable": "المنتج الأساسي غير متاح",
       "independentDetails": "يبقى مخزونه وأسعاره وتفاصيله مستقلة.",
       "viewParent": "عرض المنتج الأساسي",

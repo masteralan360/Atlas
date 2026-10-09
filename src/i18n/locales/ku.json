@@ -1704,6 +1704,7 @@
       "variant": "جۆر",
       "primary": "سەرەکی",
       "variantOf": "جۆر لە",
+      "continuedFrom": "درێژەی جۆرەکانی {{parent}}",
       "parentUnavailable": "بەرهەمی سەرەکی بەردەست نییە",
       "independentDetails": "کۆگا، نرخ و وردەکارییەکانی سەربەخۆ دەمێننەوە.",
       "viewParent": "بینینی بەرهەمی سەرەکی",

@@ -1876,6 +1876,25 @@ export async function deleteCategoryDiscount(id: string) {
 // Helpers for repetitive logic
 const TABLE_FETCH_PAGE_SIZE = 1000
 
+function isLocalHydrationRowNewer(
+    localRow: Record<string, unknown> | undefined,
+    remoteRow: Record<string, unknown> | undefined,
+    fetchStartedAt: string,
+) {
+    if (!localRow) return false
+    if (localRow.syncStatus && localRow.syncStatus !== 'synced') return true
+
+    const localVersion = Number(localRow.version)
+    const remoteVersion = Number(remoteRow?.version)
+    if (Number.isFinite(localVersion) && Number.isFinite(remoteVersion)) {
+        if (localVersion > remoteVersion) return true
+        if (localVersion < remoteVersion) return false
+    }
+
+    const localTimestamp = Date.parse(String(localRow.lastSyncedAt ?? localRow.updatedAt ?? ''))
+    return Number.isFinite(localTimestamp) && localTimestamp > Date.parse(fetchStartedAt)
+}
+
 export type TableHydrationOptions = {
     includeDeleted?: boolean
     /** Override the table's navigation freshness budget when a caller needs a tighter check. */
@@ -1898,6 +1917,7 @@ async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus
         return false
     }
 
+    const fetchStartedAt = new Date().toISOString()
     const includeDeleted = options?.includeDeleted ?? false
     const client = getSupabaseClientForTable(tableName)
     const remoteTableName = getSupabaseRemoteTableName(tableName)
@@ -1986,15 +2006,36 @@ async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus
     await db.transaction('rw', table, async () => {
         const localItems = await table.where('workspaceId').equals(workspaceId).toArray()
         if (signal?.aborted) return
+        const localItemsById = new Map<string, Record<string, unknown>>(
+            (localItems as Array<{ id: string }>).map((local) => [
+                local.id,
+                local as unknown as Record<string, unknown>,
+            ])
+        )
         const deletedIds = (localItems as any[])
-            .filter((local) => !remoteIds.has(local.id) && local.syncStatus === 'synced')
+            .filter((local) => (
+                !remoteIds.has(local.id)
+                && local.syncStatus === 'synced'
+                && !isLocalHydrationRowNewer(
+                    local as Record<string, unknown>,
+                    undefined,
+                    fetchStartedAt,
+                )
+            ))
             .map((local) => local.id)
+        const changedRemoteItems = remoteItems.filter((remoteItem) => (
+            !isLocalHydrationRowNewer(
+                localItemsById.get(remoteItem.id),
+                remoteItem as unknown as Record<string, unknown>,
+                fetchStartedAt,
+            )
+        ))
 
         if (deletedIds.length > 0) {
             await table.bulkDelete(deletedIds)
         }
-        if (remoteItems.length > 0) {
-            await table.bulkPut(remoteItems)
+        if (changedRemoteItems.length > 0) {
+            await table.bulkPut(changedRemoteItems)
         }
         reconciled = true
     })

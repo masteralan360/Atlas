@@ -190,22 +190,63 @@ type ApplyStockAdjustmentResult = {
   already_applied: boolean;
 };
 
+function isMissingTargetStockAdjustmentRpc(error: unknown) {
+  if (typeof error !== "object" || error === null) return false;
+  const rpcError = error as { code?: unknown };
+  return rpcError.code === "PGRST202" || rpcError.code === "42883";
+}
+
 export async function applyStockAdjustmentTransactionRemotely(
   transaction: InventoryTransaction,
+  targetQuantity?: number,
 ) {
   if (transaction.transactionType !== "stock_adjustment") {
     throw new Error("Only stock adjustments can use the stock adjustment RPC");
   }
 
   const client = getSupabaseClientForTable(TABLE_NAME);
-  const { data, error } = await runSupabaseAction(
-    `${TABLE_NAME}.apply_stock_adjustment`,
-    () => client.rpc("apply_stock_adjustment", {
+  const usesTargetQuantity = targetQuantity !== undefined;
+  const rpcName = usesTargetQuantity
+    ? "apply_stock_adjustment_to_target"
+    : "apply_stock_adjustment";
+  const rpcParameters = usesTargetQuantity
+    ? {
       p_transaction: toRemoteInventoryTransactionPayload(transaction),
-    }),
+      p_target_quantity: targetQuantity,
+    }
+    : { p_transaction: toRemoteInventoryTransactionPayload(transaction) };
+  const { data, error } = await runSupabaseAction(
+    `${TABLE_NAME}.${rpcName}`,
+    () => client.rpc(rpcName, rpcParameters),
   );
 
   if (error) {
+    if (usesTargetQuantity && isMissingTargetStockAdjustmentRpc(error)) {
+      // Keep older databases functional during a staged rollout. Only the
+      // explicit missing-function response takes this path; network failures
+      // still retry the idempotent target RPC above.
+      const { getInventoryQuantityForProductStorage, hydrateInventoryProductStoragesFromSupabase } =
+        await import("./inventory");
+      await hydrateInventoryProductStoragesFromSupabase(
+        transaction.workspaceId,
+        transaction.productId,
+        [transaction.storageId],
+      );
+      const previousQuantity = await getInventoryQuantityForProductStorage(
+        transaction.productId,
+        transaction.storageId,
+      );
+      const quantityDelta = roundQuantity(targetQuantity! - previousQuantity);
+      if (Math.abs(quantityDelta) <= QUANTITY_EPSILON) {
+        throw new Error("Stock is already at the requested quantity");
+      }
+      return applyStockAdjustmentTransactionRemotely({
+        ...transaction,
+        quantityDelta,
+        previousQuantity,
+        newQuantity: roundQuantity(previousQuantity + quantityDelta),
+      });
+    }
     throw error;
   }
 
@@ -228,18 +269,20 @@ async function reconcileAuthoritativeInventory(remoteInventory: Inventory) {
     .where("[productId+storageId]")
     .equals([remoteInventory.productId, remoteInventory.storageId])
     .toArray();
+  const duplicateIds = localRows
+    .filter((row) => (
+      row.workspaceId === remoteInventory.workspaceId
+      && row.id !== remoteInventory.id
+    ))
+    .map((row) => row.id);
 
   await db.transaction("rw", db.inventory, async () => {
-    await Promise.all(
-      localRows
-        .filter((row) => (
-          row.workspaceId === remoteInventory.workspaceId
-          && row.id !== remoteInventory.id
-        ))
-        .map((row) => db.inventory.delete(row.id)),
-    );
+    if (duplicateIds.length > 0) {
+      await db.inventory.bulkDelete(duplicateIds);
+    }
     await db.inventory.put(remoteInventory);
   });
+
   const { syncProductStockSnapshot } = await import("./inventory");
   await syncProductStockSnapshot(
     remoteInventory.productId,
@@ -250,6 +293,7 @@ async function reconcileAuthoritativeInventory(remoteInventory: Inventory) {
 
 export async function syncInventoryTransactionBestEffort(
   transaction: InventoryTransaction,
+  options?: { targetQuantity?: number },
 ): Promise<InventoryTransaction> {
   if (!shouldSyncInventoryTransaction(transaction.workspaceId, transaction.transactionType)) {
     return transaction;
@@ -261,12 +305,18 @@ export async function syncInventoryTransactionBestEffort(
 
   let result;
   try {
-    result = await applyStockAdjustmentTransactionRemotely(transaction);
+    result = await applyStockAdjustmentTransactionRemotely(
+      transaction,
+      options?.targetQuantity,
+    );
   } catch (error) {
     if (!isRetriableWebRequestError(error)) throw error;
     // The operation id is the transaction id, so this verification retry is
     // safe even when the first response was lost after the server committed.
-    result = await applyStockAdjustmentTransactionRemotely(transaction);
+    result = await applyStockAdjustmentTransactionRemotely(
+      transaction,
+      options?.targetQuantity,
+    );
   }
   const syncedAt = new Date().toISOString();
   const syncedTransaction: InventoryTransaction = {
@@ -307,6 +357,7 @@ export async function createInventoryTransaction(
     id?: string;
     timestamp?: string;
     skipRemoteSync?: boolean;
+    targetQuantity?: number;
   },
 ) {
   const timestamp = options?.timestamp || new Date().toISOString();
@@ -329,7 +380,9 @@ export async function createInventoryTransaction(
   };
 
   if (!options?.skipRemoteSync && shouldSync) {
-    return syncInventoryTransactionBestEffort(transaction);
+    return syncInventoryTransactionBestEffort(transaction, {
+      targetQuantity: options.targetQuantity,
+    });
   }
 
   await db.inventory_transactions.put(transaction);
