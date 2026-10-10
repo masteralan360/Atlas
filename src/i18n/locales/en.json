@@ -2043,6 +2043,8 @@
     "unavailable": "Unavailable Price Book",
     "partnerHint": "New order lines for this partner will use matching custom product prices.",
     "partnerEmptyHint": "No Price Books are available yet. Create one from Products.",
+    "partnerSyncFailedTitle": "Price Book assignment not synced",
+    "partnerSyncFailedDescription": "The business partner is saved on this device, but the Price Book assignment could not be confirmed in the cloud. Review Sync Status before relying on it in other devices.",
     "partnerAttention": "A Price Book is available. Select one, or click Create again to confirm \"No Price Book\".",
     "overrideAttention": "A Price Book is available. Add an override, or click Save again to confirm \"No Price Book\".",
     "saveWarnLabel": "Warn on save",

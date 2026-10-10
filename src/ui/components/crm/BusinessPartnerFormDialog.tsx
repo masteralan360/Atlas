@@ -462,6 +462,13 @@ export function BusinessPartnerFormDialog({
                                     <Select
                                         value={formState.priceBookId || 'none'}
                                         onValueChange={(value) => {
+                                            // Radix can emit an empty value while its async options are
+                                            // mounting. Only accept an explicit clear or a currently
+                                            // selectable Price Book so that hydration cannot erase an
+                                            // existing assignment before Save.
+                                            if (value !== 'none' && !sortedPriceBooks.some((priceBook) => priceBook.id === value)) {
+                                                return
+                                            }
                                             setFormState((current) => ({
                                                 ...current,
                                                 priceBookId: value === 'none' ? '' : value

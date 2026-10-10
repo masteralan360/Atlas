@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { PriceBook, PriceBookItem } from '@/local-db/models'
-import { findPartnerProductPriceBookItem } from './priceBooks'
+import { findPartnerProductPriceBookItem, resolvePartnerPriceBookUnitPrice } from './priceBooks'
 
 const metadata = {
     workspaceId: 'workspace-1',
@@ -74,5 +74,32 @@ describe('findPartnerProductPriceBookItem', () => {
             [{ ...priceBook, isDeleted: true }],
             [priceBookItem]
         )).toBeUndefined()
+    })
+})
+
+describe('resolvePartnerPriceBookUnitPrice', () => {
+    it('uses the product Price Book price for its base unit', () => {
+        expect(resolvePartnerPriceBookUnitPrice(
+            { price: 18_000, currency: 'iqd' },
+            'iqd',
+            { isBase: true, sellingPrice: 15_000 }
+        )).toEqual({ price: 18_000, currency: 'iqd' })
+    })
+
+    it('uses a unit-specific Price Book price when one exists', () => {
+        expect(resolvePartnerPriceBookUnitPrice(
+            { price: 18_000, currency: 'iqd' },
+            'usd',
+            { isBase: true, sellingPrice: 15_000 },
+            { price: 20, currency: 'usd' }
+        )).toEqual({ price: 20, currency: 'usd' })
+    })
+
+    it('uses the product UOM selling price for alternate units without a unit-specific Price Book price', () => {
+        expect(resolvePartnerPriceBookUnitPrice(
+            { price: 18_000, currency: 'iqd' },
+            'iqd',
+            { isBase: false, sellingPrice: 30_000 }
+        )).toEqual({ price: 30_000, currency: 'iqd' })
     })
 })

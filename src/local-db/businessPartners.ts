@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import i18n from '@/i18n/config'
 import { convertCurrencyAmountWithAvailableSnapshot, convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
 import { isOnline } from '@/lib/network'
 import { getPartnerSyncWriteRpc, getSupabaseClientForTable, getWorkspaceScopedPartnerReadRpc } from '@/lib/supabaseSchema'
@@ -19,12 +20,14 @@ import { getVisibleBusinessPartnerIdsByGroup, type BusinessPartnerGroupPrivacyVi
 import { useAuth } from '@/auth/AuthContext'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { getActiveBusinessUserId, getActiveBusinessUserRole, hasBusinessPartnerGroupPrivacyAccess } from '@/lib/network'
+import { getSchemaMismatchError, getSyncIntegrityError } from '@/sync/syncErrors'
 
 import { db } from './database'
 import { serializePartnerSummaryRefresh } from './partnerSummaryRefresh'
 import { toLiveCollection, useLiveCollection } from './liveCollection'
 import { acquireTableHydrationFromSupabase, fetchTableFromSupabase } from './hooks'
 import { addToOfflineMutations } from './offlineMutations'
+import { toast } from '@/ui/components/use-toast'
 import { getOrderBalanceAmount } from './orderInstallments'
 import { isDirectTransactionPartnerAccountEffect } from './payments'
 import { endActiveFleetAssignmentsForAgent, ensureDriverFleetAssignment } from './fleet'
@@ -247,14 +250,37 @@ async function queueOfflineUpserts(tableName: PartnerTableName, entities: SyncEn
   )
 }
 
-async function syncUpsertEntities(tableName: PartnerTableName, entities: SyncEntity[], workspaceId: string) {
+async function markRejectedPartnerUpsertsFailed(
+  tableName: PartnerTableName,
+  entities: SyncEntity[],
+  error: unknown
+) {
+  const syncError = getSchemaMismatchError(tableName, error) ?? getSyncIntegrityError(tableName, error)
+  if (!syncError) return
+
+  const queuedMutations = await Promise.all(entities.map((entity) => db.offline_mutations
+    .where('[entityType+entityId+status]')
+    .equals([tableName, entity.id, 'pending'])
+    .first()))
+  await db.offline_mutations.bulkUpdate(queuedMutations
+    .filter((mutation): mutation is NonNullable<typeof mutation> => Boolean(mutation))
+    .map((mutation) => ({
+      key: mutation.id,
+      changes: { status: 'failed' as const, error: syncError }
+    })))
+
+  const table = (db as unknown as Record<string, { update: (id: string, changes: Record<string, unknown>) => Promise<number> }>)[tableName]
+  await Promise.all(entities.map((entity) => table.update(entity.id, { syncStatus: 'conflict' })))
+}
+
+async function syncUpsertEntities(tableName: PartnerTableName, entities: SyncEntity[], workspaceId: string): Promise<boolean> {
   if (!entities.length || !shouldUseCloudBusinessData(workspaceId)) {
-    return
+    return true
   }
 
   if (!isOnline(workspaceId)) {
     await queueOfflineUpserts(tableName, entities, workspaceId)
-    return
+    return false
   }
 
   try {
@@ -287,10 +313,29 @@ async function syncUpsertEntities(tableName: PartnerTableName, entities: SyncEnt
       tableName,
       entities.map((entity) => entity.id)
     )
+    return true
   } catch (error) {
     console.error(`[BusinessPartners] Failed to sync ${tableName}:`, error)
     await queueOfflineUpserts(tableName, entities, workspaceId)
+    await markRejectedPartnerUpsertsFailed(tableName, entities, error)
+    return false
   }
+}
+
+function notifyPriceBookAssignmentSyncFailure() {
+  // Let the form's local-save toast appear first, then put the cloud-sync issue
+  // on top so a queued assignment is not mistaken for a completed remote save.
+  setTimeout(() => {
+    toast({
+      title: i18n.t('priceBooks.partnerSyncFailedTitle', {
+        defaultValue: 'Price Book assignment not synced'
+      }),
+      description: i18n.t('priceBooks.partnerSyncFailedDescription', {
+        defaultValue: 'The business partner is saved on this device, but the Price Book assignment could not be confirmed in the cloud. Review Sync Status before relying on it in other devices.'
+      }),
+      variant: 'destructive'
+    })
+  }, 0)
 }
 
 async function syncSoftDelete(
@@ -1717,7 +1762,7 @@ export async function createBusinessPartner(
 
   await db.business_partners.put(partner)
   await assignNewBusinessPartnerToCreatorGroups(workspaceId, partner.id)
-  await syncUpsertEntities('business_partners', [partner as unknown as SyncEntity], workspaceId)
+  let partnerSyncSucceeded = await syncUpsertEntities('business_partners', [partner as unknown as SyncEntity], workspaceId)
 
   let workingPartner = partner
   if (roleIncludesCustomer(partner.role)) {
@@ -1755,7 +1800,11 @@ export async function createBusinessPartner(
       ...getSyncMetadata(workspaceId, now)
     }
     await db.business_partners.put(workingPartner)
-    await syncUpsertEntities('business_partners', [workingPartner as unknown as SyncEntity], workspaceId)
+    partnerSyncSucceeded = await syncUpsertEntities('business_partners', [workingPartner as unknown as SyncEntity], workspaceId)
+  }
+
+  if (partner.priceBookId && shouldUseCloudBusinessData(workspaceId) && isOnline(workspaceId) && !partnerSyncSucceeded) {
+    notifyPriceBookAssignmentSyncFailure()
   }
 
   return workingPartner
@@ -1800,6 +1849,8 @@ export async function updateBusinessPartner(
     staff_visibility?: unknown
     owner_user_id?: unknown
   }
+  const priceBookAssignmentChanged = Object.prototype.hasOwnProperty.call(data, 'priceBookId')
+    && partnerChanges.priceBookId !== existing.priceBookId
   if (partnerChanges.partnerName !== undefined) {
     partnerChanges.partnerName = normalizeRequiredPartnerName(partnerChanges.partnerName)
   }
@@ -1858,7 +1909,7 @@ export async function updateBusinessPartner(
   }
 
   await db.business_partners.put(updated)
-  await syncUpsertEntities('business_partners', [updated as unknown as SyncEntity], existing.workspaceId)
+  let partnerSyncSucceeded = await syncUpsertEntities('business_partners', [updated as unknown as SyncEntity], existing.workspaceId)
 
   if (roleIncludesCustomer(nextRole) && !updated.customerFacetId) {
     const customer = await createFacetFromPartner(updated, 'customer')
@@ -1900,11 +1951,19 @@ export async function updateBusinessPartner(
       ...getSyncMetadata(existing.workspaceId, timestamp)
     }
     await db.business_partners.put(updated)
-    await syncUpsertEntities('business_partners', [updated as unknown as SyncEntity], existing.workspaceId)
+    partnerSyncSucceeded = await syncUpsertEntities('business_partners', [updated as unknown as SyncEntity], existing.workspaceId)
   }
 
   await mirrorPartnerToFacets(updated)
   await recalculateBusinessPartnerSummary(existing.workspaceId, updated.id)
+  if (priceBookAssignmentChanged && shouldUseCloudBusinessData(existing.workspaceId) && isOnline(existing.workspaceId) && !partnerSyncSucceeded) {
+    // Keep the edit dialog open and let its submit handler surface the failure.
+    // The generic sync helper queues failed online writes, so returning here
+    // would make the UI report a successful edit even though Supabase rejected it.
+    throw new Error(i18n.t('priceBooks.partnerSyncFailedDescription', {
+      defaultValue: 'The business partner is saved on this device, but the Price Book assignment could not be confirmed in the cloud. Review Sync Status before relying on it in other devices.'
+    }))
+  }
   return updated
 }
 
