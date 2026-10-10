@@ -381,7 +381,7 @@ export async function createInventoryTransaction(
 
   if (!options?.skipRemoteSync && shouldSync) {
     return syncInventoryTransactionBestEffort(transaction, {
-      targetQuantity: options.targetQuantity,
+      targetQuantity: options?.targetQuantity,
     });
   }
 

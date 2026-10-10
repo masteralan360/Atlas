@@ -157,10 +157,18 @@ export interface WorkspacePaygSummary {
     pricingProfileName: string | null
     pricingCheckpoints: WorkspacePaygCheckpoint[]
     pendingBillingMode: 'monthly' | 'prepaid_usage' | null
+    pendingBillingTermination: boolean
     lastUpdatedAt: string | null
     history: WorkspacePaygCycleHistory[]
     paymentHistory: WorkspacePaymentTransaction[]
     paygLimitState: WorkspacePaygLimitState | null
+}
+
+export interface WorkspaceBillingTerminationResult {
+    paymentRequired: boolean
+    pendingTermination: boolean
+    amountIqd: string
+    chargedUsageGb: string
 }
 
 type UnknownRecord = Record<string, unknown>
@@ -573,6 +581,7 @@ export function normalizeWorkspacePaygSummary(value: unknown): WorkspacePaygSumm
         pendingBillingMode: unwrapped.pending_billing_mode === 'monthly' || unwrapped.pending_billing_mode === 'prepaid_usage'
             ? unwrapped.pending_billing_mode
             : null,
+        pendingBillingTermination: getBoolean(unwrapped.pending_billing_termination),
         lastUpdatedAt: getNullableText(unwrapped.last_updated_at),
         history,
         paymentHistory,
@@ -742,6 +751,25 @@ export async function getWorkspacePaygSummary(): Promise<WorkspacePaygSummary> {
     ) as { data: unknown; error?: unknown }
     if (result.error) throw normalizeSupabaseActionError(result.error)
     return normalizeWorkspacePaygSummary(result.data)
+}
+
+export async function requestWorkspaceBillingTermination(): Promise<WorkspaceBillingTerminationResult> {
+    const result = await runSupabaseAction(
+        'workspacePayments.endAppliedBilling',
+        () => supabase.rpc('request_workspace_billing_termination'),
+        { timeoutMs: 12_000, platform: 'all' }
+    ) as { data: unknown; error?: unknown }
+    if (result.error) throw normalizeSupabaseActionError(result.error)
+    const payload = unwrapRpcJson(result.data)
+    if (!isRecord(payload) || !getBoolean(payload.success)) {
+        throw new Error('workspace_billing_termination_failed')
+    }
+    return {
+        paymentRequired: getBoolean(payload.payment_required),
+        pendingTermination: getBoolean(payload.pending_termination),
+        amountIqd: getDecimalText(payload.amount_iqd),
+        chargedUsageGb: getDecimalText(payload.charged_usage_gb)
+    }
 }
 
 export async function saveWorkspacePaygLimit(

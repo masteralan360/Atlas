@@ -10,7 +10,7 @@ import { AdditionalStorefrontsManager } from '@/ui/components/marketplace/Additi
 import { useWorkspace } from '@/workspace'
 import { Coins } from 'lucide-react'
 import type { IQDDisplayPreference, CurrencyCode } from '@/local-db/models'
-import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, Upload, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink, Usb, Bluetooth, CalendarClock, Menu, Table2, Crown, Loader2, PanelLeftOpen, PanelRightOpen, PanelLeftClose } from 'lucide-react'
+import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, Upload, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink, Usb, Bluetooth, CalendarClock, Menu, Table2, Crown, Loader2, PanelLeftOpen, PanelRightOpen, PanelLeftClose, CircleOff } from 'lucide-react'
 import { formatDate, formatDateTime, formatTime, cn, generateId, getHourDisplayPreference, setHourDisplayPreference, type HourDisplayPreference } from '@/lib/utils'
 import { useTheme } from '@/ui/components/theme-provider'
 import { Moon, Sun, Monitor, Unlock, Server, MessageSquare, Bell, MonitorPlay, Wifi } from 'lucide-react'
@@ -53,7 +53,9 @@ import {
     getWorkspaceBillingMode,
     getWorkspacePaymentAlertKind,
     getWorkspacePaymentExpiryDate,
-    openWorkspacePaymentStatusDialog
+    openWorkspacePaymentDialog,
+    openWorkspacePaymentStatusDialog,
+    requestWorkspaceBillingTermination
 } from '@/lib/workspacePayments'
 import {
     areApplicationUpdatesDisabled,
@@ -88,7 +90,7 @@ export function Settings() {
     const { syncState, pendingCount, lastSyncTime, sync, isSyncing, isOnline } = useSyncStatus()
     const { theme, setTheme, style, setStyle } = useTheme()
     const { preference: navigationRailPreference, setPreference: setNavigationRailPreference } = useNavigationRailDisplay()
-    const { features, updateSettings, refreshFeatures, workspaceName, isLocked, isLocalMode, isDemoMode, isHybridMode, hasFeature, hasCapability, planCapabilities, paymentSummary, paygSummary } = useWorkspace()
+    const { features, updateSettings, refreshFeatures, refreshPaygSummary, workspaceName, isLocked, isLocalMode, isDemoMode, isHybridMode, hasFeature, hasCapability, planCapabilities, paymentSummary, paygSummary } = useWorkspace()
     const { streamUrl, status: kdsStatus, startStream } = useKdsStream(true)
 
     useEffect(() => {
@@ -128,6 +130,8 @@ export function Settings() {
     const restaurantTableSettings = useRestaurantTableSettings(user?.workspaceId)
     const restaurantTickets = useRestaurantPosTickets(user?.workspaceId, restaurantTableSettings?.liveSyncEnabled === true)
     const [copied, setCopied] = useState(false)
+    const [isEndAppliedBillingDialogOpen, setIsEndAppliedBillingDialogOpen] = useState(false)
+    const [isEndingAppliedBilling, setIsEndingAppliedBilling] = useState(false)
     const [isCurrencyModalOpen, setIsCurrencyModalOpen] = useState(false)
     const [pendingCurrency, setPendingCurrency] = useState<'usd' | 'iqd' | 'eur' | 'try' | null>(null)
     const [isPasswordChangeModalOpen, setIsPasswordChangeModalOpen] = useState(false)
@@ -262,6 +266,40 @@ export function Settings() {
     const [mediaDownloadProgress, setMediaDownloadProgress] = useState<{ total: number, current: number, fileName: string } | null>(null)
     const [localMediaCount, setLocalMediaCount] = useState<number | null>(null)
     const [isThermalDialogOpen, setIsThermalDialogOpen] = useState(false)
+
+    const endAppliedBilling = async () => {
+        if (isEndingAppliedBilling || !paygSummary?.pendingBillingMode || paygSummary.pendingBillingTermination || paygSummary.isInherited) return
+        setIsEndingAppliedBilling(true)
+        try {
+            const result = await requestWorkspaceBillingTermination()
+            setIsEndAppliedBillingDialogOpen(false)
+            await Promise.allSettled([refreshFeatures(), refreshPaygSummary()])
+            if (result.paymentRequired) {
+                toast({
+                    title: t('workspacePayments.finalPaygPaymentRequiredTitle'),
+                    description: t('workspacePayments.finalPaygPaymentRequiredDescription', {
+                        usage: new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 2 }).format(Number(result.chargedUsageGb)),
+                        amount: new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 0 }).format(Number(result.amountIqd))
+                    })
+                })
+                openWorkspacePaymentDialog()
+            } else {
+                toast({
+                    title: t('workspacePayments.appliedBillingEndedTitle'),
+                    description: t('workspacePayments.appliedBillingEndedDescription')
+                })
+            }
+        } catch (error) {
+            console.error('[WorkspacePayments] Failed to end applied billing:', error)
+            toast({
+                variant: 'destructive',
+                title: t('workspacePayments.endAppliedBillingFailed'),
+                description: t('workspacePayments.endAppliedBillingFailedDescription')
+            })
+        } finally {
+            setIsEndingAppliedBilling(false)
+        }
+    }
     const [availableThermalPrinters, setAvailableThermalPrinters] = useState<ThermalPrinterInfo[]>([])
     const [selectedThermalPrinter, setSelectedThermalPrinter] = useState<StoredThermalPrinter | null>(null)
     const [selectedThermalRollWidth, setSelectedThermalRollWidth] = useState<ThermalRollWidth>(DEFAULT_THERMAL_ROLL_WIDTH)
@@ -3653,7 +3691,7 @@ export function Settings() {
                                             <p className="font-medium capitalize">{features.plan}</p>
                                         </div>
                                         <div className="md:col-span-2">
-                                            <Label className="text-muted-foreground">{t('workspacePayments.billingModeLabel')}</Label>
+                                            <Label className="text-muted-foreground">{t('workspacePayments.appliedBillingMode')}</Label>
                                             <div className="flex flex-wrap items-center gap-3 mt-1.5 p-3 bg-secondary/20 rounded-lg border border-border w-full max-w-sm">
                                                 <div className={cn(
                                                     "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
@@ -3673,6 +3711,38 @@ export function Settings() {
                                                             ? t('workspacePayments.lifetime')
                                                             : t('workspacePayments.noBillingDeadline')}
                                                 </p>
+                                                {paygSummary?.pendingBillingMode && (
+                                                    <div className="w-full space-y-2 border-t border-border/70 pt-3">
+                                                        <div>
+                                                            <p className="text-xs font-semibold text-violet-600">
+                                                                {paygSummary.pendingBillingTermination
+                                                                    ? t('workspacePayments.pendingBillingTermination')
+                                                                    : t('workspacePayments.pendingBillingChange')}
+                                                            </p>
+                                                            <p className="mt-1 text-xs text-muted-foreground">
+                                                                {paygSummary.pendingBillingTermination
+                                                                    ? t('workspacePayments.pendingBillingTerminationDescription')
+                                                                    : t('workspacePayments.pendingBillingChangeDescription', {
+                                                                        mode: t(paygSummary.pendingBillingMode === 'prepaid_usage'
+                                                                            ? 'workspacePayments.billingModes.usage'
+                                                                            : 'workspacePayments.billingModes.subscription')
+                                                                    })}
+                                                            </p>
+                                                        </div>
+                                                        {user?.role === 'admin' && !paygSummary.pendingBillingTermination && !paygSummary.isInherited && !isLocalMode && !isDemoMode && (
+                                                            <Button
+                                                                type="button"
+                                                                variant="destructive"
+                                                                size="sm"
+                                                                className="gap-2"
+                                                                onClick={() => setIsEndAppliedBillingDialogOpen(true)}
+                                                            >
+                                                                <CircleOff className="h-4 w-4" />
+                                                                {t('workspacePayments.endAppliedBilling')}
+                                                            </Button>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                         <div className="md:col-span-2">
@@ -3701,6 +3771,57 @@ export function Settings() {
                                     </Button>
                                 </CardContent>
                             </Card>
+
+                            <AppDialog
+                                open={isEndAppliedBillingDialogOpen}
+                                onOpenChange={(open) => {
+                                    if (!isEndingAppliedBilling) setIsEndAppliedBillingDialogOpen(open)
+                                }}
+                            >
+                                <AppDialogContent showCloseButton={!isEndingAppliedBilling} className="max-w-lg">
+                                    <AppDialogHeader>
+                                        <AppDialogTitle className="flex items-center gap-2 text-destructive">
+                                            <CircleOff className="h-5 w-5" />
+                                            {t('workspacePayments.endAppliedBillingTitle')}
+                                        </AppDialogTitle>
+                                        <AppDialogDescription>
+                                            {t('workspacePayments.endAppliedBillingDescription')}
+                                        </AppDialogDescription>
+                                    </AppDialogHeader>
+                                    <AppDialogBody className="space-y-3 text-sm">
+                                        <div className="rounded-xl border border-destructive/25 bg-destructive/5 p-3">
+                                            <p className="font-semibold">{t('workspacePayments.finalPaygUsageTitle')}</p>
+                                            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                                                {t('workspacePayments.finalPaygUsageDescription')}
+                                            </p>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            {t('workspacePayments.pendingBillingWillBeCanceled')}
+                                        </p>
+                                    </AppDialogBody>
+                                    <AppDialogFooter>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            onClick={() => setIsEndAppliedBillingDialogOpen(false)}
+                                            disabled={isEndingAppliedBilling}
+                                        >
+                                            {t('common.cancel')}
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            variant="destructive"
+                                            onClick={() => void endAppliedBilling()}
+                                            disabled={isEndingAppliedBilling || !paygSummary?.pendingBillingMode}
+                                        >
+                                            {isEndingAppliedBilling ? <Loader2 className="animate-spin" /> : <CircleOff />}
+                                            {isEndingAppliedBilling
+                                                ? t('workspacePayments.endingAppliedBilling')
+                                                : t('workspacePayments.endAppliedBilling')}
+                                        </Button>
+                                    </AppDialogFooter>
+                                </AppDialogContent>
+                            </AppDialog>
 
                             {!isDemoMode && (
                                 <Card>

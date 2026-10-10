@@ -126,6 +126,12 @@ type TerminateWorkspacePaygRequest = {
     workspaceId?: string
 }
 
+type EndWorkspaceBillingRequest = {
+    action: 'endWorkspaceBilling'
+    passkey?: string
+    workspaceId?: string
+}
+
 type ActivateWorkspacePrepaidTermRequest = {
     action: 'activateWorkspacePrepaidTerm'
     passkey?: string
@@ -179,6 +185,39 @@ type ReviewWorkspacePaymentTransactionRequest = {
     providerPaymentId?: string | null
 }
 
+type ListBillingOperationsRequest = {
+    action: 'listBillingOperations'
+    passkey?: string
+    search?: string
+}
+
+type GetBillingOperationRequest = {
+    action: 'getBillingOperation'
+    passkey?: string
+    voucherCode?: string
+}
+
+type CreateBillingOperationRequest = {
+    action: 'createBillingOperation'
+    passkey?: string
+    workspaceId?: string
+    billingMode?: 'monthly_subscription' | 'monthly_renewal_usage' | 'prepaid_term' | 'payg'
+    snapshot?: Record<string, unknown>
+    idempotencyKey?: string
+    administratorName?: string
+}
+
+type AdjustBillingOperationRequest = {
+    action: 'adjustBillingOperation'
+    passkey?: string
+    voucherCode?: string
+    expectedLiveRevisionId?: string
+    snapshot?: Record<string, unknown>
+    reason?: string
+    idempotencyKey?: string
+    administratorName?: string
+}
+
 type AdminConsoleRequest =
     | VerifyRequest
     | ListUsersRequest
@@ -204,6 +243,10 @@ type AdminConsoleRequest =
     | CreatePaygProfileRequest
     | ListWorkspacePaymentTransactionsRequest
     | ReviewWorkspacePaymentTransactionRequest
+    | ListBillingOperationsRequest
+    | GetBillingOperationRequest
+    | CreateBillingOperationRequest
+    | AdjustBillingOperationRequest
 
 type WorkspaceUsageStatusRow = {
     has_limits?: boolean | null
@@ -224,6 +267,8 @@ const POSTGRES_BIGINT_MAX = 9_223_372_036_854_775_807n
 const BYTES_PER_GB = 1_000_000_000n
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const PAYMENT_TRANSACTION_STATUSES = new Set(['pending', 'approved', 'rejected', 'expired'])
+const BILLING_OPERATION_MODES = new Set(['monthly_subscription', 'monthly_renewal_usage', 'prepaid_term', 'payg'])
+const BILLING_VOUCHER_PATTERN = /^BL-\d{4}-[A-F0-9]{8}(?:-\d+)?$/i
 
 async function getWorkspaceA2cPhones(
     adminClient: ReturnType<typeof createAdminClient>
@@ -1296,13 +1341,38 @@ async function terminateWorkspacePayg(
         return errorResponse('A valid workspace is required')
     }
 
-    const { data, error } = await adminClient.rpc('admin_terminate_workspace_payg', {
+    const { data, error } = await adminClient.rpc('admin_end_workspace_live_billing', {
         p_workspace_id: workspaceId,
         p_actor: 'admin-console-passkey'
     })
 
     if (error) {
         return errorResponse(error.message || 'Failed to terminate PAYG', 400, {
+            code: error.code,
+            details: error.details,
+            hint: error.hint
+        })
+    }
+
+    return jsonResponse(data)
+}
+
+async function endWorkspaceBilling(
+    adminClient: ReturnType<typeof createAdminClient>,
+    body: EndWorkspaceBillingRequest
+) {
+    const workspaceId = body.workspaceId?.trim() ?? ''
+    if (!UUID_PATTERN.test(workspaceId)) {
+        return errorResponse('A valid workspace is required')
+    }
+
+    const { data, error } = await adminClient.rpc('admin_end_workspace_live_billing', {
+        p_workspace_id: workspaceId,
+        p_actor: 'admin-console-passkey'
+    })
+
+    if (error) {
+        return errorResponse(error.message || 'Failed to end workspace billing', 400, {
             code: error.code,
             details: error.details,
             hint: error.hint
@@ -1504,6 +1574,108 @@ async function reviewWorkspacePaymentTransaction(
     return jsonResponse(data)
 }
 
+async function listBillingOperations(
+    adminClient: ReturnType<typeof createAdminClient>,
+    body: ListBillingOperationsRequest
+) {
+    const search = body.search?.trim() ?? ''
+    if (search.length > 160) return errorResponse('Search text is too long')
+    const { data, error } = await adminClient.rpc('admin_list_billing_operations', {
+        p_search: search || null
+    })
+    if (error) return errorResponse(error.message, 500, { code: error.code })
+    return jsonResponse(data ?? [])
+}
+
+async function getBillingOperation(
+    adminClient: ReturnType<typeof createAdminClient>,
+    body: GetBillingOperationRequest
+) {
+    const voucherCode = body.voucherCode?.trim().toUpperCase() ?? ''
+    if (!BILLING_VOUCHER_PATTERN.test(voucherCode)) {
+        return errorResponse('Enter a valid billing voucher code', 400, { code: 'invalid_billing_voucher' })
+    }
+    const { data, error } = await adminClient.rpc('admin_get_billing_operation', {
+        p_voucher_code: voucherCode
+    })
+    if (error) return errorResponse(error.message, 500, { code: error.code })
+    if (!data) return errorResponse('Billing voucher was not found', 404, { code: 'billing_voucher_not_found' })
+    return jsonResponse(data)
+}
+
+async function createBillingOperation(
+    adminClient: ReturnType<typeof createAdminClient>,
+    body: CreateBillingOperationRequest
+) {
+    const workspaceId = body.workspaceId?.trim() ?? ''
+    if (!UUID_PATTERN.test(workspaceId)) return errorResponse('A valid workspace is required')
+    if (!body.billingMode || !BILLING_OPERATION_MODES.has(body.billingMode)) {
+        return errorResponse('Choose a valid billing mode')
+    }
+    if (!body.snapshot || typeof body.snapshot !== 'object' || Array.isArray(body.snapshot)) {
+        return errorResponse('Billing details are required')
+    }
+    const idempotencyKey = body.idempotencyKey?.trim() ?? ''
+    if (!UUID_PATTERN.test(idempotencyKey)) return errorResponse('A valid operation identifier is required')
+    const administratorName = body.administratorName?.trim() ?? ''
+    if (administratorName.length < 2 || administratorName.length > 100) {
+        return errorResponse('Enter the responsible administrator name', 400, { code: 'administratorNameRequired' })
+    }
+    if (body.snapshot.billing_mode !== body.billingMode) {
+        return errorResponse('Billing mode does not match the billing details')
+    }
+
+    const { data, error } = await adminClient.rpc('admin_create_billing_operation', {
+        p_workspace_id: workspaceId,
+        p_billing_mode: body.billingMode,
+        p_snapshot: body.snapshot,
+        p_idempotency_key: idempotencyKey,
+        p_actor_label: administratorName
+    })
+    if (error) {
+        const status = ['40001', '23505', '23514'].includes(error.code ?? '') ? 409 : 400
+        return errorResponse(error.message, status, { code: error.code })
+    }
+    return jsonResponse(data)
+}
+
+async function adjustBillingOperation(
+    adminClient: ReturnType<typeof createAdminClient>,
+    body: AdjustBillingOperationRequest
+) {
+    const voucherCode = body.voucherCode?.trim().toUpperCase() ?? ''
+    if (!BILLING_VOUCHER_PATTERN.test(voucherCode)) {
+        return errorResponse('Enter a valid billing voucher code', 400, { code: 'invalid_billing_voucher' })
+    }
+    const expectedLiveRevisionId = body.expectedLiveRevisionId?.trim() ?? ''
+    if (!UUID_PATTERN.test(expectedLiveRevisionId)) return errorResponse('Reload the current billing revision before adjusting')
+    if (!body.snapshot || typeof body.snapshot !== 'object' || Array.isArray(body.snapshot)) {
+        return errorResponse('Updated billing details are required')
+    }
+    const reason = body.reason?.trim() ?? ''
+    if (reason.length < 3 || reason.length > 1000) return errorResponse('Enter an adjustment reason')
+    const idempotencyKey = body.idempotencyKey?.trim() ?? ''
+    if (!UUID_PATTERN.test(idempotencyKey)) return errorResponse('A valid operation identifier is required')
+    const administratorName = body.administratorName?.trim() ?? ''
+    if (administratorName.length < 2 || administratorName.length > 100) {
+        return errorResponse('Enter the responsible administrator name', 400, { code: 'administratorNameRequired' })
+    }
+
+    const { data, error } = await adminClient.rpc('admin_adjust_billing_operation', {
+        p_voucher_code: voucherCode,
+        p_expected_live_revision_id: expectedLiveRevisionId,
+        p_snapshot: body.snapshot,
+        p_reason: reason,
+        p_idempotency_key: idempotencyKey,
+        p_actor_label: administratorName
+    })
+    if (error) {
+        const status = ['40001', '23505', '23514'].includes(error.code ?? '') ? 409 : 400
+        return errorResponse(error.message, status, { code: error.code })
+    }
+    return jsonResponse(data)
+}
+
 Deno.serve(async (req) => {
     console.log('admin-console invoked:', req.method, req.url)
 
@@ -1597,6 +1769,10 @@ Deno.serve(async (req) => {
             return await terminateWorkspacePayg(adminClient, body)
         }
 
+        if (body.action === 'endWorkspaceBilling') {
+            return await endWorkspaceBilling(adminClient, body)
+        }
+
         if (body.action === 'activateWorkspacePrepaidTerm') {
             return await activateWorkspacePrepaidTerm(adminClient, body)
         }
@@ -1623,6 +1799,22 @@ Deno.serve(async (req) => {
 
         if (body.action === 'reviewWorkspacePaymentTransaction') {
             return await reviewWorkspacePaymentTransaction(adminClient, body)
+        }
+
+        if (body.action === 'listBillingOperations') {
+            return await listBillingOperations(adminClient, body)
+        }
+
+        if (body.action === 'getBillingOperation') {
+            return await getBillingOperation(adminClient, body)
+        }
+
+        if (body.action === 'createBillingOperation') {
+            return await createBillingOperation(adminClient, body)
+        }
+
+        if (body.action === 'adjustBillingOperation') {
+            return await adjustBillingOperation(adminClient, body)
         }
 
         return errorResponse('Unsupported action', 400)
