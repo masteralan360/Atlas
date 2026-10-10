@@ -1,4 +1,78 @@
 {
+  "commerceOperations": {
+    "title": "Commerce Operations",
+    "subtitle": "Manage social and wholesale order intake, manual market records, and coach performance.",
+    "tabs": { "social": "Social orders", "wholesale": "Wholesale", "data": "Data center", "coaches": "Coaches" },
+    "social": { "title": "Social order intake" },
+    "wholesale": { "title": "Wholesale order intake" },
+    "metrics": { "intakeOrders": "Intake orders", "waitingCollection": "Unpaid orders", "orderValue": "Order value" },
+    "filters": { "orderDate": "Order date", "recordDate": "Record date", "commissionDate": "Commission date" },
+    "orders": {
+      "unpaidHint": "Orders are saved unpaid. Fulfill them and collect payment later from Orders.",
+      "prerequisite": "Order intake requires Orders, Products, and CRM access, plus permission to create sales orders.",
+      "recent": "Recent intake", "emptyTitle": "No intake orders yet", "emptyBody": "Create an order to connect it to products, customer records, fulfillment, and later payment collection.",
+      "paid": "Paid", "unpaid": "Unpaid", "sellerUnavailable": "Seller unavailable"
+    },
+    "actions": {
+      "newOrder": "New order", "products": "Products", "openOrder": "Open order", "addRecord": "Add record", "openStockAdjustments": "Open stock adjustments",
+      "addCoach": "Add coach", "openAgents": "Open agents", "openCommissionLedger": "Commission ledger", "browseProducts": "Browse products",
+      "removeProduct": "Remove product", "unlinkProduct": "Unlink product", "unlinkBuyer": "Unlink buyer", "unlinkCoach": "Unlink coach", "editRecord": "Edit record",
+      "saveUnpaidOrder": "Save unpaid order", "saveRecord": "Save record", "updateRecord": "Update record", "saveCoach": "Save coach", "saving": "Saving…"
+    },
+    "platforms": { "instagram": "Instagram", "tiktok": "TikTok", "whatsapp": "WhatsApp", "messenger": "Messenger", "coach": "Coach", "other": "Other" },
+    "recordTypes": { "order_details": "Order intake", "ad_spend": "Ad spend", "dm_funnel": "Message funnel", "city_market": "City market", "competitor": "Competitor", "coach_profile": "Coach profile" },
+    "fields": {
+      "buyer": "Buyer", "seller": "Seller", "phone": "Phone", "socialHandle": "Social handle", "city": "City", "address": "Address",
+      "orderDate": "Order date", "date": "Date", "storage": "Storage", "priceBook": "Price book", "catalogPrices": "Use product prices",
+      "quantity": "Quantity", "currency": "Currency", "platform": "Platform", "notes": "Notes"
+    },
+    "placeholders": {
+      "findBuyer": "Search or enter buyer name", "seller": "Staff member", "phone": "Phone number", "socialHandle": "@username",
+      "city": "City", "address": "Delivery address", "storage": "Choose storage", "priceBook": "Choose a price book",
+      "searchProduct": "Search products"
+    },
+    "labels": { "linked": "Linked" },
+    "order": {
+      "socialTitle": "New social order", "wholesaleTitle": "New wholesale order", "items": "Products", "noItems": "Add at least one product to this order.",
+      "noSku": "No SKU", "currencyNote": "All order items use {{currency}}.", "deliveryFee": "Delivery fee", "discount": "Discount",
+      "subtotal": "Subtotal", "total": "Total", "noPaymentAtIntake": "This creates an unpaid order. Record payment later through the standard order payment flow.",
+      "productBrowseHint": "Choose a product and storage location.", "priceBookHint": "Wholesale prices use the selected price book."
+    },
+    "data": {
+      "title": "Data center", "subtitle": "Record campaign, market, and competitor observations manually. No external accounts are connected.",
+      "addRecord": "Add data record", "editRecord": "Edit data record", "recordType": "Record type", "amount": "Amount", "adSpend": "Ad spend", "reach": "Reach", "dms": "Messages",
+      "completedSales": "Completed sales", "directMessages": "Direct messages", "completionRate": "Message-to-sale rate: {{rate}}", "lowStock": "Low-stock products",
+      "records": "Recent records", "emptyTitle": "No market records yet", "emptyBody": "Add manual campaign, market, or competitor observations to build this view.",
+      "inventoryTitle": "Inventory connection", "inventoryHint": "Low-stock counts come from Products. Use stock adjustments to correct inventory.",
+      "competitorSnapshot": "Competitor snapshot", "competitorCount": "Competitors tracked", "dmSummary": "{{dms}} messages · {{sales}} sales",
+      "citySummary": "{{pools}} pools · {{swimmers}} swimmers", "dmTitle": "{{platform}} message funnel · {{date}}", "language": "Language",
+      "poolCount": "Pool count", "swimmerCount": "Swimmer count", "competitorName": "Competitor name", "competitorKind": "Competitor type",
+      "competitorKinds": { "online": "Online", "physical": "Physical" }, "followers": "Followers", "pricePosition": "Price position",
+      "pricePositions": { "low": "Lower priced", "mid": "Similar price", "high": "Higher priced" }, "brandingNotes": "Branding and notes"
+    },
+    "coaches": {
+      "title": "Coach performance", "subtitle": "Connect coaches to Agents and review sales commission records.", "addTitle": "Add coach profile", "coach": "Coach",
+      "chooseAgent": "Search existing agent", "agentsRequired": "The Agents module is required to link coach profiles.", "commissionSetupHint": "Set up agent commission rules in Agents before using commission reporting.",
+      "coachCount": "Coaches", "activeCoaches": "Active coaches", "commissionEntries": "Commission entries", "directory": "Coach directory",
+      "sales": "Sales", "commissionsEarned": "Commissions earned", "paid": "Paid out", "status": "Status", "emptyTitle": "No coaches linked yet",
+      "emptyBody": "Link an existing business partner with an agent profile to include them here.", "commissionsUnavailable": "Enable Sales Agent Commissions to show commission totals.",
+      "statuses": { "active": "Active", "inactive": "Inactive" }
+    },
+    "languages": { "ku": "Kurdish", "ar": "Arabic", "en": "English" },
+    "toast": {
+      "orderSaved": "Unpaid order saved", "orderSavedDetail": "Open the order to continue fulfillment and collect payment later.", "orderFailed": "Could not save order",
+      "recordSaved": "Record saved", "recordFailed": "Could not save record", "coachSaved": "Coach profile linked", "coachFailed": "Could not save coach profile",
+      "costRequired": "Product cost is missing", "costRequiredDetail": "Add a product cost or a cost to the selected price book before including this product in an order.",
+      "currencyMismatch": "Choose products that use the same currency.", "tryAgain": "Please try again."
+    },
+    "validation": {
+      "buyerRequired": "Enter or select a buyer.", "phoneRequired": "Enter a buyer phone number.", "sellerRequired": "Enter the staff member taking the order.",
+      "storageRequired": "Choose a storage location.", "productRequired": "Add at least one product.", "discountLimit": "Discount cannot exceed {{percent}}%.",
+      "amountRequired": "Enter a valid amount.", "cityRequired": "Enter a city.", "nameRequired": "Enter a name.", "coachRequired": "Select an existing agent.",
+      "coachExists": "This agent is already linked as a coach."
+    },
+    "permissions": { "access": "Access Commerce Operations", "accessDescription": "View social and wholesale order intake, market records, and coach performance." }
+  },
   "transactionAudit": {
     "run": "Run Integrity Audit",
     "title": "Transaction Integrity Audit",

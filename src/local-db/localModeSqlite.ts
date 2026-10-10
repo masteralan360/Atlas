@@ -85,6 +85,7 @@ export const LOCAL_MODE_SQLITE_TABLES = [
   "business_partner_group_partners",
   "customer_profitability_engagements",
   "customer_profitability_attributions",
+  "commerce_operations_records",
   "employees",
   "budget_settings",
   "budget_allocations",

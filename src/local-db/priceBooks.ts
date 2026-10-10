@@ -8,6 +8,15 @@ import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseR
 import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
 import { findPartnerProductPriceBookItem } from '@/lib/priceBooks'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import {
+    cancelWorkspaceDataHydration,
+    completeWorkspaceDataHydration,
+    failWorkspaceDataHydration,
+    recordWorkspaceDataFetch,
+    recordWorkspaceTableHydrationFetch,
+    startWorkspaceDataHydration,
+    updateWorkspaceDataHydrationProgress
+} from '@/workspace/workspaceDataFreshness'
 
 import { db } from './database'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
@@ -144,110 +153,124 @@ async function hydratePriceBookTable(
         return
     }
 
-    const table = tableName === 'price_books' ? db.price_books : db.price_book_items
-    const remoteRows: Record<string, unknown>[] = []
-    const pageSize = 1000
+    const operationId = generateId()
+    startWorkspaceDataHydration(workspaceId, 'supabase', tableName, operationId)
+    try {
+        const table = tableName === 'price_books' ? db.price_books : db.price_book_items
+        const remoteRows: Record<string, unknown>[] = []
+        const pageSize = 1000
 
-    for (let from = 0; ; from += pageSize) {
-        const { data, error } = await supabase
-            .from(tableName)
-            .select('*')
-            .eq('workspace_id', workspaceId)
-            .order('id', { ascending: true })
-            .range(from, from + pageSize - 1)
+        for (let from = 0; ; from += pageSize) {
+            const { data, error } = await supabase
+                .from(tableName)
+                .select('*')
+                .eq('workspace_id', workspaceId)
+                .order('id', { ascending: true })
+                .range(from, from + pageSize - 1)
 
-        if (error) {
-            throw normalizeSupabaseActionError(error)
+            if (error) {
+                throw normalizeSupabaseActionError(error)
+            }
+
+            const page = (data ?? []) as Record<string, unknown>[]
+            remoteRows.push(...page)
+            updateWorkspaceDataHydrationProgress(workspaceId, 'supabase', tableName, remoteRows.length, operationId)
+            if (page.length < pageSize) {
+                break
+            }
         }
 
-        const page = (data ?? []) as Record<string, unknown>[]
-        remoteRows.push(...page)
-        if (page.length < pageSize) {
-            break
-        }
-    }
-
-    if (!await canReconcileCloudWorkspaceData(workspaceId)) {
-        return
-    }
-
-    const syncedAt = new Date().toISOString()
-    const remoteItems = remoteRows.map((row) => ({
-        ...(toCamelCase(row) as unknown as PriceBook | PriceBookItem),
-        syncStatus: 'synced' as const,
-        lastSyncedAt: syncedAt
-    }))
-    const localItems = await table.where('workspaceId').equals(workspaceId).toArray() as Array<PriceBook | PriceBookItem>
-    const pendingItems = localItems.filter((row) => row.syncStatus === 'pending')
-    const pendingIds = new Set(pendingItems.map((row) => row.id))
-    const pendingNaturalKeys = tableName === 'price_book_items'
-        ? new Set((pendingItems as PriceBookItem[]).map((row) => `${row.priceBookId}:${row.productId}`))
-        : new Set<string>()
-    const pendingBookNameKeys = tableName === 'price_books'
-        ? new Set((pendingItems as PriceBook[])
-            .filter((row) => !row.isDeleted)
-            .map((row) => row.name.trim().toLowerCase()))
-        : new Set<string>()
-    const applicableRemoteItems = remoteItems.filter((row) => {
-        if (pendingIds.has(row.id)) {
-            return false
-        }
-        if (tableName === 'price_book_items') {
-            const item = row as PriceBookItem
-            return !pendingNaturalKeys.has(`${item.priceBookId}:${item.productId}`)
-        }
-        if (tableName === 'price_books') {
-            const book = row as PriceBook
-            return book.isDeleted || !pendingBookNameKeys.has(book.name.trim().toLowerCase())
-        }
-        return true
-    })
-    const remoteIds = new Set(remoteItems.map((row) => row.id))
-    const hiddenRemoteBookIds = tableName === 'price_books'
-        ? new Set((remoteItems as PriceBook[])
-            .filter((row) => !row.isDeleted && pendingBookNameKeys.has(row.name.trim().toLowerCase()))
-            .map((row) => row.id))
-        : new Set<string>()
-    const deletedIds = localItems
-        .filter((row) => row.syncStatus !== 'pending' && (!remoteIds.has(row.id) || hiddenRemoteBookIds.has(row.id)))
-        .map((row) => row.id)
-
-    if (!await canReconcileCloudWorkspaceData(workspaceId)) {
-        return
-    }
-
-    await db.transaction('rw', table, async () => {
-        if (deletedIds.length > 0) {
-            await table.bulkDelete(deletedIds)
+        if (!await canReconcileCloudWorkspaceData(workspaceId)) {
+            cancelWorkspaceDataHydration(workspaceId, 'supabase', tableName, operationId)
+            return
         }
 
-        if (tableName === 'price_book_items') {
-            for (const remoteItem of applicableRemoteItems as PriceBookItem[]) {
-                const conflict = await db.price_book_items
-                    .where('[priceBookId+productId]')
-                    .equals([remoteItem.priceBookId, remoteItem.productId])
-                    .first()
-                if (conflict && conflict.id !== remoteItem.id && conflict.syncStatus !== 'pending') {
-                    await db.price_book_items.delete(conflict.id)
+        const syncedAt = new Date().toISOString()
+        const remoteItems = remoteRows.map((row) => ({
+            ...(toCamelCase(row) as unknown as PriceBook | PriceBookItem),
+            syncStatus: 'synced' as const,
+            lastSyncedAt: syncedAt
+        }))
+        const localItems = await table.where('workspaceId').equals(workspaceId).toArray() as Array<PriceBook | PriceBookItem>
+        const pendingItems = localItems.filter((row) => row.syncStatus === 'pending')
+        const pendingIds = new Set(pendingItems.map((row) => row.id))
+        const pendingNaturalKeys = tableName === 'price_book_items'
+            ? new Set((pendingItems as PriceBookItem[]).map((row) => `${row.priceBookId}:${row.productId}`))
+            : new Set<string>()
+        const pendingBookNameKeys = tableName === 'price_books'
+            ? new Set((pendingItems as PriceBook[])
+                .filter((row) => !row.isDeleted)
+                .map((row) => row.name.trim().toLowerCase()))
+            : new Set<string>()
+        const applicableRemoteItems = remoteItems.filter((row) => {
+            if (pendingIds.has(row.id)) {
+                return false
+            }
+            if (tableName === 'price_book_items') {
+                const item = row as PriceBookItem
+                return !pendingNaturalKeys.has(`${item.priceBookId}:${item.productId}`)
+            }
+            if (tableName === 'price_books') {
+                const book = row as PriceBook
+                return book.isDeleted || !pendingBookNameKeys.has(book.name.trim().toLowerCase())
+            }
+            return true
+        })
+        const remoteIds = new Set(remoteItems.map((row) => row.id))
+        const hiddenRemoteBookIds = tableName === 'price_books'
+            ? new Set((remoteItems as PriceBook[])
+                .filter((row) => !row.isDeleted && pendingBookNameKeys.has(row.name.trim().toLowerCase()))
+                .map((row) => row.id))
+            : new Set<string>()
+        const deletedIds = localItems
+            .filter((row) => row.syncStatus !== 'pending' && (!remoteIds.has(row.id) || hiddenRemoteBookIds.has(row.id)))
+            .map((row) => row.id)
+
+        if (!await canReconcileCloudWorkspaceData(workspaceId)) {
+            cancelWorkspaceDataHydration(workspaceId, 'supabase', tableName, operationId)
+            return
+        }
+
+        await db.transaction('rw', table, async () => {
+            if (deletedIds.length > 0) {
+                await table.bulkDelete(deletedIds)
+            }
+
+            if (tableName === 'price_book_items') {
+                for (const remoteItem of applicableRemoteItems as PriceBookItem[]) {
+                    const conflict = await db.price_book_items
+                        .where('[priceBookId+productId]')
+                        .equals([remoteItem.priceBookId, remoteItem.productId])
+                        .first()
+                    if (conflict && conflict.id !== remoteItem.id && conflict.syncStatus !== 'pending') {
+                        await db.price_book_items.delete(conflict.id)
+                    }
                 }
             }
-        }
 
-        if (applicableRemoteItems.length > 0) {
-            if (tableName === 'price_books') {
-                await db.price_books.bulkPut(applicableRemoteItems as PriceBook[])
-            } else {
-                await db.price_book_items.bulkPut(applicableRemoteItems as PriceBookItem[])
+            if (applicableRemoteItems.length > 0) {
+                if (tableName === 'price_books') {
+                    await db.price_books.bulkPut(applicableRemoteItems as PriceBook[])
+                } else {
+                    await db.price_book_items.bulkPut(applicableRemoteItems as PriceBookItem[])
+                }
             }
-        }
-        if (pendingItems.length > 0) {
-            if (tableName === 'price_books') {
-                await db.price_books.bulkPut(pendingItems as PriceBook[])
-            } else {
-                await db.price_book_items.bulkPut(pendingItems as PriceBookItem[])
+            if (pendingItems.length > 0) {
+                if (tableName === 'price_books') {
+                    await db.price_books.bulkPut(pendingItems as PriceBook[])
+                } else {
+                    await db.price_book_items.bulkPut(pendingItems as PriceBookItem[])
+                }
             }
-        }
-    })
+        })
+        const completedAt = new Date().toISOString()
+        recordWorkspaceDataFetch(workspaceId, 'supabase', completedAt, tableName)
+        recordWorkspaceTableHydrationFetch(workspaceId, 'supabase', tableName, 'active', completedAt)
+        completeWorkspaceDataHydration(workspaceId, 'supabase', tableName, completedAt, operationId)
+    } catch (error) {
+        failWorkspaceDataHydration(workspaceId, 'supabase', tableName, undefined, operationId)
+        throw error
+    }
 }
 
 export function usePriceBooks(workspaceId: string | undefined, options: PriceBookQueryOptions = {}) {

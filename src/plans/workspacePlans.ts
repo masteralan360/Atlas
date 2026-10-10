@@ -32,6 +32,7 @@ export type PlanModuleKey =
     | 'suppliers'
     | 'orders'
     | 'ecommerce'
+    | 'commerce_operations'
     | 'real_estate'
     | 'activities'
     | 'currency_exchange'
@@ -65,6 +66,7 @@ export type WorkspaceFeatureKey =
     | 'garden_management'
     | 'travel_transportation'
     | 'ecommerce'
+    | 'commerce_operations'
     | 'real_estate'
     | 'activities'
     | 'currency_exchange'
@@ -260,6 +262,7 @@ export const WORKSPACE_FEATURE_MODULE_MAP: Record<WorkspaceFeatureKey, PlanModul
     garden_management: 'garden_management',
     travel_transportation: 'travel_transportation',
     ecommerce: 'ecommerce',
+    commerce_operations: 'commerce_operations',
     orders: 'orders',
     real_estate: 'real_estate',
     activities: 'activities',

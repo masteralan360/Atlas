@@ -356,6 +356,16 @@ export const WORKSPACE_PERMISSION_DEFINITIONS = [
     section: "partners-and-demand",
   },
   {
+    key: "commerceOperations.access",
+    module: "commerceOperations",
+    labelKey: "commerceOperations.permissions.access",
+    defaultLabel: "Commerce Operations",
+    descriptionKey: "commerceOperations.permissions.accessDescription",
+    defaultDescription: "Access social sales, wholesale intake, market reporting, and coach performance.",
+    icon: ShoppingCart,
+    section: "partners-and-demand",
+  },
+  {
     key: "accounting.access",
     module: "accounting",
     labelKey: "members.permissions.accountingAccess",

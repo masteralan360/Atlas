@@ -81,6 +81,10 @@ Any field or control that allows users to select a currency MUST use the app-pro
 
 Any field or cntrol that allows users to select a payment method MUST use the app-provided `PaymentMethodSelector` component at `src/ui/components/PaymentMethodSelector.tsx`. Do not create custom payment method dropdowns, selectors, or native alternatives IF the use is not module specific (for e.g. if a module needs a specific payment method selector, it can create new payment method inside app's provided one and wire it to that specific module). Reuse this component consistently wherever payment method selection is required.
 
+## Selectors and asynchronous options
+
+Controlled selectors MUST preserve their current value while options are loading or refreshing; loading or empty options must never clear or replace the selection. Accept only a value that matches an available option or an explicit user-initiated clear action. If a saved value is no longer available, keep it visible as unavailable until the user changes or clears it. Validate selected values again when saving, and show a localized, user-friendly error if persistence or cloud sync fails. Reuse shared selector behavior where practical, and cover asynchronous loading, refresh, unavailable values, explicit clearing, and create/edit flows with regression tests.
+
 While the modal is proceeding/processing it must NOT allow the user to close the modal by the overlay or X button. This is to prevent the user from closing the modal while the data is being saved and thus potentially corrupting the data.
 
 When a workflow explicitly uses `MultipleModalLayout`, only its last active panel may own the primary confirmation/submit action. Earlier panels may collect and validate data, but must not offer a competing confirmation action; closing a linked panel must return to the preceding step without losing its input.

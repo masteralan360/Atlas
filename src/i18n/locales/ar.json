@@ -1,4 +1,77 @@
 {
+  "commerceOperations": {
+    "title": "إدارة التجارة",
+    "subtitle": "إدارة استقبال الطلبات الاجتماعية والجملة وسجلات السوق اليدوية وأداء المدربين.",
+    "tabs": { "social": "طلبات التواصل الاجتماعي", "wholesale": "الجملة", "data": "مركز البيانات", "coaches": "المدربون" },
+    "social": { "title": "استقبال طلبات التواصل الاجتماعي" },
+    "wholesale": { "title": "استقبال طلبات الجملة" },
+    "metrics": { "intakeOrders": "الطلبات المستلمة", "waitingCollection": "طلبات غير مدفوعة", "orderValue": "قيمة الطلبات" },
+    "filters": { "orderDate": "تاريخ الطلب", "recordDate": "تاريخ السجل", "commissionDate": "تاريخ العمولة" },
+    "orders": {
+      "unpaidHint": "يُحفظ الطلب دون دفع. نفّذه وحصّل المبلغ لاحقاً من قسم الطلبات.",
+      "prerequisite": "يتطلب استقبال الطلبات صلاحية الوصول إلى الطلبات والمنتجات وCRM، مع صلاحية إنشاء طلبات البيع.",
+      "recent": "أحدث الطلبات المستلمة", "emptyTitle": "لا توجد طلبات مستلمة بعد", "emptyBody": "أنشئ طلباً لربطه بالمنتجات وسجل العميل والتنفيذ وتحصيل الدفعة لاحقاً.",
+      "paid": "مدفوع", "unpaid": "غير مدفوع", "sellerUnavailable": "البائع غير متاح"
+    },
+    "actions": {
+      "newOrder": "طلب جديد", "products": "المنتجات", "openOrder": "فتح الطلب", "addRecord": "إضافة سجل", "openStockAdjustments": "فتح تسويات المخزون",
+      "addCoach": "إضافة مدرب", "openAgents": "فتح الوكلاء", "openCommissionLedger": "دفتر العمولات", "browseProducts": "استعراض المنتجات",
+      "removeProduct": "إزالة المنتج", "unlinkProduct": "إلغاء ربط المنتج", "unlinkBuyer": "إلغاء ربط العميل", "unlinkCoach": "إلغاء ربط المدرب", "editRecord": "تعديل السجل",
+      "saveUnpaidOrder": "حفظ طلب غير مدفوع", "saveRecord": "حفظ السجل", "updateRecord": "تحديث السجل", "saveCoach": "حفظ المدرب", "saving": "جارٍ الحفظ…"
+    },
+    "platforms": { "instagram": "إنستغرام", "tiktok": "تيك توك", "whatsapp": "واتساب", "messenger": "ماسنجر", "coach": "مدرب", "other": "أخرى" },
+    "recordTypes": { "order_details": "استقبال طلب", "ad_spend": "إنفاق إعلاني", "dm_funnel": "مسار الرسائل", "city_market": "سوق المدينة", "competitor": "منافس", "coach_profile": "ملف المدرب" },
+    "fields": {
+      "buyer": "المشتري", "seller": "الموظف", "phone": "الهاتف", "socialHandle": "اسم الحساب الاجتماعي", "city": "المدينة", "address": "العنوان",
+      "orderDate": "تاريخ الطلب", "date": "التاريخ", "storage": "المخزن", "priceBook": "قائمة الأسعار", "catalogPrices": "استخدام أسعار المنتجات",
+      "quantity": "الكمية", "currency": "العملة", "platform": "المنصة", "notes": "ملاحظات"
+    },
+    "placeholders": {
+      "findBuyer": "ابحث عن المشتري أو أدخل اسمه", "seller": "الموظف", "phone": "رقم الهاتف", "socialHandle": "@اسم_المستخدم",
+      "city": "المدينة", "address": "عنوان التوصيل", "storage": "اختر المخزن", "priceBook": "اختر قائمة أسعار", "searchProduct": "ابحث عن المنتجات"
+    },
+    "labels": { "linked": "مرتبط" },
+    "order": {
+      "socialTitle": "طلب تواصل اجتماعي جديد", "wholesaleTitle": "طلب جملة جديد", "items": "المنتجات", "noItems": "أضف منتجاً واحداً على الأقل إلى الطلب.",
+      "noSku": "لا يوجد رمز منتج", "currencyNote": "تستخدم جميع عناصر الطلب عملة {{currency}}.", "deliveryFee": "رسوم التوصيل", "discount": "الخصم",
+      "subtotal": "المجموع الفرعي", "total": "الإجمالي", "noPaymentAtIntake": "ينشئ هذا طلباً غير مدفوع. سجّل الدفع لاحقاً من خلال مسار دفع الطلب المعتاد.",
+      "productBrowseHint": "اختر منتجاً وموقع التخزين.", "priceBookHint": "تُستخدم قائمة الأسعار المحددة لأسعار الجملة."
+    },
+    "data": {
+      "title": "مركز البيانات", "subtitle": "سجّل يدوياً ملاحظات الحملات والسوق والمنافسين. لا توجد حسابات خارجية مرتبطة.",
+      "addRecord": "إضافة سجل بيانات", "editRecord": "تعديل سجل بيانات", "recordType": "نوع السجل", "amount": "المبلغ", "adSpend": "الإنفاق الإعلاني", "reach": "الوصول", "dms": "الرسائل",
+      "completedSales": "المبيعات المكتملة", "directMessages": "الرسائل المباشرة", "completionRate": "معدل التحويل من الرسائل إلى البيع: {{rate}}", "lowStock": "منتجات منخفضة المخزون",
+      "records": "أحدث السجلات", "emptyTitle": "لا توجد سجلات سوق بعد", "emptyBody": "أضف ملاحظات يدوية عن الحملات أو السوق أو المنافسين لعرضها هنا.",
+      "inventoryTitle": "ارتباط المخزون", "inventoryHint": "تُحتسب المنتجات منخفضة المخزون من قسم المنتجات. استخدم تسويات المخزون لتصحيح الكميات.",
+      "competitorSnapshot": "ملخص المنافسين", "competitorCount": "المنافسون المسجلون", "dmSummary": "{{dms}} رسالة · {{sales}} مبيعة",
+      "citySummary": "{{pools}} مسبح · {{swimmers}} سباح", "dmTitle": "مسار رسائل {{platform}} · {{date}}", "language": "اللغة",
+      "poolCount": "عدد المسابح", "swimmerCount": "عدد السباحين", "competitorName": "اسم المنافس", "competitorKind": "نوع المنافس",
+      "competitorKinds": { "online": "عبر الإنترنت", "physical": "موقع فعلي" }, "followers": "المتابعون", "pricePosition": "مستوى السعر",
+      "pricePositions": { "low": "أقل سعراً", "mid": "سعر مماثل", "high": "أعلى سعراً" }, "brandingNotes": "العلامة التجارية والملاحظات"
+    },
+    "coaches": {
+      "title": "أداء المدربين", "subtitle": "اربط المدربين بالوكلاء وراجع سجلات عمولات المبيعات.", "addTitle": "إضافة ملف مدرب", "coach": "المدرب",
+      "chooseAgent": "ابحث عن وكيل موجود", "agentsRequired": "يتطلب ربط ملفات المدربين تفعيل وحدة الوكلاء.", "commissionSetupHint": "أعد قواعد عمولات الوكلاء في قسم الوكلاء قبل استخدام تقارير العمولات.",
+      "coachCount": "المدربون", "activeCoaches": "المدربون النشطون", "commissionEntries": "سجلات العمولات", "directory": "دليل المدربين",
+      "sales": "المبيعات", "commissionsEarned": "العمولات المكتسبة", "paid": "المدفوع", "status": "الحالة", "emptyTitle": "لا يوجد مدربون مرتبطون بعد",
+      "emptyBody": "اربط شريك أعمال موجوداً لديه ملف وكيل لإضافته هنا.", "commissionsUnavailable": "فعّل عمولات وكلاء المبيعات لعرض إجمالي العمولات.",
+      "statuses": { "active": "نشط", "inactive": "غير نشط" }
+    },
+    "languages": { "ku": "الكردية", "ar": "العربية", "en": "الإنجليزية" },
+    "toast": {
+      "orderSaved": "تم حفظ الطلب غير المدفوع", "orderSavedDetail": "افتح الطلب لمتابعة التنفيذ وتحصيل الدفعة لاحقاً.", "orderFailed": "تعذر حفظ الطلب",
+      "recordSaved": "تم حفظ السجل", "recordFailed": "تعذر حفظ السجل", "coachSaved": "تم ربط ملف المدرب", "coachFailed": "تعذر حفظ ملف المدرب",
+      "costRequired": "تكلفة المنتج غير محددة", "costRequiredDetail": "أضف تكلفة للمنتج أو لقائمة الأسعار المحددة قبل إدراجه في الطلب.",
+      "currencyMismatch": "اختر منتجات تستخدم العملة نفسها.", "tryAgain": "يرجى المحاولة مرة أخرى."
+    },
+    "validation": {
+      "buyerRequired": "أدخل مشترياً أو اختره.", "phoneRequired": "أدخل رقم هاتف المشتري.", "sellerRequired": "أدخل اسم الموظف الذي يستلم الطلب.",
+      "storageRequired": "اختر موقع التخزين.", "productRequired": "أضف منتجاً واحداً على الأقل.", "discountLimit": "يجب ألا يتجاوز الخصم {{percent}}%.",
+      "amountRequired": "أدخل مبلغاً صالحاً.", "cityRequired": "أدخل المدينة.", "nameRequired": "أدخل اسماً.", "coachRequired": "اختر وكيلاً موجوداً.",
+      "coachExists": "هذا الوكيل مرتبط بالفعل كمدرب."
+    },
+    "permissions": { "access": "الوصول إلى إدارة التجارة", "accessDescription": "عرض استقبال الطلبات والسجلات السوقية وأداء المدربين." }
+  },
   "transactionAudit": {
     "run": "تشغيل تدقيق السلامة",
     "title": "تدقيق سلامة المعاملة",

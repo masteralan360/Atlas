@@ -321,6 +321,9 @@ const Orders = lazy(() =>
 const Ecommerce = lazy(() =>
   import("@/ui/pages/Ecommerce").then((m) => ({ default: m.Ecommerce })),
 );
+const CommerceOperations = lazy(() =>
+  import("@/ui/pages/CommerceOperations").then((m) => ({ default: m.CommerceOperations })),
+);
 const RealEstate = lazy(() =>
   import("@/ui/pages/RealEstate").then((m) => ({ default: m.RealEstate })),
 );
@@ -1904,6 +1907,17 @@ function App() {
                         >
                           <Layout>
                             <Ecommerce />
+                          </Layout>
+                        </ProtectedRoute>
+                      </Route>
+                      <Route path="/commerce-operations">
+                        <ProtectedRoute
+                          allowedRoles={["admin", "staff", "viewer"]}
+                          requiredFeature="commerce_operations"
+                          requiredPermission="commerceOperations.access"
+                        >
+                          <Layout>
+                            <CommerceOperations />
                           </Layout>
                         </ProtectedRoute>
                       </Route>

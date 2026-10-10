@@ -1538,6 +1538,25 @@ export interface MarketplaceOrder extends BaseEntity {
   salesOrderId?: string | null
 }
 
+export type CommerceOperationRecordType =
+  | 'order_details'
+  | 'ad_spend'
+  | 'dm_funnel'
+  | 'city_market'
+  | 'competitor'
+  | 'coach_profile'
+
+/** Non-financial operational notes and analytics for the Commerce Operations module. */
+export interface CommerceOperationRecord extends BaseEntity {
+  recordType: CommerceOperationRecordType
+  recordDate: string
+  title: string
+  relatedOrderId?: string | null
+  relatedPartnerId?: string | null
+  payload: Record<string, unknown>
+  createdBy?: string | null
+}
+
 export type RealEstateTransactionType = 'sell' | 'buy' | 'rent' | 'lease' | 'exchange'
 
 export type RealEstatePropertyType =
@@ -2973,6 +2992,7 @@ export interface SyncQueueItem {
     | 'business_partner_merge_candidates'
     | 'customer_profitability_engagements'
     | 'customer_profitability_attributions'
+    | 'commerce_operations_records'
     | 'sales_orders'
     | 'purchase_orders'
     | 'order_installments'
@@ -3225,6 +3245,7 @@ export interface OfflineMutation {
     | 'business_partner_merge_candidates'
     | 'customer_profitability_engagements'
     | 'customer_profitability_attributions'
+    | 'commerce_operations_records'
     | 'sales_orders'
     | 'purchase_orders'
     | 'order_installments'

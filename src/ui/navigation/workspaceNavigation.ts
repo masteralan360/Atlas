@@ -30,6 +30,7 @@ import {
   Receipt,
   Settings,
   Store,
+  ShoppingBag,
   ShoppingCart,
   TrendingUp,
   Truck,
@@ -263,6 +264,13 @@ export function buildWorkspaceNavigation({
           icon: Store,
         },
       ]
+      : []),
+    ...(isCoreRole && hasFeature("commerce_operations") && canAccessPermission("commerceOperations.access")
+      ? [{
+        name: t("commerceOperations.title", { defaultValue: "Commerce Operations" }),
+        href: "/commerce-operations",
+        icon: ShoppingBag,
+      }]
       : []),
     ...(isCoreRole && hasFeature("agents") && canAccessPermission("agents.access")
       ? [

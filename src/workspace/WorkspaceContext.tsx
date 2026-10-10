@@ -86,6 +86,7 @@ export interface WorkspaceFeatures {
     garden_management: boolean
     travel_transportation: boolean
     ecommerce: boolean
+    commerce_operations: boolean
     real_estate: boolean
     activities: boolean
     currency_exchange: boolean
@@ -197,6 +198,7 @@ const PLAN_DERIVED_FEATURE_KEYS: ModuleFeatureKey[] = [
     'garden_management',
     'travel_transportation',
     'ecommerce',
+    'commerce_operations',
     'real_estate',
     'activities',
     'currency_exchange',

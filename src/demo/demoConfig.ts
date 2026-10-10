@@ -45,6 +45,7 @@ export const DEMO_OPTIONAL_MODULE_GRANTS = {
   CRS: { type: 'module', key: 'car_rental' },
   TT: { type: 'module', key: 'travel_transportation' },
   CP: { type: 'module', key: 'customer_profitability' },
+  CO: { type: 'module', key: 'commerce_operations' },
   GM: { type: 'module', key: 'garden_management' },
 } as const satisfies Record<string, DemoOptionalModuleGrant>
 

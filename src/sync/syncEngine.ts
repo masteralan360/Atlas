@@ -65,6 +65,7 @@ const SYNC_PULL_TABLES = [
   "product_unit_conversions",
   "price_book_unit_prices",
   "customers",
+  "commerce_operations_records",
   "suppliers",
   "agents",
   "agent_excluded_categories",

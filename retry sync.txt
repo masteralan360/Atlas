@@ -7,7 +7,6 @@ POS
 Fix Product Form on mobile
 
 #
-Remove Subscription Expiry and make billing's payment configuration authoritative
 
 Ai Assistance Payment maker with Transaction send to admin dashboard
 User Plan Control in Billing

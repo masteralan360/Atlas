@@ -104,6 +104,7 @@ import type {
   BudgetAllocation,
   CustomerProfitabilityEngagement,
   CustomerProfitabilityAttribution,
+  CommerceOperationRecord,
   GardenSite,
   GardenConstructionProject,
   GardenMaintenanceContract,
@@ -497,6 +498,7 @@ export class AtlasDatabase extends Dexie {
   business_partner_merge_candidates!: EntityTable<BusinessPartnerMergeCandidate, 'id'>
   customer_profitability_engagements!: EntityTable<CustomerProfitabilityEngagement, 'id'>
   customer_profitability_attributions!: EntityTable<CustomerProfitabilityAttribution, 'id'>
+  commerce_operations_records!: EntityTable<CommerceOperationRecord, 'id'>
   employees!: EntityTable<Employee, 'id'>
   budget_settings!: EntityTable<BudgetSettings, 'id'>
   budget_allocations!: EntityTable<BudgetAllocation, 'id'>
@@ -3721,6 +3723,11 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, jobId, userId, unassignedAt, updatedAt, isDeleted, syncStatus, [workspaceId+jobId], [workspaceId+userId], [userId+unassignedAt]',
       garden_job_activity:
         'id, workspaceId, jobId, activityType, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+jobId], [workspaceId+createdAt]'
+    })
+
+    this.version(146).stores({
+      commerce_operations_records:
+        'id, workspaceId, recordType, recordDate, relatedOrderId, relatedPartnerId, updatedAt, isDeleted, syncStatus, [workspaceId+recordType], [workspaceId+recordDate], [workspaceId+relatedOrderId], [workspaceId+relatedPartnerId], [workspaceId+updatedAt]'
     })
 
     this.registerIndexedDbDiagnostics()
