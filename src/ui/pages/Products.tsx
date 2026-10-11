@@ -15,6 +15,7 @@ import {
     useWorkspaceProductBarcodes,
     useStorages,
     type CurrencyCode,
+    type PriceBook,
     type Product
 } from '@/local-db'
 import { isMobile, isTauri } from '@/lib/platform'
@@ -55,6 +56,7 @@ import { LABEL_PRINT_TEMPLATE_KEY, isValidLabelPrintPageSize } from '@/lib/label
 import { loadProductLabelPrintTemplates } from '@/lib/productLabelPrintTemplates'
 import { printPdfBlob } from '@/services/pdfPrintService'
 import { PriceBookManagementDialog } from '@/ui/components/PriceBookManagementDialog'
+import { PriceBookName } from '@/ui/components/PriceBookName'
 import { ProductImportPreviewModal } from '@/ui/components/ProductImportPreviewModal'
 import { ProductCategoryManagerDialog } from '@/ui/components/products/ProductCategoryManagerDialog'
 import { CameraBarcodeScannerModal, type CameraBarcodeScanMode, type CameraBarcodeScannerTabOption } from '@/ui/components/pos/CameraBarcodeScannerModal'
@@ -406,19 +408,19 @@ export function Products() {
     }, [inventoryRows, products, storageById])
 
     const productPriceBookMap = useMemo(() => {
-        const priceBookNameById = new Map(priceBooks.map((priceBook) => [priceBook.id, priceBook.name] as const))
-        const productPriceBooks = new Map<string, string[]>()
+        const priceBookById = new Map(priceBooks.map((priceBook) => [priceBook.id, priceBook] as const))
+        const productPriceBooks = new Map<string, PriceBook[]>()
 
         for (const item of priceBookItems) {
-            const priceBookName = priceBookNameById.get(item.priceBookId)
-            if (!priceBookName) continue
-            const names = productPriceBooks.get(item.productId) ?? []
-            names.push(priceBookName)
-            productPriceBooks.set(item.productId, names)
+            const priceBook = priceBookById.get(item.priceBookId)
+            if (!priceBook) continue
+            const books = productPriceBooks.get(item.productId) ?? []
+            books.push(priceBook)
+            productPriceBooks.set(item.productId, books)
         }
 
-        for (const names of productPriceBooks.values()) {
-            names.sort((left, right) => left.localeCompare(right))
+        for (const books of productPriceBooks.values()) {
+            books.sort((left, right) => left.name.localeCompare(right.name))
         }
 
         return productPriceBooks
@@ -805,11 +807,13 @@ export function Products() {
     }
 
     const renderPriceBooks = (productId: string) => {
-        const names = productPriceBookMap.get(productId) ?? []
-        if (names.length === 0) {
+        const books = productPriceBookMap.get(productId) ?? []
+        if (books.length === 0) {
             return <span className="text-muted-foreground">{t('priceBooks.none', { defaultValue: 'No Price Book' })}</span>
         }
-        if (names.length === 1) return <>{names[0]}</>
+        if (books.length === 1) {
+            return <PriceBookName name={books[0].name} color={books[0].color} nameClassName="truncate" />
+        }
 
         return (
             <TooltipProvider>
@@ -820,8 +824,10 @@ export function Products() {
                         </span>
                     </TooltipTrigger>
                     <TooltipContent side="top" align="start" className="max-w-[240px] space-y-1.5 p-3">
-                        {names.map((name) => (
-                            <div key={name} className="text-sm">{name}</div>
+                        {books.map((priceBook) => (
+                            <div key={priceBook.id} className="text-sm">
+                                <PriceBookName name={priceBook.name} color={priceBook.color} />
+                            </div>
                         ))}
                     </TooltipContent>
                 </Tooltip>

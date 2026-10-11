@@ -12,6 +12,7 @@ export function ThemeAwareTitleLogo({ className }: ThemeAwareTitleLogoProps) {
         const colors: Record<string, { dark: string; light: string }> = {
             modern: { dark: '#6366f1', light: '#4f46e5' },
             emerald: { dark: '#1ACBB1', light: '#1ACBB1' },
+            gold: { dark: '#e6bd55', light: '#a87900' },
             'neo-orange': { dark: '#f97316', light: '#ea580c' },
             legacy: { dark: '#3b82f6', light: '#3b82f6' },
             primary: { dark: '#ffffff', light: '#0f172a' }
@@ -24,6 +25,7 @@ export function ThemeAwareTitleLogo({ className }: ThemeAwareTitleLogoProps) {
         const colors: Record<string, { dark: string; light: string }> = {
             modern: { dark: 'rgba(255,254,254,0.15)', light: 'rgba(0,0,0,0.08)' },
             emerald: { dark: 'rgba(255,254,254,0.15)', light: 'rgba(0,0,0,0.08)' },
+            gold: { dark: 'rgba(230,189,85,0.3)', light: 'rgba(168,121,0,0.2)' },
             'neo-orange': { dark: 'rgba(255,254,254,0.15)', light: 'rgba(0,0,0,0.1)' },
             legacy: { dark: 'rgba(255,254,254,0.15)', light: 'rgba(0,0,0,0.08)' },
             primary: { dark: 'rgba(255,254,254,0.15)', light: 'rgba(0,0,0,0.08)' }

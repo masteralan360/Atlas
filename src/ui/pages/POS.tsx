@@ -162,6 +162,7 @@ import { PosAdjust } from '@/ui/components/pos/PosAdjust'
 import { usePosReceiptPrinter } from '@/ui/components/pos/usePosReceiptPrinter'
 import type { StorageSelectorOption } from '@/ui/components/pos/StorageSelector'
 import { PosPriceBookSelector } from '@/ui/components/pos/PosPriceBookSelector'
+import { PriceBookName } from '@/ui/components/PriceBookName'
 import { CameraBarcodeScanner } from '@/ui/components/pos/CameraBarcodeScanner'
 import { MobileCatalogQuantityButton } from '@/ui/components/pos/MobileCatalogQuantityButton'
 import { mapSaleToUniversal } from '@/lib/mappings'
@@ -6006,9 +6007,12 @@ function MobileHeader({
                                                     )}
                                                 >
                                                     <BookOpen className={cn("w-5 h-5", selectedPriceBookId === priceBook.id ? "text-amber-500" : "text-muted-foreground")} />
-                                                    <span className="font-medium flex-1 truncate">
-                                                        {priceBook.name}
-                                                    </span>
+                                                    <PriceBookName
+                                                        name={priceBook.name}
+                                                        color={priceBook.color}
+                                                        className="min-w-0 flex-1"
+                                                        nameClassName="truncate font-medium"
+                                                    />
                                                     {selectedPriceBookId === priceBook.id && (
                                                         <Check className="w-4 h-4 text-amber-500 shrink-0" />
                                                     )}

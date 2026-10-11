@@ -3,7 +3,7 @@ import { isTauri } from "@/lib/platform"
 import { platformService } from "@/services/platformService"
 
 type Theme = "dark" | "light" | "system"
-type ThemeStyle = "modern" | "legacy" | "primary" | "emerald" | "neo-orange" | "low-power"
+type ThemeStyle = "modern" | "legacy" | "primary" | "emerald" | "neo-orange" | "gold" | "low-power"
 
 type ThemeProviderProps = {
     children: React.ReactNode
@@ -62,7 +62,7 @@ export function ThemeProvider({
 
     useEffect(() => {
         const root = window.document.documentElement
-        root.classList.remove("theme-modern", "theme-legacy", "theme-primary", "theme-emerald", "theme-neo-orange", "theme-low-power", "low-power")
+        root.classList.remove("theme-modern", "theme-legacy", "theme-primary", "theme-emerald", "theme-neo-orange", "theme-gold", "theme-low-power", "low-power")
         
         if (style === "low-power") {
             root.classList.add("low-power")

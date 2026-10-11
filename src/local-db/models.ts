@@ -107,6 +107,8 @@ export interface ProductUom extends BaseEntity {
 
 export interface PriceBook extends BaseEntity {
   name: string
+  /** Optional accent color for the Price Book's visual identifier. */
+  color?: string | null
   createdBy?: string | null
   /** When true, saving without selecting this (or any) Price Book shows a confirmation warning. Absent/true by default. */
   saveWarn?: boolean

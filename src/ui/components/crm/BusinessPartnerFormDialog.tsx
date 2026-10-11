@@ -45,6 +45,7 @@ import {
 } from '@/ui/components'
 import { useWorkspace } from '@/workspace'
 import { PartnerLocationField } from '@/ui/components/crm/PartnerLocationField'
+import { PriceBookName } from '@/ui/components/PriceBookName'
 import {
     BusinessPartnerDuplicateStatusDescription,
     BusinessPartnerDuplicateStatusIcon
@@ -496,7 +497,7 @@ export function BusinessPartnerFormDialog({
                                             ) : null}
                                             {sortedPriceBooks.map((priceBook) => (
                                                 <SelectItem key={priceBook.id} value={priceBook.id}>
-                                                    {priceBook.name}
+                                                    <PriceBookName name={priceBook.name} color={priceBook.color} />
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>

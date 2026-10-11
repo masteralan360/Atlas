@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { BookOpen, ChevronDown, Package, Pencil, Plus, Trash2 } from 'lucide-react'
+import { BookOpen, Check, ChevronDown, CircleOff, Package, Palette, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -11,21 +11,29 @@ import {
     type PriceBook
 } from '@/local-db'
 import { formatCurrency } from '@/lib/utils'
+import { isValidPriceBookColor } from '@/lib/priceBookColor'
 import { useHideCosts } from '@/permissions'
 import {
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogDescription,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
     Button,
     Checkbox,
     DeleteConfirmationModal,
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
     Input,
     Label,
     useToast
 } from '@/ui/components'
+import { PriceBookName } from './PriceBookName'
+
+const PRICE_BOOK_COLOR_SWATCHES = [
+    '#ef4444', '#f97316', '#eab308', '#22c55e', '#14b8a6', '#06b6d4',
+    '#3b82f6', '#6366f1', '#8b5cf6', '#ec4899', '#64748b'
+]
 
 interface PriceBookManagementDialogProps {
     open: boolean
@@ -53,6 +61,7 @@ export function PriceBookManagementDialog({
     } = usePriceBookCatalogState(workspaceId, { enabled })
     const products = useProducts(workspaceId, { syncBarcodeCache: false, syncRemote: false, enabled })
     const [name, setName] = useState('')
+    const [color, setColor] = useState<string | null>(null)
     const [editingPriceBook, setEditingPriceBook] = useState<PriceBook | null>(null)
     const [priceBookToDelete, setPriceBookToDelete] = useState<PriceBook | null>(null)
     const [expandedPriceBookIds, setExpandedPriceBookIds] = useState<Set<string>>(new Set())
@@ -91,6 +100,7 @@ export function PriceBookManagementDialog({
     useEffect(() => {
         if (!open) {
             setName('')
+            setColor(null)
             setEditingPriceBook(null)
             setPriceBookToDelete(null)
             setExpandedPriceBookIds(new Set())
@@ -105,11 +115,13 @@ export function PriceBookManagementDialog({
         }
         setEditingPriceBook(priceBook)
         setName(priceBook.name)
+        setColor(priceBook.color ?? null)
     }
 
     const cancelEdit = () => {
         setEditingPriceBook(null)
         setName('')
+        setColor(null)
     }
 
     const togglePriceBookProducts = (priceBookId: string) => {
@@ -133,14 +145,14 @@ export function PriceBookManagementDialog({
         setIsSaving(true)
         try {
             if (editingPriceBook) {
-                await updatePriceBook(editingPriceBook.id, { name })
+                await updatePriceBook(editingPriceBook.id, { name, color })
                 toast({
                     title: t('priceBooks.messages.updateSuccess', {
                         defaultValue: 'Price Book updated successfully'
                     })
                 })
             } else {
-                await createPriceBook(workspaceId, { name, createdBy })
+                await createPriceBook(workspaceId, { name, color, createdBy })
                 toast({
                     title: t('priceBooks.messages.createSuccess', {
                         defaultValue: 'Price Book created successfully'
@@ -222,48 +234,84 @@ export function PriceBookManagementDialog({
     }
 
     return (
-        <Dialog open={open && enabled} onOpenChange={(nextOpen) => !isSaving && !isDeleting && onOpenChange(nextOpen)}>
-            <DialogContent className="max-w-2xl overflow-hidden p-0">
-                <DialogHeader className="border-b bg-muted/30 px-6 py-5 text-start">
-                    <DialogTitle className="flex items-center gap-2 text-xl">
+        <AppDialog open={open && enabled} onOpenChange={(nextOpen) => !isSaving && !isDeleting && onOpenChange(nextOpen)}>
+            <AppDialogContent className="max-w-2xl" showCloseButton={!isSaving && !isDeleting}>
+                <AppDialogHeader>
+                    <AppDialogTitle className="flex items-center gap-2 text-xl">
                         <BookOpen className="h-5 w-5 text-primary" />
                         {t('priceBooks.title', { defaultValue: 'Price Books' })}
-                    </DialogTitle>
-                    <DialogDescription>
+                    </AppDialogTitle>
+                    <AppDialogDescription>
                         {t('priceBooks.managementDescription', {
                             defaultValue: 'Create and rename the pricing tiers available for products and business partners.'
                         })}
-                    </DialogDescription>
-                </DialogHeader>
+                    </AppDialogDescription>
+                </AppDialogHeader>
 
-                <form onSubmit={handleSubmit} className="space-y-5 px-6 py-5">
+                <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+                    <AppDialogBody className="space-y-5">
                     <div className="space-y-2">
                         <Label htmlFor="price-book-name">
-                            {t('priceBooks.name', { defaultValue: 'Price Book name' })}
+                            {t('priceBooks.name', { defaultValue: 'Price Book name' })} <span className="text-destructive">*</span>
                         </Label>
-                        <div className="flex flex-col gap-2 sm:flex-row">
-                            <Input
-                                id="price-book-name"
-                                value={name}
-                                onChange={(event) => setName(event.target.value)}
-                                placeholder={t('priceBooks.namePlaceholder', { defaultValue: 'e.g. Wholesale' })}
-                                maxLength={120}
-                                autoFocus
-                                required
+                        <Input
+                            id="price-book-name"
+                            value={name}
+                            onChange={(event) => setName(event.target.value)}
+                            placeholder={t('priceBooks.namePlaceholder', { defaultValue: 'e.g. Wholesale' })}
+                            maxLength={120}
+                            autoFocus
+                            required
+                            disabled={!workspaceId || !isCatalogReady || isSaving || isDeleting}
+                        />
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label id="price-book-color-label">{t('priceBooks.color', { defaultValue: 'Color' })}</Label>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2" role="group" aria-labelledby="price-book-color-label">
+                            <button
+                                type="button"
+                                aria-label={t('priceBooks.noColor', { defaultValue: 'No color' })}
+                                aria-pressed={!color}
+                                title={t('priceBooks.noColor', { defaultValue: 'No color' })}
+                                onClick={() => setColor(null)}
                                 disabled={!workspaceId || !isCatalogReady || isSaving || isDeleting}
-                            />
-                            <Button
-                                type="submit"
-                                disabled={isSaving || isDeleting || !isCatalogReady || !workspaceId || !name.trim()}
-                                className="shrink-0 gap-2"
+                                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-dashed border-muted-foreground/60 text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 aria-pressed:ring-2 aria-pressed:ring-primary aria-pressed:ring-offset-2"
                             >
-                                {editingPriceBook ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                                {isSaving
-                                    ? t('common.loading', { defaultValue: 'Loading...' })
-                                    : editingPriceBook
-                                        ? t('common.save', { defaultValue: 'Save' })
-                                        : t('common.create', { defaultValue: 'Create' })}
-                            </Button>
+                                <CircleOff className="h-3.5 w-3.5" aria-hidden="true" />
+                            </button>
+                            {PRICE_BOOK_COLOR_SWATCHES.map((swatch) => (
+                                <button
+                                    key={swatch}
+                                    type="button"
+                                    aria-label={t('priceBooks.colorOption', { color: swatch, defaultValue: 'Use {{color}}' })}
+                                    aria-pressed={color?.toLowerCase() === swatch}
+                                    title={swatch}
+                                    onClick={() => setColor(swatch)}
+                                    disabled={!workspaceId || !isCatalogReady || isSaving || isDeleting}
+                                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border ring-offset-background transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 aria-pressed:ring-2 aria-pressed:ring-primary aria-pressed:ring-offset-2"
+                                    style={{ backgroundColor: swatch }}
+                                >
+                                    {color?.toLowerCase() === swatch ? <Check className="h-3.5 w-3.5 text-white drop-shadow" aria-hidden="true" /> : null}
+                                </button>
+                            ))}
+                            <label
+                                className="relative inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border bg-background text-muted-foreground hover:bg-muted focus-within:ring-2 focus-within:ring-ring has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50"
+                                title={t('priceBooks.customColor', { defaultValue: 'Custom color' })}
+                            >
+                                <Palette className="h-3.5 w-3.5" aria-hidden="true" />
+                                <input
+                                    type="color"
+                                    value={isValidPriceBookColor(color) ? color : '#3b82f6'}
+                                    onChange={(event) => setColor(event.target.value.toLowerCase())}
+                                    aria-label={t('priceBooks.customColor', { defaultValue: 'Custom color' })}
+                                    disabled={!workspaceId || !isCatalogReady || isSaving || isDeleting}
+                                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                                />
+                            </label>
+                            <span className="min-w-16 font-mono text-xs text-muted-foreground">
+                                {color ?? t('priceBooks.noColor', { defaultValue: 'No color' })}
+                            </span>
                         </div>
                     </div>
 
@@ -306,7 +354,7 @@ export function PriceBookManagementDialog({
                                                 >
                                                     <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                                                     <div className="min-w-0 flex-1">
-                                                        <div className="truncate text-sm font-bold">{priceBook.name}</div>
+                                                        <PriceBookName name={priceBook.name} color={priceBook.color} nameClassName="truncate text-sm font-bold" />
                                                         <div className="text-xs text-muted-foreground">
                                                             {t('priceBooks.products', {
                                                                 count: items.length,
@@ -401,18 +449,34 @@ export function PriceBookManagementDialog({
                         )}
                     </div>
 
-                    <DialogFooter className="border-t pt-4 sm:justify-between">
+                    </AppDialogBody>
+
+                    <AppDialogFooter className="sm:justify-between">
                         {editingPriceBook ? (
                             <Button type="button" variant="ghost" onClick={cancelEdit} disabled={isSaving || isDeleting}>
                                 {t('priceBooks.cancelEdit', { defaultValue: 'Cancel edit' })}
                             </Button>
                         ) : <span />}
-                        <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving || isDeleting}>
-                            {t('common.close', { defaultValue: 'Close' })}
-                        </Button>
-                    </DialogFooter>
+                        <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving || isDeleting}>
+                                {t('common.close', { defaultValue: 'Close' })}
+                            </Button>
+                            <Button
+                                type="submit"
+                                disabled={isSaving || isDeleting || !isCatalogReady || !workspaceId || !name.trim()}
+                                className="gap-2"
+                            >
+                                {editingPriceBook ? <Pencil className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                                {isSaving
+                                    ? t('common.loading', { defaultValue: 'Loading...' })
+                                    : editingPriceBook
+                                        ? t('common.save', { defaultValue: 'Save' })
+                                        : t('common.create', { defaultValue: 'Create' })}
+                            </Button>
+                        </div>
+                    </AppDialogFooter>
                 </form>
-            </DialogContent>
+            </AppDialogContent>
             <DeleteConfirmationModal
                 isOpen={Boolean(priceBookToDelete)}
                 onClose={() => {
@@ -430,6 +494,6 @@ export function PriceBookManagementDialog({
                 })}
                 itemName={priceBookToDelete?.name || ''}
             />
-        </Dialog>
+        </AppDialog>
     )
 }

@@ -19,6 +19,7 @@ import {
     useToast
 } from '@/ui/components'
 import { cn } from '@/lib/utils'
+import { PriceBookName } from '@/ui/components/PriceBookName'
 import {
     addStorefrontCatalogRule,
     fetchStorefrontCatalogRules,
@@ -300,7 +301,9 @@ export function StorefrontCatalogRulesEditor({
                         </SelectTrigger>
                         <SelectContent>
                             {priceBooks.map((priceBook) => (
-                                <SelectItem key={priceBook.id} value={priceBook.id}>{priceBook.name}</SelectItem>
+                                <SelectItem key={priceBook.id} value={priceBook.id}>
+                                    <PriceBookName name={priceBook.name} color={priceBook.color} />
+                                </SelectItem>
                             ))}
                         </SelectContent>
                     </Select>
@@ -366,7 +369,16 @@ export function StorefrontCatalogRulesEditor({
                                         ? t('settings.marketplace.catalogRuleInclusion', { defaultValue: 'Include only' })
                                         : t('settings.marketplace.catalogRuleExclusion', { defaultValue: 'Exclude' })}
                                 </span>
-                                <span className="truncate text-sm font-medium">{getRuleTargetName(rule)}</span>
+                                {rule.target_type === 'price_book' && rule.price_book_id && priceBookById.get(rule.price_book_id) ? (
+                                    <PriceBookName
+                                        name={priceBookById.get(rule.price_book_id)!.name}
+                                        color={priceBookById.get(rule.price_book_id)!.color}
+                                        className="truncate"
+                                        nameClassName="truncate text-sm font-medium"
+                                    />
+                                ) : (
+                                    <span className="truncate text-sm font-medium">{getRuleTargetName(rule)}</span>
+                                )}
                             </div>
                             <div className="flex shrink-0 items-center gap-3">
                                 {rule.target_type === 'price_book' && rule.price_book_id && (

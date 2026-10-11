@@ -9,8 +9,9 @@ import { whatsappManager } from '@/lib/whatsappWebviewManager'
 import { WhatsAppNumberInputModal } from '@/ui/components/modals/WhatsAppNumberInputModal'
 import { PartialReturnInfoModal } from '@/ui/components/PartialReturnInfoModal'
 import { useTheme } from '@/ui/components/theme-provider'
-import { type Loan, useLoanBySaleId, usePriceBookCatalogState, useProductsByIds } from '@/local-db'
+import { type Loan, type PriceBook, useLoanBySaleId, usePriceBookCatalogState, useProductsByIds } from '@/local-db'
 import { ProductAvatar } from '@/ui/components/ProductAvatars'
+import { PriceBookName } from '@/ui/components/PriceBookName'
 import {
     Table,
     TableBody,
@@ -97,10 +98,10 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
         [saleProducts]
     )
     const priceBookNameById = useMemo(() => {
-        const map = new Map<string, string>()
+        const map = new Map<string, PriceBook>()
         for (const priceBook of priceBookCatalog.priceBooks) {
             if (!priceBook.isDeleted) {
-                map.set(priceBook.id, priceBook.name)
+                map.set(priceBook.id, priceBook)
             }
         }
         return map
@@ -507,7 +508,11 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
                                                         {item.price_book_id && (
                                                             <span className="inline-flex items-center gap-1 text-[8px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded leading-none whitespace-nowrap">
                                                                 <BookOpen className="w-2.5 h-2.5 shrink-0" />
-                                                                {priceBookNameById.get(item.price_book_id) || t('priceBooks.unavailable', { defaultValue: 'Unavailable Price Book' })}
+                                                                <PriceBookName
+                                                                    name={priceBookNameById.get(item.price_book_id)?.name || t('priceBooks.unavailable', { defaultValue: 'Unavailable Price Book' })}
+                                                                    color={priceBookNameById.get(item.price_book_id)?.color}
+                                                                    nameClassName="truncate"
+                                                                />
                                                             </span>
                                                         )}
                                                         {item.batch_allocations && item.batch_allocations.length > 0 && (
@@ -900,7 +905,11 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
                                                         {item.price_book_id ? (
                                                             <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded leading-none whitespace-nowrap">
                                                                 <BookOpen className="w-3 h-3 shrink-0" />
-                                                                {priceBookNameById.get(item.price_book_id) || t('priceBooks.unavailable', { defaultValue: 'Unavailable Price Book' })}
+                                                                <PriceBookName
+                                                                    name={priceBookNameById.get(item.price_book_id)?.name || t('priceBooks.unavailable', { defaultValue: 'Unavailable Price Book' })}
+                                                                    color={priceBookNameById.get(item.price_book_id)?.color}
+                                                                    nameClassName="truncate"
+                                                                />
                                                             </span>
                                                         ) : (
                                                             <span className="text-xs text-muted-foreground">—</span>

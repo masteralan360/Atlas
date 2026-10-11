@@ -2,6 +2,7 @@ CREATE TABLE public.price_books (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id uuid NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
   name text NOT NULL,
+  color text NULL DEFAULT NULL,
   save_warn boolean NOT NULL DEFAULT true,
   created_by uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL,
   created_at timestamp with time zone NOT NULL DEFAULT timezone('utc', now()),
@@ -9,7 +10,8 @@ CREATE TABLE public.price_books (
   sync_status text NOT NULL DEFAULT 'synced'::text,
   version bigint NOT NULL DEFAULT 1,
   is_deleted boolean NOT NULL DEFAULT false,
-  CONSTRAINT price_books_name_not_blank CHECK (char_length(btrim(name)) > 0)
+  CONSTRAINT price_books_name_not_blank CHECK (char_length(btrim(name)) > 0),
+  CONSTRAINT price_books_color_hex_check CHECK (color IS NULL OR color ~ '^#[0-9A-Fa-f]{6}$')
 );
 
 CREATE INDEX IF NOT EXISTS idx_price_books_workspace

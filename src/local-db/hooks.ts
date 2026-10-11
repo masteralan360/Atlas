@@ -1303,23 +1303,32 @@ export function useWorkspaceProductBarcodes(
     workspaceId: string | undefined,
     options: UseProductBarcodeTableOptions = {}
 ) {
-    return useProductBarcodeTable(
-        workspaceId,
+    const query = useCallback(
         () => workspaceId
             ? db.product_barcodes.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray()
             : Promise.resolve([]),
+        [workspaceId]
+    )
+
+    return useProductBarcodeTable(
+        workspaceId,
+        query,
         options
     )
 }
 
 export function useProductBarcodes(productId: string | undefined) {
     const product = useProduct(productId)
+    const query = useCallback(
+        () => productId
+            ? db.product_barcodes.where('productId').equals(productId).and((row) => !row.isDeleted).toArray()
+            : Promise.resolve([]),
+        [productId]
+    )
 
     return useProductBarcodeTable(
         product?.workspaceId,
-        () => productId
-            ? db.product_barcodes.where('productId').equals(productId).and((row) => !row.isDeleted).toArray()
-            : Promise.resolve([])
+        query
     )
 }
 

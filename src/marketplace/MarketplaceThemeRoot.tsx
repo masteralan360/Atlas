@@ -6,6 +6,7 @@ const appThemeClasses = [
     'theme-primary',
     'theme-emerald',
     'theme-neo-orange',
+    'theme-gold',
     'theme-low-power',
     'low-power'
 ]

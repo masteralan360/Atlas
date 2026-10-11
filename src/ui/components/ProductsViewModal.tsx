@@ -167,16 +167,19 @@ export function ProductsViewModal({
     }, [selectedStorageId])
 
     const selectableProducts = useMemo(
-        () => filterSelectableProducts(products),
-        [filterSelectableProducts, products]
+        () => open ? filterSelectableProducts(products) : [],
+        [filterSelectableProducts, open, products]
     )
 
     const storageProducts = useMemo(
-        () => filterProducts ? filterProducts(selectableProducts, selectedStorageId) : selectableProducts,
-        [filterProducts, selectableProducts, selectedStorageId]
+        () => open
+            ? filterProducts ? filterProducts(selectableProducts, selectedStorageId) : selectableProducts
+            : [],
+        [filterProducts, open, selectableProducts, selectedStorageId]
     )
 
     const visibleProducts = useMemo(() => {
+        if (!open) return []
         const query = search.trim().toLocaleLowerCase()
 
         if (!query) return storageProducts
@@ -186,7 +189,7 @@ export function ProductsViewModal({
             || product.sku?.toLocaleLowerCase().includes(query)
             || product.description?.toLocaleLowerCase().includes(query)
         )
-    }, [search, storageProducts])
+    }, [open, search, storageProducts])
 
     const getStockSources = (product: Product) => {
         const productStock = getProductStockOption?.(product, selectedStorageId)

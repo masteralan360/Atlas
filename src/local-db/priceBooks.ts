@@ -7,6 +7,7 @@ import { isOnline } from '@/lib/network'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
 import { findPartnerProductPriceBookItem } from '@/lib/priceBooks'
+import { normalizePriceBookColor } from '@/lib/priceBookColor'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import {
     cancelWorkspaceDataHydration,
@@ -493,15 +494,17 @@ export function useProductPriceBookItemsState(
 
 export async function createPriceBook(
     workspaceId: string,
-    data: { name: string; createdBy?: string | null; saveWarn?: boolean }
+    data: { name: string; color?: string | null; createdBy?: string | null; saveWarn?: boolean }
 ) {
     const now = new Date().toISOString()
     const name = normalizeName(data.name)
+    const color = normalizePriceBookColor(data.color)
     await assertUniquePriceBookName(workspaceId, name)
     const priceBook: PriceBook = {
         id: generateId(),
         workspaceId,
         name,
+        color,
         saveWarn: data.saveWarn ?? true,
         createdBy: data.createdBy ?? null,
         createdAt: now,
@@ -535,18 +538,22 @@ export async function createPriceBook(
     return priceBook
 }
 
-export async function updatePriceBook(id: string, data: { name: string; saveWarn?: boolean }) {
+export async function updatePriceBook(id: string, data: { name?: string; color?: string | null; saveWarn?: boolean }) {
     const existing = await db.price_books.get(id)
     if (!existing || existing.isDeleted) {
         throw new Error('Price Book not found')
     }
 
     const now = new Date().toISOString()
-    const name = normalizeName(data.name)
+    const name = normalizeName(data.name ?? existing.name)
+    const color = data.color === undefined
+        ? existing.color ?? null
+        : normalizePriceBookColor(data.color)
     await assertUniquePriceBookName(existing.workspaceId, name, id)
     let updated: PriceBook = {
         ...existing,
         name,
+        color,
         saveWarn: data.saveWarn ?? existing.saveWarn ?? true,
         updatedAt: now,
         version: existing.version + 1,

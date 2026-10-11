@@ -126,13 +126,36 @@ describe('Price Book local data', () => {
 
     it('creates and updates uniquely named books within a workspace', async () => {
         const book = await createPriceBook(WORKSPACE_ID, { name: ' Wholesale ' })
-        expect(book.name).toBe('Wholesale')
+        expect(book).toMatchObject({ name: 'Wholesale', color: null })
 
         await expect(createPriceBook(WORKSPACE_ID, { name: 'wholesale' }))
             .rejects.toThrow('already exists')
 
         await updatePriceBook(book.id, { name: 'VIP' })
         expect(await db.price_books.get(book.id)).toMatchObject({ name: 'VIP' })
+    })
+
+    it('creates, updates, retains, and clears an optional Price Book color', async () => {
+        const uncolored = await createPriceBook(WORKSPACE_ID, { name: 'Standard' })
+        const colored = await createPriceBook(WORKSPACE_ID, { name: 'VIP', color: '#12ABef' })
+
+        expect(uncolored.color).toBeNull()
+        expect(colored.color).toBe('#12abef')
+
+        await updatePriceBook(colored.id, { color: '#345678' })
+        expect(await db.price_books.get(colored.id)).toMatchObject({ color: '#345678' })
+
+        await db.close()
+        await db.open()
+        expect(await db.price_books.get(colored.id)).toMatchObject({ color: '#345678' })
+
+        await updatePriceBook(colored.id, { saveWarn: false })
+        expect(await db.price_books.get(colored.id)).toMatchObject({ color: '#345678', saveWarn: false })
+
+        await updatePriceBook(colored.id, { color: null })
+        expect(await db.price_books.get(colored.id)).toMatchObject({ color: null })
+
+        await expect(updatePriceBook(colored.id, { color: 'red' })).rejects.toThrow('six-digit hex color')
     })
 
     it('reconciles, soft-deletes, and resurrects a unique product mapping with zero values', async () => {

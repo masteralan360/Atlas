@@ -32,6 +32,7 @@ import { cn, formatCurrency, formatDateTime } from '@/lib/utils'
 import { useWorkspace } from '@/workspace'
 import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
 import { ProductsViewModal, ProductsViewModalTrigger } from '@/ui/components/ProductsViewModal'
+import { PriceBookName } from '@/ui/components/PriceBookName'
 import {
     Button,
     Card,
@@ -1522,7 +1523,7 @@ export function Discounts() {
                                                                                 : current.priceBookIds.filter((id) => id !== priceBook.id)
                                                                         }))}
                                                                     />
-                                                                    <span className="text-sm font-medium">{priceBook.name}</span>
+                                                                    <PriceBookName name={priceBook.name} color={priceBook.color} nameClassName="text-sm font-medium" />
                                                                 </label>
                                                             )
                                                         })}

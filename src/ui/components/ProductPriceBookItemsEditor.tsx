@@ -16,6 +16,7 @@ import {
     SelectValue,
     Switch
 } from '@/ui/components'
+import { PriceBookName } from '@/ui/components/PriceBookName'
 
 export interface ProductPriceBookDraft {
     priceBookId: string
@@ -184,7 +185,7 @@ export function ProductPriceBookItemsEditor({
                                                 ) : null}
                                                 {selectableBooks.map((priceBook) => (
                                                     <SelectItem key={priceBook.id} value={priceBook.id}>
-                                                        {priceBook.name}
+                                                        <PriceBookName name={priceBook.name} color={priceBook.color} />
                                                     </SelectItem>
                                                 ))}
                                             </SelectContent>

@@ -14,6 +14,7 @@ export function ThemeAwareLogo({ className }: ThemeAwareLogoProps) {
         const colors = {
             modern: { dark: '#6366f1', light: '#4f46e5' }, // Cyan-Teal / Indigo
             emerald: { dark: '#1ACBB1', light: '#1ACBB1' }, // Emerald / Teal (Light color used in both)
+            gold: { dark: '#e6bd55', light: '#a87900' }, // Gold
             'neo-orange': { dark: '#f97316', light: '#ea580c' }, // Orange
             legacy: { dark: '#3b82f6', light: '#3b82f6' }, // Indigo / Blue
             primary: { dark: '#ffffff', light: '#0f172a' },  // White / Dark Slate

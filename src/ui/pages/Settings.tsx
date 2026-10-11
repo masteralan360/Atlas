@@ -1969,6 +1969,15 @@ export function Settings() {
                                             {t('settings.theme.emerald', 'Emerald (Teal & Charcoal)')}
                                         </Button>
                                         <Button
+                                            variant={style === 'gold' ? 'default' : 'outline'}
+                                            className="flex items-center gap-2 justify-center border-amber-500/40"
+                                            allowViewer={true}
+                                            onClick={() => setStyle('gold')}
+                                        >
+                                            <Crown className="w-4 h-4" />
+                                            {t('settings.theme.gold', 'Gold (White & Black)')}
+                                        </Button>
+                                        <Button
                                             variant={style === 'primary' ? 'default' : 'outline'}
                                             className="flex items-center gap-2 justify-center"
                                             allowViewer={true}

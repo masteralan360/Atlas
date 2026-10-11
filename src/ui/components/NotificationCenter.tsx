@@ -410,6 +410,7 @@ export function NotificationCenter() {
         <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild><BellButton unreadCount={unreadCount} style={style} /></PopoverTrigger>
             <PopoverContent align="end" side="bottom" sideOffset={10} className="w-[440px] max-w-[calc(100vw-1rem)] border-none bg-transparent p-0 shadow-none">
+                {open ? (
                 <div className="overflow-hidden rounded-2xl border border-border bg-background shadow-2xl">
                     <Tabs value={tab} onValueChange={(value) => setTab(value as NotificationTab)} className="flex flex-col">
                         <div className="border-b border-border/70 px-4 py-4">
@@ -465,6 +466,7 @@ export function NotificationCenter() {
                         </div>
                     </Tabs>
                 </div>
+                ) : null}
             </PopoverContent>
         </Popover>
         {isAdmin && (

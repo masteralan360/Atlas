@@ -11,6 +11,7 @@ import {
     SelectValue,
 } from '@/ui/components/select'
 import type { PriceBook } from '@/local-db'
+import { PriceBookName } from '@/ui/components/PriceBookName'
 
 interface PosPriceBookSelectorProps {
     priceBooks: PriceBook[]
@@ -51,7 +52,7 @@ export function PosPriceBookSelector({
                         <SelectItem key={priceBook.id} value={priceBook.id}>
                             <span className="flex items-center gap-2">
                                 <BookOpen className="w-3.5 h-3.5 text-amber-500" />
-                                {priceBook.name}
+                                <PriceBookName name={priceBook.name} color={priceBook.color} />
                             </span>
                         </SelectItem>
                     ))}
