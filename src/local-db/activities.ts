@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import Dexie from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import { generateId, toSnakeCase } from '@/lib/utils'
@@ -663,13 +664,22 @@ export function useActivityCatalog(workspaceId: string | undefined) {
     return items ?? []
 }
 
-export function useActivityTransactions(workspaceId: string | undefined) {
+export function useActivityTransactions(workspaceId: string | undefined, startDate?: string, endDate?: string) {
     const transactions = useLiveQuery(
         async () => workspaceId
-            ? (await db.activity_transactions.where('workspaceId').equals(workspaceId).and((item) => !item.isDeleted).toArray())
+            ? (await (startDate || endDate
+                ? db.activity_transactions.where('[workspaceId+occurredAt]').between(
+                    [workspaceId, startDate || Dexie.minKey],
+                    [workspaceId, endDate || Dexie.maxKey],
+                    true,
+                    true
+                )
+                : db.activity_transactions.where('workspaceId').equals(workspaceId))
+                .and((item) => !item.isDeleted)
+                .toArray())
                 .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))
             : [],
-        [workspaceId]
+        [workspaceId, startDate, endDate]
     )
 
     useEffect(() => {
@@ -701,12 +711,23 @@ export function useActivityTransactionLines(transactionId: string | undefined, w
     return lines ?? []
 }
 
-export function useActivityTransactionLinesForWorkspace(workspaceId: string | undefined) {
+export function useActivityTransactionLinesForWorkspace(workspaceId: string | undefined, transactionIds?: readonly string[]) {
+    const transactionIdKey = transactionIds?.join('|')
     const lines = useLiveQuery(
-        () => workspaceId
-            ? db.activity_transaction_lines.where('workspaceId').equals(workspaceId).and((line) => !line.isDeleted).toArray()
-            : [],
-        [workspaceId]
+        () => {
+            if (!workspaceId) return []
+            if (transactionIds === undefined) {
+                return db.activity_transaction_lines.where('workspaceId').equals(workspaceId)
+                    .and((line) => !line.isDeleted)
+                    .toArray()
+            }
+            const ids = transactionIdKey ? transactionIdKey.split('|') : []
+            if (ids.length === 0) return []
+            return db.activity_transaction_lines.where('transactionId').anyOf(ids)
+                .and((line) => line.workspaceId === workspaceId && !line.isDeleted)
+                .toArray()
+        },
+        [workspaceId, transactionIdKey]
     )
 
     useEffect(() => {

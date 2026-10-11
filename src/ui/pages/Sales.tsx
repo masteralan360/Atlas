@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback, useDeferredValue, useRef } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
@@ -316,12 +316,12 @@ export function Sales() {
     const archivedSales = useArchivedSales(user?.workspaceId, true)
     const rawOrders = useSalesOrders(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
     const salesOrderReturnItems = useSalesOrderReturnItemsForWorkspace(user?.workspaceId)
-    const deliveryShipments = useDeliveryShipments(user?.workspaceId)
+    const deliveryShipments = useDeliveryShipments(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
     const deliveryMerchantProfiles = useDeliveryMerchantProfiles(user?.workspaceId)
     const deliveryBusinessPartners = useBusinessPartners(user?.workspaceId)
     const rentalVehicles = useRentalVehicles(user?.workspaceId)
-    const rentalContracts = useRentalContracts(user?.workspaceId)
-    const rawExchangeTransactions = useExchangeTransactions(user?.workspaceId)
+    const rentalContracts = useRentalContracts(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
+    const rawExchangeTransactions = useExchangeTransactions(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
     const products = useProducts(user?.workspaceId)
     const productImageUrls = useMemo(() => products.reduce<Record<string, string>>((imageUrls, product) => {
         const imageUrl = product.imageUrl?.trim()
@@ -335,7 +335,11 @@ export function Sales() {
         sourceModule: 'real_estate',
         sourceType: 'real_estate_commission',
         includeReversals: false
-    }, { hydrateSourceTables: false })
+    }, {
+        hydrateSourceTables: false,
+        paidAtStart: dateBounds.startDate,
+        paidAtEnd: dateBounds.endDate
+    })
     const travelBookingPayments = usePaymentTransactions(user?.workspaceId, {
         direction: 'incoming',
         sourceModule: 'travel_transportation',
@@ -349,8 +353,11 @@ export function Sales() {
         sourceType: 'clinical_appointment',
         includeReversals: true
     }, { hydrateSourceTables: false })
-    const activityTransactions = useActivityTransactions(user?.workspaceId)
-    const activityTransactionLines = useActivityTransactionLinesForWorkspace(user?.workspaceId)
+    const activityTransactions = useActivityTransactions(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
+    const activityTransactionLines = useActivityTransactionLinesForWorkspace(
+        user?.workspaceId,
+        activityTransactions.map((transaction) => transaction.id)
+    )
     const workspaceUsers = useWorkspaceUsers(user?.workspaceId)
     const cashierNameById = useMemo(
         () => new Map(workspaceUsers.map((member) => [member.id, member.name || member.email || 'Staff'] as const)),
@@ -442,6 +449,7 @@ export function Sales() {
         const cachedCashier = localStorage.getItem('sales_selected_cashier') || 'all'
         return { ...DEFAULT_SALES_FILTERS, cashier: cachedCashier }
     })
+    const deferredSalesSearch = useDeferredValue(filters.search)
     const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
     const [draftFilters, setDraftFilters] = useState<SalesFilterState>(filters)
     const [currentPage, setCurrentPage] = useState(1)
@@ -581,17 +589,42 @@ export function Sales() {
         clearPendingSaleDetailsId()
     }, [allSales])
 
-    const { effectiveFilters, currencyOptions, paymentMethodOptions, originOptions } = useMemo(() => {
+    const { currencyOptions, paymentMethodOptions, originOptions } = useMemo(() => {
         const currOpts = Array.from(new Set(allSales.map((sale) => sale.settlement_currency || (sale as any).settlementCurrency).filter(Boolean)))
         const pMethodOpts = Array.from(new Set(allSales.map((sale) => String(sale.payment_method || (sale as any).paymentMethod || (sale as any).paymentType || 'unknown')).filter(value => !!value && value !== 'unknown')))
         const originOpts = Array.from(new Set(allSales.map((sale) => sale.origin).filter(Boolean)))
         return {
-            effectiveFilters: filters,
             currencyOptions: currOpts,
             paymentMethodOptions: pMethodOpts,
             originOptions: originOpts
         }
-    }, [filters, allSales])
+    }, [allSales])
+
+    const effectiveFilters = useMemo(() => ({
+        search: deferredSalesSearch,
+        cashier: filters.cashier,
+        currency: filters.currency,
+        paymentMethod: filters.paymentMethod,
+        origin: filters.origin,
+        minAmount: filters.minAmount,
+        maxAmount: filters.maxAmount,
+        returnStatus: filters.returnStatus,
+        productSku: filters.productSku,
+        storage: filters.storage,
+        sort: filters.sort,
+    }), [
+        deferredSalesSearch,
+        filters.cashier,
+        filters.currency,
+        filters.maxAmount,
+        filters.minAmount,
+        filters.origin,
+        filters.paymentMethod,
+        filters.productSku,
+        filters.returnStatus,
+        filters.sort,
+        filters.storage,
+    ])
 
     // Client-side filtering: date range + filters
     const filteredSales = useMemo(() => {

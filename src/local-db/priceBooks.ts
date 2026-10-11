@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useMemo } from 'react'
 
 import { supabase } from '@/auth/supabase'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
@@ -28,6 +29,7 @@ import { rekeyPriceBookItemReferences } from './priceBookReferences'
 export interface PriceBookQueryOptions {
     enabled?: boolean
     syncRemote?: boolean
+    productIds?: readonly string[]
 }
 
 export interface PriceBookItemInput {
@@ -274,6 +276,60 @@ async function hydratePriceBookTable(
     }
 }
 
+async function hydratePriceBookItemsForProducts(workspaceId: string, productIds: readonly string[]) {
+    const uniqueProductIds = Array.from(new Set(productIds.filter(Boolean)))
+    if (uniqueProductIds.length === 0 || !await canReconcileCloudWorkspaceData(workspaceId)) return
+
+    const remoteRows: PriceBookItem[] = []
+    for (let offset = 0; offset < uniqueProductIds.length; offset += 100) {
+        const productIdChunk = uniqueProductIds.slice(offset, offset + 100)
+        for (let from = 0; ; from += 1000) {
+            const { data, error } = await runSupabaseAction('priceBooks.items.page.fetch', () =>
+                supabase
+                    .from('price_book_items')
+                    .select('*')
+                    .eq('workspace_id', workspaceId)
+                    .eq('is_deleted', false)
+                    .in('product_id', productIdChunk)
+                    .order('id', { ascending: true })
+                    .range(from, from + 999)
+            )
+            if (error) throw normalizeSupabaseActionError(error)
+
+            const syncedAt = new Date().toISOString()
+            const page = ((data ?? []) as Record<string, unknown>[]).map((row) => ({
+                ...(toCamelCase(row) as unknown as PriceBookItem),
+                syncStatus: 'synced' as const,
+                lastSyncedAt: syncedAt
+            }))
+            remoteRows.push(...page)
+            if (page.length < 1000) break
+        }
+    }
+
+    if (!await canReconcileCloudWorkspaceData(workspaceId)) return
+
+    const existingRows = await db.price_book_items
+        .where('productId')
+        .anyOf(uniqueProductIds)
+        .and((row) => row.workspaceId === workspaceId)
+        .toArray()
+    const existingById = new Map(existingRows.map((row) => [row.id, row] as const))
+    const remoteIds = new Set(remoteRows.map((row) => row.id))
+    const staleSyncedIds = existingRows
+        .filter((row) => row.syncStatus === 'synced' && !remoteIds.has(row.id))
+        .map((row) => row.id)
+    const rowsToPut = remoteRows.filter((row) => {
+        const existing = existingById.get(row.id)
+        return !existing || existing.syncStatus === 'synced'
+    })
+
+    await db.transaction('rw', db.price_book_items, async () => {
+        if (staleSyncedIds.length > 0) await db.price_book_items.bulkDelete(staleSyncedIds)
+        if (rowsToPut.length > 0) await db.price_book_items.bulkPut(rowsToPut)
+    })
+}
+
 export function usePriceBooks(workspaceId: string | undefined, options: PriceBookQueryOptions = {}) {
     const online = useNetworkStatus()
     const enabled = options.enabled ?? true
@@ -329,6 +385,12 @@ export function usePriceBookCatalogState(
     const online = useNetworkStatus()
     const enabled = options.enabled ?? true
     const syncRemote = options.syncRemote ?? true
+    const productIdsKey = options.productIds?.join('|')
+    const hasProductIds = options.productIds !== undefined
+    const productIds = useMemo(
+        () => !hasProductIds ? undefined : productIdsKey ? productIdsKey.split('|') : [],
+        [hasProductIds, productIdsKey]
+    )
     const needsRemoteHydration = Boolean(
         enabled && syncRemote && online && workspaceId && shouldUseCloudData(workspaceId)
     )
@@ -342,13 +404,23 @@ export function usePriceBookCatalogState(
         [enabled, workspaceId]
     )
     const priceBookItems = useLiveQuery(
-        () => enabled && workspaceId
-            ? db.price_book_items.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray()
-            : [],
-        [enabled, workspaceId]
+        () => {
+            if (!enabled || !workspaceId) return []
+            return productIds === undefined
+                ? db.price_book_items.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray()
+                : productIds.length === 0
+                    ? []
+                    : db.price_book_items
+                        .where('productId')
+                        .anyOf(productIds)
+                        .and((row) => row.workspaceId === workspaceId && !row.isDeleted)
+                        .toArray()
+        },
+        [enabled, productIds, workspaceId]
     )
 
-    const expectedHydrationKey = needsRemoteHydration ? workspaceId ?? null : null
+    const hydrationKey = workspaceId ? `${workspaceId}:${productIdsKey ?? 'all'}` : null
+    const expectedHydrationKey = needsRemoteHydration ? hydrationKey : null
 
     useEffect(() => {
         if (!needsRemoteHydration || !workspaceId) {
@@ -363,10 +435,12 @@ export function usePriceBookCatalogState(
         setHydrationError(null)
         void Promise.all([
             hydratePriceBookTable('price_books', workspaceId),
-            hydratePriceBookTable('price_book_items', workspaceId)
+            productIds === undefined
+                ? hydratePriceBookTable('price_book_items', workspaceId)
+                : hydratePriceBookItemsForProducts(workspaceId, productIds)
         ]).then(() => {
             if (!cancelled) {
-                setRemoteHydrationKey(workspaceId)
+                setRemoteHydrationKey(hydrationKey)
             }
         }).catch((error) => {
             const normalized = error instanceof Error ? error : new Error(String(error))
@@ -381,7 +455,7 @@ export function usePriceBookCatalogState(
             cancelled = true
             if (retryTimer) clearTimeout(retryTimer)
         }
-    }, [needsRemoteHydration, retryNonce, workspaceId])
+    }, [hydrationKey, needsRemoteHydration, productIds, retryNonce, workspaceId])
 
     return {
         priceBooks: priceBooks ?? [],

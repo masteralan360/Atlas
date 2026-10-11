@@ -1,11 +1,14 @@
 import { useEffect } from 'react'
+import Dexie from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { v5 as uuidv5 } from 'uuid'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import {
     canAccessBusinessPartnerFacetInLocalCache,
-    canAccessBusinessPartnerInLocalCache
+    canAccessBusinessPartnerInLocalCache,
+    getAccessibleBusinessPartnerFacetIdsInLocalCache,
+    getAccessibleBusinessPartnerIdsInLocalCache
 } from './businessPartnerAccess'
 import { roundOrderValue } from '@/lib/orderPrecision'
 import { convertCurrencyAmountWithAvailableSnapshot, convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
@@ -2351,7 +2354,7 @@ async function resolveSalesAccountAgentCounterparty(
     return { agent, partner }
 }
 
-export function useSalesOrders(workspaceId: string | undefined, startDate?: string, endDate?: string) {
+export function useSalesOrders(workspaceId: string | undefined, startDate?: string, endDate?: string, enabled = true) {
     const online = useNetworkStatus()
     const viewOwnScope = useViewOwnRecordScope('orders.view_own')
     const permissions = useOptionalWorkspacePermissions()
@@ -2363,54 +2366,62 @@ export function useSalesOrders(workspaceId: string | undefined, startDate?: stri
 
     const orders = useLiveQuery(
         async () => {
-            if (!workspaceId) return []
+            if (!workspaceId || !enabled) return []
 
             const assignedOrderIds = await getSalesOrderIdsAssignedToLinkedFieldAgent(
                 workspaceId,
                 viewOwnScope.userId,
                 viewOwnScope.isRestricted ? assignedOrderAccess : 'none'
             )
-            let query = db.sales_orders.where('workspaceId').equals(workspaceId).and((order) => (
+            const query = startDate || endDate
+                ? db.sales_orders.where('[workspaceId+createdAt]').between(
+                    [workspaceId, startDate || Dexie.minKey],
+                    [workspaceId, endDate || Dexie.maxKey],
+                    true,
+                    true
+                )
+                : db.sales_orders.where('workspaceId').equals(workspaceId)
+            const rows = await query.and((order) => (
                 !order.isDeleted
                 && (
                     !viewOwnScope.isRestricted
                     || order.createdBy === viewOwnScope.userId
                     || assignedOrderIds.has(order.id)
                 )
-            ))
-
-            if (startDate && endDate) {
-                query = query.filter(order => order.createdAt >= startDate && order.createdAt <= endDate)
-            } else if (startDate) {
-                query = query.filter(order => order.createdAt >= startDate)
-            } else if (endDate) {
-                query = query.filter(order => order.createdAt <= endDate)
-            }
-
-            const rows = await query.toArray()
-            const visibility = await Promise.all(rows.map((order) => order.businessPartnerId
-                ? canAccessBusinessPartnerInLocalCache(workspaceId, order.businessPartnerId, 'customer')
-                : canAccessBusinessPartnerFacetInLocalCache(workspaceId, order.customerId, 'customer')
-            ))
+            )).toArray()
+            const [accessiblePartnerIds, accessibleCustomerIds] = await Promise.all([
+                getAccessibleBusinessPartnerIdsInLocalCache(
+                    workspaceId,
+                    rows.map((order) => order.businessPartnerId),
+                    'customer'
+                ),
+                getAccessibleBusinessPartnerFacetIdsInLocalCache(
+                    workspaceId,
+                    rows.filter((order) => !order.businessPartnerId).map((order) => order.customerId),
+                    'customer'
+                )
+            ])
             return rows
-                .filter((_, index) => visibility[index])
+                .filter((order) => order.businessPartnerId
+                    ? accessiblePartnerIds.has(order.businessPartnerId)
+                    : !order.customerId || accessibleCustomerIds.has(order.customerId))
                 .map((order) => redactSalesOrderForStorageAccess(order, storageAccess))
                 .filter((order): order is SalesOrder => !!order)
                 .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
         },
-        [workspaceId, startDate, endDate, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess]
+        [workspaceId, startDate, endDate, enabled, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess]
     )
 
     useEffect(() => {
-        if (online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
+        if (enabled && online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('sales_orders', db.sales_orders, workspaceId)
             if (assignedOrderAccess !== 'none') {
                 fetchTableFromSupabase('sales_order_agent_assignments', db.sales_order_agent_assignments, workspaceId)
             }
         }
-    }, [online, workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess])
+    }, [enabled, online, workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess])
 
-    return useLiveCollection(orders, Boolean(workspaceId) && orders === undefined)
+    return useLiveCollection(orders, Boolean(workspaceId) && enabled && orders === undefined)
 }
 
 export function useArchivedSalesOrders(workspaceId: string | undefined, enabled = true) {
@@ -2440,12 +2451,22 @@ export function useArchivedSalesOrders(workspaceId: string | undefined, enabled 
                     || assignedOrderIds.has(order.id)
                 )
             )).toArray()
-            const visibility = await Promise.all(rows.map((order) => order.businessPartnerId
-                ? canAccessBusinessPartnerInLocalCache(workspaceId, order.businessPartnerId, 'customer')
-                : canAccessBusinessPartnerFacetInLocalCache(workspaceId, order.customerId, 'customer')
-            ))
+            const [accessiblePartnerIds, accessibleCustomerIds] = await Promise.all([
+                getAccessibleBusinessPartnerIdsInLocalCache(
+                    workspaceId,
+                    rows.map((order) => order.businessPartnerId),
+                    'customer'
+                ),
+                getAccessibleBusinessPartnerFacetIdsInLocalCache(
+                    workspaceId,
+                    rows.filter((order) => !order.businessPartnerId).map((order) => order.customerId),
+                    'customer'
+                )
+            ])
             return rows
-                .filter((_, index) => visibility[index])
+                .filter((order) => order.businessPartnerId
+                    ? accessiblePartnerIds.has(order.businessPartnerId)
+                    : !order.customerId || accessibleCustomerIds.has(order.customerId))
                 .map((order) => redactSalesOrderForStorageAccess(order, storageAccess))
                 .filter((order): order is SalesOrder => !!order)
                 .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
@@ -2453,44 +2474,96 @@ export function useArchivedSalesOrders(workspaceId: string | undefined, enabled 
         [workspaceId, enabled, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess]
     )
 
-    return orders
+    return orders ?? []
 }
 
-export function usePurchaseOrders(workspaceId: string | undefined) {
+export function usePurchaseOrders(workspaceId: string | undefined, startDate?: string, endDate?: string, enabled = true) {
     const online = useNetworkStatus()
     const viewOwnScope = useViewOwnRecordScope('orders.view_own')
     const storageAccess = useStorageAccess(workspaceId)
 
     const orders = useLiveQuery(
         async () => {
-            if (!workspaceId) return []
-            const rows = await db.purchase_orders
-                .where('workspaceId')
-                .equals(workspaceId)
+            if (!workspaceId || !enabled) return []
+            const query = startDate || endDate
+                ? db.purchase_orders.where('[workspaceId+createdAt]').between(
+                    [workspaceId, startDate || Dexie.minKey],
+                    [workspaceId, endDate || Dexie.maxKey],
+                    true,
+                    true
+                )
+                : db.purchase_orders.where('workspaceId').equals(workspaceId)
+            const rows = await query
                 .and((order) => !order.isDeleted && (
                     !viewOwnScope.isRestricted || order.createdBy === viewOwnScope.userId
                 ))
                 .toArray()
-            const visibility = await Promise.all(rows.map((order) => order.businessPartnerId
-                ? canAccessBusinessPartnerInLocalCache(workspaceId, order.businessPartnerId, 'supplier')
-                : canAccessBusinessPartnerFacetInLocalCache(workspaceId, order.supplierId, 'supplier')
-            ))
+            const [accessiblePartnerIds, accessibleSupplierIds] = await Promise.all([
+                getAccessibleBusinessPartnerIdsInLocalCache(
+                    workspaceId,
+                    rows.map((order) => order.businessPartnerId),
+                    'supplier'
+                ),
+                getAccessibleBusinessPartnerFacetIdsInLocalCache(
+                    workspaceId,
+                    rows.filter((order) => !order.businessPartnerId).map((order) => order.supplierId),
+                    'supplier'
+                )
+            ])
             return rows
-                .filter((_, index) => visibility[index])
+                .filter((order) => order.businessPartnerId
+                    ? accessiblePartnerIds.has(order.businessPartnerId)
+                    : !order.supplierId || accessibleSupplierIds.has(order.supplierId))
                 .map((order) => redactPurchaseOrderForStorageAccess(order, storageAccess))
                 .filter((order): order is PurchaseOrder => !!order)
                 .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
         },
-        [workspaceId, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId]
+        [workspaceId, startDate, endDate, enabled, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId]
     )
 
     useEffect(() => {
-        if (online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
+        if (enabled && online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
             fetchTableFromSupabase('purchase_orders', db.purchase_orders, workspaceId)
         }
-    }, [online, workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId])
+    }, [enabled, online, workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId])
 
-    return useLiveCollection(orders, Boolean(workspaceId) && orders === undefined)
+    return useLiveCollection(orders, Boolean(workspaceId) && enabled && orders === undefined)
+}
+
+export function useArchivedPurchaseOrders(workspaceId: string | undefined, enabled = true) {
+    const viewOwnScope = useViewOwnRecordScope('orders.view_own')
+    const storageAccess = useStorageAccess(workspaceId)
+
+    const orders = useLiveQuery(async () => {
+        if (!workspaceId || !enabled) return []
+
+        const rows = await db.purchase_orders.where('workspaceId').equals(workspaceId).and((order) => (
+            !order.isDeleted
+            && order.isArchived === true
+            && (!viewOwnScope.isRestricted || order.createdBy === viewOwnScope.userId)
+        )).toArray()
+        const [accessiblePartnerIds, accessibleSupplierIds] = await Promise.all([
+            getAccessibleBusinessPartnerIdsInLocalCache(
+                workspaceId,
+                rows.map((order) => order.businessPartnerId),
+                'supplier'
+            ),
+            getAccessibleBusinessPartnerFacetIdsInLocalCache(
+                workspaceId,
+                rows.filter((order) => !order.businessPartnerId).map((order) => order.supplierId),
+                'supplier'
+            )
+        ])
+        return rows
+            .filter((order) => order.businessPartnerId
+                ? accessiblePartnerIds.has(order.businessPartnerId)
+                : !order.supplierId || accessibleSupplierIds.has(order.supplierId))
+            .map((order) => redactPurchaseOrderForStorageAccess(order, storageAccess))
+            .filter((order): order is PurchaseOrder => !!order)
+            .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    }, [workspaceId, enabled, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId])
+
+    return orders ?? []
 }
 
 /**

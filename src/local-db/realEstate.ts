@@ -9,7 +9,10 @@ import { generateId, toSnakeCase } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
-import { canAccessBusinessPartnerInLocalCache } from './businessPartnerAccess'
+import {
+    canAccessBusinessPartnerInLocalCache,
+    getAccessibleBusinessPartnerIdsInLocalCache
+} from './businessPartnerAccess'
 import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
 import { getBusinessPartnerByAnyId } from './businessPartners'
 import type {
@@ -815,8 +818,15 @@ export function useRealEstateTransactions(workspaceId: string | undefined) {
                 .and((item) => !item.isDeleted)
                 .reverse()
                 .sortBy('createdAt')
-            const visibility = await Promise.all(rows.map(canAccessRealEstateTransactionInLocalCache))
-            return rows.filter((_, index) => visibility[index])
+            const accessiblePartnerIds = await getAccessibleBusinessPartnerIdsInLocalCache(
+                workspaceId,
+                rows.flatMap((transaction) => [transaction.buyerBusinessPartnerId, transaction.sellerBusinessPartnerId]),
+                'customer'
+            )
+            return rows.filter((transaction) => (
+                (!transaction.buyerBusinessPartnerId || accessiblePartnerIds.has(transaction.buyerBusinessPartnerId))
+                && (!transaction.sellerBusinessPartnerId || accessiblePartnerIds.has(transaction.sellerBusinessPartnerId))
+            ))
         },
         [workspaceId]
     )
@@ -893,12 +903,20 @@ export function useRealEstateWorkspaceInstallments(workspaceId: string | undefin
 
             const transactionIds = [...new Set(rows.map((installment) => installment.transactionId))]
             const transactions = await db.real_estate_transactions.bulkGet(transactionIds)
-            const visibility = await Promise.all(transactions.map((transaction) => (
-                transaction && !transaction.isDeleted
-                    ? canAccessRealEstateTransactionInLocalCache(transaction)
-                    : false
-            )))
-            const visibleTransactionIds = new Set(transactionIds.filter((_, index) => visibility[index]))
+            const validTransactions = transactions.filter((transaction): transaction is RealEstateTransaction => Boolean(
+                transaction && !transaction.isDeleted && transaction.workspaceId === workspaceId
+            ))
+            const accessiblePartnerIds = await getAccessibleBusinessPartnerIdsInLocalCache(
+                workspaceId,
+                validTransactions.flatMap((transaction) => [transaction.buyerBusinessPartnerId, transaction.sellerBusinessPartnerId]),
+                'customer'
+            )
+            const visibleTransactionIds = new Set(validTransactions
+                .filter((transaction) => (
+                    (!transaction.buyerBusinessPartnerId || accessiblePartnerIds.has(transaction.buyerBusinessPartnerId))
+                    && (!transaction.sellerBusinessPartnerId || accessiblePartnerIds.has(transaction.sellerBusinessPartnerId))
+                ))
+                .map((transaction) => transaction.id))
 
             return rows
                 .filter((installment) => visibleTransactionIds.has(installment.transactionId))

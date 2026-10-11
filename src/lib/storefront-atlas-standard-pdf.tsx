@@ -61,7 +61,7 @@ const ATLAS_STANDARD_LAYOUT = {
   texts: [
     { x: 72.64808095494308, y: 7.303630757229554, id: 'xsq58ogzs', text: 'لبيع مواد كوزمتيك بالجملة', color: '#000000', width: 57.98220465695479, fontSize: 16, rotation: 0 },
     { x: 14.174189035072654, y: 2.8938927452822334, id: 'j8jtek824', text: '0771 450 4323', color: '#000000', width: 84, fontSize: 16, rotation: 0 },
-    { x: 3.414287245750817, y: 10.963713335918598, id: 've07n55bx', text: 'كركوك - رحيماوا قرب اسماك دلشاد', color: '#000000', width: 74.959918567247, fontSize: 16, rotation: 0 }
+    { x: 3.414287245750817, y: 10.963713335918598, id: 've07n55bx', text: 'کەرکووک بارتوخانە قرب مول زانا و توانا', color: '#000000', width: 74.959918567247, fontSize: 16, rotation: 0 }
   ],
   componentPositions: {
     atlasStandardWorkspaceLogo: { x: -35.45, y: 5.29, scale: 1 },

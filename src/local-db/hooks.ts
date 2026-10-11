@@ -6,7 +6,10 @@ import i18n from '@/i18n/config'
 
 import { db } from './database'
 import { toLiveCollection, useLiveCollection } from './liveCollection'
-import { canAccessBusinessPartnerInLocalCache } from './businessPartnerAccess'
+import {
+    canAccessBusinessPartnerInLocalCache,
+    getAccessibleBusinessPartnerIdsInLocalCache
+} from './businessPartnerAccess'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import { createInventoryTransferBatch } from './inventoryTransferBatches'
 import { addToOfflineMutations } from './offlineMutations'
@@ -1272,6 +1275,7 @@ export async function deleteProduct(id: string): Promise<void> {
 
 interface UseProductBarcodeTableOptions {
     syncProductCache?: boolean
+    enabled?: boolean
 }
 
 function useProductBarcodeTable(
@@ -1280,21 +1284,22 @@ function useProductBarcodeTable(
     options: UseProductBarcodeTableOptions = {}
 ) {
     const online = useNetworkStatus()
+    const enabled = options.enabled ?? true
     const syncProductCache = options.syncProductCache ?? true
 
     const rows = useLiveQuery(
-        () => query().then(sortProductBarcodes),
-        [query]
+        () => enabled ? query().then(sortProductBarcodes) : Promise.resolve([]),
+        [enabled, query]
     )
 
     useEffect(() => {
-        if (!workspaceId || !online || !shouldUseCloudBusinessData(workspaceId)) {
+        if (!enabled || !workspaceId || !online || !shouldUseCloudBusinessData(workspaceId)) {
             return
         }
 
         void fetchTableFromSupabase('product_barcodes', db.product_barcodes, workspaceId)
             .then(() => syncProductCache ? syncProductBarcodeCachesForWorkspace(workspaceId) : undefined)
-    }, [online, syncProductCache, workspaceId])
+    }, [enabled, online, syncProductCache, workspaceId])
 
     return rows ?? []
 }
@@ -5313,29 +5318,6 @@ async function resolveLoanExchangeRateSnapshot(input: Pick<LoanCreateInput, 'sal
     return getEffectiveExchangeRatesSnapshot(null)
 }
 
-/**
- * A manual loan is funded immediately, so its origination payment is part of
- * creating the loan rather than a background repair. In particular, an
- * account-linked loan must fail as a whole when the account cannot fund it.
- */
-async function appendManualLoanOriginationTransaction(
-    workspaceId: string,
-    loan: Loan,
-    selection: {
-        accountId?: string | null
-        accountNameSnapshot?: string | null
-        transactionId?: string
-        deferRemoteSync?: boolean
-    } = {}
-) {
-    if (loan.source !== 'manual') {
-        return
-    }
-
-    const { appendLoanOriginationTransactionForLoan } = await import('./payments')
-    return appendLoanOriginationTransactionForLoan(workspaceId, loan, selection)
-}
-
 async function createLoanAggregate(workspaceId: string, input: LoanCreateInput): Promise<{ loan: Loan; installments: LoanInstallment[] }> {
     const now = new Date().toISOString()
     const requestedCreatedAt = input.createdAt ? new Date(input.createdAt) : null
@@ -5504,6 +5486,13 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
         lastSyncedAt: localOnly ? localNow : null
     }))
 
+    // Manual loans are funded immediately, so their origination payment must
+    // remain part of this transaction. Load the payment module first: awaiting
+    // a native dynamic-import promise in the Dexie callback can auto-commit it.
+    const appendLoanOriginationTransactionForLoan = localLoan.source === 'manual'
+        ? (await import('./payments')).appendLoanOriginationTransactionForLoan
+        : null
+
     await db.transaction(
         'rw',
         [
@@ -5517,8 +5506,8 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
             db.offline_mutations
         ],
         async () => {
-            if (localLoan.source === 'manual') {
-                await appendManualLoanOriginationTransaction(workspaceId, localLoan, {
+            if (appendLoanOriginationTransactionForLoan) {
+                await appendLoanOriginationTransactionForLoan(workspaceId, localLoan, {
                     ...input,
                     transactionId: originationTransactionId || undefined,
                     deferRemoteSync: true
@@ -5552,17 +5541,42 @@ function isLoanVisibleInLocalCache(
     return !scope.isRestricted || loan.createdBy === scope.userId
 }
 
-export function useLoans(workspaceId: string | undefined) {
+export interface UseLoansOptions {
+    loanCategory?: LoanCategory
+    startDate?: string
+    endDate?: string
+}
+
+export function useLoans(workspaceId: string | undefined, options: UseLoansOptions = {}) {
     const online = useNetworkStatus()
     const loansViewOwnScope = useViewOwnRecordScope('loans.view_own')
     const installmentsViewOwnScope = useViewOwnRecordScope('installments.view_own')
+    const loanCategory = options.loanCategory
+    const startDate = options.startDate
+    const endDate = options.endDate
 
     const loans = useLiveQuery(
         async () => {
             if (!workspaceId) return []
-            const rows = await db.loans
-                .where('workspaceId')
-                .equals(workspaceId)
+            const hasDateBounds = Boolean(startDate || endDate)
+            const baseQuery = loanCategory && hasDateBounds
+                ? db.loans.where('[workspaceId+loanCategory+createdAt]').between(
+                    [workspaceId, loanCategory, startDate || Dexie.minKey],
+                    [workspaceId, loanCategory, endDate || Dexie.maxKey],
+                    true,
+                    true
+                )
+                : loanCategory
+                    ? db.loans.where('[workspaceId+loanCategory]').equals([workspaceId, loanCategory])
+                    : hasDateBounds
+                        ? db.loans.where('[workspaceId+createdAt]').between(
+                            [workspaceId, startDate || Dexie.minKey],
+                            [workspaceId, endDate || Dexie.maxKey],
+                            true,
+                            true
+                        )
+                        : db.loans.where('workspaceId').equals(workspaceId)
+            const rows = await baseQuery
                 .and((loan) => !loan.isDeleted && isLoanVisibleInLocalCache(
                     loan,
                     loansViewOwnScope,
@@ -5570,14 +5584,23 @@ export function useLoans(workspaceId: string | undefined) {
                 ))
                 .reverse()
                 .sortBy('createdAt')
-            const visibility = await Promise.all(rows.map((loan) => loan.linkedPartyType === 'business_partner'
-                ? canAccessBusinessPartnerInLocalCache(workspaceId, loan.linkedPartyId, 'customer')
-                : true
-            ))
-            return rows.filter((_, index) => visibility[index])
+            const linkedPartyIds = rows
+                .filter((loan) => loan.linkedPartyType === 'business_partner')
+                .map((loan) => loan.linkedPartyId)
+            const accessiblePartnerIds = await getAccessibleBusinessPartnerIdsInLocalCache(
+                workspaceId,
+                linkedPartyIds,
+                'customer'
+            )
+            return rows.filter((loan) => loan.linkedPartyType !== 'business_partner'
+                || !loan.linkedPartyId
+                || accessiblePartnerIds.has(loan.linkedPartyId))
         },
         [
             workspaceId,
+            loanCategory,
+            startDate,
+            endDate,
             loansViewOwnScope.isRestricted,
             loansViewOwnScope.userId,
             installmentsViewOwnScope.isRestricted,

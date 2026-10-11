@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import Dexie from "dexie";
 import { useLiveQuery } from "dexie-react-hooks";
 
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
@@ -10,7 +11,9 @@ import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
 import { toLiveCollection } from "./liveCollection";
-import { canAccessBusinessPartnerInLocalCache } from "./businessPartnerAccess";
+import {
+  getAccessibleBusinessPartnerIdsInLocalCache,
+} from "./businessPartnerAccess";
 import { addToOfflineMutations, fetchTableFromSupabase } from "./hooks";
 import { appendPaymentTransaction } from "./payments";
 import type {
@@ -326,10 +329,12 @@ export function useRentalRequests(workspaceId?: string) {
         .equals(workspaceId)
         .and((row) => !row.isDeleted)
         .toArray();
-      const visibility = await Promise.all(rows.map((request) =>
-        canAccessBusinessPartnerInLocalCache(workspaceId, request.businessPartnerId, "customer")
-      ));
-      return rows.filter((_, index) => visibility[index]);
+      const accessiblePartnerIds = await getAccessibleBusinessPartnerIdsInLocalCache(
+        workspaceId,
+        rows.map((request) => request.businessPartnerId),
+        "customer"
+      );
+      return rows.filter((request) => !request.businessPartnerId || accessiblePartnerIds.has(request.businessPartnerId));
     },
     [workspaceId],
   );
@@ -344,31 +349,53 @@ export function useRentalRequests(workspaceId?: string) {
   return [...(requests ?? [])].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
-export function useRentalContracts(workspaceId?: string) {
+export function useRentalContracts(workspaceId?: string, recognizedDateStart?: string, recognizedDateEnd?: string) {
   const online = useNetworkStatus();
   const contracts = useLiveQuery(
     async () => {
       if (!workspaceId) return [];
-      const rows = await db.rental_contracts
-        .where("workspaceId")
-        .equals(workspaceId)
-        .and((row) => !row.isDeleted)
-        .toArray();
-      const visibility = await Promise.all(rows.map(async (contract) => {
-        if (!await canAccessBusinessPartnerInLocalCache(workspaceId, contract.businessPartnerId, "customer")) {
-          return false;
-        }
-        if (!contract.requestId) return true;
-        const request = await db.rental_requests.get(contract.requestId);
-        return !request || await canAccessBusinessPartnerInLocalCache(
-          workspaceId,
-          request.businessPartnerId,
-          "customer"
-        );
-      }));
-      return rows.filter((_, index) => visibility[index]);
+      const rows = recognizedDateStart || recognizedDateEnd
+        ? await Promise.all([
+          db.rental_contracts.where("[workspaceId+actualPickupAt]").between(
+            [workspaceId, recognizedDateStart || Dexie.minKey],
+            [workspaceId, recognizedDateEnd || Dexie.maxKey],
+            true,
+            true
+          ).and((row) => !row.isDeleted && !!row.actualPickupAt).toArray(),
+          db.rental_contracts.where("[workspaceId+plannedPickupAt]").between(
+            [workspaceId, recognizedDateStart || Dexie.minKey],
+            [workspaceId, recognizedDateEnd || Dexie.maxKey],
+            true,
+            true
+          ).and((row) => !row.isDeleted && !row.actualPickupAt).toArray()
+        ]).then(([actualRows, plannedRows]) => [...actualRows, ...plannedRows])
+        : await db.rental_contracts
+          .where("workspaceId")
+          .equals(workspaceId)
+          .and((row) => !row.isDeleted)
+          .toArray();
+      const requestIds = [...new Set(rows.flatMap((contract) => contract.requestId ? [contract.requestId] : []))];
+      const requests = await db.rental_requests.bulkGet(requestIds);
+      const requestById = new Map(requests
+        .filter((request): request is NonNullable<typeof request> => Boolean(
+          request && !request.isDeleted && request.workspaceId === workspaceId
+        ))
+        .map((request) => [request.id, request] as const));
+      const accessiblePartnerIds = await getAccessibleBusinessPartnerIdsInLocalCache(
+        workspaceId,
+        [
+          ...rows.map((contract) => contract.businessPartnerId),
+          ...[...requestById.values()].map((request) => request.businessPartnerId)
+        ],
+        "customer"
+      );
+      return rows.filter((contract) => {
+        if (contract.businessPartnerId && !accessiblePartnerIds.has(contract.businessPartnerId)) return false;
+        const request = contract.requestId ? requestById.get(contract.requestId) : undefined;
+        return !request?.businessPartnerId || accessiblePartnerIds.has(request.businessPartnerId);
+      });
     },
-    [workspaceId],
+    [workspaceId, recognizedDateStart, recognizedDateEnd],
   );
 
   useEffect(() => {

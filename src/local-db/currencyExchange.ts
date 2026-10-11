@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import Dexie from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
@@ -1427,19 +1428,24 @@ export async function reverseExchangeTransaction(
     return { reversal, original: updatedOriginal }
 }
 
-export function useExchangeTransactions(workspaceId: string | undefined) {
+export function useExchangeTransactions(workspaceId: string | undefined, startDate?: string, endDate?: string) {
     const online = useNetworkStatus()
 
     const transactions = useLiveQuery(
         () => workspaceId
-            ? db.exchange_transactions
-                .where('workspaceId')
-                .equals(workspaceId)
+            ? (startDate || endDate
+                ? db.exchange_transactions.where('[workspaceId+transactionDate]').between(
+                    [workspaceId, startDate || Dexie.minKey],
+                    [workspaceId, endDate || Dexie.maxKey],
+                    true,
+                    true
+                )
+                : db.exchange_transactions.where('workspaceId').equals(workspaceId))
                 .and((item) => !item.isDeleted)
                 .reverse()
                 .sortBy('createdAt')
             : [],
-        [workspaceId]
+        [workspaceId, startDate, endDate]
     )
 
     useEffect(() => {

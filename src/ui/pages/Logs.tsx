@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
     AlertTriangle,
@@ -19,7 +19,7 @@ import {
     Upload,
 } from 'lucide-react'
 import { useDateRange } from '@/context/DateRangeContext'
-import { isDateInDateRange } from '@/lib/dateRangeFilters'
+import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import {
     copyErrorLogRecord,
     exportErrorLogRecord,
@@ -27,7 +27,7 @@ import {
     isErrorLogRecordingControlAvailable,
     isErrorLogRecordingEnabled,
     isErrorLogStorageAvailable,
-    readErrorLogs,
+    readErrorLogsPage,
     setErrorLogRecordingEnabled,
     type ErrorLogRecord,
     type SerializedConsoleValue,
@@ -59,7 +59,7 @@ import {
     useToast,
 } from '@/ui/components'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
-import { getLogsPageSize, paginateLogRecords } from './logsPagination'
+import { getLogsPageSize } from './logsPagination'
 
 function getLogSummary(argument: SerializedConsoleValue | undefined) {
     if (typeof argument === 'string') return argument
@@ -105,8 +105,11 @@ export function Logs() {
     const { t } = useTranslation()
     const { toast } = useToast()
     const [records, setRecords] = useState<ErrorLogRecord[]>([])
+    const [filteredRecordCount, setFilteredRecordCount] = useState(0)
+    const [totalRecordCount, setTotalRecordCount] = useState(0)
     const [isLoading, setIsLoading] = useState(true)
     const [search, setSearch] = useState('')
+    const deferredSearch = useDeferredValue(search)
     const { dateRange, customDates, setDateRange, setCustomDates } = useDateRange()
     const [currentPage, setCurrentPage] = useState(1)
     const [pageSize, setPageSize] = useState(() => getLogsPageSize(localStorage.getItem('logs_page_size')))
@@ -115,47 +118,60 @@ export function Logs() {
     const [isExporting, setIsExporting] = useState(false)
     const [isLogRecordingEnabled, setIsLogRecordingEnabled] = useState(() => isErrorLogRecordingEnabled())
     const canControlLogRecording = isErrorLogRecordingControlAvailable()
+    const refreshRequestIdRef = useRef(0)
 
-    const refresh = useCallback(async () => {
-        setIsLoading(true)
+    const refresh = useCallback(async (showLoading = true) => {
+        const requestId = ++refreshRequestIdRef.current
+        if (showLoading) setIsLoading(true)
         try {
-            setRecords(await readErrorLogs())
+            const { start, end } = getDateRangeBounds(dateRange, customDates)
+            const page = await readErrorLogsPage({
+                offset: (currentPage - 1) * pageSize,
+                limit: pageSize,
+                from: start?.toISOString(),
+                to: end?.toISOString(),
+                search: deferredSearch,
+            })
+            if (requestId !== refreshRequestIdRef.current) return
+            setRecords((currentRecords) => currentRecords.length === page.records.length
+                && currentRecords.every((record, index) => record.id === page.records[index]?.id)
+                ? currentRecords
+                : page.records)
+            setFilteredRecordCount(page.totalCount)
+            setTotalRecordCount(page.totalRecordCount)
         } finally {
-            setIsLoading(false)
+            if (requestId === refreshRequestIdRef.current && showLoading) setIsLoading(false)
         }
-    }, [])
+    }, [currentPage, customDates, dateRange, deferredSearch, pageSize])
 
     useEffect(() => {
         void refresh()
-        const interval = window.setInterval(() => void refresh(), 5000)
-        return () => window.clearInterval(interval)
+        const interval = window.setInterval(() => {
+            if (document.visibilityState === 'visible') void refresh(false)
+        }, 5000)
+        const refreshWhenVisible = () => {
+            if (document.visibilityState === 'visible') void refresh(false)
+        }
+        document.addEventListener('visibilitychange', refreshWhenVisible)
+        return () => {
+            refreshRequestIdRef.current += 1
+            window.clearInterval(interval)
+            document.removeEventListener('visibilitychange', refreshWhenVisible)
+        }
     }, [refresh])
 
     useEffect(() => {
         localStorage.setItem('logs_page_size', String(pageSize))
     }, [pageSize])
 
-    const filteredRecords = useMemo(() => {
-        const normalizedSearch = search.trim().toLocaleLowerCase()
-        return records.filter((record) => {
-            if (!isDateInDateRange(record.timestamp, dateRange, customDates)) return false
-            if (!normalizedSearch) return true
-            return `${record.timestamp} ${record.route} ${formatErrorLogRecord(record)}`
-                .toLocaleLowerCase()
-                .includes(normalizedSearch)
-        })
-    }, [customDates, dateRange, records, search])
-
-    const paginatedRecords = useMemo(
-        () => paginateLogRecords(filteredRecords, currentPage, pageSize),
-        [currentPage, filteredRecords, pageSize]
-    )
+    const pageCount = Math.max(1, Math.ceil(filteredRecordCount / pageSize))
+    const paginatedCurrentPage = Math.min(currentPage, pageCount)
 
     useEffect(() => {
-        if (currentPage !== paginatedRecords.currentPage) {
-            setCurrentPage(paginatedRecords.currentPage)
+        if (currentPage !== paginatedCurrentPage) {
+            setCurrentPage(paginatedCurrentPage)
         }
-    }, [currentPage, paginatedRecords.currentPage])
+    }, [currentPage, paginatedCurrentPage])
 
     const copySelectedRecord = async () => {
         if (!selectedRecord) return
@@ -261,7 +277,7 @@ export function Logs() {
                     <CardContent className="flex items-center gap-3 p-4">
                         <AlertTriangle className="h-5 w-5 text-destructive" />
                         <div>
-                            <p className="text-2xl font-bold tabular-nums">{records.length}</p>
+                            <p className="text-2xl font-bold tabular-nums">{totalRecordCount}</p>
                             <p className="text-xs text-muted-foreground">{t('errorLogs.records')}</p>
                         </div>
                     </CardContent>
@@ -291,8 +307,8 @@ export function Logs() {
                     </div>
                     <div className="flex w-full flex-wrap items-center gap-3 xl:w-auto">
                         <AppPagination
-                            currentPage={paginatedRecords.currentPage}
-                            totalCount={filteredRecords.length}
+                            currentPage={paginatedCurrentPage}
+                            totalCount={filteredRecordCount}
                             pageSize={pageSize}
                             onPageChange={setCurrentPage}
                             onPageSizeChange={(nextPageSize) => {
@@ -347,7 +363,7 @@ export function Logs() {
                                             {t('errorLogs.loading')}
                                         </TableCell>
                                     </TableRow>
-                                ) : paginatedRecords.records.length > 0 ? paginatedRecords.records.map((record) => (
+                                ) : records.length > 0 ? records.map((record) => (
                                     <TableRow key={record.id}>
                                         <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                                             {formatDateTime(record.timestamp)}
@@ -386,7 +402,7 @@ export function Logs() {
                                         <TableCell colSpan={5} className="h-40 text-center">
                                             <FileSearch className="mx-auto mb-3 h-6 w-6 text-muted-foreground" />
                                             <p className="text-sm text-muted-foreground">
-                                                {records.length > 0 ? t('errorLogs.noMatchingRecords') : t('errorLogs.noRecords')}
+                                                {totalRecordCount > 0 ? t('errorLogs.noMatchingRecords') : t('errorLogs.noRecords')}
                                             </p>
                                         </TableCell>
                                     </TableRow>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { ArrowDownLeft, ArrowUpRight, Ban, HandCoins, Printer, RotateCcw, Search, ShieldCheck } from 'lucide-react'
 import { useLocation } from 'wouter'
@@ -16,6 +16,7 @@ import {
     isReversiblePaymentSourceType,
     isFinancialVoidSourceSupported,
     isPartnerSettlementPartialError,
+    filterPaymentTransactions,
     recordObligationSettlement,
     reversePaymentTransaction,
     settlePartnerBalance,
@@ -287,6 +288,7 @@ export function Payments() {
         return [5, 10, 20, 50, 100].includes(savedPageSize) ? savedPageSize : 20
     })
     const [search, setSearch] = useState('')
+    const deferredSearch = useDeferredValue(search)
     const [directionFilter, setDirectionFilter] = useState<DirectionFilter>('all')
     const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
     const [statusFilter, setStatusFilter] = useState<OpenStatusFilter>('all')
@@ -346,7 +348,7 @@ export function Payments() {
         direction: directionFilter,
         sourceModule: sourceFilter,
         status: statusFilter,
-        search,
+        search: deferredSearch,
         applySalesAgentAccountCredits: true
     })
     const obligationsByTab = useMemo<Record<ObligationTab, PaymentObligation[]>>(() => ({
@@ -354,16 +356,10 @@ export function Payments() {
         payable: obligations.filter((item) => item.direction === 'outgoing'),
         collectable: obligations.filter((item) => item.direction === 'incoming')
     }), [obligations])
-    const lockedSourceKeys = useLockedPaymentSourceKeys(workspaceId)
+    const lockedSourceKeys = useLockedPaymentSourceKeys(workspaceId, sourceFilter)
 
     const allTransactions = usePaymentTransactions(workspaceId, { includeReversals: true })
     const financialVoidAudits = useFinancialTransactionVoids(user?.role === 'admin' ? workspaceId : undefined)
-    const transactions = usePaymentTransactions(workspaceId, {
-        direction: directionFilter,
-        sourceModule: sourceFilter,
-        search,
-        includeReversals: true
-    })
 
     const reversalAmountsByTransactionId = useMemo(
         () => getPaymentTransactionReversalAmounts(allTransactions),
@@ -398,12 +394,21 @@ export function Payments() {
         return map
     }, [allTransactions])
 
+    const filteredTransactions = useMemo(
+        () => filterPaymentTransactions(allTransactions, {
+            direction: directionFilter,
+            sourceModule: sourceFilter,
+            search: deferredSearch,
+            includeReversals: true
+        }).sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt)),
+        [allTransactions, deferredSearch, directionFilter, sourceFilter]
+    )
     const visibleTransactions = useMemo(
         () => collapseTransactionsBySource(
-            transactions.filter((item) => isDateInDateRange(item.paidAt, dateRange, customDates)),
+            filteredTransactions.filter((item) => isDateInDateRange(item.paidAt, dateRange, customDates)),
             latestUnreversedBySource
         ),
-        [customDates, dateRange, transactions, latestUnreversedBySource]
+        [customDates, dateRange, filteredTransactions, latestUnreversedBySource]
     )
     const transactionsPageCount = Math.max(1, Math.ceil(visibleTransactions.length / pageSize))
     const transactionsCurrentPage = Math.min(currentPages.transactions, transactionsPageCount)

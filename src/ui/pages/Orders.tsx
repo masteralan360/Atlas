@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { Archive, BadgeCheck, BadgeDollarSign, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, ClipboardCheck, Clock3, CreditCard, EllipsisVertical, Eye, HandCoins, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -69,6 +69,8 @@ import {
     useProducts,
     useProductCommissionRuleAgents,
     useProductCommissionRules,
+    useArchivedPurchaseOrders,
+    useArchivedSalesOrders,
     usePurchaseOrders,
     useSalesOrders,
     useStorages,
@@ -387,6 +389,21 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const { toast } = useToast()
     const [, navigate] = useLocation()
     const { dateRange, customDates, setDateRange, setCustomDates } = useDateRange()
+    const orderDateBounds = useMemo(() => {
+        const { start, end } = getDateRangeBounds(dateRange, customDates)
+        return {
+            startDate: start?.toISOString(),
+            endDate: end ? new Date(end.getTime() - 1).toISOString() : undefined
+        }
+    }, [customDates, dateRange])
+    const previousDateRange = useMemo(
+        () => getPreviousDateRange(dateRange, customDates),
+        [dateRange, customDates]
+    )
+    const previousOrderDateBounds = useMemo(() => previousDateRange ? {
+        startDate: previousDateRange.start.toISOString(),
+        endDate: new Date(previousDateRange.end.getTime() - 1).toISOString()
+    } : {}, [previousDateRange])
     const products = useProducts(workspaceId)
     const productImageUrls = useMemo(() => products.reduce<Record<string, string>>((imageUrls, product) => {
         const imageUrl = product.imageUrl?.trim()
@@ -397,8 +414,22 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const storages = useStorages(workspaceId)
     const customers = useCustomers(workspaceId)
     const suppliers = useSuppliers(workspaceId)
-    const salesOrders = useSalesOrders(workspaceId)
-    const purchaseOrders = usePurchaseOrders(workspaceId)
+    const salesOrders = useSalesOrders(workspaceId, orderDateBounds.startDate, orderDateBounds.endDate)
+    const purchaseOrders = usePurchaseOrders(workspaceId, orderDateBounds.startDate, orderDateBounds.endDate)
+    const previousSalesOrders = useSalesOrders(
+        workspaceId,
+        previousOrderDateBounds.startDate,
+        previousOrderDateBounds.endDate,
+        Boolean(previousDateRange)
+    )
+    const previousPurchaseOrders = usePurchaseOrders(
+        workspaceId,
+        previousOrderDateBounds.startDate,
+        previousOrderDateBounds.endDate,
+        Boolean(previousDateRange)
+    )
+    const archivedSalesOrders = useArchivedSalesOrders(workspaceId)
+    const archivedPurchaseOrders = useArchivedPurchaseOrders(workspaceId)
     const commissionData = useOptionalCommissionFeatureData()
     const salesAgentCommissionsEnabled = Boolean(commissionData)
     const productCommissionRules = useProductCommissionRules(salesAgentCommissionsEnabled ? workspaceId : undefined)
@@ -482,6 +513,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => (localStorage.getItem('orders_view_mode') as 'table' | 'grid') || 'table')
     const [pagination, setPagination] = useState(() => createOrdersPaginationState(localStorage.getItem(ORDERS_PAGE_SIZE_STORAGE_KEY)))
     const [search, setSearch] = useState('')
+    const deferredSearch = useDeferredValue(search)
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
     const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all')
     const [ecommerceFilter, setEcommerceFilter] = useState<EcommerceFilter>('all')
@@ -632,17 +664,6 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         [createdDateFilteredSalesOrders]
     )
 
-    const archivedSalesOrders = useMemo(
-        () => salesOrders.filter((order) => order.isArchived === true)
-            .sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
-        [salesOrders]
-    )
-    const archivedPurchaseOrders = useMemo(
-        () => purchaseOrders.filter((order) => order.isArchived === true)
-            .sort((left, right) => right.createdAt.localeCompare(left.createdAt)),
-        [purchaseOrders]
-    )
-
     useEffect(() => {
         if (!hasEcommerceOrdersForCreatedDate) {
             setEcommerceFilter('all')
@@ -684,7 +705,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             ) === commissionModeFilter)
         }
 
-        const query = search.trim().toLowerCase()
+        const query = deferredSearch.trim().toLowerCase()
         if (!query) return items
 
         return items.filter((order) =>
@@ -694,7 +715,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 && visibleCommissionAgentsByOrderId.get(order.id)?.some((agent) => agent.name.toLowerCase().includes(query)))
             || order.items.some((item) => item.productName.toLowerCase().includes(query))
         )
-    }, [commissionModeFilter, dateFilteredSalesOrders, ecommerceFilter, paymentFilter, salesAgentCommissionsEnabled, search, statusFilter, visibleCommissionAgentsByOrderId])
+    }, [commissionModeFilter, dateFilteredSalesOrders, deferredSearch, ecommerceFilter, paymentFilter, salesAgentCommissionsEnabled, statusFilter, visibleCommissionAgentsByOrderId])
 
     const filteredPurchaseOrders = useMemo(() => {
         let items = dateFilteredPurchaseOrders.filter(isActiveOrder)
@@ -709,14 +730,14 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             items = items.filter((order) => getOrderPaymentStatus(order) === paymentFilter)
         }
 
-        const query = search.trim().toLowerCase()
+        const query = deferredSearch.trim().toLowerCase()
         if (!query) return items
         return items.filter((order) =>
             order.orderNumber.toLowerCase().includes(query)
             || order.supplierName.toLowerCase().includes(query)
             || order.items.some((item) => item.productName.toLowerCase().includes(query))
         )
-    }, [dateFilteredPurchaseOrders, search, statusFilter, paymentFilter])
+    }, [dateFilteredPurchaseOrders, deferredSearch, statusFilter, paymentFilter])
 
     const summaryOrders = useMemo(
         () => activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders,
@@ -816,18 +837,10 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         else summary.unpaid += 1
         return summary
     }, { total: 0, unpaid: 0, partiallyPaid: 0 }), [summaryOrders, workspaceCurrency, liveRates])
-    const previousDateRange = useMemo(
-        () => getPreviousDateRange(dateRange, customDates),
-        [dateRange, customDates]
-    )
     const previousOrderCount = useMemo(() => {
         if (!previousDateRange) return null
-        const orders = activeTab === 'sales' ? salesOrders : purchaseOrders
-        return orders.filter((order) => {
-            const createdAt = new Date(order.createdAt)
-            return createdAt >= previousDateRange.start && createdAt < previousDateRange.end
-        }).length
-    }, [activeTab, previousDateRange, purchaseOrders, salesOrders])
+        return (activeTab === 'sales' ? previousSalesOrders : previousPurchaseOrders).length
+    }, [activeTab, previousDateRange, previousPurchaseOrders, previousSalesOrders])
     const hasAdditionalTableFilters = statusFilter !== 'all'
         || paymentFilter !== 'all'
         || ecommerceFilter !== 'all'

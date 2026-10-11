@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
@@ -8,10 +8,12 @@ import { useAuth } from '@/auth'
 import {
     createProduct,
     deleteProduct,
+    fetchAllProductCatalogMatches,
     useCategories,
     usePriceBookCatalogState,
     useInventory,
     useProducts,
+    useProductCatalogPage,
     useWorkspaceProductBarcodes,
     useStorages,
     type CurrencyCode,
@@ -37,6 +39,8 @@ import {
     type ProductImportValidationContext
 } from '@/lib/productImport'
 import { useWorkspace } from '@/workspace'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { useHideCosts } from '@/permissions'
 import { hasValidProductCost } from '@/lib/productCost'
 import { isService } from '@/lib/catalogItem'
@@ -189,16 +193,22 @@ type ProductTableRow = {
 function paginateProductGroups(
     groups: ProductListGroup[],
     pageSize: number,
+    requestedPage: number,
     shouldExpandVariants: (group: ProductListGroup) => boolean
-): ProductPageGroup[][] {
+): { currentPage: number; pageCount: number; groups: ProductPageGroup[] } {
     const safePageSize = Math.max(1, Math.floor(pageSize) || 1)
-    const pages: ProductPageGroup[][] = []
+    const safeRequestedPage = Math.max(1, Math.floor(requestedPage) || 1)
+    let pageNumber = 1
+    let selectedPage: ProductPageGroup[] | undefined
+    let lastPage: ProductPageGroup[] = []
     let currentPage: ProductPageGroup[] = []
     let currentPageRowCount = 0
 
     const finishPage = () => {
         if (currentPage.length === 0) return
-        pages.push(currentPage)
+        lastPage = currentPage
+        if (pageNumber === safeRequestedPage) selectedPage = currentPage
+        pageNumber += 1
         currentPage = []
         currentPageRowCount = 0
     }
@@ -206,10 +216,19 @@ function paginateProductGroups(
     for (const group of groups) {
         const visibleVariants = shouldExpandVariants(group) ? group.variants : []
         const groupRowCount = 1 + visibleVariants.length
-        const segments: ProductPageGroup[] = []
+        const appendSegment = (segment: ProductPageGroup) => {
+            const segmentRowCount = (segment.includesPrimary ? 1 : 0) + segment.variants.length
+            if (currentPageRowCount > 0 && currentPageRowCount + segmentRowCount > safePageSize) {
+                finishPage()
+            }
+
+            currentPage.push(segment)
+            currentPageRowCount += segmentRowCount
+            if (currentPageRowCount === safePageSize) finishPage()
+        }
 
         if (groupRowCount <= safePageSize) {
-            segments.push({
+            appendSegment({
                 primary: group.primary,
                 variants: visibleVariants,
                 totalVariantCount: group.variants.length,
@@ -221,17 +240,17 @@ function paginateProductGroups(
             // cannot fit on a page by itself, then mark its following segments.
             if (currentPageRowCount > 0) finishPage()
 
-            const firstSegmentVariants = visibleVariants.slice(0, safePageSize - 1)
-            segments.push({
+            const firstSegmentVariantCount = Math.max(0, safePageSize - 1)
+            appendSegment({
                 primary: group.primary,
-                variants: firstSegmentVariants,
+                variants: visibleVariants.slice(0, firstSegmentVariantCount),
                 totalVariantCount: group.variants.length,
                 includesPrimary: true,
                 isContinuation: false
             })
 
-            for (let offset = firstSegmentVariants.length; offset < visibleVariants.length; offset += safePageSize) {
-                segments.push({
+            for (let offset = firstSegmentVariantCount; offset < visibleVariants.length; offset += safePageSize) {
+                appendSegment({
                     primary: group.primary,
                     variants: visibleVariants.slice(offset, offset + safePageSize),
                     totalVariantCount: group.variants.length,
@@ -240,21 +259,16 @@ function paginateProductGroups(
                 })
             }
         }
-
-        for (const segment of segments) {
-            const segmentRowCount = (segment.includesPrimary ? 1 : 0) + segment.variants.length
-            if (currentPageRowCount > 0 && currentPageRowCount + segmentRowCount > safePageSize) {
-                finishPage()
-            }
-
-            currentPage.push(segment)
-            currentPageRowCount += segmentRowCount
-            if (currentPageRowCount === safePageSize) finishPage()
-        }
     }
 
     finishPage()
-    return pages
+    const pageCount = Math.max(1, pageNumber - 1)
+    const clampedPage = Math.min(safeRequestedPage, pageCount)
+    return {
+        currentPage: clampedPage,
+        pageCount,
+        groups: selectedPage ?? lastPage
+    }
 }
 
 function countActiveProductFilters(filters: ProductFilterState) {
@@ -338,22 +352,16 @@ export function Products() {
     const { toast } = useToast()
     const { isAccessKeyHeld } = useUiAccess()
     const [, navigate] = useLocation()
-    const products = useProducts(user?.workspaceId, { syncBarcodeCache: false })
+    const workspaceId = user?.workspaceId || ''
+    const isOnline = useNetworkStatus()
+    const isRemoteCatalogBrowse = Boolean(workspaceId && isOnline && !isLocalWorkspaceMode(workspaceId))
     const categories = useCategories(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
-    const workspaceId = user?.workspaceId || ''
-    const productBarcodes = useWorkspaceProductBarcodes(workspaceId || undefined)
-    const getProductQuantityPresentation = useProductQuantityPresentation(workspaceId || undefined)
-    const formatProductQuantity = useCallback(
-        (productId: string, quantity: number, unit: string) =>
-            getProductQuantityPresentation(productId, quantity, unit).label,
-        [getProductQuantityPresentation]
-    )
+    const productBarcodes = useWorkspaceProductBarcodes(workspaceId || undefined, {
+        enabled: !isRemoteCatalogBrowse,
+        syncProductCache: false
+    })
     const priceBooksEnabled = hasCapability('priceBooks')
-    const { priceBooks, priceBookItems } = usePriceBookCatalogState(
-        priceBooksEnabled ? workspaceId || undefined : undefined,
-        { enabled: priceBooksEnabled }
-    )
     const categoryById = useMemo(
         () => new Map(categories.map((category) => [category.id, category] as const)),
         [categories]
@@ -368,45 +376,140 @@ export function Products() {
         allowedCurrencies: features.allowed_currencies
     }), [categories, features.allowed_currencies, storages])
 
-    // Besides observing local changes, this hook refreshes inventory from the
-    // cloud when this page is opened. The direct query that used to live here
-    // could leave Add Stock with an empty or stale local snapshot on a fresh load.
-    const inventoryRows = useInventory(workspaceId, { includeProducts: false })
+    const canEdit = user?.role === 'admin' || user?.role === 'staff'
+    const canDelete = user?.role === 'admin'
+    const canCloneProducts = user?.role === 'admin'
+    const isBranchWorkspace = Boolean(branchInfo?.isBranch)
 
-    const productStorageMap = useMemo(() => {
-        const map = new Map<string, { storageId: string; name: string; quantity: number }[]>()
-        const temp = new Map<string, Map<string, { name: string; quantity: number }>>()
-        for (const row of inventoryRows) {
-            const storage = storageById.get(row.storageId)
-            if (!storage) continue
-            const productEntry = temp.get(row.productId) ?? new Map()
-            const currentPosition = productEntry.get(row.storageId)
-            productEntry.set(row.storageId, {
-                name: storage.name,
-                quantity: (currentPosition?.quantity ?? 0) + row.quantity,
-            })
-            temp.set(row.productId, productEntry)
-        }
-        for (const [productId, storageMap] of temp) {
-            const entries: { storageId: string; name: string; quantity: number }[] = []
-            for (const [storageId, position] of storageMap) {
-                entries.push({ storageId, ...position })
-            }
-            map.set(productId, entries)
-        }
-        for (const product of products) {
-            if (map.has(product.id) || !product.storageId) continue
-            const storage = storageById.get(product.storageId)
-            if (!storage) continue
-            map.set(product.id, [{
-                storageId: product.storageId,
-                name: product.storageName || storage.name,
-                quantity: Number(product.quantity) || 0
-            }])
-        }
-        return map
-    }, [inventoryRows, products, storageById])
+    const [search, setSearch] = useState('')
+    const deferredSearch = useDeferredValue(search)
+    const [isCameraSearchScannerOpen, setIsCameraSearchScannerOpen] = useState(false)
+    const [selectedScannerCameraId, setSelectedScannerCameraId] = useState(() => localStorage.getItem('scanner_camera_id') || '')
+    const [scannerCameras, setScannerCameras] = useState<MediaDeviceInfo[]>([])
+    const [catalogType, setCatalogType] = useState<'all' | 'products' | 'services'>('all')
+    const [filters, setFilters] = useState<ProductFilterState>(DEFAULT_PRODUCT_FILTERS)
+    const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
+    const [draftFilters, setDraftFilters] = useState<ProductFilterState>(filters)
+    const [currentPage, setCurrentPage] = useState(1)
+    const [collapsedPrimaryProductIds, setCollapsedPrimaryProductIds] = useState<Set<string>>(() => new Set())
+    const [pageSize, setPageSize] = useState(() => {
+        return Number(localStorage.getItem('products_page_size')) || 20
+    })
 
+    useEffect(() => {
+        localStorage.setItem('products_page_size', String(pageSize))
+    }, [pageSize])
+    const [isProductCategoryManagerOpen, setIsProductCategoryManagerOpen] = useState(false)
+    const [isPriceBookDialogOpen, setIsPriceBookDialogOpen] = useState(false)
+    const [adjustmentDialogOpen, setAdjustmentDialogOpen] = useState(false)
+    const [selectedProductForStock, setSelectedProductForStock] = useState<string | undefined>()
+    const [stockQuantityOverrides, setStockQuantityOverrides] = useState<
+        Record<string, { quantity: number; previousUpdatedAt?: string }>
+    >({})
+    const [storagePositionOverrides, setStoragePositionOverrides] = useState<
+        Record<string, Record<string, { name: string; quantity: number; savedProductUpdatedAt: string }>>
+    >({})
+    const [heldStockActionProductId, setHeldStockActionProductId] = useState<string | null>(null)
+    const stockRowHoldTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const stockRowHoldOriginRef = useRef<{ productId: string; x: number; y: number } | null>(null)
+    const stockRowPointerTypeRef = useRef<string | null>(null)
+    const [isLoading, setIsLoading] = useState(false)
+    const [isProductsExportOpen, setIsProductsExportOpen] = useState(false)
+    const [isProductImportOpen, setIsProductImportOpen] = useState(false)
+    const [isPreparingProductImport, setIsPreparingProductImport] = useState(false)
+    const [productImport, setProductImport] = useState<PreparedProductImport | null>(null)
+    const productImportInputRef = useRef<HTMLInputElement>(null)
+    const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => {
+        return (localStorage.getItem('products_view_mode') as 'table' | 'grid') || 'table'
+    })
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+    const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null)
+    const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set())
+    const [isBranchCloneSelectionMode, setIsBranchCloneSelectionMode] = useState(false)
+    const [isBarcodeSelectionMode, setIsBarcodeSelectionMode] = useState(false)
+    const [isBarcodePrintOpen, setIsBarcodePrintOpen] = useState(false)
+    const [catalogActionProducts, setCatalogActionProducts] = useState<Product[] | null>(null)
+    const [isPreparingCatalogAction, setIsPreparingCatalogAction] = useState(false)
+    const [barcodePrintProducts, setBarcodePrintProducts] = useState<Product[]>([])
+    const [barcodeLabelTemplates, setBarcodeLabelTemplates] = useState<StoredCustomTemplateRow[]>([])
+    const [selectedBarcodeLabelTemplate, setSelectedBarcodeLabelTemplate] = useState<StoredCustomTemplateRow | null>(null)
+    const [barcodeLabelTemplateLoadFailed, setBarcodeLabelTemplateLoadFailed] = useState(false)
+    const [branchCloneDialogOpen, setBranchCloneDialogOpen] = useState(false)
+    const [cloneTargets, setCloneTargets] = useState<ProductCloneTarget[]>([])
+    const [selectedCloneTargetWorkspaceId, setSelectedCloneTargetWorkspaceId] = useState('')
+    const [selectedCloneTargetStorageId, setSelectedCloneTargetStorageId] = useState('')
+    const [isBranchCloning, setIsBranchCloning] = useState(false)
+    const canCloneToBranch = canCloneProducts && cloneTargets.length > 0
+
+    const remoteCatalogPageEnabled = isRemoteCatalogBrowse
+        && !isBranchCloneSelectionMode
+        && !isBarcodeSelectionMode
+        && !isProductsExportOpen
+    const productCatalogPage = useProductCatalogPage({
+        workspaceId,
+        search: deferredSearch,
+        catalogType,
+        categoryIds: filters.category,
+        storageIds: filters.storage,
+        currencies: filters.currency,
+        minPrice: filters.minPrice,
+        maxPrice: filters.maxPrice,
+        minStock: filters.minStock,
+        maxStock: filters.maxStock,
+        sort: filters.sort,
+        page: currentPage,
+        pageSize,
+        enabled: remoteCatalogPageEnabled
+    })
+    // Keep the full Dexie collection for offline screens and explicit bulk
+    // workflows. Online browsing reads only the server page unless a local
+    // scanner or cache fallback needs the full collection.
+    const products = useProducts(user?.workspaceId, {
+        enabled: !remoteCatalogPageEnabled || Boolean(productCatalogPage.error) || isCameraSearchScannerOpen,
+        syncRemote: false,
+        syncBarcodeCache: false
+    })
+    const lastCatalogErrorRef = useRef<unknown>(null)
+    useEffect(() => {
+        if (!productCatalogPage.error || lastCatalogErrorRef.current === productCatalogPage.error) return
+        lastCatalogErrorRef.current = productCatalogPage.error
+        console.error('[Products] Failed to load a catalog page:', productCatalogPage.error)
+        toast({
+            title: t('common.error', { defaultValue: 'Could not complete' }),
+            description: t('products.catalogLoadError', {
+                defaultValue: 'Could not load the matching products. Check your connection and try again.'
+            }),
+            variant: 'destructive'
+        })
+    }, [productCatalogPage.error, t, toast])
+    const useRemoteCatalogPage = remoteCatalogPageEnabled && !productCatalogPage.error
+    const matchedCatalogProductIds = useMemo(
+        () => new Set(productCatalogPage.matchedProductIds),
+        [productCatalogPage.matchedProductIds]
+    )
+    const productsForBulkActions = catalogActionProducts ?? products
+    const catalogProducts = useMemo(
+        () => useRemoteCatalogPage
+            ? productCatalogPage.products.filter((product) => matchedCatalogProductIds.has(product.id))
+            : productsForBulkActions,
+        [matchedCatalogProductIds, productCatalogPage.products, productsForBulkActions, useRemoteCatalogPage]
+    )
+    const catalogSupportProducts = useMemo(
+        () => useRemoteCatalogPage
+            ? productCatalogPage.products.filter((product) => !matchedCatalogProductIds.has(product.id))
+            : [],
+        [matchedCatalogProductIds, productCatalogPage.products, useRemoteCatalogPage]
+    )
+    const priceBookProductIds = useMemo(
+        () => isProductsExportOpen
+            ? []
+            : Array.from(new Set([...catalogProducts, ...catalogSupportProducts].map((product) => product.id))),
+        [catalogProducts, catalogSupportProducts, isProductsExportOpen]
+    )
+    const { priceBooks, priceBookItems } = usePriceBookCatalogState(
+        priceBooksEnabled ? workspaceId || undefined : undefined,
+        { enabled: priceBooksEnabled, productIds: priceBookProductIds }
+    )
     const productPriceBookMap = useMemo(() => {
         const priceBookById = new Map(priceBooks.map((priceBook) => [priceBook.id, priceBook] as const))
         const productPriceBooks = new Map<string, PriceBook[]>()
@@ -464,67 +567,68 @@ export function Products() {
         return `This product has no cost in ${priceBookNames.join(', ')} and cannot be sold to partners linked to that Price Book.`
     }
 
-    const canEdit = user?.role === 'admin' || user?.role === 'staff'
-    const canDelete = user?.role === 'admin'
-    const canCloneProducts = user?.role === 'admin'
-    const isBranchWorkspace = Boolean(branchInfo?.isBranch)
-
-    const [search, setSearch] = useState('')
-    const [isCameraSearchScannerOpen, setIsCameraSearchScannerOpen] = useState(false)
-    const [selectedScannerCameraId, setSelectedScannerCameraId] = useState(() => localStorage.getItem('scanner_camera_id') || '')
-    const [scannerCameras, setScannerCameras] = useState<MediaDeviceInfo[]>([])
-    const [catalogType, setCatalogType] = useState<'all' | 'products' | 'services'>('all')
-    const [filters, setFilters] = useState<ProductFilterState>(DEFAULT_PRODUCT_FILTERS)
-    const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
-    const [draftFilters, setDraftFilters] = useState<ProductFilterState>(filters)
-    const [currentPage, setCurrentPage] = useState(1)
-    const [collapsedPrimaryProductIds, setCollapsedPrimaryProductIds] = useState<Set<string>>(() => new Set())
-    const [pageSize, setPageSize] = useState(() => {
-        return Number(localStorage.getItem('products_page_size')) || 20
+    const cachedInventoryRows = useInventory(workspaceId, {
+        includeProducts: false,
+        syncRemote: !useRemoteCatalogPage,
+        enabled: !useRemoteCatalogPage
     })
+    const inventoryRows = useRemoteCatalogPage ? productCatalogPage.inventoryRows : cachedInventoryRows
+    const productStorageMap = useMemo(() => {
+        const map = new Map<string, { storageId: string; name: string; quantity: number }[]>()
+        const temp = new Map<string, Map<string, { name: string; quantity: number }>>()
+        const visibleProductIds = new Set(catalogProducts.map((product) => product.id))
+        for (const row of inventoryRows) {
+            if (!visibleProductIds.has(row.productId)) continue
+            const storage = storageById.get(row.storageId)
+            if (!storage) continue
+            const productEntry = temp.get(row.productId) ?? new Map()
+            const currentPosition = productEntry.get(row.storageId)
+            productEntry.set(row.storageId, {
+                name: storage.name,
+                quantity: (currentPosition?.quantity ?? 0) + row.quantity,
+            })
+            temp.set(row.productId, productEntry)
+        }
+        for (const [productId, storageMap] of temp) {
+            const entries: { storageId: string; name: string; quantity: number }[] = []
+            for (const [storageId, position] of storageMap) {
+                entries.push({ storageId, ...position })
+            }
+            map.set(productId, entries)
+        }
+        for (const product of catalogProducts) {
+            if (map.has(product.id) || !product.storageId) continue
+            const storage = storageById.get(product.storageId)
+            if (!storage) continue
+            map.set(product.id, [{
+                storageId: product.storageId,
+                name: product.storageName || storage.name,
+                quantity: Number(product.quantity) || 0
+            }])
+        }
+        return map
+    }, [catalogProducts, inventoryRows, storageById])
 
-    useEffect(() => {
-        localStorage.setItem('products_page_size', String(pageSize))
-    }, [pageSize])
-    const [isProductCategoryManagerOpen, setIsProductCategoryManagerOpen] = useState(false)
-    const [isPriceBookDialogOpen, setIsPriceBookDialogOpen] = useState(false)
-    const [adjustmentDialogOpen, setAdjustmentDialogOpen] = useState(false)
-    const [selectedProductForStock, setSelectedProductForStock] = useState<string | undefined>()
-    const [stockQuantityOverrides, setStockQuantityOverrides] = useState<
-        Record<string, { quantity: number; previousUpdatedAt?: string }>
-    >({})
-    const [storagePositionOverrides, setStoragePositionOverrides] = useState<
-        Record<string, Record<string, { name: string; quantity: number; savedProductUpdatedAt: string }>>
-    >({})
-    const [heldStockActionProductId, setHeldStockActionProductId] = useState<string | null>(null)
-    const stockRowHoldTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const stockRowHoldOriginRef = useRef<{ productId: string; x: number; y: number } | null>(null)
-    const stockRowPointerTypeRef = useRef<string | null>(null)
-    const [isLoading, setIsLoading] = useState(false)
-    const [isProductsExportOpen, setIsProductsExportOpen] = useState(false)
-    const [isProductImportOpen, setIsProductImportOpen] = useState(false)
-    const [isPreparingProductImport, setIsPreparingProductImport] = useState(false)
-    const [productImport, setProductImport] = useState<PreparedProductImport | null>(null)
-    const productImportInputRef = useRef<HTMLInputElement>(null)
-    const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => {
-        return (localStorage.getItem('products_view_mode') as 'table' | 'grid') || 'table'
-    })
-    const [deleteModalOpen, setDeleteModalOpen] = useState(false)
-    const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null)
-    const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set())
-    const [isBranchCloneSelectionMode, setIsBranchCloneSelectionMode] = useState(false)
-    const [isBarcodeSelectionMode, setIsBarcodeSelectionMode] = useState(false)
-    const [isBarcodePrintOpen, setIsBarcodePrintOpen] = useState(false)
-    const [barcodePrintProducts, setBarcodePrintProducts] = useState<Product[]>([])
-    const [barcodeLabelTemplates, setBarcodeLabelTemplates] = useState<StoredCustomTemplateRow[]>([])
-    const [selectedBarcodeLabelTemplate, setSelectedBarcodeLabelTemplate] = useState<StoredCustomTemplateRow | null>(null)
-    const [barcodeLabelTemplateLoadFailed, setBarcodeLabelTemplateLoadFailed] = useState(false)
-    const [branchCloneDialogOpen, setBranchCloneDialogOpen] = useState(false)
-    const [cloneTargets, setCloneTargets] = useState<ProductCloneTarget[]>([])
-    const [selectedCloneTargetWorkspaceId, setSelectedCloneTargetWorkspaceId] = useState('')
-    const [selectedCloneTargetStorageId, setSelectedCloneTargetStorageId] = useState('')
-    const [isBranchCloning, setIsBranchCloning] = useState(false)
-    const canCloneToBranch = canCloneProducts && cloneTargets.length > 0
+    const fetchCatalogRows = async (
+        searchTerm: string,
+        type: 'all' | 'products' | 'services',
+        catalogFilters: ProductFilterState
+    ) => {
+        if (!isRemoteCatalogBrowse) return products
+        return fetchAllProductCatalogMatches({
+            workspaceId,
+            search: searchTerm,
+            catalogType: type,
+            categoryIds: catalogFilters.category,
+            storageIds: catalogFilters.storage,
+            currencies: catalogFilters.currency,
+            minPrice: catalogFilters.minPrice,
+            maxPrice: catalogFilters.maxPrice,
+            minStock: catalogFilters.minStock,
+            maxStock: catalogFilters.maxStock,
+            sort: catalogFilters.sort
+        })
+    }
 
     const productsScannerTabOptions = useMemo<CameraBarcodeScannerTabOption[]>(() => ([
         { id: 'barcode', label: t('products.barcodePrint.barcode', { defaultValue: 'Barcode' }), mode: 'single' },
@@ -535,7 +639,7 @@ export function Products() {
         if (mode !== 'single') return false
 
         const searchValue = tabOptionId === 'productName'
-            ? findProductByOrderBarcode(products, productBarcodes, barcode)?.name
+            ? findProductByOrderBarcode(products, productBarcodes, barcode)?.name ?? barcode
             : barcode
         if (searchValue === undefined) return false
 
@@ -633,12 +737,12 @@ export function Products() {
     }, [viewMode])
 
     useEffect(() => {
-        const currentProductIds = new Set(products.map((product) => product.id))
+        const currentProductIds = new Set(productsForBulkActions.map((product) => product.id))
         setSelectedProductIds((previous) => {
             const next = new Set(Array.from(previous).filter((productId) => currentProductIds.has(productId)))
             return next.size === previous.size ? previous : next
         })
-    }, [products])
+    }, [productsForBulkActions])
 
     useEffect(() => {
         if (!canCloneToBranch) {
@@ -835,7 +939,7 @@ export function Products() {
         )
     }
 
-    const getProductStorageSummary = (product: Product) => {
+    const getProductStorageSummary = useCallback((product: Product) => {
         const entries = productStorageMap.get(product.id)
         if (!entries || entries.length === 0) {
             return getStorageName(product.storageId) || t('products.export.noStorage', { defaultValue: 'No Storage' })
@@ -847,7 +951,7 @@ export function Products() {
             .sort((a, b) => b.quantity - a.quantity)
             .map((entry) => `${entry.name} (${entry.quantity})`)
             .join(', ')
-    }
+    }, [getStorageName, productStorageMap, t])
 
     const productBarcodeValuesByProductId = useMemo(() => {
         const barcodeValuesByProductId = new Map<string, string[]>()
@@ -858,7 +962,7 @@ export function Products() {
             barcodeValuesByProductId.set(productId, values)
         }
 
-        for (const product of products) {
+        for (const product of catalogProducts) {
             addBarcode(product.id, product.barcode)
             product.barcodes?.forEach((barcode) => addBarcode(product.id, barcode))
         }
@@ -867,11 +971,11 @@ export function Products() {
         }
 
         return barcodeValuesByProductId
-    }, [productBarcodes, products])
+    }, [catalogProducts, productBarcodes])
 
     const filteredProducts = useMemo(() => {
-        const searchTerm = search.toLowerCase()
-        let result = products.filter((product) =>
+        const searchTerm = deferredSearch.toLowerCase()
+        let result = catalogProducts.filter((product) =>
             (hasFeature('services') || !isService(product))
             && (catalogType === 'all' || (catalogType === 'services' ? isService(product) : !isService(product)))
             && (
@@ -926,26 +1030,35 @@ export function Products() {
         })
 
         return result
-    }, [products, productBarcodeValuesByProductId, search, getCategoryName, getStorageName, filters, catalogType, hasFeature])
+    }, [catalogProducts, productBarcodeValuesByProductId, deferredSearch, getCategoryName, getStorageName, filters, catalogType, hasFeature])
 
     const productById = useMemo(
-        () => new Map(products.map((product) => [product.id, product] as const)),
-        [products]
+        () => new Map([...products, ...catalogSupportProducts, ...catalogProducts].map((product) => [product.id, product] as const)),
+        [catalogProducts, catalogSupportProducts, products]
+    )
+    const stockAdjustmentProducts = useMemo(
+        () => Array.from(new Map([
+            ...productsForBulkActions,
+            ...catalogSupportProducts,
+            ...catalogProducts
+        ].map((product) => [product.id, product] as const)).values())
+            .filter((product) => !isService(product)),
+        [catalogProducts, catalogSupportProducts, productsForBulkActions]
     )
 
     useEffect(() => {
         setStockQuantityOverrides((current) => {
             const remaining = Object.entries(current).filter(([productId, override]) => {
                 const product = productById.get(productId)
-                return product
-                    && !quantitiesEqual(product.quantity, override.quantity)
+                if (!product) return useRemoteCatalogPage
+                return !quantitiesEqual(product.quantity, override.quantity)
                     && product.updatedAt === override.previousUpdatedAt
             })
             return remaining.length === Object.keys(current).length
                 ? current
                 : Object.fromEntries(remaining)
         })
-    }, [productById])
+    }, [productById, useRemoteCatalogPage])
 
     useEffect(() => {
         setStoragePositionOverrides((current) => {
@@ -954,7 +1067,8 @@ export function Products() {
             for (const [productId, overrides] of Object.entries(current)) {
                 const product = productById.get(productId)
                 if (!product) {
-                    changed = true
+                    if (useRemoteCatalogPage) next[productId] = overrides
+                    else changed = true
                     continue
                 }
                 const remaining: typeof overrides = {}
@@ -976,7 +1090,7 @@ export function Products() {
             }
             return changed ? next : current
         })
-    }, [inventoryRows, productById])
+    }, [inventoryRows, productById, useRemoteCatalogPage])
 
     const handleStockAdjustmentSaved = useCallback((
         productId: string,
@@ -1015,14 +1129,14 @@ export function Products() {
 
     const variantsByParentId = useMemo(() => {
         const map = new Map<string, Product[]>()
-        for (const product of products) {
+        for (const product of [...products, ...catalogProducts]) {
             if (!product.parentProductId) continue
             const variants = map.get(product.parentProductId) ?? []
             variants.push(product)
             map.set(product.parentProductId, variants)
         }
         return map
-    }, [products])
+    }, [catalogProducts, products])
 
     const productListGroups = useMemo(() => {
         const groups = new Map<string, ProductListGroup>()
@@ -1042,16 +1156,46 @@ export function Products() {
         return Array.from(groups.values())
     }, [filteredProducts, productById])
 
-    const totalCount = filteredProducts.length
+    const totalCount = useRemoteCatalogPage ? productCatalogPage.totalCount : filteredProducts.length
     const productPages = useMemo(
-        () => paginateProductGroups(productListGroups, pageSize, (group) => (
-            isMobile()
-            || viewMode === 'grid'
-            || !collapsedPrimaryProductIds.has(group.primary.id)
-        )),
-        [collapsedPrimaryProductIds, pageSize, productListGroups, viewMode]
+        () => useRemoteCatalogPage
+            ? {
+                currentPage,
+                pageCount: productCatalogPage.pageCount,
+                groups: productListGroups.map((group) => {
+                    const isExpanded = isMobile()
+                        || viewMode === 'grid'
+                        || !collapsedPrimaryProductIds.has(group.primary.id)
+                    return {
+                        primary: group.primary,
+                        variants: isExpanded ? group.variants : [],
+                        totalVariantCount: group.variants.length,
+                        includesPrimary: true,
+                        isContinuation: false
+                    }
+                })
+            }
+            : paginateProductGroups(productListGroups, pageSize, currentPage, (group) => (
+                isMobile()
+                || viewMode === 'grid'
+                || !collapsedPrimaryProductIds.has(group.primary.id)
+            )),
+        [collapsedPrimaryProductIds, currentPage, pageSize, productCatalogPage.pageCount, productListGroups, useRemoteCatalogPage, viewMode]
     )
-    const paginatedProductGroups = productPages[currentPage - 1] ?? []
+    const paginatedProductGroups = productPages.groups
+    const productQuantityProductIds = useMemo(() => Array.from(new Set(paginatedProductGroups.flatMap((group) => [
+        ...(group.includesPrimary ? [group.primary.id] : []),
+        ...group.variants.map((product) => product.id)
+    ]))), [paginatedProductGroups])
+    const getProductQuantityPresentation = useProductQuantityPresentation(
+        workspaceId || undefined,
+        productQuantityProductIds
+    )
+    const formatProductQuantity = useCallback(
+        (productId: string, quantity: number, unit: string) =>
+            getProductQuantityPresentation(productId, quantity, unit).label,
+        [getProductQuantityPresentation]
+    )
 
     const paginatedProducts = useMemo<ProductPageRow[]>(
         () => paginatedProductGroups.flatMap((group) => [
@@ -1103,8 +1247,8 @@ export function Products() {
     }, [collapsedPrimaryProductIds, paginatedProductGroups, variantsByParentId, viewMode])
 
     useEffect(() => {
-        setCurrentPage((page) => Math.min(page, Math.max(productPages.length, 1)))
-    }, [productPages.length])
+        setCurrentPage((page) => Math.min(page, productPages.pageCount))
+    }, [productPages.pageCount])
 
     const isPrimaryProduct = (product: Product) => (variantsByParentId.get(product.id)?.length ?? 0) > 0
 
@@ -1125,25 +1269,33 @@ export function Products() {
         setCurrentPage(1)
     }
 
+    const isProductSelectionMode = isBranchCloneSelectionMode || isBarcodeSelectionMode
     const selectionEligibleProducts = useMemo(
-        () => products.filter((product) => !isService(product)),
-        [products]
+        () => isBranchCloneSelectionMode ? productsForBulkActions.filter((product) => !isService(product)) : [],
+        [isBranchCloneSelectionMode, productsForBulkActions]
     )
     const barcodeSelectionEligibleProducts = useMemo(
-        () => products.filter((product) =>
+        () => isBarcodeSelectionMode ? productsForBulkActions.filter((product) =>
             (hasFeature('services') || !isService(product))
             && isProductSelectableForBarcodePrint(product)
-        ),
-        [hasFeature, products]
+        ) : [],
+        [hasFeature, isBarcodeSelectionMode, productsForBulkActions]
     )
-    const selectedProductsCount = (isBarcodeSelectionMode ? barcodeSelectionEligibleProducts : selectionEligibleProducts)
-        .filter((product) => selectedProductIds.has(product.id)).length
-    const allWorkspaceProductsSelected = selectionEligibleProducts.length > 0 && selectedProductsCount === selectionEligibleProducts.length
-    const selectableFilteredProducts = filteredProducts.filter(isProductSelectableForBarcodePrint)
+    const selectedProductsCount = useMemo(
+        () => (isBarcodeSelectionMode ? barcodeSelectionEligibleProducts : selectionEligibleProducts)
+            .filter((product) => selectedProductIds.has(product.id)).length,
+        [barcodeSelectionEligibleProducts, isBarcodeSelectionMode, selectedProductIds, selectionEligibleProducts]
+    )
+    const allWorkspaceProductsSelected = selectionEligibleProducts.length > 0
+        && selectedProductsCount === selectionEligibleProducts.length
+    const selectableFilteredProducts = useMemo(
+        () => isBarcodeSelectionMode ? filteredProducts.filter(isProductSelectableForBarcodePrint) : [],
+        [filteredProducts, isBarcodeSelectionMode]
+    )
     const allFilteredProductsSelected = selectableFilteredProducts.length > 0
         && selectableFilteredProducts.every((product) => selectedProductIds.has(product.id))
-    const isProductSelectionMode = isBranchCloneSelectionMode || isBarcodeSelectionMode
     const selectedBarcodeProducts = useMemo(() => {
+        if (!isBarcodeSelectionMode) return []
         const selectedIds = selectedProductIds
         const visibleProducts = selectableFilteredProducts.filter((product) => selectedIds.has(product.id))
         const visibleProductIds = new Set(visibleProducts.map((product) => product.id))
@@ -1152,7 +1304,7 @@ export function Products() {
             ...visibleProducts,
             ...barcodeSelectionEligibleProducts.filter((product) => selectedIds.has(product.id) && !visibleProductIds.has(product.id))
         ]
-    }, [barcodeSelectionEligibleProducts, selectableFilteredProducts, selectedProductIds])
+    }, [barcodeSelectionEligibleProducts, isBarcodeSelectionMode, selectableFilteredProducts, selectedProductIds])
     const barcodeLabels = useMemo(
         () => getBarcodeLabelData(barcodePrintProducts, features.iqd_display_preference),
         [barcodePrintProducts, features.iqd_display_preference]
@@ -1263,7 +1415,7 @@ export function Products() {
     }
 
     const toggleProductSelection = (productId: string) => {
-        const product = products.find((row) => row.id === productId)
+        const product = productsForBulkActions.find((row) => row.id === productId)
         if (!product || (isBarcodeSelectionMode
             ? !isProductSelectableForBarcodePrint(product)
             : isService(product))) return
@@ -1305,23 +1457,51 @@ export function Products() {
         setIsBranchCloneSelectionMode(false)
         setSelectedProductIds(new Set())
         setBranchCloneDialogOpen(false)
+        setCatalogActionProducts(null)
     }
 
-    const openBranchCloneSelectionMode = () => {
+    const openBranchCloneSelectionMode = async () => {
+        setIsPreparingCatalogAction(true)
+        try {
+            const rows = isRemoteCatalogBrowse
+                ? await fetchCatalogRows('', 'all', DEFAULT_PRODUCT_FILTERS)
+                : products
+            setCatalogActionProducts(rows)
+        } catch (error) {
+            showBranchCloneError(error, t('products.branchClone.error', { defaultValue: 'Failed to load products for selection.' }))
+            setIsPreparingCatalogAction(false)
+            return
+        }
         setSelectedProductIds(new Set())
         setIsBarcodeSelectionMode(false)
         setIsBranchCloneSelectionMode(true)
+        setIsPreparingCatalogAction(false)
     }
 
-    const openBarcodeSelectionMode = () => {
+    const openBarcodeSelectionMode = async () => {
+        setIsPreparingCatalogAction(true)
+        try {
+            const rows = isRemoteCatalogBrowse
+                ? await fetchCatalogRows('', 'all', DEFAULT_PRODUCT_FILTERS)
+                : products
+            setCatalogActionProducts(rows)
+        } catch (error) {
+            showBranchCloneError(error, t('products.barcodePrint.templateLoadErrorDescription', {
+                defaultValue: 'Could not load the products for barcode printing.'
+            }))
+            setIsPreparingCatalogAction(false)
+            return
+        }
         setSelectedProductIds(new Set())
         setIsBranchCloneSelectionMode(false)
         setIsBarcodeSelectionMode(true)
+        setIsPreparingCatalogAction(false)
     }
 
     const exitBarcodeSelectionMode = () => {
         setIsBarcodeSelectionMode(false)
         setSelectedProductIds(new Set())
+        setCatalogActionProducts(null)
     }
 
     const handleOpenBarcodePrint = () => {
@@ -1420,9 +1600,25 @@ export function Products() {
         }
     }
 
-    const handleExportProducts = () => {
-        if (filteredProducts.length === 0) return
-        setIsProductsExportOpen(true)
+    const handleExportProducts = async () => {
+        if (totalCount === 0) return
+        setIsPreparingCatalogAction(true)
+        try {
+            const rows = await fetchCatalogRows(deferredSearch, catalogType, filters)
+            setCatalogActionProducts(rows)
+            setIsProductsExportOpen(true)
+        } catch (error) {
+            showBranchCloneError(error, t('products.catalogLoadError', {
+                defaultValue: 'Could not load the matching products. Check your connection and try again.'
+            }))
+        } finally {
+            setIsPreparingCatalogAction(false)
+        }
+    }
+
+    const closeProductsExport = () => {
+        setIsProductsExportOpen(false)
+        setCatalogActionProducts(null)
     }
 
     const closeProductImportPreview = () => {
@@ -1438,7 +1634,12 @@ export function Products() {
         try {
             const parsed = await parseProductImportWorkbook(fileData)
             const rows = createProductImportPreviewRows(
-                assignGeneratedProductImportSkus(parsed.rows, products.map((product) => product.sku)),
+                assignGeneratedProductImportSkus(
+                    parsed.rows,
+                    (isRemoteCatalogBrowse
+                        ? await fetchCatalogRows('', 'all', DEFAULT_PRODUCT_FILTERS)
+                        : products).map((product) => product.sku)
+                ),
                 productImportValidationContext
             )
             setProductImport({
@@ -1616,22 +1817,25 @@ export function Products() {
         }
     }
 
-    const productsExportRows = [...filteredProducts]
-        .sort((left, right) => right.quantity - left.quantity || left.name.localeCompare(right.name))
-        .map((product) => ({
-            [t('products.table.sku', { defaultValue: 'SKU' })]: product.sku,
-            [t('products.table.name', { defaultValue: 'Name' })]: product.name,
-            [t('products.table.category', { defaultValue: 'Category' })]: getCategoryName(product.categoryId),
-            [t('storages.title', { defaultValue: 'Storage' })]: getProductStorageSummary(product),
-            [t('products.table.price', { defaultValue: 'Price' })]: product.price,
-            ...(!hideCosts ? { [t('products.form.cost', { defaultValue: 'Cost Price' })]: product.costPrice } : {}),
-            [t('products.form.currency', { defaultValue: 'Currency' })]: product.currency.toUpperCase(),
-            [t('products.table.stock', { defaultValue: 'Stock' })]: product.quantity,
-            [t('products.form.minStock', { defaultValue: 'Min Stock Level' })]: product.minStockLevel,
-            [t('products.form.unit', { defaultValue: 'Unit' })]: t(`products.units.${product.unit}`, product.unit),
-            [t('products.form.description', { defaultValue: 'Description' })]: product.description || '',
-            [t('common.createdAt', { defaultValue: 'Created At' })]: product.createdAt ? new Date(product.createdAt).toLocaleString() : ''
-        }))
+    const productsExportRows = useMemo(() => {
+        if (!isProductsExportOpen) return []
+        return [...filteredProducts]
+            .sort((left, right) => right.quantity - left.quantity || left.name.localeCompare(right.name))
+            .map((product) => ({
+                [t('products.table.sku', { defaultValue: 'SKU' })]: product.sku,
+                [t('products.table.name', { defaultValue: 'Name' })]: product.name,
+                [t('products.table.category', { defaultValue: 'Category' })]: getCategoryName(product.categoryId),
+                [t('storages.title', { defaultValue: 'Storage' })]: getProductStorageSummary(product),
+                [t('products.table.price', { defaultValue: 'Price' })]: product.price,
+                ...(!hideCosts ? { [t('products.form.cost', { defaultValue: 'Cost Price' })]: product.costPrice } : {}),
+                [t('products.form.currency', { defaultValue: 'Currency' })]: product.currency.toUpperCase(),
+                [t('products.table.stock', { defaultValue: 'Stock' })]: product.quantity,
+                [t('products.form.minStock', { defaultValue: 'Min Stock Level' })]: product.minStockLevel,
+                [t('products.form.unit', { defaultValue: 'Unit' })]: t(`products.units.${product.unit}`, product.unit),
+                [t('products.form.description', { defaultValue: 'Description' })]: product.description || '',
+                [t('common.createdAt', { defaultValue: 'Created At' })]: product.createdAt ? new Date(product.createdAt).toLocaleString() : ''
+            }))
+    }, [filteredProducts, getCategoryName, getProductStorageSummary, hideCosts, isProductsExportOpen, t])
 
     if (isProductImportOpen && productImport) {
         return (
@@ -1652,7 +1856,7 @@ export function Products() {
             <TooltipProvider>
                 <ExportPreviewModal
                     isOpen={isProductsExportOpen}
-                    onClose={() => setIsProductsExportOpen(false)}
+                    onClose={closeProductsExport}
                     type="products"
                     records={productsExportRows}
                 />
@@ -1676,7 +1880,7 @@ export function Products() {
                         {t('products.title')}
                     </h1>
                     <p className="text-muted-foreground">
-                        {t('products.subtitle') || 'Manage your inventory'} <ModulePageFreshness className="ms-2" />
+                        {t('products.subtitle') || 'Manage your inventory'} <ModulePageFreshness className="ms-2" tableNames={['products']} />
                     </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1711,9 +1915,11 @@ export function Products() {
                                     <Button
                                         variant="outline"
                                         onClick={openBranchCloneSelectionMode}
-                                        disabled={products.length === 0}
+                                        disabled={isPreparingCatalogAction || totalCount === 0}
                                     >
-                                        <GitBranch className="h-4 w-4" />
+                                        {isPreparingCatalogAction
+                                            ? <Loader2 className="h-4 w-4 animate-spin" />
+                                            : <GitBranch className="h-4 w-4" />}
                                         {branchCloneActionLabel}
                                     </Button>
                                 )}
@@ -1722,9 +1928,11 @@ export function Products() {
                                 <Button
                                     variant="outline"
                                     onClick={openBarcodeSelectionMode}
-                                    disabled={products.length === 0}
+                                    disabled={isPreparingCatalogAction || totalCount === 0}
                                 >
-                                    <Barcode className="h-4 w-4" />
+                                    {isPreparingCatalogAction
+                                        ? <Loader2 className="h-4 w-4 animate-spin" />
+                                        : <Barcode className="h-4 w-4" />}
                                     {t('products.barcodePrint.action', { defaultValue: 'Print barcodes' })}
                                 </Button>
                             )}
@@ -1887,7 +2095,7 @@ export function Products() {
                         <AppPagination
                             currentPage={currentPage}
                             totalCount={totalCount}
-                            pageCount={productPages.length}
+                            pageCount={productPages.pageCount}
                             pageSize={pageSize}
                             onPageChange={setCurrentPage}
                             onPageSizeChange={(newSize) => {
@@ -1901,14 +2109,16 @@ export function Products() {
                             variant="outline"
                             allowViewer={true}
                             onClick={handleExportProducts}
-                            disabled={filteredProducts.length === 0}
+                            disabled={isPreparingCatalogAction || totalCount === 0}
                             className={cn(
                                 "h-10 gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-5 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition-all",
                                 "hover:bg-emerald-100 hover:shadow-[0_0_20px_-5px_rgba(16,185,129,0.3)] active:scale-95",
                                 "dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/20"
                             )}
                         >
-                            <FileSpreadsheet className="h-4 w-4" />
+                            {isPreparingCatalogAction
+                                ? <Loader2 className="h-4 w-4 animate-spin" />
+                                : <FileSpreadsheet className="h-4 w-4" />}
                             {t('sales.export.button', { defaultValue: 'Excel Export' })}
                         </Button>
                         {canEdit && !isMobile() && (
@@ -1932,7 +2142,11 @@ export function Products() {
                 </CardHeader>
                 <CardContent>
                     {filteredProducts.length === 0 ? (
-                        <div className="py-8 text-center text-muted-foreground">{t('common.noData')}</div>
+                        <div className="flex items-center justify-center gap-2 py-8 text-center text-muted-foreground">
+                            {isRemoteCatalogBrowse && productCatalogPage.isLoading ? (
+                                <><Loader2 className="h-4 w-4 animate-spin" />{t('common.loading', { defaultValue: 'Loading...' })}</>
+                            ) : t('common.noData')}
+                        </div>
                     ) : (
                         <>
                             {isMobile() && (
@@ -2812,7 +3026,7 @@ export function Products() {
                 }}
                 preselectedProductId={selectedProductForStock}
                 allowAnyStorage
-                products={products.filter((product) => !isService(product))}
+                products={stockAdjustmentProducts}
                 storages={storages}
                 inventory={inventoryRows}
                 workspaceId={workspaceId}

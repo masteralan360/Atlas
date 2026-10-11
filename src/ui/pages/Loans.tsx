@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useEffect, type ReactElement } from 'react'
+import { useCallback, useDeferredValue, useMemo, useState, useEffect, type ReactElement } from 'react'
 import { Link, useLocation, useRoute } from 'wouter'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useTranslation } from 'react-i18next'
@@ -23,7 +23,7 @@ import {
     type PaymentTransaction
 } from '@/local-db'
 import { useWorkspace } from '@/workspace'
-import { isDateInDateRange } from '@/lib/dateRangeFilters'
+import { getDateRangeBounds, isDateInDateRange } from '@/lib/dateRangeFilters'
 import { calculateInstallmentLoanListMetrics } from '@/lib/loanListMetrics'
 import { getLoanLinkedPartySummary } from '@/lib/loanParties'
 import { getReportOriginId } from '@/lib/printIdentity'
@@ -183,9 +183,17 @@ function LoanListView({
     const { user } = useAuth()
     const { toast } = useToast()
     const { dateRange, customDates } = useDateRange()
+    const loanDateBounds = useMemo(() => {
+        const { start, end } = getDateRangeBounds(dateRange, customDates)
+        return {
+            startDate: start?.toISOString(),
+            endDate: end ? new Date(end.getTime() - 1).toISOString() : undefined
+        }
+    }, [customDates, dateRange])
     const isReadOnly = user?.role === 'viewer'
     const canUseWhatsApp = hasCapability('whatsappSharing')
     const [search, setSearch] = useState('')
+    const deferredSearch = useDeferredValue(search)
     const [filter, setFilter] = useState<LoanFilter>('all')
     const [paymentFilter, setPaymentFilter] = useState<LoanPaymentFilter>('all')
     const [currentPage, setCurrentPage] = useState(1)
@@ -226,7 +234,7 @@ function LoanListView({
         setLoanForWhatsApp(null)
     }
 
-    const allLoans = useLoans(workspaceId)
+    const allLoans = useLoans(workspaceId, { loanCategory: 'standard', ...loanDateBounds })
     const loans = useMemo(
         () => allLoans.filter((loan) => loan.loanCategory !== 'simple'),
         [allLoans]
@@ -235,9 +243,14 @@ function LoanListView({
         () => new Set(loans.map((loan) => loan.id)),
         [loans]
     )
+    const standardLoanIdKey = useMemo(() => [...standardLoanIds].sort().join('|'), [standardLoanIds])
     const queriedInstallments = useLiveQuery(
-        () => db.loan_installments.where('workspaceId').equals(workspaceId).and(item => !item.isDeleted).toArray(),
-        [workspaceId]
+        () => standardLoanIds.size === 0
+            ? []
+            : db.loan_installments.where('loanId').anyOf([...standardLoanIds])
+                .and((item) => item.workspaceId === workspaceId && !item.isDeleted)
+                .toArray(),
+        [standardLoanIdKey, workspaceId]
     )
     const installments = useMemo(
         () => queriedInstallments ?? [],
@@ -258,20 +271,30 @@ function LoanListView({
         )),
         [dateScopedLoanIds, installments, standardLoanIds]
     )
-    const workspaceSales = useLiveQuery(
-        () => db.sales.where('workspaceId').equals(workspaceId).toArray(),
-        [workspaceId]
-    )
     const loanPaymentHistoryIds = useLiveQuery(
         async () => {
-            const rows = await db.loan_payments.where('workspaceId').equals(workspaceId).and((item) => !item.isDeleted).toArray()
+            if (standardLoanIds.size === 0) return []
+            const rows = await db.loan_payments.where('loanId').anyOf([...standardLoanIds])
+                .and((item) => item.workspaceId === workspaceId && !item.isDeleted)
+                .toArray()
             return rows.map((item) => item.loanId)
         },
-        [workspaceId]
+        [standardLoanIdKey, workspaceId]
     )
-    const activeSaleIds = useMemo(
-        () => new Set((workspaceSales ?? []).filter(item => !item.isDeleted).map(item => item.id)),
-        [workspaceSales]
+    const standardLoanSaleIdKey = useMemo(
+        () => [...new Set(loans.flatMap((loan) => loan.saleId ? [loan.saleId] : []))].sort().join('|'),
+        [loans]
+    )
+    const activeSaleIds = useLiveQuery(
+        async () => {
+            const saleIds = standardLoanSaleIdKey ? standardLoanSaleIdKey.split('|') : []
+            if (saleIds.length === 0) return new Set<string>()
+            const rows = await db.sales.bulkGet(saleIds)
+            return new Set(rows
+                .filter((sale) => sale && sale.workspaceId === workspaceId && !sale.isDeleted)
+                .map((sale) => sale!.id))
+        },
+        [standardLoanSaleIdKey, workspaceId]
     )
     const loanPaymentHistoryIdSet = useMemo(
         () => new Set(loanPaymentHistoryIds ?? []),
@@ -279,7 +302,7 @@ function LoanListView({
     )
 
     const filtered = useMemo(() => {
-        const query = search.trim().toLowerCase()
+        const query = deferredSearch.trim().toLowerCase()
         return dateScopedLoans.filter(loan => {
             if (!matchesLoanPaymentFilter(loan, paymentFilter)) return false
             if (filter === 'active' && loan.status !== 'active') return false
@@ -293,7 +316,7 @@ function LoanListView({
                 loan.loanNo.toLowerCase().includes(query)
             )
         })
-    }, [dateScopedLoans, search, filter, paymentFilter])
+    }, [dateScopedLoans, deferredSearch, filter, paymentFilter])
 
     const metrics = useMemo(
         () => calculateInstallmentLoanListMetrics(
@@ -456,7 +479,7 @@ function LoanListView({
             return isLoanDeletionAllowed(loan, false, hasTransactionHistory)
         }
 
-        if (workspaceSales === undefined) {
+        if (activeSaleIds === undefined) {
             return false
         }
 

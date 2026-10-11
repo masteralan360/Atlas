@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import { supabase } from '@/auth/supabase'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isOnline, getActiveBusinessUserId } from '@/lib/network'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
+import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { normalizeUnitCode, type Product, type ProductUom, type UnitRef } from './models'
 import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
@@ -36,35 +37,60 @@ export class ProductUomValidationError extends Error {
   }
 }
 
-export function useProductUomCatalogState(workspaceId?: string) {
+export interface ProductUomQueryOptions {
+  /** Restricts the read to the products currently visible in a catalog page. */
+  productIds?: readonly string[]
+  syncRemote?: boolean
+}
+
+export function useProductUomCatalogState(workspaceId?: string, options: ProductUomQueryOptions = {}) {
   const online = useNetworkStatus()
+  const productIdsKey = options.productIds?.join('|')
+  const hasProductIds = options.productIds !== undefined
+  const productIds = useMemo(
+    () => !hasProductIds ? undefined : productIdsKey ? productIdsKey.split('|') : [],
+    [hasProductIds, productIdsKey]
+  )
+  const syncRemote = options.syncRemote ?? true
   const [remoteState, setRemoteState] = useState<{ key: string; ready: boolean; error: unknown | null }>({
     key: '',
     ready: false,
     error: null,
   })
   const rows = useLiveQuery(
-    () => workspaceId
-      ? db.product_uoms.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray()
-      : [],
-    [workspaceId],
+    async () => {
+      if (!workspaceId) return []
+      if (productIds !== undefined) {
+        if (productIds.length === 0) return []
+        return db.product_uoms
+          .where('productId')
+          .anyOf(productIds)
+          .and((row) => row.workspaceId === workspaceId && !row.isDeleted)
+          .toArray()
+      }
+      return db.product_uoms.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray()
+    },
+    [productIds, productIdsKey, workspaceId],
   )
 
   useEffect(() => {
-    const key = `${workspaceId ?? ''}:${online}`
+    const key = `${workspaceId ?? ''}:${online}:${productIdsKey ?? 'all'}`
     let cancelled = false
-    if (!workspaceId || !online || isLocalWorkspaceMode(workspaceId)) {
+    if (!workspaceId || !online || isLocalWorkspaceMode(workspaceId) || !syncRemote) {
       setRemoteState({ key, ready: true, error: null })
       return () => { cancelled = true }
     }
     setRemoteState({ key, ready: false, error: null })
-    void fetchTableFromSupabase(TABLE, db.product_uoms, workspaceId)
+    const hydrate = productIds === undefined
+      ? fetchTableFromSupabase(TABLE, db.product_uoms, workspaceId)
+      : hydrateProductUomsForIds(workspaceId, productIds)
+    void hydrate
       .then(() => { if (!cancelled) setRemoteState({ key, ready: true, error: null }) })
       .catch((error) => { if (!cancelled) setRemoteState({ key, ready: true, error }) })
     return () => { cancelled = true }
-  }, [online, workspaceId])
+  }, [online, productIds, productIdsKey, syncRemote, workspaceId])
 
-  const key = `${workspaceId ?? ''}:${online}`
+  const key = `${workspaceId ?? ''}:${online}:${productIdsKey ?? 'all'}`
   return {
     rows: rows ?? [],
     isReady: rows !== undefined && remoteState.key === key && remoteState.ready,
@@ -72,8 +98,54 @@ export function useProductUomCatalogState(workspaceId?: string) {
   }
 }
 
-export function useProductUoms(workspaceId?: string) {
-  return useProductUomCatalogState(workspaceId).rows
+export function useProductUoms(workspaceId?: string, options?: ProductUomQueryOptions) {
+  return useProductUomCatalogState(workspaceId, options).rows
+}
+
+async function hydrateProductUomsForIds(workspaceId: string, productIds: readonly string[]) {
+  const uniqueProductIds = Array.from(new Set(productIds.filter(Boolean)))
+  if (uniqueProductIds.length === 0) return
+
+  const remoteRows: ProductUom[] = []
+  for (let offset = 0; offset < uniqueProductIds.length; offset += 100) {
+    const productIdChunk = uniqueProductIds.slice(offset, offset + 100)
+    for (let from = 0; ; from += 1000) {
+      const response = await runSupabaseAction('productUoms.page.fetch', () =>
+        getSupabaseClientForTable(TABLE)
+          .from(TABLE)
+          .select('*')
+          .eq('workspace_id', workspaceId)
+          .eq('is_deleted', false)
+          .in('product_id', productIdChunk)
+          .order('id', { ascending: true })
+          .range(from, from + 999)
+      )
+      if (response.error) throw normalizeSupabaseActionError(response.error)
+      const page = (response.data ?? []).map((value) => {
+        const row = toCamelCase(value as Record<string, unknown>) as unknown as ProductUom
+        row.syncStatus = 'synced'
+        row.lastSyncedAt = new Date().toISOString()
+        return row
+      })
+      remoteRows.push(...page)
+      if (page.length < 1000) break
+    }
+  }
+
+  const existingRows = await db.product_uoms
+    .where('productId')
+    .anyOf(uniqueProductIds)
+    .and((row) => row.workspaceId === workspaceId)
+    .toArray()
+  const remoteIds = new Set(remoteRows.map((row) => row.id))
+  const staleSyncedIds = existingRows
+    .filter((row) => row.syncStatus === 'synced' && !remoteIds.has(row.id))
+    .map((row) => row.id)
+
+  await db.transaction('rw', db.product_uoms, async () => {
+    if (staleSyncedIds.length > 0) await db.product_uoms.bulkDelete(staleSyncedIds)
+    if (remoteRows.length > 0) await db.product_uoms.bulkPut(remoteRows)
+  })
 }
 
 function usesCloud(workspaceId: string) {

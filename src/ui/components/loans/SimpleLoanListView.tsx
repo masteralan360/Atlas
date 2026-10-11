@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useState, type ReactElement } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
@@ -6,7 +6,7 @@ import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, BadgeCheck, CircleDashed, 
 
 import { useAuth } from '@/auth'
 import { useDateRange } from '@/context/DateRangeContext'
-import { isDateInDateRange } from '@/lib/dateRangeFilters'
+import { getDateRangeBounds, isDateInDateRange } from '@/lib/dateRangeFilters'
 import { getLoanLinkedPartySummary } from '@/lib/loanParties'
 import { calculateLegacySimpleLoanListMetrics, calculateSimpleLoanListMetrics, type SimpleLoanSummaryMode } from '@/lib/loanListMetrics'
 import { getReportOriginId } from '@/lib/printIdentity'
@@ -99,9 +99,17 @@ export function SimpleLoanListView({
     const { user } = useAuth()
     const { toast } = useToast()
     const { dateRange, customDates } = useDateRange()
+    const loanDateBounds = useMemo(() => {
+        const { start, end } = getDateRangeBounds(dateRange, customDates)
+        return {
+            startDate: start?.toISOString(),
+            endDate: end ? new Date(end.getTime() - 1).toISOString() : undefined
+        }
+    }, [customDates, dateRange])
     const isReadOnly = user?.role === 'viewer'
     const canUseWhatsApp = hasCapability('whatsappSharing')
     const [search, setSearch] = useState('')
+    const deferredSearch = useDeferredValue(search)
     const [filter, setFilter] = useState<SimpleLoanFilter>('all')
     const [paymentFilter, setPaymentFilter] = useState<LoanPaymentFilter>('all')
     const [summaryModeByWorkspace, setSummaryModeByWorkspace] = useState<Record<string, SimpleLoanSummaryMode>>({})
@@ -166,21 +174,26 @@ export function SimpleLoanListView({
         }
     ]), [t])
 
-    const loans = useLoans(workspaceId)
+    const loans = useLoans(workspaceId, { loanCategory: 'simple', ...loanDateBounds })
     const simpleLoans = useMemo(
         () => loans.filter((loan) => loan.loanCategory === 'simple'),
         [loans]
     )
+    const simpleLoanIdKey = useMemo(() => simpleLoans.map((loan) => loan.id).sort().join('|'), [simpleLoans])
     const dateScopedSimpleLoans = useMemo(
         () => simpleLoans.filter((loan) => isDateInDateRange(loan.createdAt, dateRange, customDates)),
         [customDates, dateRange, simpleLoans]
     )
     const loanPaymentHistoryIds = useLiveQuery(
         async () => {
-            const rows = await db.loan_payments.where('workspaceId').equals(workspaceId).and((item) => !item.isDeleted).toArray()
+            const loanIds = simpleLoanIdKey ? simpleLoanIdKey.split('|') : []
+            if (loanIds.length === 0) return []
+            const rows = await db.loan_payments.where('loanId').anyOf(loanIds)
+                .and((item) => item.workspaceId === workspaceId && !item.isDeleted)
+                .toArray()
             return rows.map((item) => item.loanId)
         },
-        [workspaceId]
+        [simpleLoanIdKey, workspaceId]
     )
     const loanPaymentHistoryIdSet = useMemo(
         () => new Set(loanPaymentHistoryIds ?? []),
@@ -188,7 +201,7 @@ export function SimpleLoanListView({
     )
 
     const filtered = useMemo(() => {
-        const query = search.trim().toLowerCase()
+        const query = deferredSearch.trim().toLowerCase()
         return dateScopedSimpleLoans.filter((loan) => {
             const direction = getLoanDirection(loan)
             const overdue = isLoanOverdue(loan)
@@ -206,7 +219,7 @@ export function SimpleLoanListView({
                 (overdue && (t('loans.statuses.overdue') || 'overdue').toLowerCase().includes(query))
             )
         })
-    }, [dateScopedSimpleLoans, filter, paymentFilter, search, t])
+    }, [dateScopedSimpleLoans, deferredSearch, filter, paymentFilter, t])
 
     const metrics = useMemo(
         () => calculateSimpleLoanListMetrics(filtered, features.default_currency),

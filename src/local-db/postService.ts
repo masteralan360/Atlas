@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import Dexie from "dexie";
 import { useLiveQuery } from "dexie-react-hooks";
 
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
@@ -13,7 +14,10 @@ import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
 import { sortLiveCollection, useLiveCollection } from "./liveCollection";
-import { canAccessBusinessPartnerInLocalCache } from "./businessPartnerAccess";
+import {
+  canAccessBusinessPartnerInLocalCache,
+  getAccessibleBusinessPartnerIdsInLocalCache,
+} from "./businessPartnerAccess";
 import { fetchTableFromSupabase } from "./hooks";
 import { addToOfflineMutations } from "./offlineMutations";
 import { appendPaymentTransaction } from "./payments";
@@ -529,10 +533,14 @@ async function getVisibleDeliveryShipmentIds(
     .equals(workspaceId)
     .and((shipment) => isVisibleDeliveryShipment(shipment, viewOwnScope, linkedCourierIds))
     .toArray();
-  const visibility = await Promise.all(shipments.map((shipment) =>
-    canAccessBusinessPartnerInLocalCache(workspaceId, shipment.merchantBusinessPartnerId, "customer")
-  ));
-  return new Set(shipments.filter((_, index) => visibility[index]).map((shipment) => shipment.id));
+  const accessiblePartnerIds = await getAccessibleBusinessPartnerIdsInLocalCache(
+    workspaceId,
+    shipments.map((shipment) => shipment.merchantBusinessPartnerId),
+    "customer"
+  );
+  return new Set(shipments
+    .filter((shipment) => !shipment.merchantBusinessPartnerId || accessiblePartnerIds.has(shipment.merchantBusinessPartnerId))
+    .map((shipment) => shipment.id));
 }
 
 async function canAccessDeliveryPartner(
@@ -990,10 +998,12 @@ export function useDeliveryMerchantProfiles(workspaceId?: string) {
         .equals(workspaceId)
         .and((row) => !row.isDeleted)
         .toArray();
-      const visibility = await Promise.all(profiles.map((profile) =>
-        canAccessBusinessPartnerInLocalCache(workspaceId, profile.businessPartnerId, "customer")
-      ));
-      return profiles.filter((_, index) => visibility[index]);
+      const accessiblePartnerIds = await getAccessibleBusinessPartnerIdsInLocalCache(
+        workspaceId,
+        profiles.map((profile) => profile.businessPartnerId),
+        "customer"
+      );
+      return profiles.filter((profile) => !profile.businessPartnerId || accessiblePartnerIds.has(profile.businessPartnerId));
     },
     [workspaceId],
   );
@@ -1013,7 +1023,7 @@ export function useDeliveryMerchantProfiles(workspaceId?: string) {
   ), [liveRows]);
 }
 
-export function useDeliveryShipments(workspaceId?: string) {
+export function useDeliveryShipments(workspaceId?: string, deliveredAtStart?: string, deliveredAtEnd?: string) {
   const online = useNetworkStatus();
   const viewOwnScope = useViewOwnRecordScope("postService.view_own");
   const rows = useLiveQuery(
@@ -1022,17 +1032,25 @@ export function useDeliveryShipments(workspaceId?: string) {
       const linkedCourierIds = viewOwnScope.isRestricted
         ? await getLinkedCourierIds(workspaceId, viewOwnScope.userId)
         : new Set<string>();
-      const shipments = await db.delivery_shipments
-        .where("workspaceId")
-        .equals(workspaceId)
+      const query = deliveredAtStart || deliveredAtEnd
+        ? db.delivery_shipments.where("[workspaceId+deliveredAt]").between(
+          [workspaceId, deliveredAtStart || Dexie.minKey],
+          [workspaceId, deliveredAtEnd || Dexie.maxKey],
+          true,
+          true
+        )
+        : db.delivery_shipments.where("workspaceId").equals(workspaceId);
+      const shipments = await query
         .and((shipment) => isVisibleDeliveryShipment(shipment, viewOwnScope, linkedCourierIds))
         .toArray();
-      const visibility = await Promise.all(shipments.map((shipment) =>
-        canAccessBusinessPartnerInLocalCache(workspaceId, shipment.merchantBusinessPartnerId, "customer")
-      ));
-      return shipments.filter((_, index) => visibility[index]);
+      const accessiblePartnerIds = await getAccessibleBusinessPartnerIdsInLocalCache(
+        workspaceId,
+        shipments.map((shipment) => shipment.merchantBusinessPartnerId),
+        "customer"
+      );
+      return shipments.filter((shipment) => !shipment.merchantBusinessPartnerId || accessiblePartnerIds.has(shipment.merchantBusinessPartnerId));
     },
-    [workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId],
+    [workspaceId, deliveredAtStart, deliveredAtEnd, viewOwnScope.isRestricted, viewOwnScope.userId],
   );
 
   useEffect(() => {

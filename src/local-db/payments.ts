@@ -1,8 +1,13 @@
 import { useEffect, useMemo } from 'react'
+import Dexie from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
-import { canAccessBusinessPartnerInLocalCache, filterBusinessPartnersByGroupPrivacy } from './businessPartnerAccess'
+import {
+  canAccessBusinessPartnerInLocalCache,
+  filterBusinessPartnersByGroupPrivacy,
+  getAccessibleBusinessPartnerIdsInLocalCache
+} from './businessPartnerAccess'
 import {
     addMonths,
     buildDueDate,
@@ -99,6 +104,8 @@ export interface PaymentTransactionFilterOptions {
 
 export interface UsePaymentTransactionsOptions {
     hydrateSourceTables?: boolean
+    paidAtStart?: string
+    paidAtEnd?: string
 }
 
 export interface PaymentObligationFilterOptions {
@@ -480,7 +487,7 @@ function buildLoanOriginationTransactionInput(
 
 const loanOriginationEnsureLocks = new Map<string, Promise<void>>()
 
-function filterTransactions(items: PaymentTransaction[], filters: PaymentTransactionFilterOptions) {
+export function filterPaymentTransactions(items: PaymentTransaction[], filters: PaymentTransactionFilterOptions) {
   const includeReversals = filters.includeReversals ?? true
   const includeVoided = filters.includeVoided ?? false
 
@@ -1446,6 +1453,23 @@ async function applySalesAccountAgentStatementCredits(
 
 export async function buildPaymentObligations(workspaceId: string, filters: PaymentObligationFilterOptions) {
   const todayKey = new Date().toISOString().slice(0, 10)
+  const selectedSourceModule = filters.sourceModule || 'all'
+  const includesSource = (...modules: PaymentTransactionSourceModule[]) =>
+    selectedSourceModule === 'all' || modules.includes(selectedSourceModule)
+  const includeLoanRows = includesSource('loans', 'orders')
+  const includeLoanInstallments = includesSource('loans')
+  const includeInstallmentSales = includesSource('installment_sales')
+  const includeRealEstate = includesSource('real_estate')
+  const includeClinicalAppointments = includesSource('clinical_appointments')
+  const includeOrders = includesSource('orders')
+  const includeBudget = includesSource('budget')
+  const shouldApplySalesAgentCredits =
+    filters.applySalesAgentAccountCredits && filters.direction !== 'outgoing' && includeOrders
+  const needsPaymentTransactions =
+    selectedSourceModule === 'all' ||
+    includeRealEstate ||
+    includeClinicalAppointments ||
+    shouldApplySalesAgentCredits
   const [
     loans,
     installments,
@@ -1463,21 +1487,23 @@ export async function buildPaymentObligations(workspaceId: string, filters: Paym
     clinicalAppointments,
     workspace
   ] = await Promise.all([
-    db.loans.where('workspaceId').equals(workspaceId).toArray(),
-    db.loan_installments.where('workspaceId').equals(workspaceId).toArray(),
-    db.installment_sales.where('workspaceId').equals(workspaceId).toArray(),
-    db.installment_sale_installments.where('workspaceId').equals(workspaceId).toArray(),
-    db.real_estate_transactions.where('workspaceId').equals(workspaceId).toArray(),
-    db.payment_transactions.where('workspaceId').equals(workspaceId).toArray(),
-    db.sales_orders.where('workspaceId').equals(workspaceId).toArray(),
-    db.purchase_orders.where('workspaceId').equals(workspaceId).toArray(),
-    db.order_installments.where('workspaceId').equals(workspaceId).toArray(),
-    db.expense_series.where('workspaceId').equals(workspaceId).toArray(),
-    db.expense_items.where('workspaceId').equals(workspaceId).toArray(),
-    db.payroll_statuses.where('workspaceId').equals(workspaceId).toArray(),
-    db.employees.where('workspaceId').equals(workspaceId).toArray(),
-    db.clinical_appointments.where('workspaceId').equals(workspaceId).toArray(),
-    db.workspaces.get(workspaceId)
+    includeLoanRows ? db.loans.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+    includeLoanInstallments ? db.loan_installments.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+    includeInstallmentSales ? db.installment_sales.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+    includeInstallmentSales
+      ? db.installment_sale_installments.where('workspaceId').equals(workspaceId).toArray()
+      : Promise.resolve([]),
+    includeRealEstate ? db.real_estate_transactions.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+    needsPaymentTransactions ? db.payment_transactions.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+    includeOrders ? db.sales_orders.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+    includeOrders ? db.purchase_orders.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+    includeOrders ? db.order_installments.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+    includeBudget ? db.expense_series.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+    includeBudget ? db.expense_items.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+    includeBudget ? db.payroll_statuses.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+    includeBudget ? db.employees.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+    includeClinicalAppointments ? db.clinical_appointments.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+    includeClinicalAppointments ? db.workspaces.get(workspaceId) : Promise.resolve(undefined)
   ])
 
   const expenseSeriesMap = new Map(expenseSeries.filter((item) => !item.isDeleted && !item.voidId).map((item) => [item.id, item]))
@@ -1491,11 +1517,11 @@ export async function buildPaymentObligations(workspaceId: string, filters: Paym
   const loanManagedPurchaseOrderIds = getLoanManagedOrderIds(loans, 'purchase')
 
   const obligations = [
-    ...buildStandardLoanInstallmentObligations(loans, installments, todayKey),
-    ...buildSimpleLoanObligations(loans, todayKey),
-    ...buildInstallmentSaleObligations(installmentSales, installmentSaleInstallments, todayKey),
-    ...buildRealEstateCommissionObligations(realEstateTransactions, paymentTransactions),
-    ...clinicalAppointments
+    ...(includesSource('loans') ? buildStandardLoanInstallmentObligations(loans, installments, todayKey) : []),
+    ...(includesSource('loans') ? buildSimpleLoanObligations(loans, todayKey) : []),
+    ...(includeInstallmentSales ? buildInstallmentSaleObligations(installmentSales, installmentSaleInstallments, todayKey) : []),
+    ...(includeRealEstate ? buildRealEstateCommissionObligations(realEstateTransactions, paymentTransactions) : []),
+    ...(includeClinicalAppointments ? clinicalAppointments
       .map((appointment) =>
         buildClinicalAppointmentPaymentObligation(
           appointment,
@@ -1503,33 +1529,32 @@ export async function buildPaymentObligations(workspaceId: string, filters: Paym
           workspace?.default_currency || 'usd'
         )
       )
-      .filter((item): item is PaymentObligation => !!item),
-    ...salesOrders
+      .filter((item): item is PaymentObligation => !!item) : []),
+    ...(includeOrders ? salesOrders
       .filter((order) => !loanManagedSalesOrderIds.has(order.id))
       .filter((order) => !order.isInstallmentBased || !salesOrdersWithInstallments.has(order.id))
       .map((order) => buildSalesOrderObligation(order, todayKey))
-      .filter((item): item is PaymentObligation => !!item),
-    ...purchaseOrders
+      .filter((item): item is PaymentObligation => !!item) : []),
+    ...(includeOrders ? purchaseOrders
       .filter((order) => !loanManagedPurchaseOrderIds.has(order.id))
       .filter((order) => !order.isInstallmentBased || !purchaseOrdersWithInstallments.has(order.id))
       .map((order) => buildPurchaseOrderObligation(order, todayKey))
-      .filter((item): item is PaymentObligation => !!item),
-    ...salesOrders.flatMap((order) => buildOrderInstallmentObligations(order, orderInstallments, todayKey)),
-    ...purchaseOrders.flatMap((order) => buildOrderInstallmentObligations(order, orderInstallments, todayKey)),
-    ...expenseItems
+      .filter((item): item is PaymentObligation => !!item) : []),
+    ...(includeOrders ? salesOrders.flatMap((order) => buildOrderInstallmentObligations(order, orderInstallments, todayKey)) : []),
+    ...(includeOrders ? purchaseOrders.flatMap((order) => buildOrderInstallmentObligations(order, orderInstallments, todayKey)) : []),
+    ...(includeBudget ? expenseItems
       .filter((item) => !item.isDeleted && !item.voidId)
       .map((item) => buildExpenseObligation(item, expenseSeriesMap.get(item.seriesId), todayKey))
-      .filter((item): item is PaymentObligation => !!item),
-    ...buildPayrollObligations(employees, payrollStatuses, todayKey)
+      .filter((item): item is PaymentObligation => !!item) : []),
+    ...(includeBudget ? buildPayrollObligations(employees, payrollStatuses, todayKey) : [])
   ]
 
   // Commission balances are not derived from order payment state. Add them to
   // the shared source list so Open Items, Payable, Collectable, and partner
   // settlement all see the identical per-assignment balance.
-  const agentCommissionObligations = await buildAgentCommissionObligations(workspaceId)
+  const agentCommissionObligations = includeOrders ? await buildAgentCommissionObligations(workspaceId) : []
 
   const allObligations = [...obligations, ...agentCommissionObligations]
-  const shouldApplySalesAgentCredits = filters.applySalesAgentAccountCredits && filters.direction !== 'outgoing'
   const withAgentAccountCredits = shouldApplySalesAgentCredits
     ? await applySalesAccountAgentStatementCredits(
       workspaceId,
@@ -1562,6 +1587,8 @@ export function usePaymentTransactions(
 ) {
   const online = useNetworkStatus()
   const hydrateSourceTables = options.hydrateSourceTables ?? true
+  const paidAtStart = options.paidAtStart
+  const paidAtEnd = options.paidAtEnd
   const filterKey = useMemo(
     () => JSON.stringify(filters),
     [filters.direction, filters.includeReversals, filters.includeVoided, filters.search, filters.sourceModule, filters.sourceType]
@@ -1572,26 +1599,52 @@ export function usePaymentTransactions(
       return []
     }
 
-    const items = await db.payment_transactions.where('workspaceId').equals(workspaceId).toArray()
+    const query = paidAtStart || paidAtEnd
+      ? db.payment_transactions.where('[workspaceId+paidAt]').between(
+        [workspaceId, paidAtStart || Dexie.minKey],
+        [workspaceId, paidAtEnd || Dexie.maxKey],
+        true,
+        true
+      )
+      : filters.sourceType && filters.sourceType !== 'all'
+        ? db.payment_transactions.where('sourceType').equals(filters.sourceType)
+        : filters.sourceModule && filters.sourceModule !== 'all'
+          ? db.payment_transactions.where('sourceModule').equals(filters.sourceModule)
+          : db.payment_transactions.where('workspaceId').equals(workspaceId)
+    const items = await query
+      .and((transaction) => (
+        transaction.workspaceId === workspaceId &&
+        (!filters.sourceModule || filters.sourceModule === 'all' || transaction.sourceModule === filters.sourceModule) &&
+        (!filters.sourceType || filters.sourceType === 'all' || transaction.sourceType === filters.sourceType) &&
+        (!filters.direction || filters.direction === 'all' || transaction.direction === filters.direction)
+      ))
+      .toArray()
 
-    const visibility = await Promise.all(
-      items.map((transaction) => {
-        const businessPartnerId = transaction.metadata?.businessPartnerId
-        return typeof businessPartnerId === 'string'
-          ? canAccessBusinessPartnerInLocalCache(
-              workspaceId,
-              businessPartnerId,
-              transaction.sourceType === 'purchase_order' ? 'supplier' : 'customer'
-            )
-          : true
-      })
-    )
+    const customerPartnerIds = items
+      .filter((transaction) => transaction.sourceType !== 'purchase_order')
+      .map((transaction) => transaction.metadata?.businessPartnerId)
+      .filter((id): id is string => typeof id === 'string')
+    const supplierPartnerIds = items
+      .filter((transaction) => transaction.sourceType === 'purchase_order')
+      .map((transaction) => transaction.metadata?.businessPartnerId)
+      .filter((id): id is string => typeof id === 'string')
+    const [accessibleCustomerPartnerIds, accessibleSupplierPartnerIds] = await Promise.all([
+      getAccessibleBusinessPartnerIdsInLocalCache(workspaceId, customerPartnerIds, 'customer'),
+      getAccessibleBusinessPartnerIdsInLocalCache(workspaceId, supplierPartnerIds, 'supplier')
+    ])
+    const visibleItems = items.filter((transaction) => {
+      const businessPartnerId = transaction.metadata?.businessPartnerId
+      if (typeof businessPartnerId !== 'string') return true
+      return transaction.sourceType === 'purchase_order'
+        ? accessibleSupplierPartnerIds.has(businessPartnerId)
+        : accessibleCustomerPartnerIds.has(businessPartnerId)
+    })
 
-    return filterTransactions(
-      items.filter((_, index) => visibility[index]),
+    return filterPaymentTransactions(
+      visibleItems,
       filters
     ).sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt))
-  }, [workspaceId, filterKey])
+  }, [workspaceId, filterKey, paidAtStart, paidAtEnd])
 
   useEffect(() => {
     if (!workspaceId) {
@@ -1672,17 +1725,22 @@ export function usePaymentObligations(workspaceId: string | undefined, filters: 
   return obligations ?? []
 }
 
-export function useLockedPaymentSourceKeys(workspaceId: string | undefined) {
+export function useLockedPaymentSourceKeys(
+  workspaceId: string | undefined,
+  sourceModule: PaymentTransactionSourceModule | 'all' = 'all'
+) {
+  const includeOrders = sourceModule === 'all' || sourceModule === 'orders'
+  const includeBudget = sourceModule === 'all' || sourceModule === 'budget'
   const keys = useLiveQuery(async () => {
     if (!workspaceId) {
       return []
     }
 
     const [salesOrders, purchaseOrders, expenseItems, payrollStatuses] = await Promise.all([
-      db.sales_orders.where('workspaceId').equals(workspaceId).toArray(),
-      db.purchase_orders.where('workspaceId').equals(workspaceId).toArray(),
-      db.expense_items.where('workspaceId').equals(workspaceId).toArray(),
-      db.payroll_statuses.where('workspaceId').equals(workspaceId).toArray()
+      includeOrders ? db.sales_orders.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+      includeOrders ? db.purchase_orders.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+      includeBudget ? db.expense_items.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([]),
+      includeBudget ? db.payroll_statuses.where('workspaceId').equals(workspaceId).toArray() : Promise.resolve([])
     ])
 
     return [
@@ -1727,7 +1785,7 @@ export function useLockedPaymentSourceKeys(workspaceId: string | undefined) {
           })
         )
     ]
-  }, [workspaceId])
+  }, [workspaceId, includeBudget, includeOrders])
 
   return useMemo(() => new Set(keys ?? []), [keys])
 }

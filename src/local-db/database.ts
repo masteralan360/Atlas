@@ -3730,6 +3730,28 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, recordType, recordDate, relatedOrderId, relatedPartnerId, updatedAt, isDeleted, syncStatus, [workspaceId+recordType], [workspaceId+recordDate], [workspaceId+relatedOrderId], [workspaceId+relatedPartnerId], [workspaceId+updatedAt]'
     })
 
+    this.version(147).stores({
+      sales_orders:
+        'id, orderNumber, businessPartnerId, customerId, linkedLoanId, salesAccountAgentId, workspaceId, status, paymentStatus, paymentMethod, currency, nextDueDate, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+salesAccountAgentId], [workspaceId+createdAt], [workspaceId+isArchived]',
+      purchase_orders:
+        'id, orderNumber, businessPartnerId, supplierId, linkedLoanId, workspaceId, status, paymentStatus, paymentMethod, currency, nextDueDate, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+createdAt], [workspaceId+isArchived]'
+    })
+
+    this.version(148).stores({
+      loans:
+        'id, saleId, orderId, orderType, loanNo, workspaceId, source, loanCategory, direction, linkedPartyId, borrowerName, status, nextDueDate, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+status], [workspaceId+loanCategory], [workspaceId+direction], [orderType+orderId], [workspaceId+createdAt], [workspaceId+loanCategory+createdAt]'
+    })
+
+    this.version(149).stores({
+      delivery_shipments:
+        'id, workspaceId, trackingNumber, merchantProfileId, merchantBusinessPartnerId, assignedAgentId, assignedRunId, status, currency, deliveredAt, createdAt, createdBy, updatedAt, isDeleted, syncStatus, [workspaceId+trackingNumber], [workspaceId+status], [workspaceId+merchantProfileId], [workspaceId+assignedAgentId], [workspaceId+assignedRunId], [workspaceId+createdBy], [workspaceId+deliveredAt]'
+    })
+
+    this.version(150).stores({
+      rental_contracts:
+        'id, workspaceId, contractNo, requestId, vehicleId, businessPartnerId, status, plannedPickupAt, actualPickupAt, plannedReturnAt, actualReturnAt, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+contractNo], [workspaceId+vehicleId], [workspaceId+status], [workspaceId+createdAt], [workspaceId+plannedPickupAt], [workspaceId+actualPickupAt]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

@@ -1694,6 +1694,7 @@
       }
     },
     "title": "Products",
+    "catalogLoadError": "Could not load the matching products. Check your connection and try again.",
     "filters": {
       "title": "Filters",
       "clear": "Clear Filters",

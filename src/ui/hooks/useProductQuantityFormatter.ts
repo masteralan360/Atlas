@@ -5,9 +5,9 @@ import { useProductUoms } from '@/local-db'
 import { getProductStockPresentation } from '@/lib/productStockPresentation'
 import { indexProductUomsByProduct } from '@/lib/productUoms'
 
-export function useProductQuantityPresentation(workspaceId?: string) {
+export function useProductQuantityPresentation(workspaceId?: string, productIds?: readonly string[]) {
   const { t, i18n } = useTranslation()
-  const productUoms = useProductUoms(workspaceId)
+  const productUoms = useProductUoms(workspaceId, productIds === undefined ? undefined : { productIds })
   const contexts = useMemo(() => indexProductUomsByProduct(productUoms), [productUoms])
   const numberFormatter = useMemo(
     () => new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }),

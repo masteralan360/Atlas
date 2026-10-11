@@ -8,7 +8,10 @@ import { runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId, toSnakeCase } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
-import { canAccessBusinessPartnerInLocalCache } from './businessPartnerAccess'
+import {
+  canAccessBusinessPartnerInLocalCache,
+  getAccessibleBusinessPartnerIdsInLocalCache
+} from './businessPartnerAccess'
 import { db } from './database'
 import { useLiveCollection } from './liveCollection'
 import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
@@ -896,8 +899,15 @@ export function useInstallmentSales(workspaceId: string | undefined) {
       .and((row) => !row.isDeleted)
       .reverse()
       .sortBy('createdAt')
-    const visible = await Promise.all(sales.map((sale) => canAccessSaleInLocalCache(sale, viewOwnScope)))
-    return sales.filter((_, index) => visible[index])
+    const visibleSales = sales.filter((sale) => !viewOwnScope.isRestricted || sale.createdBy === viewOwnScope.userId)
+    const accessiblePartnerIds = await getAccessibleBusinessPartnerIdsInLocalCache(
+      workspaceId,
+      visibleSales.map((sale) => sale.customerBusinessPartnerId),
+      'customer'
+    )
+    return visibleSales.filter((sale) => (
+      !sale.customerBusinessPartnerId || accessiblePartnerIds.has(sale.customerBusinessPartnerId)
+    ))
   }, [workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId])
   useEffect(() => {
     if (workspaceId && shouldUseCloudBusinessData(workspaceId) && isOnline(workspaceId))

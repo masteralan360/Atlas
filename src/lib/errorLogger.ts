@@ -740,6 +740,178 @@ export async function readErrorLogs(): Promise<ErrorLogRecord[]> {
     return logFiles.flat().sort((first, second) => second.timestamp.localeCompare(first.timestamp))
 }
 
+export interface ErrorLogPageQuery {
+    offset: number
+    limit: number
+    from?: string
+    to?: string
+    search?: string
+}
+
+export interface ErrorLogPage {
+    records: ErrorLogRecord[]
+    totalCount: number
+    totalRecordCount: number
+}
+
+function toErrorLogRecord(value: unknown): ErrorLogRecord | null {
+    if (!value || typeof value !== 'object') return null
+    const record = value as Partial<ErrorLogRecord>
+    if (record.version !== 1 || typeof record.timestamp !== 'string' || !Array.isArray(record.arguments)) return null
+    return {
+        ...record,
+        source: record.source === 'toast' || record.source === 'network' ? record.source : 'console'
+    } as ErrorLogRecord
+}
+
+function matchesErrorLogPageQuery(record: ErrorLogRecord, query: ErrorLogPageQuery, search: string) {
+    const timestamp = record.timestamp
+    if (query.from && timestamp < query.from) return false
+    if (query.to && timestamp >= query.to) return false
+    if (!search) return true
+    return `${timestamp} ${record.route} ${formatErrorLogRecord(record)}`
+        .toLocaleLowerCase()
+        .includes(search)
+}
+
+async function readTauriErrorLogPage(
+    query: ErrorLogPageQuery,
+    offset: number,
+    limit: number,
+    search: string,
+): Promise<ErrorLogPage> {
+    if (!isTauriRuntime()) return { records: [], totalCount: 0, totalRecordCount: 0 }
+
+    const { BaseDirectory, readDir, readTextFile } = await loadFileSystem()
+    let entries: Awaited<ReturnType<typeof readDir>>
+    try {
+        entries = await readDir(ERROR_LOG_DIRECTORY, { baseDir: BaseDirectory.AppData })
+    } catch {
+        return { records: [], totalCount: 0, totalRecordCount: 0 }
+    }
+
+    const files = entries
+        .filter((entry) => entry.isFile && ERROR_LOG_FILE_PATTERN.test(entry.name))
+        .map((entry) => entry.name)
+        .sort((first, second) => second.localeCompare(first))
+    const pageCapacity = offset + limit
+    let totalCount = 0
+    let totalRecordCount = 0
+    let pageCandidates: ErrorLogRecord[] = []
+
+    for (const fileName of files) {
+        let contents: string
+        try {
+            contents = await readTextFile(`${ERROR_LOG_DIRECTORY}/${fileName}`, { baseDir: BaseDirectory.AppData })
+        } catch {
+            continue
+        }
+
+        const fileCandidates: ErrorLogRecord[] = []
+        for (const line of contents.split('\n')) {
+            if (!line.trim()) continue
+            let record: ErrorLogRecord | null = null
+            try {
+                record = toErrorLogRecord(JSON.parse(line))
+            } catch {
+                continue
+            }
+            if (!record) continue
+
+            totalRecordCount += 1
+            if (!matchesErrorLogPageQuery(record, query, search)) continue
+            totalCount += 1
+            fileCandidates.push(record)
+        }
+
+        if (fileCandidates.length === 0) continue
+        pageCandidates = pageCandidates.concat(fileCandidates)
+            .sort((first, second) => second.timestamp.localeCompare(first.timestamp))
+            .slice(0, pageCapacity)
+    }
+
+    return {
+        records: pageCandidates.slice(offset, offset + limit),
+        totalCount,
+        totalRecordCount,
+    }
+}
+
+/** Reads only the requested PWA page when no search scan is needed. */
+export async function readErrorLogsPage(query: ErrorLogPageQuery): Promise<ErrorLogPage> {
+    const offset = Math.max(0, Math.floor(query.offset) || 0)
+    const limit = Math.max(1, Math.min(500, Math.floor(query.limit) || 1))
+    const search = query.search?.trim().toLocaleLowerCase() ?? ''
+
+    if (!isPwaErrorLogRuntime()) {
+        return readTauriErrorLogPage(query, offset, limit, search)
+    }
+
+    try {
+        const database = await loadPwaErrorLogDatabase()
+        const transaction = database.transaction(PWA_ERROR_LOG_OBJECT_STORE, 'readonly')
+        const store = transaction.objectStore(PWA_ERROR_LOG_OBJECT_STORE)
+        const timestampIndex = store.index('timestamp')
+        const range = query.from && query.to
+            ? IDBKeyRange.bound(query.from, query.to, false, true)
+            : query.from
+                ? IDBKeyRange.lowerBound(query.from)
+                : query.to
+                    ? IDBKeyRange.upperBound(query.to, true)
+                    : undefined
+
+        const requestValue = <T,>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
+            request.onsuccess = () => resolve(request.result)
+            request.onerror = () => reject(request.error ?? new Error('Unable to read the error log database.'))
+        })
+        const totalRecordCountPromise = requestValue(store.count())
+        const filteredCountPromise = search ? undefined : requestValue(timestampIndex.count(range))
+        const recordsPromise = new Promise<{ records: ErrorLogRecord[]; totalCount: number }>((resolve, reject) => {
+            const records: ErrorLogRecord[] = []
+            let matchingCount = 0
+            const request = timestampIndex.openCursor(range, 'prev')
+            request.onerror = () => reject(request.error ?? new Error('Unable to read the error log database.'))
+            request.onsuccess = () => {
+                const cursor = request.result
+                if (!cursor) {
+                    resolve({ records, totalCount: matchingCount })
+                    return
+                }
+
+                const record = toErrorLogRecord(cursor.value)
+                if (record && matchesErrorLogPageQuery(record, query, search)) {
+                    if (search) {
+                        if (matchingCount >= offset && records.length < limit) records.push(record)
+                        matchingCount += 1
+                    } else if (matchingCount >= offset) {
+                        records.push(record)
+                    }
+                }
+
+                if (!search && records.length >= limit) {
+                    resolve({ records, totalCount: 0 })
+                    return
+                }
+                cursor.continue()
+            }
+        })
+
+        const [page, totalRecordCount, filteredCount] = await Promise.all([
+            recordsPromise,
+            totalRecordCountPromise,
+            filteredCountPromise ?? Promise.resolve(undefined),
+        ])
+
+        return {
+            records: page.records,
+            totalCount: search ? page.totalCount : Number(filteredCount) || 0,
+            totalRecordCount: Number(totalRecordCount) || 0,
+        }
+    } catch {
+        return { records: [], totalCount: 0, totalRecordCount: 0 }
+    }
+}
+
 export async function copyErrorLogRecord(record: ErrorLogRecord) {
     const content = formatErrorLogRecord(record)
     if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {

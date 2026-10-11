@@ -1,3 +1,4 @@
+import Dexie from 'dexie'
 import { getActiveBusinessUserId } from '@/lib/network'
 import { QUANTITY_EPSILON, isPositiveQuantity, roundQuantity } from '@/lib/quantity'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
@@ -295,37 +296,121 @@ export async function fetchInventoryTransferBatchHistory(query: InventoryTransfe
 }
 
 async function queryTransferBatchesFromDexie(query: InventoryTransferBatchHistoryQuery): Promise<InventoryTransferBatchHistoryPage> {
-  const batches = await db.inventory_transfer_batches
-    .where('workspaceId').equals(query.workspaceId)
-    .and((batch) => !batch.isDeleted
-      && (!query.from || batch.transferredAt >= query.from)
-      && (!query.to || batch.transferredAt < query.to))
-    .toArray()
   const needle = query.search?.trim().toLocaleLowerCase()
-  const filtered: InventoryTransferBatchHistoryItem[] = []
-  for (const batch of batches) {
-    const [transactions, actor] = await Promise.all([
-      db.inventory_transactions.where('[workspaceId+transferBatchId]')
-        .equals([query.workspaceId, batch.id]).toArray(),
-      batch.performedBy ? db.users.get(batch.performedBy) : Promise.resolve(undefined),
-    ])
-    const productIds = new Set(transactions.filter((row) => !row.isDeleted).map((row) => row.productId))
-    if (needle) {
-      const metadata = [batch.transferNumber, batch.sourceWorkspaceName, batch.sourceStorageName,
-        batch.destinationWorkspaceName, batch.destinationStorageName, actor?.name]
-        .filter(Boolean).join(' ').toLocaleLowerCase()
-      const products = await Promise.all([...productIds].map((id) => db.products.get(id)))
-      const productMatch = products.some((product) => product && [product.name, product.sku, product.barcode,
-        ...(product.barcodes ?? [])].some((value) => value?.toLocaleLowerCase().includes(needle)))
-      if (!metadata.includes(needle) && !productMatch) continue
-    }
-    filtered.push({ batch, productCount: productIds.size, performedByName: actor?.name ?? null,
-      sourceIsBranch: false, destinationIsBranch: false })
-  }
-  filtered.sort((left, right) => right.batch.transferredAt.localeCompare(left.batch.transferredAt)
-    || right.batch.id.localeCompare(left.batch.id))
   const { offset, limit } = historyBounds(query)
-  return { rows: filtered.slice(offset, offset + limit), totalCount: filtered.length }
+  const batchesByDate = db.inventory_transfer_batches
+    .where('[workspaceId+transferredAt]')
+    .between(
+      [query.workspaceId, query.from ?? Dexie.minKey],
+      [query.workspaceId, query.to ?? Dexie.maxKey],
+      true,
+      false,
+    )
+    .reverse()
+    .and((batch) => !batch.isDeleted)
+
+  if (!needle) {
+    const totalCount = await batchesByDate.count()
+    const pageBatches = await batchesByDate.offset(offset).limit(limit).toArray()
+    return {
+      rows: await enrichDexieTransferBatchRows(query.workspaceId, pageBatches),
+      totalCount,
+    }
+  }
+
+  // Search spans batch, actor, product, and barcode fields. Read these tables
+  // once in batches instead of issuing one IndexedDB request per transfer.
+  const batches = await batchesByDate.toArray()
+  const enriched = await enrichDexieTransferBatchRows(query.workspaceId, batches, true)
+  const filtered = enriched.filter(({ batch, performedByName, productIds, products, productBarcodes }) => {
+    const metadata = [batch.transferNumber, batch.sourceWorkspaceName, batch.sourceStorageName,
+      batch.destinationWorkspaceName, batch.destinationStorageName, performedByName]
+      .filter(Boolean).join(' ').toLocaleLowerCase()
+    const productMatch = [...productIds].some((productId) => {
+      const product = products.get(productId)
+      if (!product) return false
+      const barcodes = productBarcodes.get(productId) ?? []
+      return [product.name, product.sku, product.barcode, ...(product.barcodes ?? []), ...barcodes]
+        .some((value) => value?.toLocaleLowerCase().includes(needle))
+    })
+    return metadata.includes(needle) || productMatch
+  })
+
+  return {
+    rows: filtered.slice(offset, offset + limit).map(({ batch, productCount, performedByName }) => ({
+      batch,
+      productCount,
+      performedByName,
+      sourceIsBranch: false,
+      destinationIsBranch: false,
+    })),
+    totalCount: filtered.length,
+  }
+}
+
+async function enrichDexieTransferBatchRows(
+  workspaceId: string,
+  batches: InventoryTransferBatch[],
+  includeSearchData = false,
+): Promise<Array<InventoryTransferBatchHistoryItem & {
+  productIds: Set<string>
+  products: Map<string, Product>
+  productBarcodes: Map<string, string[]>
+}>> {
+  if (batches.length === 0) return []
+
+  const batchIds = new Set(batches.map((batch) => batch.id))
+  const transactions = batches.length <= 100
+    ? await db.inventory_transactions
+      .where('[workspaceId+transferBatchId]')
+      .anyOf(batches.map((batch) => [workspaceId, batch.id]))
+      .and((row) => !row.isDeleted)
+      .toArray()
+    : await db.inventory_transactions
+      .where('workspaceId')
+      .equals(workspaceId)
+      .and((row) => !row.isDeleted && Boolean(row.transferBatchId && batchIds.has(row.transferBatchId)))
+      .toArray()
+  const productIdsByBatch = new Map<string, Set<string>>()
+  const allProductIds = new Set<string>()
+  for (const transaction of transactions) {
+    const productIds = productIdsByBatch.get(transaction.transferBatchId!) ?? new Set<string>()
+    productIds.add(transaction.productId)
+    productIdsByBatch.set(transaction.transferBatchId!, productIds)
+    allProductIds.add(transaction.productId)
+  }
+
+  const performerIds = [...new Set(batches.flatMap((batch) => batch.performedBy ? [batch.performedBy] : []))]
+  const [actors, products, barcodeRows] = await Promise.all([
+    db.users.bulkGet(performerIds),
+    includeSearchData ? db.products.bulkGet([...allProductIds]) : Promise.resolve([]),
+    includeSearchData && allProductIds.size > 0
+      ? db.product_barcodes.where('productId').anyOf([...allProductIds]).and((row) => !row.isDeleted).toArray()
+      : Promise.resolve([]),
+  ])
+  const actorById = new Map(actors.flatMap((actor) => actor ? [[actor.id, actor] as const] : []))
+  const productById = new Map(products.flatMap((product) => product ? [[product.id, product] as const] : []))
+  const barcodeValuesByProductId = new Map<string, string[]>()
+  for (const row of barcodeRows) {
+    if (row.workspaceId !== workspaceId) continue
+    const values = barcodeValuesByProductId.get(row.productId) ?? []
+    values.push(row.barcode)
+    barcodeValuesByProductId.set(row.productId, values)
+  }
+
+  return batches.map((batch) => {
+    const productIds = productIdsByBatch.get(batch.id) ?? new Set<string>()
+    return {
+      batch,
+      productCount: productIds.size,
+      performedByName: batch.performedBy ? actorById.get(batch.performedBy)?.name ?? null : null,
+      sourceIsBranch: false,
+      destinationIsBranch: false,
+      productIds,
+      products: productById,
+      productBarcodes: barcodeValuesByProductId,
+    }
+  })
 }
 
 /** Loads the requested batch and its transfer_out (or local-side) transaction lines. */

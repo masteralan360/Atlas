@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, useDeferredValue } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
@@ -630,7 +630,7 @@ export function Revenue() {
     const expenseItems = useExpenseItemsForWorkspace(canAccessAccountingExpenses ? user?.workspaceId : undefined)
     const rawSalesOrders = useSalesOrders(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
     const salesOrderReturnItems = useSalesOrderReturnItemsForWorkspace(user?.workspaceId)
-    const deliveryShipments = useDeliveryShipments(user?.workspaceId)
+    const deliveryShipments = useDeliveryShipments(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
     const deliveryMerchantProfiles = useDeliveryMerchantProfiles(user?.workspaceId)
     const businessPartners = useBusinessPartners(user?.workspaceId, {
         includeRealEstateRoles: true,
@@ -638,13 +638,16 @@ export function Revenue() {
     })
     const businessPartnerAgents = useAgents(user?.workspaceId)
     const rentalVehicles = useRentalVehicles(user?.workspaceId)
-    const rentalContracts = useRentalContracts(user?.workspaceId)
-    const rawExchangeTransactions = useExchangeTransactions(user?.workspaceId)
+    const rentalContracts = useRentalContracts(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
+    const rawExchangeTransactions = useExchangeTransactions(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
     const realEstateCommissionTransactions = usePaymentTransactions(user?.workspaceId, {
         direction: 'incoming',
         sourceModule: 'real_estate',
         sourceType: 'real_estate_commission',
         includeReversals: false
+    }, {
+        paidAtStart: dateBounds.startDate,
+        paidAtEnd: dateBounds.endDate
     })
     const travelBookingPayments = usePaymentTransactions(user?.workspaceId, {
         direction: 'incoming',
@@ -659,8 +662,11 @@ export function Revenue() {
         sourceType: 'clinical_appointment',
         includeReversals: true
     }, { hydrateSourceTables: false })
-    const activityTransactions = useActivityTransactions(user?.workspaceId)
-    const activityTransactionLines = useActivityTransactionLinesForWorkspace(user?.workspaceId)
+    const activityTransactions = useActivityTransactions(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
+    const activityTransactionLines = useActivityTransactionLinesForWorkspace(
+        user?.workspaceId,
+        activityTransactions.map((transaction) => transaction.id)
+    )
     const products = useProducts(user?.workspaceId)
     const categories = useCategories(user?.workspaceId)
     const storages = useStorages(user?.workspaceId)
@@ -736,6 +742,7 @@ export function Revenue() {
     const [filters, setFilters] = useState<RevenueFilterState>(DEFAULT_REVENUE_FILTERS)
     const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
     const [draftFilters, setDraftFilters] = useState<RevenueFilterState>(DEFAULT_REVENUE_FILTERS)
+    const deferredDraftFilters = useDeferredValue(draftFilters)
 
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => {
         return (localStorage.getItem('revenue_view_mode') as 'table' | 'grid') || 'table'
@@ -843,8 +850,8 @@ export function Revenue() {
         [filters, revenueRecords, t, userNameById]
     )
     const draftPreviewRevenueRecords = useMemo(
-        () => applyRevenueFilters(filterRevenueRecordsByStorage(dateScopedRevenueRecords, draftFilters.storage), draftFilters, userNameById, t),
-        [dateScopedRevenueRecords, draftFilters, t, userNameById]
+        () => applyRevenueFilters(filterRevenueRecordsByStorage(dateScopedRevenueRecords, deferredDraftFilters.storage), deferredDraftFilters, userNameById, t),
+        [dateScopedRevenueRecords, deferredDraftFilters, t, userNameById]
     )
     const filteredSales = useMemo(() => {
         const visibleSaleIds = new Set(
