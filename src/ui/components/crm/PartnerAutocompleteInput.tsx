@@ -32,6 +32,8 @@ interface PartnerAutocompleteInputProps {
     additionalOptions?: PartnerAutocompleteAdditionalOption[]
     onSelectAdditionalOption?: (option: PartnerAutocompleteAdditionalOption) => void
     isLoading?: boolean
+    /** Use a caller's already-paged candidates without hydrating the full directory. */
+    partnerOptions?: BusinessPartner[]
 }
 
 export function PartnerAutocompleteInput({
@@ -50,18 +52,20 @@ export function PartnerAutocompleteInput({
     roles,
     additionalOptions = [],
     onSelectAdditionalOption,
-    isLoading: isLoadingOverride
+    isLoading: isLoadingOverride,
+    partnerOptions
 }: PartnerAutocompleteInputProps) {
     const { t } = useTranslation()
-    const partners = useBusinessPartners(workspaceId, { includeRealEstateRoles, includeAgentRoles, roles })
+    const storedPartners = useBusinessPartners(partnerOptions ? undefined : workspaceId, { includeRealEstateRoles, includeAgentRoles, roles })
+    const partners = partnerOptions ?? storedPartners
     const [isFocused, setIsFocused] = useState(false)
     const [justSelected, setJustSelected] = useState(false)
     const [showInitialSuggestions, setShowInitialSuggestions] = useState(false)
     const inputRef = useRef<HTMLInputElement>(null)
     const pendingOpenRef = useRef(false)
     const hadFocusRef = useRef(false)
-    const wasLoadingRef = useRef(isLoadingOverride ?? partners.isLoading)
-    const isLoading = isLoadingOverride ?? partners.isLoading
+    const wasLoadingRef = useRef(isLoadingOverride ?? storedPartners.isLoading)
+    const isLoading = isLoadingOverride ?? storedPartners.isLoading
     const isDisabled = Boolean(disabled || isLoading)
 
     const query = value.trim().toLowerCase()

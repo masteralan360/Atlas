@@ -7,8 +7,9 @@ import {
   deleteBusinessPartnerGroup,
   saveBusinessPartnerGroupMembers,
   updateBusinessPartnerGroup,
+  useBusinessPartnerDirectoryPage,
   useBusinessPartnerGroups,
-  useBusinessPartners,
+  useBusinessPartnersByIds,
   useWorkspaceUsers,
   type BusinessPartner,
   type BusinessPartnerGroup,
@@ -56,7 +57,6 @@ export function BusinessPartnerGroupsPanel({ workspaceId, featureEnabled }: Busi
   const { toast } = useToast()
   const groupsState = useBusinessPartnerGroups(workspaceId, featureEnabled)
   const workspaceUsers = useWorkspaceUsers(workspaceId)
-  const partnersState = useBusinessPartners(workspaceId, { includeAgentRoles: true, includeRealEstateRoles: true })
   const eligibleUsers = useMemo(
     () => getEligibleBusinessPartnerGroupUsers(workspaceUsers),
     [workspaceUsers],
@@ -78,10 +78,20 @@ export function BusinessPartnerGroupsPanel({ workspaceId, featureEnabled }: Busi
   const [deleteTarget, setDeleteTarget] = useState<BusinessPartnerGroup | null>(null)
   const [isDeletingGroup, setIsDeletingGroup] = useState(false)
 
+  const partnerDirectory = useBusinessPartnerDirectoryPage(workspaceId, {
+    includeAgentRoles: true,
+    includeRealEstateRoles: true,
+    page: 1,
+    pageSize: 20,
+    search: partnerSearch,
+    enabled: membersOpen && memberTab === 'partners',
+  })
+  const selectedPartners = useBusinessPartnersByIds(workspaceId, selectedPartnerIds)
+
   const selectedGroup = groupsState.groups.find((group) => group.id === memberGroupId)
   const partnerById = useMemo(
-    () => new Map<string, BusinessPartner>(partnersState.map((partner) => [partner.id, partner])),
-    [partnersState],
+    () => new Map<string, BusinessPartner>(selectedPartners.map((partner) => [partner.id, partner])),
+    [selectedPartners],
   )
 
   useEffect(() => {
@@ -226,12 +236,9 @@ export function BusinessPartnerGroupsPanel({ workspaceId, featureEnabled }: Busi
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {groupsState.groups.map((group) => {
             const userCount = groupsState.groupUsers.filter((row) => row.groupId === group.id).length
-            const partnerCount = getActiveAssignedBusinessPartners(
-              groupsState.groupPartners
-                .filter((row) => row.groupId === group.id)
-                .map((row) => row.businessPartnerId),
-              [...partnerById.values()],
-            ).length
+            const partnerCount = groupsState.groupPartners
+              .filter((row) => row.groupId === group.id && !row.isDeleted)
+              .length
             const isNonGrouped = group.accessType === 'non_grouped'
             return (
               <Card key={group.id}>
@@ -397,8 +404,10 @@ export function BusinessPartnerGroupsPanel({ workspaceId, featureEnabled }: Busi
                     workspaceId={workspaceId}
                     includeAgentRoles
                     includeRealEstateRoles
+                    partnerOptions={partnerDirectory.items}
                     placeholder={t('businessPartners.groupPrivacy.searchPartners')}
-                    disabled={partnersState.isLoading}
+                    disabled={partnerDirectory.isLoading}
+                    isLoading={partnerDirectory.isLoading}
                   />
                   {selectedPartnerChips.length ? (
                     <div className="flex max-h-[36vh] flex-wrap content-start gap-2 overflow-y-auto rounded-xl border p-3">

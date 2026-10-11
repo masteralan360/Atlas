@@ -112,6 +112,9 @@ export interface StockBatchTransferPlan {
 }
 
 export type BatchAwareInventoryProduct = InventoryProduct & {
+    basePrice?: number
+    baseCostPrice?: number | null
+    baseCurrency?: CurrencyCode
     stockBatches: StockBatch[]
     hasBatches: boolean
     batchCount: number
@@ -1605,6 +1608,9 @@ export function useBatchAwareInventoryProducts(workspaceId: string | undefined, 
             if (sortedBatchRows.length === 0) {
                 return {
                     ...product,
+                    basePrice: product.price,
+                    baseCostPrice: product.costPrice,
+                    baseCurrency: product.currency,
                     stockBatches: [],
                     hasBatches: false,
                     batchCount: 0,
@@ -1623,6 +1629,9 @@ export function useBatchAwareInventoryProducts(workspaceId: string | undefined, 
 
             return {
                 ...product,
+                basePrice: product.price,
+                baseCostPrice: product.costPrice,
+                baseCurrency: product.currency,
                 stockBatches: sortedBatchRows,
                 price: effectivePrice,
                 costPrice: effectiveCostPrice,

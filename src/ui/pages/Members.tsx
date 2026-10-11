@@ -32,7 +32,7 @@ import {
 import { UsersRound, UserMinus, Loader2, Shield, Eye, Briefcase, UserRound, KeyRound, ShieldCheck, Copy, CopyCheck } from 'lucide-react'
 import { ProfileCardModal } from '@/ui/components/ProfileCardModal'
 import { useTranslation } from 'react-i18next'
-import { cn, formatDate } from '@/lib/utils'
+import { cn, formatDate, generateId } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { invokeWorkspaceAccess } from '@/lib/workspaceAccess'
@@ -391,7 +391,6 @@ export function Members() {
                         .equals([user.workspaceId, member.id, permissionKey])
                         .first()
                     if (!existing) {
-                        const { generateId } = await import('@/lib/utils')
                         await db.workspace_permissions.put({
                             id: generateId(),
                             workspaceId: user.workspaceId,
@@ -459,7 +458,6 @@ export function Members() {
             if (isLocalMode) {
                 await db.transaction('rw', db.workspace_permissions, async () => {
                     if (shouldGrant) {
-                        const { generateId } = await import('@/lib/utils')
                         for (const permissionKey of VIEW_OWN_RECORD_PERMISSION_KEYS) {
                             const existing = await db.workspace_permissions
                                 .where('[workspaceId+userUuid+key]')
@@ -877,8 +875,6 @@ export function Members() {
                 sourceKeys.set(row.key, row.module)
             }
         }
-
-        const { generateId } = await import('@/lib/utils')
 
         await db.workspace_permissions
             .where('[workspaceId+userUuid]')

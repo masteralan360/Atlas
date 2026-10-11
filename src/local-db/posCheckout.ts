@@ -11,7 +11,11 @@ import { db } from './database'
 import type { CurrencyCode, ExchangeRateSnapshot, StockBatchAllocation, UserRole } from './models'
 import { assertStaffMinimumSellingPrices } from './minimumSellingPrice'
 import type { MinimumSellingPriceCheckItem } from './minimumSellingPrice'
-import { createLoanFromPosSale, generateLocalSaleSequenceId } from './hooks'
+import {
+    createLoanFromPosSale,
+    generateLocalSaleSequenceId,
+    type LoanBusinessPartnerDependencies
+} from './hooks'
 import { appendPaymentTransaction, cacheConfirmedPaymentTransaction } from './payments'
 import { assertCurrentUserCanAccessStorage } from './storagePermissions'
 import { adjustInventoryQuantity } from './inventory'
@@ -168,7 +172,7 @@ async function postPayment(input: PosCheckoutInput, referenceLabel: string) {
     })
 }
 
-async function saveLocal(input: PosCheckoutInput) {
+async function saveLocal(input: PosCheckoutInput, loanDependencies?: LoanBusinessPartnerDependencies) {
     const { payload: p } = input
     // Include nested stock, payment-account and loan writes in the same commit.
     // SQLite's existing transaction hook receives the complete write set.
@@ -283,7 +287,7 @@ async function saveLocal(input: PosCheckoutInput) {
         const loan = p.payment_method === 'loan' && r ? await createLoanFromPosSale(p.workspace_id, {
             saleId: p.id, ...r, principalAmount: p.total_amount, settlementCurrency: p.settlement_currency,
             exchangeRateSnapshot: input.exchangeRates, createdBy: input.user.id, createdAt: input.timestamp
-        }) : null
+        }, loanDependencies) : null
         return { sequenceId, loanId: loan?.loan.id ?? null }
     })
 }
@@ -313,7 +317,16 @@ export async function commitPosCheckout(input: PosCheckoutInput) {
             await Promise.all(storageIds.map((storageId) =>
                 assertCurrentUserCanAccessStorage(p.workspace_id, storageId)
             ))
-            const result = await saveLocal(input)
+            let loanDependencies: LoanBusinessPartnerDependencies | undefined
+            if (input.loanRegistration?.linkedPartyType === 'business_partner'
+                && input.loanRegistration.linkedPartyId) {
+                const businessPartners = await import('./businessPartners')
+                loanDependencies = {
+                    getBusinessPartnerByAnyId: businessPartners.getBusinessPartnerByAnyId,
+                    recalculateBusinessPartnerSummary: businessPartners.recalculateBusinessPartnerSummary
+                }
+            }
+            const result = await saveLocal(input, loanDependencies)
             // Automatic reorder transfers are follow-up work, outside the sale.
             const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
             await Promise.allSettled([...new Set(p.items.filter(item => item.storage_id).map(item => item.product_id))]

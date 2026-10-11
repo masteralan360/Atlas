@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Virtuoso } from 'react-virtuoso'
 import { useLocation, useRoute } from 'wouter'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
@@ -898,45 +899,18 @@ export function InstantPOS() {
         enabled: !!selectedStorageId && !isServicesStorage,
         storageId: isServicesStorage ? undefined : selectedStorageId || undefined
     })
-    const catalogProducts = useProducts(user?.workspaceId, { syncBarcodeCache: false })
     const productUoms = useProductUoms(user?.workspaceId)
     const customUnits = useUnits(user?.workspaceId)
     const uomDescriptors = useMemo(() => getUomDescriptors(customUnits), [customUnits])
-    const { canSelectProduct, filterProducts: filterSelectableProducts } = useProductSelectionAccess(user?.workspaceId, user?.id)
-    const serviceProducts = useMemo(() => {
-        if (!hasFeature('services')) return []
-        return filterSelectableProducts(catalogProducts.filter(isService)).map((service) => ({
-            ...service,
-            unit: '', storageId: SERVICES_VIRTUAL_STORAGE_ID, storageName: 'Services',
-            quantity: Number.MAX_SAFE_INTEGER, minStockLevel: 0,
-            inventoryId: `service:${service.id}`, inventoryQuantity: Number.MAX_SAFE_INTEGER,
-            hasBatches: false, batchCount: 0, nextBatchNumber: null, nextBatchExpiryDate: null, nextBatchQuantity: null
-        }))
-    }, [catalogProducts, filterSelectableProducts, hasFeature])
+    const { canSelectProduct, filterProducts: filterSelectableProducts } = useProductSelectionAccess(
+        user?.workspaceId,
+        user?.id,
+        { storageId: selectedStorageId && !isServicesStorage ? selectedStorageId : null }
+    )
     const inventoryProducts = useMemo(
         () => filterSelectableProducts(products),
         [filterSelectableProducts, products]
     )
-    const selectableProducts = useMemo(
-        () => isServicesStorage ? serviceProducts : inventoryProducts,
-        [inventoryProducts, isServicesStorage, serviceProducts]
-    )
-    const ticketProducts = useMemo(
-        () => [...inventoryProducts, ...serviceProducts],
-        [inventoryProducts, serviceProducts]
-    )
-    const activeDiscountMap = useActiveDiscountMap(user?.workspaceId, {
-        products: isServicesStorage ? catalogProducts.filter(isService) : products,
-        inventoryRows: selectedStorageId && !isServicesStorage ? undefined : [],
-        storageId: isServicesStorage ? undefined : selectedStorageId || undefined,
-        syncRemote: false
-    })
-    const categories = useCategories(user?.workspaceId)
-
-    const getDefaultSellingUom = useCallback((product: (typeof catalogProducts)[number]) => {
-        const available = getActiveProductUoms(product, productUoms, uomDescriptors)
-        return available.find((row) => row.isDefaultSelling) ?? available.find((row) => row.isBase) ?? available[0]
-    }, [productUoms, uomDescriptors])
 
     const getDiscountedUomPrice = (price: number, discount: ResolvedActiveDiscount | undefined) => {
         if (!discount) return price
@@ -975,6 +949,43 @@ export function InstantPOS() {
     const [restaurantTicketToClose, setRestaurantTicketToClose] = useState<RestaurantPosTicket | null>(null)
     const [isRestaurantTicketClosing, setIsRestaurantTicketClosing] = useState(false)
     const tickets = restaurantMode ? restaurantTickets : localTickets
+    const hasServiceTicketItems = tickets.some((ticket) => (
+        ticket.items.some((item) => item.storageId === SERVICES_VIRTUAL_STORAGE_ID)
+    ))
+    const catalogProducts = useProducts(user?.workspaceId, {
+        syncBarcodeCache: false,
+        enabled: isServicesStorage || hasServiceTicketItems
+    })
+    const serviceProducts = useMemo(() => {
+        if (!hasFeature('services')) return []
+        return filterSelectableProducts(catalogProducts.filter(isService)).map((service) => ({
+            ...service,
+            unit: '', storageId: SERVICES_VIRTUAL_STORAGE_ID, storageName: 'Services',
+            quantity: Number.MAX_SAFE_INTEGER, minStockLevel: 0,
+            inventoryId: `service:${service.id}`, inventoryQuantity: Number.MAX_SAFE_INTEGER,
+            hasBatches: false, batchCount: 0, nextBatchNumber: null, nextBatchExpiryDate: null, nextBatchQuantity: null
+        }))
+    }, [catalogProducts, filterSelectableProducts, hasFeature])
+    const selectableProducts = useMemo(
+        () => isServicesStorage ? serviceProducts : inventoryProducts,
+        [inventoryProducts, isServicesStorage, serviceProducts]
+    )
+    const ticketProducts = useMemo(
+        () => [...inventoryProducts, ...serviceProducts],
+        [inventoryProducts, serviceProducts]
+    )
+    const activeDiscountMap = useActiveDiscountMap(user?.workspaceId, {
+        products: isServicesStorage ? catalogProducts.filter(isService) : products,
+        inventoryRows: selectedStorageId && !isServicesStorage ? undefined : [],
+        storageId: isServicesStorage ? undefined : selectedStorageId || undefined,
+        syncRemote: false
+    })
+    const categories = useCategories(user?.workspaceId)
+
+    const getDefaultSellingUom = useCallback((product: (typeof catalogProducts)[number]) => {
+        const available = getActiveProductUoms(product, productUoms, uomDescriptors)
+        return available.find((row) => row.isDefaultSelling) ?? available.find((row) => row.isBase) ?? available[0]
+    }, [productUoms, uomDescriptors])
     const routedRestaurantTableNumber = useMemo(() => {
         const value = Number(restaurantTableRouteParams?.tableNumber)
         return Number.isInteger(value) && value > 0 ? value : null
@@ -1277,6 +1288,18 @@ export function InstantPOS() {
             return product.categoryId === selectedCategory
         })
     }, [search, selectableProducts, selectedCategory, selectedStorageId, settlementCurrency])
+    const catalogGridColumns = viewportWidth >= 1024
+        ? Math.max(1, productsPerRow)
+        : viewportWidth >= 640
+            ? 2
+            : 1
+    const filteredProductRows = useMemo(() => {
+        const rows: typeof filteredProducts[] = []
+        for (let index = 0; index < filteredProducts.length; index += catalogGridColumns) {
+            rows.push(filteredProducts.slice(index, index + catalogGridColumns))
+        }
+        return rows
+    }, [catalogGridColumns, filteredProducts])
 
     useEffect(() => {
         const excludedProductIds = new Set(
@@ -2785,23 +2808,25 @@ export function InstantPOS() {
                         </button>
                     </div>
 
-                    <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-2">
-                        <div
-                            className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
-                            style={{
-                                gridTemplateColumns: viewportWidth < 1024
-                                    ? undefined
-                                    : `repeat(${productsPerRow}, minmax(0, 1fr))`,
-                            }}
-                        >
-                            {filteredProducts.length === 0 ? (
-                                <div className="col-span-full text-sm text-muted-foreground">
-                                    {!selectedStorageId
-                                        ? (t('storages.selectStorage') || 'Select a storage')
-                                        : (t('instantPos.noProducts') || 'No products match your search.')}
-                                </div>
-                            ) : (
-                                filteredProducts.map(product => {
+                    <div className="flex-1 min-h-0 overflow-hidden pr-2">
+                        {filteredProducts.length === 0 ? (
+                            <div className="text-sm text-muted-foreground">
+                                {!selectedStorageId
+                                    ? (t('storages.selectStorage') || 'Select a storage')
+                                    : (t('instantPos.noProducts') || 'No products match your search.')}
+                            </div>
+                        ) : (
+                            <Virtuoso
+                                key={`${selectedStorageId}:${selectedCategory}:${search}:${settlementCurrency || ''}`}
+                                data={filteredProductRows}
+                                style={{ height: '100%' }}
+                                increaseViewportBy={{ top: 250, bottom: 500 }}
+                                itemContent={(_rowIndex, row) => (
+                                    <div
+                                        className="grid gap-4 pb-4"
+                                        style={{ gridTemplateColumns: `repeat(${catalogGridColumns}, minmax(0, 1fr))` }}
+                                    >
+                                        {row.map(product => {
                                     const imageUrl = getDisplayImageUrl(product.imageUrl)
                                     const service = isService(product)
                                     const activeDiscount = activeDiscountMap.get(product.id)
@@ -2828,6 +2853,7 @@ export function InstantPOS() {
                                                     <img
                                                         src={imageUrl}
                                                         alt={product.name}
+                                                            loading="lazy"
                                                         className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
                                                     />
                                                 ) : (
@@ -2887,10 +2913,12 @@ export function InstantPOS() {
                                                 )}
                                             </div>
                                         </button>
-                                    )
-                                })
-                            )}
-                        </div>
+                                        )
+                                        })}
+                                    </div>
+                                )}
+                            />
+                        )}
                     </div>
 
                     {activeTicket && (

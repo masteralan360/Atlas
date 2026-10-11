@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { Eye, Pencil, Plus, Search, Trash2, Users } from 'lucide-react'
+import { Eye, Loader2, Pencil, Plus, Search, Trash2, Users } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 
@@ -9,7 +9,7 @@ import {
     createBusinessPartner,
     deleteBusinessPartner,
     updateBusinessPartner,
-    useBusinessPartners,
+    useBusinessPartnerDirectoryPage,
     type BusinessPartner,
     type CurrencyCode
 } from '@/local-db'
@@ -33,6 +33,7 @@ import {
     TabsContent,
     TabsList,
     TabsTrigger,
+    AppPagination,
     useToast
 } from '@/ui/components'
 import { useWorkspacePermissions } from '@/permissions/WorkspacePermissionsContext'
@@ -51,35 +52,35 @@ export function Customers() {
     const canViewAll = hasPermission('businessPartners.access')
     const canViewSuppliers = hasPermission('suppliers.access')
     const [scope, setScope] = useState<'all' | 'customers' | 'suppliers'>('customers')
-    const customers = useBusinessPartners(user?.workspaceId, { roles: ['customer'] })
     const [search, setSearch] = useState('')
+    const [currentPage, setCurrentPage] = useState(1)
+    const [pageSize, setPageSize] = useState(20)
     const [dialogOpen, setDialogOpen] = useState(false)
     const [editingPartner, setEditingPartner] = useState<BusinessPartner | null>(null)
     const [deleteTarget, setDeleteTarget] = useState<BusinessPartner | null>(null)
     const [isSaving, setIsSaving] = useState(false)
     const [showEcommerceCustomers, setShowEcommerceCustomers] = useState(true)
 
+    const customers = useBusinessPartnerDirectoryPage(user?.workspaceId, {
+        roles: ['customer'],
+        page: currentPage,
+        pageSize,
+        search,
+        includeEcommerce: showEcommerceCustomers,
+    })
+
     const availableCurrencies = useMemo(() => {
         return Array.from(new Set([features.default_currency, ...features.allowed_currencies])) as CurrencyCode[]
     }, [features.allowed_currencies, features.default_currency])
 
-    const visibleCustomers = useMemo(() => {
-        if (showEcommerceCustomers) {
-            return customers
-        }
+    const filteredCustomers = customers.items
 
-        return customers.filter((customer) => !customer.isEcommerce)
-    }, [customers, showEcommerceCustomers])
-
-    const filteredCustomers = useMemo(() => {
-        const query = search.trim().toLowerCase()
-        if (!query) return visibleCustomers
-        return visibleCustomers.filter((customer) =>
-            [customer.partnerName, customer.phone, customer.city]
-                .filter((value): value is string => typeof value === 'string' && value.length > 0)
-                .some((value) => value.toLowerCase().includes(query))
-        )
-    }, [visibleCustomers, search])
+    useEffect(() => setCurrentPage(1), [search, pageSize, showEcommerceCustomers])
+    useEffect(() => {
+        if (customers.isLoading) return
+        const pageCount = Math.max(1, Math.ceil(customers.totalCount / pageSize))
+        setCurrentPage((page) => Math.min(page, pageCount))
+    }, [customers.isLoading, customers.totalCount, pageSize])
 
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
     const canDelete = user?.role === 'admin'
@@ -102,6 +103,7 @@ export function Customers() {
 
             setDialogOpen(false)
             setEditingPartner(null)
+            customers.refresh()
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
@@ -119,6 +121,7 @@ export function Customers() {
             await deleteBusinessPartner(deleteTarget.id)
             toast({ title: t('customers.messages.deleteSuccess') || 'Customer deleted successfully' })
             setDeleteTarget(null)
+            customers.refresh()
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
@@ -128,7 +131,7 @@ export function Customers() {
         }
     }
 
-    const totalOutstanding = visibleCustomers.reduce((count, customer) => count + (customer.receivableBalance > 0 ? 1 : 0), 0)
+    const totalOutstanding = customers.summary.customersWithOutstanding
 
     return (
         <div className="space-y-6">
@@ -190,7 +193,7 @@ export function Customers() {
                         <CardTitle className="text-sm text-muted-foreground">{t('customers.title') || 'Customers'}</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-black">{visibleCustomers.length}</div>
+                        <div className="text-3xl font-black">{customers.summary.partnerCount}</div>
                     </CardContent>
                 </Card>
                 <Card>
@@ -198,7 +201,7 @@ export function Customers() {
                         <CardTitle className="text-sm text-muted-foreground">{t('orders.table.items') || 'Orders'}</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-black">{visibleCustomers.reduce((sum, customer) => sum + customer.totalSalesOrders, 0)}</div>
+                        <div className="text-3xl font-black">{customers.summary.totalSalesOrders}</div>
                     </CardContent>
                 </Card>
                 <Card>
@@ -212,8 +215,18 @@ export function Customers() {
             </div>
 
             <Card>
-                <CardHeader className="gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <CardTitle>{t('customers.title') || 'Customers'}</CardTitle>
+                <CardHeader className="flex-wrap gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex min-w-0 flex-wrap items-center gap-3">
+                        <CardTitle>{t('customers.title') || 'Customers'}</CardTitle>
+                        <AppPagination
+                            currentPage={currentPage}
+                            totalCount={customers.totalCount}
+                            pageSize={pageSize}
+                            onPageChange={setCurrentPage}
+                            onPageSizeChange={setPageSize}
+                            className="mx-0 w-auto justify-start"
+                        />
+                    </div>
                     <div className="flex w-full flex-col gap-3 lg:max-w-xl lg:flex-row lg:items-center lg:justify-end">
                         <UiAccessGate>
                             <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/60 px-4 py-3">
@@ -262,7 +275,13 @@ export function Customers() {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {filteredCustomers.length === 0 ? (
+                                {customers.isLoading ? (
+                                    <TableRow>
+                                        <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
+                                            <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />{t('common.loading')}</span>
+                                        </TableCell>
+                                    </TableRow>
+                                ) : filteredCustomers.length === 0 ? (
                                     <TableRow>
                                         <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
                                             {t('common.noData') || 'No data available'}

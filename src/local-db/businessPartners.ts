@@ -6,6 +6,7 @@ import i18n from '@/i18n/config'
 import { convertCurrencyAmountWithAvailableSnapshot, convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
 import { isOnline } from '@/lib/network'
 import { getPartnerSyncWriteRpc, getSupabaseClientForTable, getWorkspaceScopedPartnerReadRpc } from '@/lib/supabaseSchema'
+import { supabase } from '@/auth/supabase'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 import {
   canSelectProductForExcludedCategories,
@@ -40,11 +41,13 @@ import type {
   BusinessPartnerRole,
   CurrencyCode,
   Customer,
+  Inventory,
   Loan,
   Product,
   PurchaseOrder,
   SalesOrder,
-  Supplier
+  Supplier,
+  User
 } from './models'
 import { isRealEstateBusinessPartnerRole } from './models'
 
@@ -56,6 +59,30 @@ type PartnerFilterOptions = {
   includeMerged?: boolean
   includeRealEstateRoles?: boolean
   includeAgentRoles?: boolean
+}
+
+export type BusinessPartnerDirectorySummary = {
+  partnerCount: number
+  totalSalesOrders: number
+  totalPurchaseOrders: number
+  suppliersWithPurchases: number
+  customersWithOutstanding: number
+  receivableTotals: Array<{ currency: CurrencyCode; amount: number }>
+  payableTotals: Array<{ currency: CurrencyCode; amount: number }>
+}
+
+export type BusinessPartnerDirectoryPageOptions = PartnerFilterOptions & {
+  page: number
+  pageSize: number
+  search?: string
+  includeEcommerce?: boolean
+  enabled?: boolean
+}
+
+export type BusinessPartnerDirectoryPage = {
+  items: BusinessPartner[]
+  totalCount: number
+  summary: BusinessPartnerDirectorySummary
 }
 type BusinessPartnerRoleAccessOptions = {
   allowRealEstateRoles?: boolean
@@ -712,7 +739,11 @@ export function useAgentExcludedCategories(workspaceId: string | undefined, agen
   return exclusions
 }
 
-export function useProductSelectionAccess(workspaceId: string | undefined, userId: string | null | undefined) {
+export function useProductSelectionAccess(
+  workspaceId: string | undefined,
+  userId: string | null | undefined,
+  options: { storageId?: string | null } = {}
+) {
   const online = useNetworkStatus()
   const storageAccess = useStorageAccess(workspaceId, userId)
   const agents = useLiveQuery(
@@ -727,15 +758,16 @@ export function useProductSelectionAccess(workspaceId: string | undefined, userI
     [workspaceId]
   )
   const exclusions = useAgentExcludedCategories(workspaceId)
-  const inventoryRows = useLiveQuery(
-    () => workspaceId
-      ? db.inventory
-          .where('workspaceId')
-          .equals(workspaceId)
-          .and((row) => !row.isDeleted)
-          .toArray()
-      : [],
-    [workspaceId]
+  const storageId = options.storageId?.trim()
+  const inventoryRows = useLiveQuery<Inventory[]>(
+    () => {
+      if (!workspaceId || options.storageId === null) return []
+      const query = storageId
+        ? db.inventory.where('[workspaceId+storageId]').equals([workspaceId, storageId])
+        : db.inventory.where('workspaceId').equals(workspaceId)
+      return query.and((row) => !row.isDeleted).toArray()
+    },
+    [options.storageId, storageId, workspaceId]
   )
 
   useEffect(() => {
@@ -1497,6 +1529,428 @@ async function readBusinessPartners(
     .map(normalizeRuntimePartnerName)
     .filter((partner) => matchesPartnerRoleFilter(partner, filters?.roles))
     .sort((a, b) => a.partnerName.localeCompare(b.partnerName))
+}
+
+const EMPTY_BUSINESS_PARTNER_DIRECTORY_SUMMARY: BusinessPartnerDirectorySummary = {
+  partnerCount: 0,
+  totalSalesOrders: 0,
+  totalPurchaseOrders: 0,
+  suppliersWithPurchases: 0,
+  customersWithOutstanding: 0,
+  receivableTotals: [],
+  payableTotals: [],
+}
+
+function normalizeDirectorySummary(value: unknown): BusinessPartnerDirectorySummary {
+  const summary = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const normalizeTotals = (totals: unknown) => Array.isArray(totals)
+    ? totals.flatMap((item) => {
+        if (!item || typeof item !== 'object') return []
+        const row = item as Record<string, unknown>
+        if (typeof row.currency !== 'string') return []
+        return [{ currency: row.currency as CurrencyCode, amount: Number(row.amount ?? 0) }]
+      })
+    : []
+  return {
+    partnerCount: Number(summary.partnerCount ?? 0),
+    totalSalesOrders: Number(summary.totalSalesOrders ?? 0),
+    totalPurchaseOrders: Number(summary.totalPurchaseOrders ?? 0),
+    suppliersWithPurchases: Number(summary.suppliersWithPurchases ?? 0),
+    customersWithOutstanding: Number(summary.customersWithOutstanding ?? 0),
+    receivableTotals: normalizeTotals(summary.receivableTotals),
+    payableTotals: normalizeTotals(summary.payableTotals),
+  }
+}
+
+function directoryPartnerMatches(
+  partner: BusinessPartner,
+  options: BusinessPartnerDirectoryPageOptions,
+) {
+  if (partner.isDeleted || (!options.includeMerged && partner.mergedIntoBusinessPartnerId)) return false
+  if (isRemovedBusinessPartnerRole(partner.role)) return false
+  if (!options.includeRealEstateRoles && isRealEstateBusinessPartnerRole(partner.role)) return false
+  if (!options.includeAgentRoles && roleIncludesAgent(partner.role)) return false
+  if (!matchesPartnerRoleFilter(partner, options.roles)) return false
+  if (options.includeEcommerce === false && partner.isEcommerce) return false
+  return true
+}
+
+async function readLocalBusinessPartnerDirectoryPage(
+  workspaceId: string | undefined,
+  options: BusinessPartnerDirectoryPageOptions,
+  viewer: BusinessPartnerGroupPrivacyViewer,
+  collectAll = false,
+): Promise<BusinessPartnerDirectoryPage> {
+  if (!workspaceId) return { items: [], totalCount: 0, summary: { ...EMPTY_BUSINESS_PARTNER_DIRECTORY_SUMMARY } }
+
+  const page = Math.max(1, Math.floor(options.page) || 1)
+  const pageSize = Math.min(100, Math.max(1, Math.floor(options.pageSize) || 20))
+  const offset = (page - 1) * pageSize
+  const search = options.search?.trim().toLocaleLowerCase() ?? ''
+  const summary: BusinessPartnerDirectorySummary = {
+    ...EMPTY_BUSINESS_PARTNER_DIRECTORY_SUMMARY,
+    receivableTotals: [],
+    payableTotals: [],
+  }
+  const receivableByCurrency = new Map<CurrencyCode, number>()
+  const payableByCurrency = new Map<CurrencyCode, number>()
+  const items: BusinessPartner[] = []
+  let totalCount = 0
+
+  let visiblePartnerIds: Set<string> | null = null
+  if (viewer.featureEnabled && viewer.role !== 'admin') {
+    const [groups, groupUsers, groupPartners] = await Promise.all([
+      db.business_partner_groups.where('workspaceId').equals(workspaceId).toArray(),
+      db.business_partner_group_users.where('workspaceId').equals(workspaceId).toArray(),
+      db.business_partner_group_partners.where('workspaceId').equals(workspaceId).toArray(),
+    ])
+    visiblePartnerIds = getVisibleBusinessPartnerIdsByGroup(groups, groupUsers, groupPartners, viewer)
+  }
+
+  // The compound index keeps the read workspace-scoped and in stable name/id
+  // order. Filtering and counting happen as records pass through the cursor;
+  // only the requested page is retained for the UI.
+  const partners = db.business_partners
+    .where('[workspaceId+partnerName+id]')
+    .between([workspaceId, '', ''], [workspaceId, '\uffff', '\uffff'])
+
+  await partners.each(async (candidate) => {
+    if (!directoryPartnerMatches(candidate, options)) return
+    if (visiblePartnerIds && !visiblePartnerIds.has(candidate.id)) return
+
+    const partner = normalizeRuntimePartnerName(candidate)
+    const currency = partner.defaultCurrency
+    summary.partnerCount += 1
+    summary.totalSalesOrders += Number(partner.totalSalesOrders || 0)
+    summary.totalPurchaseOrders += Number(partner.totalPurchaseOrders || 0)
+    if (Number(partner.totalPurchaseValue || 0) > 0) summary.suppliersWithPurchases += 1
+    if (Number(partner.receivableBalance || 0) > 0) summary.customersWithOutstanding += 1
+    receivableByCurrency.set(currency, (receivableByCurrency.get(currency) ?? 0) + Number(partner.receivableBalance || 0))
+    payableByCurrency.set(currency, (payableByCurrency.get(currency) ?? 0) + Number(partner.payableBalance || 0))
+
+    let matchesSearch = true
+    if (search) {
+      const partnerFields = [partner.partnerName, partner.phone, partner.city]
+      matchesSearch = partnerFields.some((value) => typeof value === 'string' && value.toLocaleLowerCase().includes(search))
+      if (!matchesSearch && partner.role === 'agent' && partner.agentFacetId) {
+        const agent = await db.agents.get(partner.agentFacetId)
+        matchesSearch = Boolean(agent && !agent.isDeleted && [agent.zone, agent.agentType, agent.status]
+          .some((value) => typeof value === 'string' && value.toLocaleLowerCase().includes(search)))
+      }
+    }
+    if (!matchesSearch) return
+
+    totalCount += 1
+    if (collectAll || (totalCount > offset && items.length < pageSize)) items.push(partner)
+  })
+
+  summary.receivableTotals = [...receivableByCurrency.entries()]
+    .map(([totalCurrency, amount]) => ({ currency: totalCurrency, amount }))
+    .sort((left, right) => left.currency.localeCompare(right.currency))
+  summary.payableTotals = [...payableByCurrency.entries()]
+    .map(([totalCurrency, amount]) => ({ currency: totalCurrency, amount }))
+    .sort((left, right) => left.currency.localeCompare(right.currency))
+
+  return { items, totalCount, summary }
+}
+
+async function fetchRemoteBusinessPartnerDirectoryPage(
+  workspaceId: string,
+  options: BusinessPartnerDirectoryPageOptions,
+  includeMetadata = true,
+): Promise<BusinessPartnerDirectoryPage> {
+  const client = getSupabaseClientForTable('business_partners')
+  const result = await runMutation('businessPartners.directory.page', () => client.rpc('list_business_partner_directory_page', {
+    p_workspace_id: workspaceId,
+    p_roles: options.roles?.length ? options.roles : null,
+    p_include_merged: options.includeMerged ?? false,
+    p_include_real_estate_roles: options.includeRealEstateRoles ?? false,
+    p_include_agent_roles: options.includeAgentRoles ?? false,
+    p_include_ecommerce: options.includeEcommerce ?? true,
+    p_search: options.search?.trim() || null,
+    p_page: Math.max(1, Math.floor(options.page) || 1),
+    p_page_size: Math.min(100, Math.max(1, Math.floor(options.pageSize) || 20)),
+    p_include_metadata: includeMetadata,
+  }))
+  if (result.error) throw result.error
+  if (!result.data || typeof result.data !== 'object') {
+    throw new Error('Business partner directory returned an invalid page')
+  }
+
+  const payload = result.data as Record<string, unknown>
+  const rawItems = Array.isArray(payload.items) ? payload.items : []
+  const timestamp = new Date().toISOString()
+  const mappedItems = rawItems.map((row) => ({
+    ...(toCamelCase(row as Record<string, unknown>) as unknown as BusinessPartner),
+    syncStatus: 'synced' as const,
+    lastSyncedAt: timestamp,
+  }))
+
+  if (mappedItems.length) {
+    const cachedItems = await db.business_partners.bulkGet(mappedItems.map((item) => item.id))
+    const cacheUpdates = mappedItems.filter((_, index) => {
+      const cached = cachedItems[index]
+      return cached?.syncStatus !== 'pending' && cached?.syncStatus !== 'conflict'
+    })
+    if (cacheUpdates.length) await db.business_partners.bulkPut(cacheUpdates)
+  }
+
+  return {
+    items: mappedItems.map(normalizeRuntimePartnerName),
+    totalCount: includeMetadata ? Number(payload.totalCount ?? 0) : mappedItems.length,
+    summary: includeMetadata
+      ? normalizeDirectorySummary(payload.summary)
+      : { ...EMPTY_BUSINESS_PARTNER_DIRECTORY_SUMMARY },
+  }
+}
+
+export function useBusinessPartnerDirectoryPage(
+  workspaceId: string | undefined,
+  options: BusinessPartnerDirectoryPageOptions,
+) {
+  const { user } = useAuth()
+  const { hasCapability } = useWorkspace()
+  const online = useNetworkStatus()
+  const [refreshVersion, setRefreshVersion] = useState(0)
+  const [remotePage, setRemotePage] = useState<{ key: string; value: BusinessPartnerDirectoryPage } | null>(null)
+  const [remoteErrorKey, setRemoteErrorKey] = useState<string | null>(null)
+  const [settledSearch, setSettledSearch] = useState(options.search ?? '')
+  const viewer = useMemo<BusinessPartnerGroupPrivacyViewer>(() => ({
+    userId: user?.id,
+    role: user?.role,
+    featureEnabled: hasCapability('businessPartnerGroupPrivacy'),
+  }), [hasCapability, user?.id, user?.role])
+  const optionsKey = JSON.stringify(options)
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setSettledSearch(options.search ?? ''), 250)
+    return () => window.clearTimeout(timeout)
+  }, [options.search])
+  const requestOptions = useMemo(() => ({ ...options, search: settledSearch }), [optionsKey, settledSearch])
+  const requestOptionsKey = JSON.stringify(requestOptions)
+  const queryKey = JSON.stringify([workspaceId, requestOptionsKey, viewer.featureEnabled, viewer.role, viewer.userId, refreshVersion])
+  const enabled = options.enabled !== false
+  const useRemote = Boolean(enabled && online && shouldUseCloudBusinessData(workspaceId))
+  const matchingRemotePage = remotePage?.key === queryKey ? remotePage.value : null
+
+  useEffect(() => {
+    if (!enabled || !workspaceId || !useRemote) return
+    let disposed = false
+    setRemoteErrorKey(null)
+    void fetchRemoteBusinessPartnerDirectoryPage(workspaceId, requestOptions)
+      .then((value) => {
+        if (!disposed) setRemotePage({ key: queryKey, value })
+      })
+      .catch((error) => {
+        console.error('[BusinessPartners] Failed to load a directory page:', error)
+        if (!disposed) setRemoteErrorKey(queryKey)
+      })
+    return () => { disposed = true }
+  }, [enabled, queryKey, requestOptionsKey, useRemote, workspaceId])
+
+  const localOrCachedPage = useLiveQuery(async () => {
+    if (!enabled || !workspaceId) return { items: [], totalCount: 0, summary: { ...EMPTY_BUSINESS_PARTNER_DIRECTORY_SUMMARY } }
+    if (useRemote) {
+      if (matchingRemotePage) {
+        const cachedRows = await db.business_partners.bulkGet(matchingRemotePage.items.map((item) => item.id))
+        return {
+          ...matchingRemotePage,
+          items: matchingRemotePage.items.flatMap((remoteItem, index) => {
+            const localItem = cachedRows[index]
+            if (localItem?.syncStatus === 'pending' || localItem?.syncStatus === 'conflict') {
+              return localItem.isDeleted ? [] : [normalizeRuntimePartnerName(localItem)]
+            }
+            return [remoteItem]
+          }),
+        }
+      }
+      if (remoteErrorKey !== queryKey) return undefined
+    }
+    return readLocalBusinessPartnerDirectoryPage(workspaceId, requestOptions, viewer)
+  }, [enabled, requestOptionsKey, queryKey, matchingRemotePage?.items.map((item) => item.id).join(','), remoteErrorKey, useRemote, viewer.featureEnabled, viewer.role, viewer.userId, workspaceId])
+
+  const page = localOrCachedPage ?? matchingRemotePage
+  const items = page?.items ?? []
+  const pageIdsKey = items.map((item) => item.id).join(',')
+  const pageIds = useMemo(() => pageIdsKey ? pageIdsKey.split(',') : [], [pageIdsKey])
+  const agents = useLiveQuery(
+    () => pageIds.length
+      ? db.agents.where('businessPartnerId').anyOf(pageIds).and((agent) => agent.workspaceId === workspaceId && !agent.isDeleted).toArray()
+      : [],
+    [pageIdsKey, workspaceId]
+  )
+  const linkedUserIds = useMemo(
+    () => [...new Set((agents ?? []).map((agent) => agent.linkedUserId).filter((id): id is string => Boolean(id)))],
+    [agents]
+  )
+  const linkedUserIdsKey = linkedUserIds.join(',')
+  const workspaceUsers = useLiveQuery(async () => {
+    if (!workspaceId || linkedUserIds.length === 0) return []
+    const [users, profiles] = await Promise.all([
+      db.users.bulkGet(linkedUserIds),
+      db.profiles.bulkGet(linkedUserIds),
+    ])
+    return linkedUserIds.flatMap((id, index) => {
+      const userRecord = users[index]
+      const profile = profiles[index] as (typeof profiles)[number] & { profile_url?: string | null; created_at?: string | null } | undefined
+      if (!userRecord && !profile) return []
+      if (userRecord) {
+        return [{ ...userRecord, profileUrl: userRecord.profileUrl || profile?.profile_url || undefined }]
+      }
+      return [{
+        id,
+        workspaceId,
+        name: profile?.name || '',
+        email: '',
+        role: profile?.role || 'staff',
+        profileUrl: profile?.profile_url || undefined,
+        createdAt: profile?.created_at || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        syncStatus: 'synced' as const,
+        lastSyncedAt: new Date().toISOString(),
+        version: 1,
+        isDeleted: false,
+      } as User]
+    })
+  }, [linkedUserIdsKey, workspaceId])
+
+  useEffect(() => {
+    if (!workspaceId || !useRemote || pageIds.length === 0) return
+    let disposed = false
+    void (async () => {
+      const client = getSupabaseClientForTable('agents')
+      const { data: agentRows, error: agentsError } = await runMutation('businessPartners.directory.agents', () => client
+        .from('agents')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .eq('is_deleted', false)
+        .in('business_partner_id', pageIds))
+      if (agentsError || !agentRows || disposed) return
+      const syncedAt = new Date().toISOString()
+      const pageAgents = agentRows.map((row: Record<string, unknown>) => ({
+        ...(toCamelCase(row) as unknown as Agent),
+        syncStatus: 'synced' as const,
+        lastSyncedAt: syncedAt,
+      }))
+      if (pageAgents.length) await db.agents.bulkPut(pageAgents)
+      const linkedIds = [...new Set(pageAgents.map((agent) => agent.linkedUserId).filter((id): id is string => Boolean(id)))]
+      if (!linkedIds.length || disposed) return
+      const { data: profileRows, error: profilesError } = await runMutation('businessPartners.directory.profiles', () => supabase
+        .from('profiles')
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .in('id', linkedIds))
+      if (profilesError || !profileRows || disposed) return
+      const users = profileRows.map((row: Record<string, unknown>) => {
+        const profile = toCamelCase(row) as Record<string, unknown>
+        return {
+          ...profile,
+          id: String(profile.id),
+          workspaceId: String(profile.workspaceId ?? workspaceId),
+          name: String(profile.name ?? ''),
+          email: String(profile.email ?? ''),
+          profileUrl: typeof profile.profileUrl === 'string' ? profile.profileUrl : undefined,
+          createdAt: String(profile.createdAt ?? syncedAt),
+          updatedAt: String(profile.updatedAt ?? syncedAt),
+          syncStatus: 'synced' as const,
+          lastSyncedAt: syncedAt,
+          version: Number(profile.version ?? 1),
+          isDeleted: false,
+        } as User
+      })
+      if (users.length) await db.users.bulkPut(users)
+    })().catch((error) => console.warn('[BusinessPartners] Failed to load page-related agent details:', error))
+    return () => { disposed = true }
+  }, [pageIdsKey, useRemote, workspaceId])
+
+  const refresh = useCallback(() => setRefreshVersion((current) => current + 1), [])
+  const isLoading = useRemote
+    ? matchingRemotePage
+      ? false
+      : remoteErrorKey === queryKey
+        ? localOrCachedPage === undefined
+        : true
+    : localOrCachedPage === undefined
+
+  return {
+    items,
+    totalCount: page?.totalCount ?? 0,
+    summary: page?.summary ?? EMPTY_BUSINESS_PARTNER_DIRECTORY_SUMMARY,
+    agents: agents ?? [],
+    workspaceUsers: workspaceUsers ?? [],
+    isLoading,
+    isHydrating: useRemote && isLoading,
+    hydrationFailed: useRemote && remoteErrorKey === queryKey,
+    refresh,
+  }
+}
+
+export async function loadAllBusinessPartnerDirectoryRows(
+  workspaceId: string,
+  options: Omit<BusinessPartnerDirectoryPageOptions, 'page' | 'pageSize' | 'search'>,
+  viewer: BusinessPartnerGroupPrivacyViewer,
+) {
+  const directoryOptions: BusinessPartnerDirectoryPageOptions = {
+    ...options,
+    page: 1,
+    pageSize: 100,
+    includeEcommerce: options.includeEcommerce ?? true,
+  }
+  if (isOnline(workspaceId) && shouldUseCloudBusinessData(workspaceId)) {
+    const rows: BusinessPartner[] = []
+    let page = 1
+    while (true) {
+      const result = await fetchRemoteBusinessPartnerDirectoryPage(workspaceId, { ...directoryOptions, page }, false)
+      rows.push(...result.items)
+      if (result.items.length < directoryOptions.pageSize) break
+      page += 1
+    }
+    return rows
+  }
+  return (await readLocalBusinessPartnerDirectoryPage(workspaceId, directoryOptions, viewer, true)).items
+}
+
+export function useBusinessPartnersByIds(workspaceId: string | undefined, partnerIds: string[]) {
+  const online = useNetworkStatus()
+  const normalizedIdsKey = [...new Set(partnerIds.filter(Boolean))].sort().join(',')
+  const normalizedIds = useMemo(() => normalizedIdsKey ? normalizedIdsKey.split(',') : [], [normalizedIdsKey])
+  const partners = useLiveQuery(
+    async () => (await db.business_partners.bulkGet(normalizedIds))
+      .filter((partner): partner is BusinessPartner => Boolean(partner && !partner.isDeleted && partner.workspaceId === workspaceId))
+      .map(normalizeRuntimePartnerName),
+    [normalizedIdsKey, workspaceId]
+  )
+
+  useEffect(() => {
+    if (!workspaceId || !normalizedIds.length || !online || !shouldUseCloudBusinessData(workspaceId)) return
+    let disposed = false
+    const readRpc = getWorkspaceScopedPartnerReadRpc('business_partners')
+    if (!readRpc) return
+    void (async () => {
+      const client = getSupabaseClientForTable('business_partners')
+      const remoteRows: Record<string, unknown>[] = []
+      for (let start = 0; start < normalizedIds.length; start += 100) {
+        const ids = normalizedIds.slice(start, start + 100)
+        const result = await runMutation('businessPartners.byIds', () => client
+          .rpc(readRpc, { p_workspace_id: workspaceId })
+          .in('id', ids))
+        if (result.error) throw result.error
+        if (result.data) remoteRows.push(...result.data as Record<string, unknown>[])
+      }
+      if (disposed || remoteRows.length === 0) return
+      const syncedAt = new Date().toISOString()
+      const mapped = remoteRows.map((row) => ({
+        ...(toCamelCase(row) as unknown as BusinessPartner),
+        syncStatus: 'synced' as const,
+        lastSyncedAt: syncedAt,
+      }))
+      const cached = await db.business_partners.bulkGet(mapped.map((partner) => partner.id))
+      const cacheUpdates = mapped.filter((_, index) => cached[index]?.syncStatus !== 'pending' && cached[index]?.syncStatus !== 'conflict')
+      if (!disposed && cacheUpdates.length) await db.business_partners.bulkPut(cacheUpdates)
+    })().catch((error) => console.warn('[BusinessPartners] Failed to load selected partners:', error))
+    return () => { disposed = true }
+  }, [normalizedIdsKey, online, workspaceId])
+
+  return partners ?? []
 }
 
 export function useBusinessPartners(workspaceId: string | undefined, filters?: PartnerFilterOptions) {

@@ -6919,6 +6919,11 @@
       "name": "Storage Name",
       "namePlaceholder": "e.g. Warehouse A"
     },
+    "errors": {
+      "duplicateName": "A storage with this name already exists in this workspace.",
+      "createFailed": "Could not create this storage. Try again.",
+      "updateFailed": "Could not update this storage. Try again."
+    },
     "messages": {
       "deleteConfirm": "Products in this storage will be moved to Reserve. Continue?"
     },

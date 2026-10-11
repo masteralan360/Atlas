@@ -2141,11 +2141,14 @@ export function Products() {
                     </div>
                 </CardHeader>
                 <CardContent>
-                    {filteredProducts.length === 0 ? (
+                    {isRemoteCatalogBrowse && productCatalogPage.isLoading ? (
+                        <div className="flex min-h-60 items-center justify-center gap-2 py-8 text-center text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            {t('common.loading', { defaultValue: 'Loading...' })}
+                        </div>
+                    ) : filteredProducts.length === 0 ? (
                         <div className="flex items-center justify-center gap-2 py-8 text-center text-muted-foreground">
-                            {isRemoteCatalogBrowse && productCatalogPage.isLoading ? (
-                                <><Loader2 className="h-4 w-4 animate-spin" />{t('common.loading', { defaultValue: 'Loading...' })}</>
-                            ) : t('common.noData')}
+                            {t('common.noData')}
                         </div>
                     ) : (
                         <>

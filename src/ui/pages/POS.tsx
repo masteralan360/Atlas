@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
 import {
@@ -557,11 +558,56 @@ export function POS() {
         }
         return map
     }, [priceBookCatalog.priceBookItems, priceBookById, selectedPriceBookId])
+    const [isSkuModalOpen, setIsSkuModalOpen] = useState(false)
+    const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false)
+    const [isCameraProductScannerOpen, setIsCameraProductScannerOpen] = useState(false)
+    const [isCameraScannerAutoEnabled, setIsCameraScannerAutoEnabled] = useState(() => (
+        localStorage.getItem('scanner_auto_enabled') === 'true'
+    ))
+    const [isDeviceScannerAutoEnabled, setIsDeviceScannerAutoEnabled] = useState(() => (
+        localStorage.getItem('scanner_device_auto_enabled') === 'true'
+    ))
+    const [cart, setCart] = useState<CartItem[]>([])
+    const hasCrossStorageCartItems = cart.some((item) => (
+        !item.storageId
+        || (item.storageId !== selectedStorageId
+            && item.storageId !== ACTIVITIES_VIRTUAL_STORAGE_ID
+            && item.storageId !== SERVICES_VIRTUAL_STORAGE_ID)
+    ))
+    const hasPhysicalStorageSelection = Boolean(selectedStorageId)
+        && !isActivitiesStorage
+        && !isServicesStorage
+    const requiresWorkspaceProductLookup = hasCrossStorageCartItems
+        || isSkuModalOpen
+        || isBarcodeModalOpen
+        || isCameraProductScannerOpen
+        || isCameraScannerAutoEnabled
+        || isDeviceScannerAutoEnabled
+    const inventoryQueryStorageId = requiresWorkspaceProductLookup
+        ? undefined
+        : hasPhysicalStorageSelection
+            ? selectedStorageId
+            : undefined
     const products = useBatchAwareInventoryProducts(user?.workspaceId, {
-        enabled: !!user?.workspaceId
+        enabled: !!user?.workspaceId && (hasPhysicalStorageSelection || requiresWorkspaceProductLookup),
+        storageId: inventoryQueryStorageId
     })
-    const catalogProducts = useProducts(user?.workspaceId, { syncBarcodeCache: false })
-    const { canSelectProduct, filterProducts: filterSelectableProducts } = useProductSelectionAccess(user?.workspaceId, user?.id)
+    const catalogProducts = useProducts(user?.workspaceId, {
+        syncBarcodeCache: false,
+        enabled: isServicesStorage || cart.some((item) => item.storageId === SERVICES_VIRTUAL_STORAGE_ID)
+    })
+    const productAccessStorageId = requiresWorkspaceProductLookup
+        ? undefined
+        : hasPhysicalStorageSelection
+            ? selectedStorageId
+            : isActivitiesStorage
+                ? undefined
+                : null
+    const { canSelectProduct, filterProducts: filterSelectableProducts } = useProductSelectionAccess(
+        user?.workspaceId,
+        user?.id,
+        { storageId: productAccessStorageId }
+    )
     const activityCatalog = useActivityCatalog(canSellActivities ? user?.workspaceId : undefined)
     const infiniteActivityIds = useMemo(
         () => new Set(activityCatalog.filter((activity) => activity.isInfinite && !activity.isDeleted).map((activity) => activity.id)),
@@ -580,7 +626,6 @@ export function POS() {
         foundStorageName: string;
     } | null>(null)
     const [search, setSearch] = useState('')
-    const [cart, setCart] = useState<CartItem[]>([])
     const isActivitiesCart = cart.some((item) => item.storageId === ACTIVITIES_STORAGE_ID)
     const isActivitiesCheckout = cart.length > 0 ? isActivitiesCart : isActivitiesStorage
     const [unitSelectionProduct, setUnitSelectionProduct] = useState<PosCatalogProduct | null>(null)
@@ -594,7 +639,6 @@ export function POS() {
     }, [])
     const [dynamicUnitModal, setDynamicUnitModal] = useState<{ type: string; itemKey: string } | null>(null)
     const [dynamicInputBuffer, setDynamicInputBuffer] = useState<Record<string, string>>({})
-    const [isSkuModalOpen, setIsSkuModalOpen] = useState(false)
     const [selectedCategory, setSelectedCategory] = useState<string>(() => {
         return localStorage.getItem('pos_selected_category') || 'all'
     })
@@ -607,17 +651,9 @@ export function POS() {
     const checkoutSubmissionInProgress = useRef(false)
     const posCheckoutAttempt = useRef(new PosCheckoutAttempt())
     const [isPreprinting, setIsPreprinting] = useState(false)
-    const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false)
-    const [isCameraProductScannerOpen, setIsCameraProductScannerOpen] = useState(false)
     const isCameraProductScannerOpenRef = useRef(false)
     isCameraProductScannerOpenRef.current = isCameraProductScannerOpen
     const [isPosAdjustOpen, setIsPosAdjustOpen] = useState(false)
-    const [isCameraScannerAutoEnabled, setIsCameraScannerAutoEnabled] = useState(() => {
-        return localStorage.getItem('scanner_auto_enabled') === 'true'
-    })
-    const [isDeviceScannerAutoEnabled, setIsDeviceScannerAutoEnabled] = useState(() => {
-        return localStorage.getItem('scanner_device_auto_enabled') === 'true'
-    })
     const [isBluetoothScannerModeEnabled, setIsBluetoothScannerModeEnabled] = useState(() => {
         return localStorage.getItem('scanner_bluetooth_mode_enabled') === 'true'
     })
@@ -897,17 +933,14 @@ export function POS() {
         stockSource?: PosStockSourceSelection | null
     ): PosCatalogProduct => {
         if (!stockSource) return product
-        const regularProduct = catalogProducts.find((candidate) => (
-            candidate.id === product.id && candidate.storageId === product.storageId
-        )) ?? product
         const batch = stockSource.type === 'batch' ? stockSource.batch : null
         return {
             ...product,
-            price: batch?.price ?? regularProduct.price,
-            costPrice: batch?.costPrice ?? regularProduct.costPrice,
-            currency: batch?.currency ?? regularProduct.currency
+            price: batch?.price ?? product.basePrice ?? product.price,
+            costPrice: batch?.costPrice ?? product.baseCostPrice ?? product.costPrice,
+            currency: batch?.currency ?? product.baseCurrency ?? product.currency
         }
-    }, [catalogProducts])
+    }, [])
 
     const getStockSourceAvailability = useCallback((
         product: PosCatalogProduct,
@@ -1060,6 +1093,7 @@ export function POS() {
     const [focusedCartIndex, setFocusedCartIndex] = useState<number>(-1)
     const searchInputRef = useRef<HTMLInputElement>(null)
     const productRefs = useRef<(HTMLButtonElement | null)[]>([])
+    const catalogGridRef = useRef<VirtuosoHandle | null>(null)
     const cartItemRefs = useRef<(HTMLDivElement | null)[]>([])
     const cartContainerRef = useRef<HTMLDivElement>(null)
     const sidebarRef = useRef<HTMLDivElement>(null)
@@ -1404,11 +1438,21 @@ export function POS() {
             return matchesSearch
         }).sort((left, right) => (left.name || '').localeCompare(right.name || ''))
     }, [search, selectedCategory, selectedStorageId, sellableProducts])
+    const catalogGridColumns = isLayoutMobile ? getGridColumns() : catalogColumns
+    const filteredProductRows = useMemo(() => {
+        const columns = Math.max(1, catalogGridColumns)
+        const rows: PosCatalogProduct[][] = []
+        for (let index = 0; index < filteredProducts.length; index += columns) {
+            rows.push(filteredProducts.slice(index, index + columns))
+        }
+        return rows
+    }, [catalogGridColumns, filteredProducts])
 
     const barcodeMap = useMemo(() => {
         const map = new Map<string, string>()
+        const scannableProductIds = new Set(scannableProducts.map((product) => product.id))
         for (const barcodeRow of productBarcodes) {
-            if (scannableProducts.some((product) => product.id === barcodeRow.productId)) {
+            if (scannableProductIds.has(barcodeRow.productId)) {
                 addBarcodeLookupCode(map, barcodeRow.barcode, barcodeRow.productId, barcodeRow.isPrimary)
             }
         }
@@ -1419,7 +1463,7 @@ export function POS() {
             }
         }
         for (const uom of productUoms) {
-            if (!uom.isActive || uom.isDeleted || !scannableProducts.some((product) => product.id === uom.productId)) continue
+            if (!uom.isActive || uom.isDeleted || !scannableProductIds.has(uom.productId)) continue
             addBarcodeLookupCode(map, uom.barcode, uom.productId, true)
             addBarcodeLookupCode(map, uom.sku, uom.productId, true)
         }
@@ -1958,6 +2002,7 @@ export function POS() {
 
             if (newIndex !== focusedProductIndex) {
                 setFocusedProductIndex(newIndex)
+                catalogGridRef.current?.scrollToIndex(Math.floor(newIndex / Math.max(1, cols)))
                 // Scroll into view
                 const el = productRefs.current[newIndex]
                 if (el) {
@@ -3791,12 +3836,11 @@ export function POS() {
                         showExchangeTools={!isActivitiesStorage}
                     />
                     <div className={cn(
-                        "flex-1 relative no-scrollbar",
-                        mobileView === 'grid' ? "overflow-y-auto" : "overflow-hidden"
+                        "flex flex-1 min-h-0 flex-col relative no-scrollbar overflow-hidden"
                     )}>
                         {!isActivitiesStorage && showExchangeTicker && (
                             <div
-                                className="cursor-pointer active:bg-primary/5 transition-colors border-b border-border/50 bg-background"
+                                className="shrink-0 cursor-pointer active:bg-primary/5 transition-colors border-b border-border/50 bg-background"
                                 onClick={() => setShowExchangeTicker(false)}
                             >
                                 <ExchangeTicker
@@ -3820,6 +3864,8 @@ export function POS() {
                                 setIsCameraProductScannerOpen={setIsCameraProductScannerOpen}
                                 isDeviceScannerAutoEnabled={isDeviceScannerAutoEnabled}
                                 filteredProducts={filteredProducts}
+                                catalogColumns={catalogGridColumns}
+                                gridRef={catalogGridRef}
                                 cart={cart}
                                 selectCatalogProduct={selectCatalogProduct}
                                 getProductCardStockDisplay={getProductCardStockDisplay}
@@ -3831,6 +3877,7 @@ export function POS() {
                                 features={features}
                                 getDisplayImageUrl={getDisplayImageUrl}
                                 categories={isActivitiesStorage ? [] : categories}
+                                selectedStorageId={selectedStorageId}
                                 selectedCategory={selectedCategory}
                                 setSelectedCategory={setSelectedCategory}
                                 getActiveDiscount={getActiveDiscountForProduct}
@@ -3963,10 +4010,10 @@ export function POS() {
                             </div>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto pr-2">
+                        <div className="flex flex-1 min-h-0 flex-col overflow-hidden pr-2">
                             {/* Categories */}
                             {showCategories && !isActivitiesStorage && categories.length > 0 && (
-                                <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-none no-scrollbar">
+                                <div className="flex shrink-0 gap-2 overflow-x-auto pb-4 scrollbar-none no-scrollbar">
                                     <button
                                         key="all"
                                         onClick={() => setSelectedCategory('all')}
@@ -3991,15 +4038,19 @@ export function POS() {
                                     ))}
                                 </div>
                             )}
-                            <div
-                                className="grid gap-4"
-                                style={{
-                                    gridTemplateColumns: isLayoutMobile
-                                        ? undefined
-                                        : `repeat(${catalogColumns}, minmax(0, 1fr))`
-                                }}
-                            >
-                                {filteredProducts.map((product, index) => {
+                            <Virtuoso
+                                key={`${selectedStorageId}:${selectedCategory}:${search}`}
+                                ref={catalogGridRef}
+                                data={filteredProductRows}
+                                style={{ height: '100%' }}
+                                increaseViewportBy={{ top: 250, bottom: 500 }}
+                                itemContent={(rowIndex, row) => (
+                                    <div
+                                        className="grid gap-4 pb-4"
+                                        style={{ gridTemplateColumns: `repeat(${catalogGridColumns}, minmax(0, 1fr))` }}
+                                    >
+                                        {row.map((product, columnIndex) => {
+                                    const index = rowIndex * catalogGridColumns + columnIndex
                                     const productCartItems = cart.filter((item) => item.product_id === product.id && item.storageId === product.storageId)
                                     const inCartQuantity = productCartItems.reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
                                     const cardStockDisplay = product.hasBatches
@@ -4025,7 +4076,7 @@ export function POS() {
                                             key={product.id}
                                             data-testid="pos-product-card"
                                             data-product-id={product.id}
-                                            ref={el => productRefs.current[index] = el}
+                                                ref={el => productRefs.current[index] = el}
                                             onClick={() => selectCatalogProduct(product)}
                                             disabled={!isInfiniteActivity && !isServiceProduct && remainingQuantity <= 0}
                                             className={cn(
@@ -4146,8 +4197,10 @@ export function POS() {
                                             </div>
                                         </button>
                                     )
-                                })}
-                            </div>
+                                        })}
+                                    </div>
+                                )}
+                            />
                         </div>
                     </div>
 
@@ -6118,6 +6171,8 @@ interface MobileGridProps {
     setIsCameraProductScannerOpen: (o: boolean) => void
     isDeviceScannerAutoEnabled: boolean
     filteredProducts: PosCatalogProduct[]
+    catalogColumns: number
+    gridRef: { current: VirtuosoHandle | null }
     cart: CartItem[]
     selectCatalogProduct: (p: PosCatalogProduct) => boolean
     getProductCardStockDisplay: (product: PosCatalogProduct, cartItems: CartItem[]) => PosProductCardStockDisplay
@@ -6129,6 +6184,7 @@ interface MobileGridProps {
     features: WorkspaceFeatures
     getDisplayImageUrl: (url?: string) => string
     categories: Category[]
+    selectedStorageId: string
     selectedCategory: string
     setSelectedCategory: (id: string) => void
     getActiveDiscount: (product: PosCatalogProduct, basePrice: number, currency: CurrencyCode) => ResolvedActiveDiscount | null
@@ -6143,9 +6199,17 @@ interface MobileGridProps {
     showCategories: boolean
 }
 
-function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, setIsCameraProductScannerOpen, isDeviceScannerAutoEnabled, filteredProducts, cart, selectCatalogProduct, getProductCardStockDisplay, getCartItemKey, onHoldForFreeOnlyOrder, canUseOrderFreeBonus, quickOrderEnabled, updateQuantity, features, getDisplayImageUrl, categories, selectedCategory, setSelectedCategory, getActiveDiscount, getPriceBookPricing, showQuantityIndicator, showCategories }: MobileGridProps) {
+function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, setIsCameraProductScannerOpen, isDeviceScannerAutoEnabled, filteredProducts, catalogColumns, gridRef, cart, selectCatalogProduct, getProductCardStockDisplay, getCartItemKey, onHoldForFreeOnlyOrder, canUseOrderFreeBonus, quickOrderEnabled, updateQuantity, features, getDisplayImageUrl, categories, selectedStorageId, selectedCategory, setSelectedCategory, getActiveDiscount, getPriceBookPricing, showQuantityIndicator, showCategories }: MobileGridProps) {
     const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const suppressCatalogClickRef = useRef(false)
+    const productRows = useMemo(() => {
+        const columns = Math.max(1, catalogColumns)
+        const rows: PosCatalogProduct[][] = []
+        for (let index = 0; index < filteredProducts.length; index += columns) {
+            rows.push(filteredProducts.slice(index, index + columns))
+        }
+        return rows
+    }, [catalogColumns, filteredProducts])
 
     const clearCatalogHold = () => {
         if (holdTimerRef.current !== null) {
@@ -6159,7 +6223,7 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
     }, [])
 
     return (
-        <div className="flex flex-col gap-4 animate-in fade-in slide-in-from-right-4 duration-300">
+        <div className="flex flex-1 min-h-0 flex-col gap-4 animate-in fade-in slide-in-from-right-4 duration-300">
             {/* Search & Tool Bar */}
             <div className="flex items-center gap-2 p-4 pb-0">
                 <div className="relative flex-1">
@@ -6208,7 +6272,7 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
 
             {/* Categories */}
             {showCategories && (
-                <div className="flex gap-2 overflow-x-auto px-4 py-2 scrollbar-none no-scrollbar">
+                <div className="flex shrink-0 gap-2 overflow-x-auto px-4 py-2 scrollbar-none no-scrollbar">
                     <button
                         key="all"
                         onClick={() => setSelectedCategory('all')}
@@ -6235,8 +6299,24 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
             )}
 
             {/* Products Grid */}
-            <div className="grid grid-cols-2 gap-4 p-4 pt-0 pb-10">
-                {filteredProducts.map((product) => {
+            {filteredProducts.length === 0 ? (
+                <div className="px-4 text-sm text-muted-foreground">
+                    {t('instantPos.noProducts') || 'No products match your search.'}
+                </div>
+            ) : (
+                <Virtuoso
+                    key={`${selectedStorageId}:${selectedCategory}:${search}`}
+                    ref={gridRef}
+                    data={productRows}
+                    className="flex-1 min-h-0"
+                    style={{ height: '100%' }}
+                    increaseViewportBy={{ top: 250, bottom: 500 }}
+                    itemContent={(_rowIndex, row) => (
+                        <div
+                            className="grid gap-4 px-4 pt-0 pb-4"
+                            style={{ gridTemplateColumns: `repeat(${Math.max(1, catalogColumns)}, minmax(0, 1fr))` }}
+                        >
+                            {row.map((product) => {
                     const productCartItems = cart.filter((item) => item.product_id === product.id && item.storageId === product.storageId)
                     const cartItem = productCartItems.at(-1)
                     const inCartQuantity = productCartItems.reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
@@ -6426,8 +6506,11 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                             </div>
                         </div>
                     )
-                })}
-            </div>
+                            })}
+                        </div>
+                    )}
+                />
+            )}
         </div>
     )
 }

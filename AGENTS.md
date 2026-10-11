@@ -11,6 +11,17 @@ All Supabase Edge Functions and database migrations related to the Admin dashboa
 - **Local:** The device’s SQLite database is the source of truth; business data does not synchronize with Supabase.
 - All modes use Dexie/IndexedDB for responsive local UI reads and writes.
 
+## Pagination and large lists
+
+- Apply search, filters, sorting, and pagination at the data source before loading records into the UI. UI pagination alone does not prevent the app from loading the full dataset.
+- Cloud and Hybrid modules must page remote data through Supabase queries or RPCs and keep Dexie cache reads consistent. Local modules must use indexed local queries with equivalent filtering and ordering.
+- Calculate the total count from the same filtered dataset as the current page.
+- Use a stable sort with a unique tie-breaker so records do not move unpredictably between pages.
+- During remote page changes, replace the previous page's records with a centered, localized loading indicator until the requested page loads, and keep pagination in the header; Take Business Partners and Products modules paginations as reference.
+- Load related or derived data only for records on the current page. Avoid unbounded reads such as `toArray()` when they are only used for pagination, search, or sorting.
+- Operations that require the full dataset, such as exports or bulk processing, must fetch and process records in batches.
+- Add or reuse database indexes for common workspace scopes, filters, and sort fields when needed.
+
 ## Live Exchange Rate Fetch
 
 Any module that requires live exchange rate fetch MUST use the app-provided and centralized live exchange rate fetcher at `src/lib/exchangeRate.ts` and always ensure the exchange rate is up to date.

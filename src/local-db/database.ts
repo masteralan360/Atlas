@@ -3752,6 +3752,11 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, contractNo, requestId, vehicleId, businessPartnerId, status, plannedPickupAt, actualPickupAt, plannedReturnAt, actualReturnAt, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+contractNo], [workspaceId+vehicleId], [workspaceId+status], [workspaceId+createdAt], [workspaceId+plannedPickupAt], [workspaceId+actualPickupAt]'
     })
 
+    this.version(151).stores({
+      business_partners:
+        'id, partnerName, workspaceId, role, customerFacetId, supplierFacetId, agentFacetId, priceBookId, defaultCurrency, updatedAt, isDeleted, syncStatus, mergedIntoBusinessPartnerId, latitude, longitude, [workspaceId+partnerName+id]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

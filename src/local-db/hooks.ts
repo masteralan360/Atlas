@@ -33,6 +33,7 @@ import {
     useInventory
 } from './inventory'
 import type {
+    BusinessPartner,
     Product,
     Inventory,
     ProductBarcode,
@@ -3450,9 +3451,42 @@ export function useStorages(workspaceId: string | undefined) {
     return storages ?? []
 }
 
+export class DuplicateStorageNameError extends Error {
+    constructor() {
+        super('A storage with this name already exists in the workspace.')
+        this.name = 'DuplicateStorageNameError'
+    }
+}
+
+function isDuplicateStorageNameConstraintError(error: unknown) {
+    if (!error || typeof error !== 'object') return false
+    const candidate = error as { code?: unknown; constraint?: unknown; message?: unknown; details?: unknown }
+    if (candidate.code !== '23505') return false
+    if (candidate.constraint === 'unique_storage_name_per_workspace') return true
+    return [candidate.message, candidate.details]
+        .some((value) => typeof value === 'string' && value.includes('unique_storage_name_per_workspace'))
+}
+
 export async function createStorage(workspaceId: string, data: { name: string }): Promise<Storage> {
+    const storageName = data.name.trim()
+    if (!storageName) {
+        throw new Error('Storage name is required.')
+    }
+
+    const existingStorageName = await db.storages
+        .where('workspaceId')
+        .equals(workspaceId)
+        // The server's unique index includes soft-deleted rows too.
+        .and((storage) => storage.name === storageName)
+        .first()
+    if (existingStorageName) {
+        throw new DuplicateStorageNameError()
+    }
+
     const now = new Date().toISOString()
     const id = generateId()
+    const usesCloudBusinessData = shouldUseCloudBusinessData(workspaceId)
+    const isCloudOnline = usesCloudBusinessData && isOnline(workspaceId)
     const activeStorageCount = await db.storages
         .where('workspaceId')
         .equals(workspaceId)
@@ -3462,22 +3496,22 @@ export async function createStorage(workspaceId: string, data: { name: string })
     const storage: Storage = {
         id,
         workspaceId,
-        name: data.name,
+        name: storageName,
         isSystem: false,
         isProtected: false,
         isPrimary: activeStorageCount === 0,
         isMarketplace: activeStorageCount === 0,
         createdAt: now,
         updatedAt: now,
-        syncStatus: (isOnline() ? 'synced' : 'pending') as any,
-        lastSyncedAt: isOnline() ? now : null,
+        syncStatus: (isCloudOnline || !usesCloudBusinessData ? 'synced' : 'pending') as any,
+        lastSyncedAt: isCloudOnline || !usesCloudBusinessData ? now : null,
         version: 1,
         isDeleted: false
     }
 
     await db.storages.put(storage)
 
-    if (isOnline()) {
+    if (isCloudOnline) {
         const payload = toSnakeCase({
             ...storage,
             syncStatus: undefined,
@@ -3491,9 +3525,16 @@ export async function createStorage(workspaceId: string, data: { name: string })
             )
 
             if (error) {
+                if (isDuplicateStorageNameConstraintError(error)) {
+                    throw new DuplicateStorageNameError()
+                }
                 throw normalizeSupabaseActionError(error)
             }
         } catch (error) {
+            if (error instanceof DuplicateStorageNameError) {
+                await db.storages.delete(id)
+                throw error
+            }
             console.error('[Storage] Create sync failed:', error)
             if (shouldUseOfflineMutationFallback(error)) {
                 await db.storages.update(id, { syncStatus: 'pending' })
@@ -3503,7 +3544,7 @@ export async function createStorage(workspaceId: string, data: { name: string })
                 throw normalizeSupabaseActionError(error)
             }
         }
-    } else {
+    } else if (usesCloudBusinessData) {
         const payload = toSnakeCase({
             ...storage,
             syncStatus: undefined,
@@ -4868,12 +4909,17 @@ function roundLoanAmount(amount: number, _currency: CurrencyCode): number {
     return roundOrderValue(amount)
 }
 
-async function resolveLinkedBusinessPartner(linkedPartyType?: LoanLinkedPartyType | null, linkedPartyId?: string | null) {
+async function resolveLinkedBusinessPartner(
+    linkedPartyType?: LoanLinkedPartyType | null,
+    linkedPartyId?: string | null,
+    dependencies?: LoanBusinessPartnerDependencies
+) {
     if (linkedPartyType !== 'business_partner' || !linkedPartyId) {
         return undefined
     }
 
-    const { getBusinessPartnerByAnyId } = await import('./businessPartners')
+    const getBusinessPartnerByAnyId = dependencies?.getBusinessPartnerByAnyId
+        ?? (await import('./businessPartners')).getBusinessPartnerByAnyId
     const partner = await getBusinessPartnerByAnyId(linkedPartyId)
     if (!partner || partner.isDeleted || partner.mergedIntoBusinessPartnerId) {
         return undefined
@@ -4884,9 +4930,10 @@ async function resolveLinkedBusinessPartner(linkedPartyType?: LoanLinkedPartyTyp
 
 async function assertLoanCreditLimit(
     workspaceId: string,
-    input: Pick<LoanCreateInput, 'linkedPartyType' | 'linkedPartyId' | 'principalAmount' | 'settlementCurrency' | 'direction' | 'exchangeRateSnapshot'>
+    input: Pick<LoanCreateInput, 'linkedPartyType' | 'linkedPartyId' | 'principalAmount' | 'settlementCurrency' | 'direction' | 'exchangeRateSnapshot'>,
+    dependencies?: LoanBusinessPartnerDependencies
 ) {
-    const partner = await resolveLinkedBusinessPartner(input.linkedPartyType, input.linkedPartyId)
+    const partner = await resolveLinkedBusinessPartner(input.linkedPartyType, input.linkedPartyId, dependencies)
     if (!partner) {
         return
     }
@@ -4944,13 +4991,19 @@ async function assertLoanCreditLimit(
     }
 }
 
-async function recalculateLoanLinkedBusinessPartnerSummary(workspaceId: string, linkedPartyType?: LoanLinkedPartyType | null, linkedPartyId?: string | null) {
-    const partner = await resolveLinkedBusinessPartner(linkedPartyType, linkedPartyId)
+async function recalculateLoanLinkedBusinessPartnerSummary(
+    workspaceId: string,
+    linkedPartyType?: LoanLinkedPartyType | null,
+    linkedPartyId?: string | null,
+    dependencies?: LoanBusinessPartnerDependencies
+) {
+    const partner = await resolveLinkedBusinessPartner(linkedPartyType, linkedPartyId, dependencies)
     if (!partner) {
         return
     }
 
-    const { recalculateBusinessPartnerSummary } = await import('./businessPartners')
+    const recalculateBusinessPartnerSummary = dependencies?.recalculateBusinessPartnerSummary
+        ?? (await import('./businessPartners')).recalculateBusinessPartnerSummary
     await recalculateBusinessPartnerSummary(workspaceId, partner.id)
 }
 
@@ -5286,6 +5339,11 @@ interface LoanCreateInput {
     accountNameSnapshot?: string | null
 }
 
+export interface LoanBusinessPartnerDependencies {
+    getBusinessPartnerByAnyId: (id: string) => Promise<BusinessPartner | undefined>
+    recalculateBusinessPartnerSummary: (workspaceId: string, partnerId: string) => Promise<unknown>
+}
+
 export function isLoanDeletionAllowed(
     loan: Pick<Loan, 'source' | 'saleId' | 'orderId'>,
     hasLinkedActiveSource: boolean,
@@ -5318,7 +5376,11 @@ async function resolveLoanExchangeRateSnapshot(input: Pick<LoanCreateInput, 'sal
     return getEffectiveExchangeRatesSnapshot(null)
 }
 
-async function createLoanAggregate(workspaceId: string, input: LoanCreateInput): Promise<{ loan: Loan; installments: LoanInstallment[] }> {
+async function createLoanAggregate(
+    workspaceId: string,
+    input: LoanCreateInput,
+    dependencies?: LoanBusinessPartnerDependencies
+): Promise<{ loan: Loan; installments: LoanInstallment[] }> {
     const now = new Date().toISOString()
     const requestedCreatedAt = input.createdAt ? new Date(input.createdAt) : null
     if (requestedCreatedAt && Number.isNaN(requestedCreatedAt.getTime())) {
@@ -5353,7 +5415,7 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
 
     const exchangeRateSnapshot = await resolveLoanExchangeRateSnapshot(input)
 
-    const linkedBusinessPartner = await resolveLinkedBusinessPartner(linkedPartyType, linkedPartyId)
+    const linkedBusinessPartner = await resolveLinkedBusinessPartner(linkedPartyType, linkedPartyId, dependencies)
     if (linkedPartyType && linkedPartyId && !linkedBusinessPartner) {
         throw new Error('Business partner not found')
     }
@@ -5367,7 +5429,7 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
             settlementCurrency: input.settlementCurrency,
             direction,
             exchangeRateSnapshot
-        })
+        }, dependencies)
     }
 
     const plan = createInstallmentPlan(
@@ -5460,7 +5522,8 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
             await recalculateLoanLinkedBusinessPartnerSummary(
                 workspaceId,
                 aggregate.loan.linkedPartyType,
-                aggregate.loan.linkedPartyId
+                aggregate.loan.linkedPartyId,
+                dependencies
             )
             return { loan: aggregate.loan, installments: aggregate.installments }
         } catch (error) {
@@ -5524,7 +5587,8 @@ async function createLoanAggregate(workspaceId: string, input: LoanCreateInput):
     await recalculateLoanLinkedBusinessPartnerSummary(
         workspaceId,
         localLoan.linkedPartyType,
-        localLoan.linkedPartyId
+        localLoan.linkedPartyId,
+        dependencies
     )
     return { loan: localLoan, installments: localInstallments }
 }
@@ -5827,7 +5891,8 @@ export async function createManualLoan(
 
 export async function createLoanFromPosSale(
     workspaceId: string,
-    input: Omit<LoanCreateInput, 'source'>
+    input: Omit<LoanCreateInput, 'source'>,
+    dependencies?: LoanBusinessPartnerDependencies
 ): Promise<{ loan: Loan; installments: LoanInstallment[] }> {
     const installmentCount = Math.max(1, Math.trunc(Number(input.installmentCount) || 1))
     return createLoanAggregate(workspaceId, {
@@ -5835,7 +5900,7 @@ export async function createLoanFromPosSale(
         installmentCount,
         loanCategory: installmentCount > 1 ? 'standard' : 'simple',
         source: 'pos'
-    })
+    }, dependencies)
 }
 
 export async function markPosLoanCancelledForFullSaleReturn(input: {
@@ -6693,8 +6758,9 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
         integrityVersion: 1
     }
 
-    const appendLedger = async () => {
-        const { appendPaymentTransaction } = await import('./payments')
+    const appendLedger = (
+        appendPaymentTransaction: typeof import('./payments').appendPaymentTransaction
+    ) => {
         return appendPaymentTransaction(workspaceId, {
             id: payment.paymentTransactionId || undefined,
             idempotent: true,
@@ -6790,6 +6856,10 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
         lastSyncedAt: localSyncedAt
     }))
 
+    // Resolve the payment module before opening Dexie's transaction. Its
+    // dynamic-import promise must not be awaited from the transaction callback.
+    const { appendPaymentTransaction } = await import('./payments')
+
     await db.transaction(
         'rw',
         [
@@ -6804,7 +6874,7 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
             db.offline_mutations
         ],
         async () => {
-            await appendLedger()
+            await appendLedger(appendPaymentTransaction)
             await db.loans.put(localLoan)
             await db.loan_installments.bulkPut(localInstallments)
             await db.loan_payments.put(localPayment)

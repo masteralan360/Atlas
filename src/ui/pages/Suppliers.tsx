@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { Eye, Pencil, Plus, Search, Trash2, Truck } from 'lucide-react'
+import { Eye, Loader2, Pencil, Plus, Search, Trash2, Truck } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 
@@ -9,7 +9,7 @@ import {
     createBusinessPartner,
     deleteBusinessPartner,
     updateBusinessPartner,
-    useBusinessPartners,
+    useBusinessPartnerDirectoryPage,
     type BusinessPartner,
     type CurrencyCode
 } from '@/local-db'
@@ -32,6 +32,7 @@ import {
     TabsContent,
     TabsList,
     TabsTrigger,
+    AppPagination,
     useToast
 } from '@/ui/components'
 import { useWorkspacePermissions } from '@/permissions/WorkspacePermissionsContext'
@@ -48,26 +49,33 @@ export function Suppliers() {
     const canViewAll = hasPermission('businessPartners.access')
     const canViewCustomers = hasPermission('customers.access')
     const [scope, setScope] = useState<'all' | 'customers' | 'suppliers'>('suppliers')
-    const suppliers = useBusinessPartners(user?.workspaceId, { roles: ['supplier'] })
     const [search, setSearch] = useState('')
+    const [currentPage, setCurrentPage] = useState(1)
+    const [pageSize, setPageSize] = useState(20)
     const [dialogOpen, setDialogOpen] = useState(false)
     const [editingPartner, setEditingPartner] = useState<BusinessPartner | null>(null)
     const [deleteTarget, setDeleteTarget] = useState<BusinessPartner | null>(null)
     const [isSaving, setIsSaving] = useState(false)
 
+    const suppliers = useBusinessPartnerDirectoryPage(user?.workspaceId, {
+        roles: ['supplier'],
+        page: currentPage,
+        pageSize,
+        search,
+    })
+
     const availableCurrencies = useMemo(() => {
         return Array.from(new Set([features.default_currency, ...features.allowed_currencies])) as CurrencyCode[]
     }, [features.allowed_currencies, features.default_currency])
 
-    const filteredSuppliers = useMemo(() => {
-        const query = search.trim().toLowerCase()
-        if (!query) return suppliers
-        return suppliers.filter((supplier) =>
-            [supplier.partnerName, supplier.phone, supplier.city]
-                .filter((value): value is string => typeof value === 'string' && value.length > 0)
-                .some((value) => value.toLowerCase().includes(query))
-        )
-    }, [suppliers, search])
+    const filteredSuppliers = suppliers.items
+
+    useEffect(() => setCurrentPage(1), [search, pageSize])
+    useEffect(() => {
+        if (suppliers.isLoading) return
+        const pageCount = Math.max(1, Math.ceil(suppliers.totalCount / pageSize))
+        setCurrentPage((page) => Math.min(page, pageCount))
+    }, [suppliers.isLoading, suppliers.totalCount, pageSize])
 
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
     const canDelete = user?.role === 'admin'
@@ -90,6 +98,7 @@ export function Suppliers() {
 
             setDialogOpen(false)
             setEditingPartner(null)
+            suppliers.refresh()
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
@@ -107,6 +116,7 @@ export function Suppliers() {
             await deleteBusinessPartner(deleteTarget.id)
             toast({ title: t('suppliers.messages.deleteSuccess') || 'Supplier deleted successfully' })
             setDeleteTarget(null)
+            suppliers.refresh()
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
@@ -173,7 +183,7 @@ export function Suppliers() {
                         <CardTitle className="text-sm text-muted-foreground">{t('suppliers.title') || 'Suppliers'}</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-black">{suppliers.length}</div>
+                        <div className="text-3xl font-black">{suppliers.summary.partnerCount}</div>
                     </CardContent>
                 </Card>
                 <Card>
@@ -181,7 +191,7 @@ export function Suppliers() {
                         <CardTitle className="text-sm text-muted-foreground">{t('suppliers.details.transactions', { defaultValue: 'Transactions' })}</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-black">{suppliers.reduce((sum, supplier) => sum + supplier.totalPurchaseOrders, 0)}</div>
+                        <div className="text-3xl font-black">{suppliers.summary.totalPurchaseOrders}</div>
                     </CardContent>
                 </Card>
                 <Card>
@@ -189,14 +199,24 @@ export function Suppliers() {
                         <CardTitle className="text-sm text-muted-foreground">{t('common.total') || 'Total Spent'}</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-black">{suppliers.filter((supplier) => supplier.totalPurchaseValue > 0).length}</div>
+                        <div className="text-3xl font-black">{suppliers.summary.suppliersWithPurchases}</div>
                     </CardContent>
                 </Card>
             </div>
 
             <Card>
-                <CardHeader className="gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <CardTitle>{t('suppliers.title') || 'Suppliers'}</CardTitle>
+                <CardHeader className="flex-wrap gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex min-w-0 flex-wrap items-center gap-3">
+                        <CardTitle>{t('suppliers.title') || 'Suppliers'}</CardTitle>
+                        <AppPagination
+                            currentPage={currentPage}
+                            totalCount={suppliers.totalCount}
+                            pageSize={pageSize}
+                            onPageChange={setCurrentPage}
+                            onPageSizeChange={setPageSize}
+                            className="mx-0 w-auto justify-start"
+                        />
+                    </div>
                     <div className="relative w-full max-w-sm">
                         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
@@ -223,7 +243,13 @@ export function Suppliers() {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {filteredSuppliers.length === 0 ? (
+                                {suppliers.isLoading ? (
+                                    <TableRow>
+                                        <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
+                                            <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />{t('common.loading')}</span>
+                                        </TableCell>
+                                    </TableRow>
+                                ) : filteredSuppliers.length === 0 ? (
                                     <TableRow>
                                         <TableCell colSpan={8} className="py-12 text-center text-muted-foreground">
                                             {t('common.noData') || 'No data available'}

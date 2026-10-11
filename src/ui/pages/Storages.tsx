@@ -1,14 +1,14 @@
-import { useStorages, createStorage, updateStorage, deleteStorage, setMarketplaceStorage, getPrimaryStorageId, getPrimaryStorageFromList, isPrimaryStorage, useInventory, useProducts, useCategories, type Storage, type CurrencyCode } from '@/local-db'
+import { useStorages, createStorage, updateStorage, deleteStorage, setMarketplaceStorage, getPrimaryStorageId, getPrimaryStorageFromList, isPrimaryStorage, useInventory, useProducts, useCategories, DuplicateStorageNameError, type Storage, type CurrencyCode } from '@/local-db'
 import { replaceStorageMemberExclusions, useStorageMemberExclusionsState } from '@/local-db/storagePermissions'
 import { useWorkspaceUsers } from '@/local-db/hooks'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useLocation } from 'wouter'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { useAuth } from '@/auth'
 import { useWorkspace } from '@/workspace'
 import { Button } from '@/ui/components/button'
-import { Plus, Search, Edit, Trash2, Warehouse, ShieldCheck, Package, Filter, LayoutGrid, Info, Store, ArrowRight, KeyRound, UsersRound } from 'lucide-react'
+import { Plus, Search, Edit, Trash2, Warehouse, ShieldCheck, Package, Filter, LayoutGrid, Info, Store, ArrowRight, KeyRound, UsersRound, Loader2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/ui/components/card'
 import { Input } from '@/ui/components/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/components/table'
@@ -35,6 +35,8 @@ export default function Storages() {
     const [deletingStorage, setDeletingStorage] = useState<Storage | undefined>(undefined)
     const [storageWithStock, setStorageWithStock] = useState<Storage | undefined>(undefined)
     const [storageName, setStorageName] = useState('')
+    const [savingStorage, setSavingStorage] = useState(false)
+    const savingStorageRef = useRef(false)
     const [, navigate] = useLocation()
 
     const filteredStorages = storages.filter(s =>
@@ -268,20 +270,53 @@ const totalStorageValue = useMemo(() => {
     const getDisplayImageUrl = (url?: string) => getProductImageDisplayUrl(url)
 
     const handleCreate = async () => {
-        if (!activeWorkspace || !storageName.trim()) return
-        await createStorage(activeWorkspace.id, { name: storageName.trim() })
-        setStorageName('')
-        setIsDialogOpen(false)
-        toast({ title: t('storages.created', 'Storage created successfully') })
+        if (!activeWorkspace || !storageName.trim() || savingStorageRef.current) return
+        savingStorageRef.current = true
+        setSavingStorage(true)
+        try {
+            await createStorage(activeWorkspace.id, { name: storageName.trim() })
+            setStorageName('')
+            savingStorageRef.current = false
+            setIsDialogOpen(false)
+            toast({ title: t('storages.created', 'Storage created successfully') })
+        } catch (error) {
+            const duplicateName = error instanceof DuplicateStorageNameError
+            if (!duplicateName) console.error('[Storage] Failed to create:', error)
+            toast({
+                title: t('common.error', 'Error'),
+                description: duplicateName
+                    ? t('storages.errors.duplicateName', 'A storage with this name already exists in this workspace.')
+                    : t('storages.errors.createFailed', 'Could not create this storage. Try again.'),
+                variant: 'destructive'
+            })
+        } finally {
+            savingStorageRef.current = false
+            setSavingStorage(false)
+        }
     }
 
     const handleUpdate = async () => {
-        if (!editingStorage || !storageName.trim()) return
-        await updateStorage(editingStorage.id, { name: storageName.trim() })
-        setStorageName('')
-        setEditingStorage(undefined)
-        setIsDialogOpen(false)
-        toast({ title: t('storages.updated', 'Storage updated successfully') })
+        if (!editingStorage || !storageName.trim() || savingStorageRef.current) return
+        savingStorageRef.current = true
+        setSavingStorage(true)
+        try {
+            await updateStorage(editingStorage.id, { name: storageName.trim() })
+            setStorageName('')
+            setEditingStorage(undefined)
+            savingStorageRef.current = false
+            setIsDialogOpen(false)
+            toast({ title: t('storages.updated', 'Storage updated successfully') })
+        } catch (error) {
+            console.error('[Storage] Failed to update:', error)
+            toast({
+                title: t('common.error', 'Error'),
+                description: t('storages.errors.updateFailed', 'Could not update this storage. Try again.'),
+                variant: 'destructive'
+            })
+        } finally {
+            savingStorageRef.current = false
+            setSavingStorage(false)
+        }
     }
 
     const handleDelete = async () => {
@@ -810,35 +845,51 @@ const totalStorageValue = useMemo(() => {
             </Tabs>
 
             {/* Create/Edit Dialog */}
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-                <DialogContent className="rounded-2xl">
-                    <DialogHeader>
-                        <DialogTitle>
+            <AppDialog
+                open={isDialogOpen}
+                onOpenChange={(open) => {
+                    if (!open && savingStorageRef.current) return
+                    setIsDialogOpen(open)
+                }}
+            >
+                <AppDialogContent className="max-w-xl" showCloseButton={!savingStorage}>
+                    <AppDialogHeader>
+                        <AppDialogTitle>
                             {editingStorage ? t('storages.editStorage', 'Edit Storage') : t('storages.addStorage', 'New Storage')}
-                        </DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4 py-4">
+                        </AppDialogTitle>
+                    </AppDialogHeader>
+                    <AppDialogBody>
                         <div className="space-y-2">
-                            <Label htmlFor="storage-name">{t('storages.form.name', 'Storage Name')}</Label>
+                            <Label htmlFor="storage-name">{t('storages.form.name', 'Storage Name')} *</Label>
                             <Input
                                 id="storage-name"
+                                required
                                 value={storageName}
                                 onChange={(e) => setStorageName(e.target.value)}
                                 placeholder={t('storages.form.namePlaceholder', 'e.g. Warehouse A')}
                                 className="rounded-xl"
+                                disabled={savingStorage}
                             />
                         </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="rounded-xl">
+                    </AppDialogBody>
+                    <AppDialogFooter>
+                        <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="rounded-xl" disabled={savingStorage}>
                             {t('common.cancel', 'Cancel')}
                         </Button>
-                        <Button onClick={editingStorage ? handleUpdate : handleCreate} className="rounded-xl">
-                            {editingStorage ? t('common.save', 'Save') : t('common.create', 'Create')}
+                        <Button
+                            onClick={editingStorage ? handleUpdate : handleCreate}
+                            className="rounded-xl"
+                            disabled={savingStorage || !storageName.trim()}
+                            aria-busy={savingStorage}
+                        >
+                            {savingStorage ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                            {savingStorage
+                                ? t('common.saving', 'Saving...')
+                                : editingStorage ? t('common.save', 'Save') : t('common.create', 'Create')}
                         </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
 
             <Dialog open={!!storageWithStock} onOpenChange={() => setStorageWithStock(undefined)}>
                 <DialogContent

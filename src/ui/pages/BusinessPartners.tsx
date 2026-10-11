@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { Eye, MapPin, Pencil, Plus, Search, Trash2, UsersRound } from 'lucide-react'
+import { Eye, Loader2, MapPin, Pencil, Plus, Search, Trash2, UsersRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 
@@ -8,10 +8,9 @@ import { useAuth } from '@/auth'
 import {
     createBusinessPartner,
     deleteBusinessPartner,
+    loadAllBusinessPartnerDirectoryRows,
     updateBusinessPartner,
-    useAgents,
-    useBusinessPartners,
-    useWorkspaceUsers,
+    useBusinessPartnerDirectoryPage,
     type BusinessPartner,
     type BusinessPartnerRole,
     type CurrencyCode
@@ -26,6 +25,7 @@ import {
     CardContent,
     CardHeader,
     CardTitle,
+    AppPagination,
     Input,
     Map as AtlasMap,
     MapControls,
@@ -65,26 +65,6 @@ function roleLabel(role: BusinessPartnerRole, t: (key: string, options?: Record<
         default:
             return t('businessPartners.roles.both') || 'Both'
     }
-}
-
-function groupPartnerTotalsByCurrency(
-    partners: BusinessPartner[],
-    selectAmount: (partner: BusinessPartner) => number
-) {
-    const totals = new Map<CurrencyCode, number>()
-
-    for (const partner of partners) {
-        const amount = selectAmount(partner)
-        if (!amount) {
-            continue
-        }
-
-        totals.set(partner.defaultCurrency, (totals.get(partner.defaultCurrency) || 0) + amount)
-    }
-
-    return Array.from(totals.entries())
-        .map(([currency, amount]) => ({ currency, amount }))
-        .sort((left, right) => left.currency.localeCompare(right.currency))
 }
 
 type LocatedBusinessPartner = BusinessPartner & {
@@ -187,14 +167,20 @@ export function BusinessPartners() {
     const canViewCustomers = hasPermission('customers.access')
     const canViewSuppliers = hasPermission('suppliers.access')
     const [scope, setScope] = useState<'all' | 'customers' | 'suppliers' | 'groups'>('all')
-    const partners = useBusinessPartners(user?.workspaceId, {
-        includeRealEstateRoles: features.real_estate,
-        includeAgentRoles: features.agents
-    })
-    const agents = useAgents(user?.workspaceId)
-    const workspaceUsers = useWorkspaceUsers(user?.workspaceId)
     const [search, setSearch] = useState('')
+    const [currentPage, setCurrentPage] = useState(1)
+    const [pageSize, setPageSize] = useState(20)
+    const directoryPage = useBusinessPartnerDirectoryPage(user?.workspaceId, {
+        includeRealEstateRoles: features.real_estate,
+        includeAgentRoles: features.agents,
+        includeEcommerce: false,
+        page: currentPage,
+        pageSize,
+        search,
+    })
     const [activeTab, setActiveTab] = useState<'partners' | 'maps'>('partners')
+    const [mapPartners, setMapPartners] = useState<BusinessPartner[] | null>(null)
+    const [isLoadingMap, setIsLoadingMap] = useState(false)
     const [mapPartnerSearch, setMapPartnerSearch] = useState('')
     const [focusedMapPartnerId, setFocusedMapPartnerId] = useState<string | null>(null)
     const [dialogOpen, setDialogOpen] = useState(false)
@@ -206,6 +192,40 @@ export function BusinessPartners() {
     const canDelete = user?.role === 'admin'
     const canManageGroups = user?.role === 'admin' && hasCapability('businessPartnerGroupPrivacy')
     const showGroupManagementTab = canManageGroups && Boolean(user?.workspaceId)
+    const privacyViewer = useMemo(() => ({
+        userId: user?.id,
+        role: user?.role,
+        featureEnabled: hasCapability('businessPartnerGroupPrivacy'),
+    }), [hasCapability, user?.id, user?.role])
+
+    useEffect(() => setCurrentPage(1), [search, pageSize])
+    useEffect(() => {
+        if (directoryPage.isLoading) return
+        const pageCount = Math.max(1, Math.ceil(directoryPage.totalCount / pageSize))
+        setCurrentPage((page) => Math.min(page, pageCount))
+    }, [directoryPage.isLoading, directoryPage.totalCount, pageSize])
+
+    useEffect(() => {
+        if (activeTab !== 'maps' || !user?.workspaceId || mapPartners !== null) return
+        let disposed = false
+        setIsLoadingMap(true)
+        void loadAllBusinessPartnerDirectoryRows(user.workspaceId, {
+            includeRealEstateRoles: features.real_estate,
+            includeAgentRoles: features.agents,
+            includeEcommerce: true,
+        }, privacyViewer)
+            .then((rows) => {
+                if (!disposed) setMapPartners(rows)
+            })
+            .catch((error) => {
+                console.error('[BusinessPartners] Failed to load map markers:', error)
+                if (!disposed) setMapPartners([])
+            })
+            .finally(() => {
+                if (!disposed) setIsLoadingMap(false)
+            })
+        return () => { disposed = true }
+    }, [activeTab, features.agents, features.real_estate, mapPartners, privacyViewer, user?.workspaceId])
 
     useEffect(() => {
         if (!showGroupManagementTab && scope === 'groups') setScope('all')
@@ -215,50 +235,28 @@ export function BusinessPartners() {
         return Array.from(new Set([features.default_currency, ...features.allowed_currencies])) as CurrencyCode[]
     }, [features.allowed_currencies, features.default_currency])
 
-    const visiblePartners = useMemo(
-        () => partners.filter((partner) => !partner.isEcommerce),
-        [partners]
-    )
+    const partners = directoryPage.items
+    const visiblePartners = partners
     const agentMap = useMemo(
-        () => new Map(agents.map((agent) => [agent.id, agent])),
-        [agents]
+        () => new Map(directoryPage.agents.map((agent) => [agent.id, agent])),
+        [directoryPage.agents]
     )
     const workspaceUserMap = useMemo(
-        () => new Map(workspaceUsers.map((workspaceUser) => [workspaceUser.id, workspaceUser])),
-        [workspaceUsers]
+        () => new Map(directoryPage.workspaceUsers.map((workspaceUser) => [workspaceUser.id, workspaceUser])),
+        [directoryPage.workspaceUsers]
     )
-
-    const filteredPartners = useMemo(() => {
-        const query = search.trim().toLowerCase()
-        if (!query) {
-            return visiblePartners
-        }
-
-        return visiblePartners.filter((partner) => {
-            const agent = partner.agentFacetId ? agentMap.get(partner.agentFacetId) : undefined
-            return [partner.partnerName, partner.phone, partner.city, agent?.zone, agent?.agentType, agent?.status]
-                .filter((value): value is string => typeof value === 'string' && value.length > 0)
-                .some((value) => value.toLowerCase().includes(query))
-        })
-    }, [agentMap, visiblePartners, search])
-
-    const receivableTotals = useMemo(
-        () => groupPartnerTotalsByCurrency(visiblePartners, (partner) => partner.receivableBalance),
-        [visiblePartners]
-    )
-    const payableTotals = useMemo(
-        () => groupPartnerTotalsByCurrency(visiblePartners, (partner) => partner.payableBalance),
-        [visiblePartners]
-    )
+    const filteredPartners = visiblePartners
+    const receivableTotals = directoryPage.summary.receivableTotals.filter((item) => item.amount !== 0)
+    const payableTotals = directoryPage.summary.payableTotals.filter((item) => item.amount !== 0)
     const partnersWithLocations = useMemo(
-        () => partners.filter(hasValidPartnerLocation),
-        [partners]
+        () => (mapPartners ?? []).filter(hasValidPartnerLocation),
+        [mapPartners]
     )
     const partnerIdsWithoutLocations = useMemo(
-        () => partners
+        () => (mapPartners ?? [])
             .filter((partner) => !hasValidPartnerLocation(partner))
             .map((partner) => partner.id),
-        [partners]
+        [mapPartners]
     )
 
     const renderGroupedTotals = (totals: Array<{ currency: CurrencyCode; amount: number }>) => {
@@ -307,6 +305,8 @@ export function BusinessPartners() {
 
             setDialogOpen(false)
             setEditingPartner(null)
+            directoryPage.refresh()
+            setMapPartners(null)
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
@@ -327,6 +327,8 @@ export function BusinessPartners() {
             await deleteBusinessPartner(deleteTarget.id)
             toast({ title: t('businessPartners.messages.deleteSuccess') || 'Business partner deleted successfully' })
             setDeleteTarget(null)
+            directoryPage.refresh()
+            setMapPartners(null)
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
@@ -405,7 +407,7 @@ export function BusinessPartners() {
                         <CardTitle className="text-sm text-muted-foreground">{t('businessPartners.title') || 'Business Partners'}</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="text-3xl font-black">{visiblePartners.length}</div>
+                        <div className="text-3xl font-black">{directoryPage.summary.partnerCount}</div>
                     </CardContent>
                 </Card>
                 <Card>
@@ -451,8 +453,18 @@ export function BusinessPartners() {
 
                 <TabsContent value="partners" className="mt-0">
                     <Card>
-                        <CardHeader>
-                            <CardTitle>{t('businessPartners.title') || 'Business Partners'}</CardTitle>
+                        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
+                            <div className="flex min-w-0 flex-wrap items-center gap-3">
+                                <CardTitle>{t('businessPartners.title') || 'Business Partners'}</CardTitle>
+                                <AppPagination
+                                    currentPage={currentPage}
+                                    totalCount={directoryPage.totalCount}
+                                    pageSize={pageSize}
+                                    onPageChange={setCurrentPage}
+                                    onPageSizeChange={setPageSize}
+                                    className="mx-0 w-auto justify-start"
+                                />
+                            </div>
                         </CardHeader>
                         <CardContent>
                             <div className="overflow-x-auto">
@@ -472,7 +484,13 @@ export function BusinessPartners() {
                                         </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                        {filteredPartners.length === 0 ? (
+                                        {directoryPage.isLoading ? (
+                                            <TableRow>
+                                                <TableCell colSpan={10} className="py-12 text-center text-muted-foreground">
+                                                    <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />{t('common.loading')}</span>
+                                                </TableCell>
+                                            </TableRow>
+                                        ) : filteredPartners.length === 0 ? (
                                             <TableRow>
                                                 <TableCell colSpan={10} className="py-12 text-center text-muted-foreground">
                                                     {t('common.noData') || 'No data available'}
@@ -579,7 +597,7 @@ export function BusinessPartners() {
                                 <CardTitle className="flex items-center gap-2">
                                     <MapPin className="h-5 w-5 text-primary" />
                                     {t('businessPartners.maps', { defaultValue: 'Maps' })}
-                                    <AutocompleteLoadingIndicator isLoading={partners.isLoading} />
+                                    <AutocompleteLoadingIndicator isLoading={isLoadingMap} />
                                 </CardTitle>
                                 <p className="text-sm text-muted-foreground">
                                     {t('businessPartners.mapsDescription', { defaultValue: 'All business partner locations in this workspace.' })}
@@ -601,9 +619,10 @@ export function BusinessPartners() {
                                     workspaceId={user?.workspaceId || ''}
                                     includeRealEstateRoles={features.real_estate}
                                     includeAgentRoles={features.agents}
+                                    partnerOptions={mapPartners ?? []}
                                     excludePartnerIds={partnerIdsWithoutLocations}
                                     disabled={!user?.workspaceId}
-                                    isLoading={partners.isLoading}
+                                    isLoading={isLoadingMap}
                                     placeholder={t('businessPartners.searchMapPlaceholder', { defaultValue: 'Search a partner on the map...' })}
                                 />
                                 <div className="shrink-0 rounded-full bg-primary/10 px-3 py-1 text-sm font-semibold text-primary">
