@@ -544,7 +544,7 @@ html[lang] pre {
 
 /* Page Transitions */
 .page-enter {
-  animation: pageFadeIn 0.5s ease-out forwards;
+  animation: pageFadeIn 0.5s ease-out;
 }
 
 /* The top edge of each regular module surface subtly casts back into the
@@ -656,12 +656,10 @@ html[lang] pre {
 @keyframes pageFadeIn {
   from {
     opacity: 0;
-    transform: translateY(10px);
   }
 
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
