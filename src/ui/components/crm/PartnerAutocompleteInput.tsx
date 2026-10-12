@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { UserRound, Users } from 'lucide-react'
+import { Loader2, UserRound, Users } from 'lucide-react'
 
-import { useBusinessPartners, type BusinessPartner, type BusinessPartnerRole } from '@/local-db'
+import { cacheBusinessPartnerAutocompleteSelection, searchBusinessPartnerAutocompleteSuggestions } from '@/local-db/businessPartners'
+import type { BusinessPartner, BusinessPartnerRole } from '@/local-db/models'
+import { useAuth } from '@/auth/AuthContext'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { Input } from '@/ui/components'
 import { cn } from '@/lib/utils'
 import { AutocompletePopover } from '@/ui/components/AutocompletePopover'
+import { useDebouncedAutocompleteSearch } from '@/ui/components/useDebouncedAutocompleteSearch'
 
 export interface PartnerAutocompleteAdditionalOption {
     id: string
@@ -31,8 +35,7 @@ interface PartnerAutocompleteInputProps {
     roles?: BusinessPartnerRole[]
     additionalOptions?: PartnerAutocompleteAdditionalOption[]
     onSelectAdditionalOption?: (option: PartnerAutocompleteAdditionalOption) => void
-    isLoading?: boolean
-    /** Use a caller's already-paged candidates without hydrating the full directory. */
+    /** Restrict suggestions to this caller's eligible records, while searching the data source. */
     partnerOptions?: BusinessPartner[]
 }
 
@@ -52,54 +55,93 @@ export function PartnerAutocompleteInput({
     roles,
     additionalOptions = [],
     onSelectAdditionalOption,
-    isLoading: isLoadingOverride,
     partnerOptions
 }: PartnerAutocompleteInputProps) {
     const { t } = useTranslation()
-    const storedPartners = useBusinessPartners(partnerOptions ? undefined : workspaceId, { includeRealEstateRoles, includeAgentRoles, roles })
-    const partners = partnerOptions ?? storedPartners
+    const { user } = useAuth()
+    const { hasCapability } = useWorkspace()
     const [isFocused, setIsFocused] = useState(false)
     const [justSelected, setJustSelected] = useState(false)
-    const [showInitialSuggestions, setShowInitialSuggestions] = useState(false)
     const inputRef = useRef<HTMLInputElement>(null)
-    const pendingOpenRef = useRef(false)
-    const hadFocusRef = useRef(false)
-    const wasLoadingRef = useRef(isLoadingOverride ?? storedPartners.isLoading)
-    const isLoading = isLoadingOverride ?? storedPartners.isLoading
-    const isDisabled = Boolean(disabled || isLoading)
-
-    const query = value.trim().toLowerCase()
+    const query = value.trim()
+    const normalizedQuery = query.toLocaleLowerCase()
+    const rolesKey = roles?.join('|') ?? ''
+    const normalizedRoles = useMemo(
+        () => rolesKey ? rolesKey.split('|') as BusinessPartnerRole[] : undefined,
+        [rolesKey]
+    )
     const excludedPartnerIds = useMemo(() => new Set(excludePartnerIds.filter(Boolean)), [excludePartnerIds])
+    const partnerOptionIds = useMemo(
+        () => partnerOptions ? new Set(partnerOptions.map((partner) => partner.id)) : null,
+        [partnerOptions]
+    )
     const eligibleAgentPartnerIdSet = useMemo(
         () => eligibleAgentPartnerIds === undefined ? null : new Set(eligibleAgentPartnerIds.filter(Boolean)),
         [eligibleAgentPartnerIds]
     )
+    const allowedPartnerIds = useMemo(
+        () => partnerOptionIds ? [...partnerOptionIds] : undefined,
+        [partnerOptionIds]
+    )
+    const searchConstraints = useMemo(() => ({
+        allowedPartnerIds,
+        excludedPartnerIds: [...excludedPartnerIds],
+        eligibleAgentPartnerIds: eligibleAgentPartnerIdSet ? [...eligibleAgentPartnerIdSet] : undefined,
+    }), [allowedPartnerIds, eligibleAgentPartnerIdSet, excludedPartnerIds])
+    const viewer = useMemo(() => ({
+        userId: user?.id,
+        role: user?.role,
+        featureEnabled: hasCapability('businessPartnerGroupPrivacy'),
+    }), [hasCapability, user?.id, user?.role])
+    const searchOptions = useMemo(() => ({
+        roles: normalizedRoles,
+        includeRealEstateRoles,
+        includeAgentRoles,
+        includeEcommerce: true,
+    }), [includeAgentRoles, includeRealEstateRoles, normalizedRoles])
+    const searchPartners = useCallback((search: string) => (
+        searchBusinessPartnerAutocompleteSuggestions(workspaceId, search, searchOptions, viewer, searchConstraints)
+    ), [searchConstraints, searchOptions, viewer, workspaceId])
+    const remoteSearch = useDebouncedAutocompleteSearch(
+        query,
+        isFocused && !justSelected && Boolean(workspaceId),
+        searchPartners,
+        250,
+        3,
+    )
+    const partners = remoteSearch.items
+    const isSearchLoading = remoteSearch.isLoading
+    const searchError = remoteSearch.error
 
     const filtered = useMemo(() => {
         const eligiblePartners = partners
+            .filter((p) => !partnerOptionIds || partnerOptionIds.has(p.id))
             .filter((p) => !excludedPartnerIds.has(p.id))
             .filter((p) => p.role !== 'agent' || !eligibleAgentPartnerIdSet || eligibleAgentPartnerIdSet.has(p.id))
-        if (!query || query.length < 1) {
-            return showInitialSuggestions ? eligiblePartners.slice(0, 8) : []
-        }
+        if (normalizedQuery.length < 3) return []
         return eligiblePartners
-            .filter((p) => p.partnerName.toLowerCase().includes(query))
             .slice(0, 8)
-    }, [eligibleAgentPartnerIdSet, excludedPartnerIds, partners, query, showInitialSuggestions])
+    }, [eligibleAgentPartnerIdSet, excludedPartnerIds, normalizedQuery, partnerOptionIds, partners])
 
     const filteredAdditionalOptions = useMemo(() => {
-        if (!query || query.length < 1) {
-            return showInitialSuggestions ? additionalOptions.slice(0, 8) : []
-        }
+        if (normalizedQuery.length < 1) return []
         return additionalOptions
-            .filter((option) => `${option.label} ${option.description || ''}`.toLowerCase().includes(query))
+            .filter((option) => `${option.label} ${option.description || ''}`.toLocaleLowerCase().includes(normalizedQuery))
             .slice(0, 8)
-    }, [additionalOptions, query, showInitialSuggestions])
+    }, [additionalOptions, normalizedQuery])
 
-    const showDropdown = isFocused && !justSelected && (filtered.length > 0 || filteredAdditionalOptions.length > 0)
+    const showDropdown = isFocused && !justSelected && (
+        isSearchLoading
+        || Boolean(searchError)
+        || filtered.length > 0
+        || filteredAdditionalOptions.length > 0
+        || (Boolean(workspaceId) && normalizedQuery.length >= 3)
+    )
 
     const handleSelect = useCallback((partner: BusinessPartner) => {
-        hadFocusRef.current = false
+        void cacheBusinessPartnerAutocompleteSelection(partner).catch((error) => {
+            console.error('[BusinessPartners] Failed to cache selected autocomplete result:', error)
+        })
         setJustSelected(true)
         setIsFocused(false)
         onChange(partner.partnerName)
@@ -107,7 +149,6 @@ export function PartnerAutocompleteInput({
     }, [onChange, onSelectPartner])
 
     const handleSelectAdditionalOption = useCallback((option: PartnerAutocompleteAdditionalOption) => {
-        hadFocusRef.current = false
         setJustSelected(true)
         setIsFocused(false)
         onChange(option.label)
@@ -121,29 +162,10 @@ export function PartnerAutocompleteInput({
         }
     }, [justSelected])
 
-    useEffect(() => {
-        if (isLoading && !wasLoadingRef.current && hadFocusRef.current) {
-            pendingOpenRef.current = true
-            setIsFocused(false)
-        }
-
-        if (!isLoading && wasLoadingRef.current && pendingOpenRef.current) {
-            pendingOpenRef.current = false
-            if (!disabled) {
-                setShowInitialSuggestions(true)
-                setIsFocused(true)
-                inputRef.current?.focus()
-            }
-        }
-
-        wasLoadingRef.current = isLoading
-    }, [disabled, isLoading])
-
     return (
         <AutocompletePopover
             open={showDropdown}
             onOpenChange={(open) => {
-                if (!open && !isLoading) hadFocusRef.current = false
                 setIsFocused(open)
             }}
             anchor={(
@@ -153,19 +175,14 @@ export function PartnerAutocompleteInput({
                         value={value}
                         onChange={(e) => {
                             setJustSelected(false)
-                            setShowInitialSuggestions(false)
                             onChange(e.target.value)
                         }}
                         onFocus={() => {
-                            hadFocusRef.current = true
                             setIsFocused(true)
                         }}
-                        onBlur={() => {
-                            if (!isLoading) hadFocusRef.current = false
-                        }}
                         placeholder={placeholder}
-                        disabled={isDisabled}
-                        aria-busy={isLoading || undefined}
+                        disabled={Boolean(disabled)}
+                        aria-busy={isSearchLoading || undefined}
                         required={required}
                         className="flex-1"
                     />
@@ -173,6 +190,16 @@ export function PartnerAutocompleteInput({
             )}
         >
             <div className="rounded-xl border bg-popover shadow-lg">
+                    {isSearchLoading ? (
+                        <div role="status" className="flex items-center justify-center gap-2 px-3 py-4 text-sm text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            {t('common.autocomplete.searching')}
+                        </div>
+                    ) : searchError ? (
+                        <div role="status" className="px-3 py-4 text-center text-sm text-muted-foreground">
+                            {t('common.autocomplete.searchFailed')}
+                        </div>
+                    ) : null}
                     {filtered.map((partner) => (
                         <button
                             key={`partner:${partner.id}`}
@@ -231,6 +258,11 @@ export function PartnerAutocompleteInput({
                             ) : null}
                         </button>
                     ))}
+                    {!isSearchLoading && !searchError && filtered.length === 0 && filteredAdditionalOptions.length === 0 && normalizedQuery.length >= 2 ? (
+                        <div role="status" className="px-3 py-4 text-center text-sm text-muted-foreground">
+                            {t('common.autocomplete.noResults')}
+                        </div>
+                    ) : null}
                 </div>
         </AutocompletePopover>
     )

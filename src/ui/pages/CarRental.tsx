@@ -1671,7 +1671,7 @@ function RequestDialog({
                   required
                 />
               </Field>
-              <Field label={t("carRental.fields.preferredVehicle")} isLoading={vehicles.isLoading}>
+              <Field label={t("carRental.fields.preferredVehicle")}>
                 <VehicleAutocompleteInput
                   workspaceId={workspaceId}
                   value={form.preferredVehicleSearch}
@@ -1693,7 +1693,6 @@ function RequestDialog({
                   }
                   placeholder={t("carRental.placeholders.searchVehicle")}
                   disabled={isSaving}
-                  isLoading={vehicles.isLoading}
                 />
               </Field>
               <Field label={t("carRental.fields.pickup")}>
@@ -1864,7 +1863,7 @@ function ContractDialog({
         >
           <AppDialogBody className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={t("carRental.fields.vehicle")} isLoading={vehicles.isLoading}>
+              <Field label={t("carRental.fields.vehicle")}>
                 <VehicleAutocompleteInput
                   workspaceId={workspaceId}
                   value={form.vehicleSearch}
@@ -1880,7 +1879,6 @@ function ContractDialog({
                   placeholder={t("carRental.placeholders.searchVehicle")}
                   statuses={["available"]}
                   disabled={isSaving}
-                  isLoading={vehicles.isLoading}
                   required
                 />
               </Field>
@@ -2540,15 +2538,13 @@ function CancelRentalContractDialog({
 function Field({
   label,
   children,
-  isLoading = false,
 }: {
   label: string;
   children: React.ReactNode;
-  isLoading?: boolean;
 }) {
   return (
     <div className="grid gap-2">
-      <Label isLoading={isLoading}>{label}</Label>
+      <Label>{label}</Label>
       {children}
     </div>
   );
@@ -2578,7 +2574,7 @@ function LinkedPartnerField({
   const { t } = useTranslation();
   const linkedPartner = partners.find((partner) => partner.id === partnerId);
   return (
-    <Field label={label} isLoading={partners.isLoading}>
+    <Field label={label} >
       <div className="space-y-2">
         <PartnerAutocompleteInput
           workspaceId={workspaceId}
@@ -2588,7 +2584,6 @@ function LinkedPartnerField({
           placeholder={t("carRental.placeholders.searchCustomer")}
           roles={["customer"]}
           disabled={disabled}
-          isLoading={partners.isLoading}
           required
         />
         {partnerId ? (

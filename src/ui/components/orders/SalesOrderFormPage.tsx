@@ -1789,7 +1789,7 @@ export function SalesOrderFormPage({
                                         </div>
                                     ) : null}
                                     <div className="grid gap-2">
-                                        <Label isLoading={customerPartners.isLoading}>
+                                        <Label>
                                             {selectedSalesAccount
                                                 ? t('agentSalesAccounts.sellingAgent')
                                                 : t('orders.form.customer', { defaultValue: 'Customer' })}{' '}
@@ -1808,7 +1808,7 @@ export function SalesOrderFormPage({
                                                     }}
                                                     workspaceId={workspaceId}
                                                     roles={['customer']}
-                                                    isLoading={customerPartners.isLoading}
+
                                                     placeholder={t('orders.form.selectCustomer', { defaultValue: 'Select Customer' })}
                                                 />
                                                 <QuickCustomerButton
@@ -2028,7 +2028,7 @@ export function SalesOrderFormPage({
                                                     )}
                                                     data-demo-product-linked={item.productId ? 'true' : 'false'}
                                                 >
-                                                    <Label className="flex min-w-0 items-center gap-2" isLoading={products.isLoading}>
+                                                    <Label className="flex min-w-0 items-center gap-2" >
                                                         <span className="truncate">{t('orders.form.selectProduct', { defaultValue: 'Select Product' })}</span>
                                                         {item.productId ? (
                                                             selectedBatch ? (
@@ -2067,8 +2067,7 @@ export function SalesOrderFormPage({
                                                             value={item.productSearch}
                                                             onChange={(value) => updateItem(index, { productSearch: value, productId: '' })}
                                                             onSelectProduct={(product) => selectProductForItem(index, product)}
-                                                            products={getSalesProductOptions(item.storageId, item.productId)}
-                                                            isLoading={products.isLoading}
+
                                                             disabled={priceBooksEnabled && (!isPriceBookCatalogReady || !selectedCustomer)}
                                                             placeholder={priceBooksEnabled && !selectedCustomer
                                                                 ? t('priceBooks.selectPartnerFirst', { defaultValue: 'Select a business partner first' })

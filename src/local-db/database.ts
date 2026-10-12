@@ -3757,6 +3757,15 @@ export class AtlasDatabase extends Dexie {
         'id, partnerName, workspaceId, role, customerFacetId, supplierFacetId, agentFacetId, priceBookId, defaultCurrency, updatedAt, isDeleted, syncStatus, mergedIntoBusinessPartnerId, latitude, longitude, [workspaceId+partnerName+id]'
     })
 
+    this.version(152).stores({
+      products:
+        'id, sku, skuKey, name, categoryId, storageId, workspaceId, parentProductId, currency, syncStatus, updatedAt, isDeleted, canBeReturned, [workspaceId+name], [workspaceId+name+id], [workspaceId+sku], [workspaceId+sku+id], [workspaceId+skuKey], [workspaceId+parentProductId], [workspaceId+categoryId], [workspaceId+currency], [workspaceId+updatedAt], [workspaceId+storageId]',
+      business_partners:
+        'id, partnerName, workspaceId, phone, city, role, customerFacetId, supplierFacetId, agentFacetId, priceBookId, defaultCurrency, updatedAt, isDeleted, syncStatus, mergedIntoBusinessPartnerId, latitude, longitude, [workspaceId+partnerName+id], [workspaceId+phone], [workspaceId+city]',
+      rental_vehicles:
+        'id, workspaceId, plateNumber, make, model, category, status, currency, updatedAt, isDeleted, syncStatus, [workspaceId+plateNumber], [workspaceId+plateNumber+id], [workspaceId+make], [workspaceId+model], [workspaceId+category], [workspaceId+status]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

@@ -382,7 +382,7 @@ export function CreateRealEstateTransactionPage({
 
                                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                         <div className="grid gap-2">
-                                            <Label isLoading={arePartnersLoading}>{partyLabels.buyer.label} <span className="text-destructive">*</span></Label>
+                                            <Label>{partyLabels.buyer.label} <span className="text-destructive">*</span></Label>
                                             <div className="flex flex-col gap-2">
                                                 <div className="flex gap-2">
                                                     <PartnerAutocompleteInput
@@ -398,7 +398,7 @@ export function CreateRealEstateTransactionPage({
                                                         placeholder={partyLabels.buyer.placeholder}
                                                         className="flex-1"
                                                         includeRealEstateRoles={features.real_estate}
-                                                        isLoading={arePartnersLoading}
+
                                                         excludePartnerIds={sellerLink?.id ? [sellerLink.id] : []}
                                                     />
                                                     <AddPartnerButton onClick={() => setIsCreateBuyerOpen(true)} label={partyLabels.buyer.addButtonLabel} />
@@ -409,7 +409,7 @@ export function CreateRealEstateTransactionPage({
                                             </div>
                                         </div>
                                         <div className="grid gap-2">
-                                            <Label isLoading={arePartnersLoading}>{partyLabels.seller.label} <span className="text-destructive">*</span></Label>
+                                            <Label>{partyLabels.seller.label} <span className="text-destructive">*</span></Label>
                                             <div className="flex flex-col gap-2">
                                                 <div className="flex gap-2">
                                                     <PartnerAutocompleteInput
@@ -425,7 +425,7 @@ export function CreateRealEstateTransactionPage({
                                                         placeholder={partyLabels.seller.placeholder}
                                                         className="flex-1"
                                                         includeRealEstateRoles={features.real_estate}
-                                                        isLoading={arePartnersLoading}
+
                                                         excludePartnerIds={buyerLink?.id ? [buyerLink.id] : []}
                                                     />
                                                     <AddPartnerButton onClick={() => setIsCreateSellerOpen(true)} label={partyLabels.seller.addButtonLabel} />

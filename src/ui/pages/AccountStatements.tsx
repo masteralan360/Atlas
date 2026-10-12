@@ -85,7 +85,6 @@ import {
     TableRow
 } from '@/ui/components'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
-import { AutocompleteLoadingIndicator } from '@/ui/components/AutocompleteLoadingIndicator'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { PartnerAccountStatementTemplateDialog } from '@/ui/components/crm/PartnerAccountStatementTemplateDialog'
 import type { PartnerAccountStatementPrintData } from '@/ui/components/crm/PartnerAccountStatementPrintTemplate'
@@ -927,7 +926,6 @@ export function AccountStatements() {
                     <div className="space-y-2">
                         <label className="inline-flex items-center gap-1.5 text-sm font-semibold">
                             {t('businessPartners.title', { defaultValue: 'Business Partner' })}
-                            <AutocompleteLoadingIndicator isLoading={arePartnersLoading} />
                         </label>
                         <PartnerAutocompleteInput
                             value={partnerQuery}
@@ -935,7 +933,7 @@ export function AccountStatements() {
                             onSelectPartner={selectPartner}
                             workspaceId={workspaceId}
                             includeAgentRoles={hasFeature('agent_sales_accounts')}
-                            isLoading={arePartnersLoading}
+
                             placeholder={t('businessPartners.accountStatement.searchPartner', { defaultValue: 'Search for a business partner' })}
                         />
                     </div>

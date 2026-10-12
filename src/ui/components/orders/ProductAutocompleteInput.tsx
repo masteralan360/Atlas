@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, Check, GitBranch, Package } from 'lucide-react'
+import { AlertTriangle, Check, GitBranch, Loader2, Package } from 'lucide-react'
 
-import { useProductSelectionAccess, type Product } from '@/local-db'
+import { useProductSelectionAccess } from '@/local-db/businessPartners'
+import { searchProductAutocompleteSuggestions, type ProductAutocompleteSuggestion } from '@/local-db/productCatalog'
+import type { Product } from '@/local-db/models'
 import { useOptionalAuth } from '@/auth'
 import { Input, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/components'
 import { cn } from '@/lib/utils'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { AutocompletePopover } from '@/ui/components/AutocompletePopover'
+import { useDebouncedAutocompleteSearch } from '@/ui/components/useDebouncedAutocompleteSearch'
 
 interface ProductAutocompleteInputProps {
     value: string
     onChange: (value: string) => void
     onSelectProduct: (product: Product) => void
-    products: Product[]
     placeholder?: string
     className?: string
     inputClassName?: string
@@ -27,7 +29,6 @@ interface ProductAutocompleteInputProps {
     onStorageMissingClick?: () => void
     storageMissingLabel?: string
     scannerTargetIndex?: number
-    isLoading?: boolean
 }
 
 const getDisplayImageUrl = getProductImageDisplayUrl
@@ -61,7 +62,6 @@ export function ProductAutocompleteInput({
     value,
     onChange,
     onSelectProduct,
-    products,
     placeholder,
     className,
     inputClassName,
@@ -74,79 +74,68 @@ export function ProductAutocompleteInput({
     storageMissing,
     onStorageMissingClick,
     storageMissingLabel = 'Select Storage',
-    scannerTargetIndex,
-    isLoading: isLoadingOverride
+    scannerTargetIndex
 }: ProductAutocompleteInputProps) {
     const { i18n, t } = useTranslation()
     const user = useOptionalAuth()?.user
-    const { canSelectProduct, filterProducts } = useProductSelectionAccess(user?.workspaceId, user?.id)
     const [isFocused, setIsFocused] = useState(false)
     const [justSelected, setJustSelected] = useState(false)
-    const [showInitialSuggestions, setShowInitialSuggestions] = useState(false)
+    const [candidateProductIds, setCandidateProductIds] = useState<string[]>([])
     const inputRef = useRef<HTMLInputElement>(null)
-    const pendingOpenRef = useRef(false)
-    const hadFocusRef = useRef(false)
-    const isLoading = isLoadingOverride ?? ('isLoading' in products && Boolean(products.isLoading))
-    const wasLoadingRef = useRef(isLoading)
-    const isDisabled = Boolean(disabled || isLoading)
-
-    const query = value.trim().toLowerCase()
+    const query = value.trim()
+    const normalizedQuery = query.toLocaleLowerCase()
+    const selectionAccess = useProductSelectionAccess(user?.workspaceId, user?.id, { candidateProductIds })
+    const excludedStorageIdsKey = [...selectionAccess.storageAccess.excludedStorageIds].sort().join('|')
+    const excludedStorageIds = useMemo(
+        () => excludedStorageIdsKey ? excludedStorageIdsKey.split('|') : [],
+        [excludedStorageIdsKey]
+    )
+    const searchProducts = useCallback(async (search: string) => {
+        const matches = await searchProductAutocompleteSuggestions(
+            user?.workspaceId || '',
+            search,
+            selectionAccess.excludedCategoryIds,
+            excludedStorageIds,
+        )
+        setCandidateProductIds(matches.map((product) => product.id))
+        return matches
+    }, [excludedStorageIds, selectionAccess.excludedCategoryIds, user?.workspaceId])
+    const remoteSearch = useDebouncedAutocompleteSearch(
+        query,
+        isFocused && !justSelected && Boolean(user?.workspaceId) && selectionAccess.storageAccess.isReady !== false,
+        searchProducts,
+    )
+    const isSearchLoading = remoteSearch.isLoading
+        || (isFocused && normalizedQuery.length >= 2 && selectionAccess.storageAccess.isReady === false)
+        || (remoteSearch.items.length > 0 && selectionAccess.inventoryLoading)
     const selectableProducts = useMemo(
-        () => filterProducts(products),
-        [filterProducts, products]
+        () => selectionAccess.filterProducts(remoteSearch.items),
+        [remoteSearch.items, selectionAccess]
     )
+    const filtered = useMemo(() => selectableProducts.slice(0, 8), [selectableProducts])
     const productById = useMemo(
-        () => new Map(products.map((product) => [product.id, product] as const)),
-        [products]
+        () => new Map<string, ProductAutocompleteSuggestion>(selectableProducts.map((product) => [product.id, product])),
+        [selectableProducts]
     )
 
-    const filtered = useMemo(() => {
-        const families = new Map<string, Product[]>()
-        for (const product of selectableProducts) {
-            const familyId = product.parentProductId || product.id
-            const members = families.get(familyId) ?? []
-            members.push(product)
-            families.set(familyId, members)
-        }
-
-        const orderedProducts = Array.from(families.entries())
-            .filter(([, members]) => !query || members.some((product) => (
-                product.name.toLowerCase().includes(query)
-                || (product.sku && product.sku.toLowerCase().includes(query))
-            )))
-            .flatMap(([familyId, members]) => {
-                const primaryIndex = members.findIndex((product) => product.id === familyId)
-                if (primaryIndex <= 0) {
-                    return members
-                }
-
-                return [
-                    members[primaryIndex],
-                    ...members.slice(0, primaryIndex),
-                    ...members.slice(primaryIndex + 1)
-                ]
-            })
-
-        if (!query || query.length < 1) {
-            return showInitialSuggestions ? orderedProducts.slice(0, 8) : []
-        }
-
-        return orderedProducts
-    }, [query, selectableProducts, showInitialSuggestions])
-
-    const showDropdown = isFocused && !justSelected && filtered.length > 0
+    const showDropdown = isFocused && !justSelected && Boolean(user?.workspaceId) && (
+        isSearchLoading
+        || Boolean(remoteSearch.error)
+        || filtered.length > 0
+        || normalizedQuery.length >= 2
+    )
     const shouldShowLinkedIndicator = Boolean(hasSelection && !storageMissing && showLinkedIndicator)
 
     const handleSelect = useCallback((product: Product) => {
-        if (!canSelectProduct(product)) {
+        if (!selectionAccess.canSelectProduct(product)) {
             return
         }
-        hadFocusRef.current = false
+        setCandidateProductIds([])
         setJustSelected(true)
         setIsFocused(false)
         onChange(product.name)
         onSelectProduct(product)
-    }, [canSelectProduct, onChange, onSelectProduct])
+    }, [onChange, onSelectProduct, selectionAccess])
 
     useEffect(() => {
         if (justSelected) {
@@ -155,30 +144,11 @@ export function ProductAutocompleteInput({
         }
     }, [justSelected])
 
-    useEffect(() => {
-        if (isLoading && !wasLoadingRef.current && hadFocusRef.current) {
-            pendingOpenRef.current = true
-            setIsFocused(false)
-        }
-
-        if (!isLoading && wasLoadingRef.current && pendingOpenRef.current) {
-            pendingOpenRef.current = false
-            if (!disabled) {
-                setShowInitialSuggestions(true)
-                setIsFocused(true)
-                inputRef.current?.focus()
-            }
-        }
-
-        wasLoadingRef.current = isLoading
-    }, [disabled, isLoading])
-
     const handleFocus = () => {
         if (storageMissing) {
             onStorageMissingClick?.()
             return
         }
-        hadFocusRef.current = true
         setIsFocused(true)
     }
 
@@ -187,8 +157,8 @@ export function ProductAutocompleteInput({
             onStorageMissingClick?.()
             return
         }
+        setCandidateProductIds([])
         setJustSelected(false)
-        setShowInitialSuggestions(false)
         setIsFocused(true)
         onChange(e.target.value)
     }
@@ -213,7 +183,6 @@ export function ProductAutocompleteInput({
         <AutocompletePopover
             open={showDropdown}
             onOpenChange={(open) => {
-                if (!open && !isLoading) hadFocusRef.current = false
                 setIsFocused(open)
             }}
             className="w-[max(var(--radix-popover-trigger-width),18rem)]"
@@ -227,11 +196,8 @@ export function ProductAutocompleteInput({
                         data-order-product-input={scannerTargetIndex === undefined ? undefined : 'true'}
                         data-order-product-index={scannerTargetIndex}
                         placeholder={placeholder}
-                        disabled={isDisabled}
-                        aria-busy={isLoading || undefined}
-                        onBlur={() => {
-                            if (!isLoading) hadFocusRef.current = false
-                        }}
+                        disabled={Boolean(disabled || storageMissing)}
+                        aria-busy={isSearchLoading || undefined}
                         className={cn(
                             'flex-1',
                             inputClassName,
@@ -264,6 +230,16 @@ export function ProductAutocompleteInput({
             )}
         >
             <div className="rounded-xl border bg-popover shadow-lg">
+                    {isSearchLoading ? (
+                        <div role="status" className="flex items-center justify-center gap-2 px-3 py-4 text-sm text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            {t('common.autocomplete.searching')}
+                        </div>
+                    ) : remoteSearch.error ? (
+                        <div role="status" className="px-3 py-4 text-center text-sm text-muted-foreground">
+                            {t('common.autocomplete.searchFailed')}
+                        </div>
+                    ) : null}
                     {filtered.map((product) => (
                         <button
                             key={product.id}
@@ -286,6 +262,11 @@ export function ProductAutocompleteInput({
                             </div>
                         </button>
                     ))}
+                    {!isSearchLoading && !remoteSearch.error && filtered.length === 0 && normalizedQuery.length >= 2 ? (
+                        <div role="status" className="px-3 py-4 text-center text-sm text-muted-foreground">
+                            {t('common.autocomplete.noResults')}
+                        </div>
+                    ) : null}
                 </div>
         </AutocompletePopover>
     )

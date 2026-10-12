@@ -1540,7 +1540,7 @@ export function InventoryTransactionsPage() {
           <div className="flex-1 overflow-y-auto px-6 py-6">
           <div className="grid gap-5">
             <div className="space-y-2">
-              <Label isLoading={products.isLoading}>
+              <Label>
                 {t("inventoryTransactions.filters.product", "Product")}
               </Label>
               <ProductAutocompleteInput
@@ -1559,8 +1559,7 @@ export function InventoryTransactionsPage() {
                     productSearch: product.name,
                   }))
                 }
-                products={products}
-                isLoading={products.isLoading}
+
                 placeholder={t(
                   "inventoryTransactions.filters.selectProduct",
                   "Search by name or SKU",

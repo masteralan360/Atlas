@@ -148,7 +148,6 @@ export function ProductExchangeModal({
     onSubmit,
 }: ProductExchangeModalProps) {
     const { t } = useTranslation()
-    const isProductsLoading = Boolean(productCatalog.isLoading)
     const [saleItemId, setSaleItemId] = useState('')
     const [returnQuantity, setReturnQuantity] = useState('')
     const [storageId, setStorageId] = useState('')
@@ -172,11 +171,6 @@ export function ProductExchangeModal({
         () => storageProducts.find((product) => product.id === replacementProductId),
         [replacementProductId, storageProducts],
     )
-    const autocompleteReplacementProducts = useMemo(() => {
-        const availableIds = new Set(storageProducts.map((product) => product.id))
-        return productCatalog.filter((product) => availableIds.has(product.id))
-    }, [productCatalog, storageProducts])
-
     const returnedQuantityValue = parseQuantity(returnQuantity)
     const replacementQuantityValue = parseQuantity(replacementQuantity)
     const returnedTotal = selectedSaleItem ? roundQuantity(selectedSaleItem.unitPrice * returnedQuantityValue) : 0
@@ -411,7 +405,7 @@ export function ProductExchangeModal({
                                         </Select>
                                     </div>
                                     <div className="space-y-2">
-                                        <Label isLoading={isProductsLoading}>{t('sales.exchange.replacementProduct', { defaultValue: 'Replacement product' })}</Label>
+                                        <Label>{t('sales.exchange.replacementProduct', { defaultValue: 'Replacement product' })}</Label>
                                         <div className="flex items-center">
                                             <ProductsViewModalTrigger
                                                 label={t('sales.exchange.browseProducts', { defaultValue: 'Browse products' })}
@@ -423,8 +417,7 @@ export function ProductExchangeModal({
                                                 value={replacementProductSearch}
                                                 onChange={handleReplacementSearchChange}
                                                 onSelectProduct={(product) => selectReplacementProduct(product.id)}
-                                                products={autocompleteReplacementProducts}
-                                                isLoading={isProductsLoading}
+
                                                 placeholder={t('sales.exchange.searchReplacementProduct', { defaultValue: 'Search by product name or SKU' })}
                                                 disabled={!storageId || storageProducts.length === 0 || isSubmitting}
                                                 hasSelection={!!selectedReplacementProduct}

@@ -7,7 +7,6 @@ import {
   deleteBusinessPartnerGroup,
   saveBusinessPartnerGroupMembers,
   updateBusinessPartnerGroup,
-  useBusinessPartnerDirectoryPage,
   useBusinessPartnerGroups,
   useBusinessPartnersByIds,
   useWorkspaceUsers,
@@ -78,14 +77,6 @@ export function BusinessPartnerGroupsPanel({ workspaceId, featureEnabled }: Busi
   const [deleteTarget, setDeleteTarget] = useState<BusinessPartnerGroup | null>(null)
   const [isDeletingGroup, setIsDeletingGroup] = useState(false)
 
-  const partnerDirectory = useBusinessPartnerDirectoryPage(workspaceId, {
-    includeAgentRoles: true,
-    includeRealEstateRoles: true,
-    page: 1,
-    pageSize: 20,
-    search: partnerSearch,
-    enabled: membersOpen && memberTab === 'partners',
-  })
   const selectedPartners = useBusinessPartnersByIds(workspaceId, selectedPartnerIds)
 
   const selectedGroup = groupsState.groups.find((group) => group.id === memberGroupId)
@@ -404,10 +395,7 @@ export function BusinessPartnerGroupsPanel({ workspaceId, featureEnabled }: Busi
                     workspaceId={workspaceId}
                     includeAgentRoles
                     includeRealEstateRoles
-                    partnerOptions={partnerDirectory.items}
                     placeholder={t('businessPartners.groupPrivacy.searchPartners')}
-                    disabled={partnerDirectory.isLoading}
-                    isLoading={partnerDirectory.isLoading}
                   />
                   {selectedPartnerChips.length ? (
                     <div className="flex max-h-[36vh] flex-wrap content-start gap-2 overflow-y-auto rounded-xl border p-3">

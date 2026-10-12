@@ -4,6 +4,8 @@ import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { toCamelCase } from '@/lib/utils'
 import { runSupabaseAction, normalizeSupabaseActionError } from '@/lib/supabaseRequest'
 import { generateId } from '@/lib/utils'
+import { isOnline } from '@/lib/network'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import {
   completeWorkspaceDataHydration,
   failWorkspaceDataHydration,
@@ -14,6 +16,8 @@ import {
 
 import { db } from './database'
 import type { CurrencyCode, Inventory, Product } from './models'
+
+export type ProductAutocompleteSuggestion = Product
 
 export type ProductCatalogSort =
   | 'name_asc'
@@ -84,7 +88,194 @@ function normalizeRemoteProduct(value: unknown, workspaceId: string, syncedAt: s
   product.barcodes = Array.isArray(product.barcodes)
     ? product.barcodes.filter((barcode): barcode is string => typeof barcode === 'string')
     : []
+  delete (product as Product & { autocompleteIsSupport?: boolean }).autocompleteIsSupport
   return product
+}
+
+function normalizeAutocompleteInventory(value: unknown, workspaceId: string, syncedAt: string): Inventory {
+  const inventory = toCamelCase(value as Record<string, unknown>) as unknown as Inventory
+  inventory.workspaceId = workspaceId
+  inventory.syncStatus = 'synced'
+  inventory.lastSyncedAt = syncedAt
+  inventory.isDeleted = false
+  inventory.quantity = Number(inventory.quantity ?? 0)
+  return inventory
+}
+
+async function readLocalProductAutocompleteSuggestions(
+  workspaceId: string,
+  normalizedSearch: string,
+  excludedCategoryIds: readonly string[],
+  limit: number,
+  pendingOnly = false,
+): Promise<ProductAutocompleteSuggestion[]> {
+  const excludedCategories = new Set(excludedCategoryIds)
+  const matchesSearch = (product: Product) => !product.isDeleted
+    && (!pendingOnly || product.syncStatus === 'pending' || product.syncStatus === 'conflict')
+    && !excludedCategories.has(product.categoryId || '')
+  const nameMatches = await db.products
+    .where('[workspaceId+name+id]')
+    .between([workspaceId, '', ''], [workspaceId, '\uffff', '\uffff'])
+    .filter((product) => matchesSearch(product)
+      && String(product.name ?? '').toLocaleLowerCase().includes(normalizedSearch))
+    .limit(limit)
+    .toArray()
+  const skuMatches = await db.products
+    .where('[workspaceId+sku+id]')
+    .between([workspaceId, '', ''], [workspaceId, '\uffff', '\uffff'])
+    .filter((product) => matchesSearch(product)
+      && String(product.sku ?? '').toLocaleLowerCase().includes(normalizedSearch))
+    .limit(limit)
+    .toArray()
+  const productsById = new Map([...nameMatches, ...skuMatches].map((product) => [product.id, product]))
+  const products = [...productsById.values()]
+    .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
+    .slice(0, limit)
+  const familyIds = [...new Set(products.map((product) => product.parentProductId || product.id))]
+  const [parentRows, familyChildren] = await Promise.all([
+    familyIds.length ? db.products.bulkGet(familyIds) : Promise.resolve([]),
+    familyIds.length
+      ? db.products
+        .where('[workspaceId+parentProductId]')
+        .anyOf(familyIds.map((familyId) => [workspaceId, familyId]))
+        .filter((product) => product.workspaceId === workspaceId
+          && !product.isDeleted
+          && !excludedCategories.has(product.categoryId || ''))
+        .limit(limit * 8)
+        .toArray()
+      : Promise.resolve([]),
+  ])
+  const parentById = new Map(parentRows
+    .filter((product): product is Product => Boolean(product
+      && product.workspaceId === workspaceId
+      && !product.isDeleted
+      && !excludedCategories.has(product.categoryId || '')))
+    .map((product) => [product.id, product]))
+  const childrenByFamilyId = new Map<string, Product[]>()
+  for (const child of familyChildren) {
+    if (!child.parentProductId) continue
+    const current = childrenByFamilyId.get(child.parentProductId) ?? []
+    current.push(child)
+    childrenByFamilyId.set(child.parentProductId, current)
+  }
+  const suggestions: ProductAutocompleteSuggestion[] = []
+  const addedIds = new Set<string>()
+  for (const familyId of familyIds) {
+    const parent = parentById.get(familyId)
+    if (parent && !addedIds.has(parent.id)) {
+      suggestions.push(parent)
+      addedIds.add(parent.id)
+    }
+
+    const familyMatches = products
+      .filter((product) => (product.parentProductId || product.id) === familyId)
+      .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
+    for (const product of familyMatches) {
+      if (addedIds.has(product.id)) continue
+      suggestions.push(product)
+      addedIds.add(product.id)
+    }
+
+    const siblings = childrenByFamilyId.get(familyId) ?? []
+    for (const sibling of siblings.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))) {
+      if (addedIds.has(sibling.id)) continue
+      suggestions.push(sibling)
+      addedIds.add(sibling.id)
+    }
+    if (suggestions.length >= limit) break
+  }
+  return suggestions.slice(0, limit)
+}
+
+/** Fetches a small typed-search result set without hydrating the product catalog. */
+export async function searchProductAutocompleteSuggestions(
+  workspaceId: string,
+  search: string,
+  excludedCategoryIds: readonly string[],
+  excludedStorageIds: readonly string[],
+): Promise<ProductAutocompleteSuggestion[]> {
+  const normalizedSearch = search.trim().toLocaleLowerCase()
+  if (!workspaceId || normalizedSearch.length < 2) return []
+
+  if (isOnline(workspaceId) && !isLocalWorkspaceMode(workspaceId)) {
+    const response = await runSupabaseAction('products.autocompleteSearch', () =>
+      getSupabaseClientForTable('products').rpc('search_products_for_autocomplete', {
+        p_workspace_id: workspaceId,
+        p_search: search.trim(),
+        p_excluded_category_ids: [...excludedCategoryIds],
+        p_excluded_storage_ids: [...excludedStorageIds],
+        p_limit: 8,
+      })
+    )
+    if (response.error) throw normalizeSupabaseActionError(response.error)
+    const result = response.data as { products?: unknown[]; inventory?: unknown[] } | null
+    if (!result || !Array.isArray(result.products)) {
+      throw new Error('The product autocomplete response was invalid.')
+    }
+
+    const syncedAt = new Date().toISOString()
+    const productRows = result.products as Array<Record<string, unknown>>
+    const familySupportIds = new Set(productRows.flatMap((row) => (
+      row.autocomplete_is_support === true && typeof row.id === 'string' ? [row.id] : []
+    )))
+    const products = productRows.map((value) => normalizeRemoteProduct(value, workspaceId, syncedAt))
+    const inventoryRows = (Array.isArray(result.inventory) ? result.inventory : [])
+      .map((value) => normalizeAutocompleteInventory(value, workspaceId, syncedAt))
+
+    if (products.some((product) => product.workspaceId !== workspaceId || !product.id)
+      || inventoryRows.some((row) => row.workspaceId !== workspaceId || !row.id)) {
+      throw new Error('The product autocomplete returned a record outside the active workspace.')
+    }
+
+    const cachedProducts = await db.products.bulkGet(products.map((product) => product.id))
+    const productsToCache = products.filter((_, index) => {
+      const cached = cachedProducts[index]
+      return cached?.syncStatus !== 'pending' && cached?.syncStatus !== 'conflict'
+    })
+    if (productsToCache.length) await db.products.bulkPut(productsToCache)
+
+    if (inventoryRows.length) {
+      const cachedInventory = await db.inventory.bulkGet(inventoryRows.map((row) => row.id))
+      const inventoryToCache = inventoryRows.filter((_, index) => {
+        const cached = cachedInventory[index]
+        return cached?.syncStatus !== 'pending' && cached?.syncStatus !== 'conflict'
+      })
+      if (inventoryToCache.length) await db.inventory.bulkPut(inventoryToCache)
+    }
+
+    const normalizedProducts = products.map((product, index) => {
+      const cached = cachedProducts[index]
+      const candidate = cached?.syncStatus === 'pending' || cached?.syncStatus === 'conflict'
+        ? cached
+        : product
+      const stillMatches = familySupportIds.has(candidate.id)
+        || String(candidate.name ?? '').toLocaleLowerCase().includes(normalizedSearch)
+        || String(candidate.sku ?? '').toLocaleLowerCase().includes(normalizedSearch)
+      return stillMatches ? candidate : null
+    }).filter((product): product is ProductAutocompleteSuggestion => product !== null)
+
+    const localPendingProducts = await readLocalProductAutocompleteSuggestions(
+      workspaceId,
+      normalizedSearch,
+      excludedCategoryIds,
+      8,
+      true,
+    )
+    const mergedProducts = [...localPendingProducts]
+    const mergedIndexes = new Map(mergedProducts.map((product, index) => [product.id, index]))
+    for (const product of normalizedProducts) {
+      const existingIndex = mergedIndexes.get(product.id)
+      if (existingIndex === undefined) {
+        mergedIndexes.set(product.id, mergedProducts.length)
+        mergedProducts.push(product)
+      } else {
+        mergedProducts[existingIndex] = product
+      }
+    }
+    return mergedProducts.slice(0, 16)
+  }
+
+  return readLocalProductAutocompleteSuggestions(workspaceId, normalizedSearch, excludedCategoryIds, 8)
 }
 
 async function readProductCatalogPage(query: ProductCatalogPageQuery): Promise<ProductCatalogPage> {

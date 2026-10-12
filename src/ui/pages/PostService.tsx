@@ -1973,7 +1973,7 @@ export function PostService() {
         </DialogHeader>
         <form onSubmit={handleCreateMerchant} className="flex min-h-0 flex-1 flex-col">
           <DialogBody className="grid gap-4 py-5">
-            <Field label={t("postService.form.businessPartner")} isLoading={partners.isLoading}>
+            <Field label={t("postService.form.businessPartner")} >
               <div className="flex flex-col gap-2">
                 <div className="flex gap-2">
                   <PartnerAutocompleteInput
@@ -1983,7 +1983,7 @@ export function PostService() {
                     workspaceId={workspaceId}
                     placeholder={t("postService.placeholders.selectMerchantOrShop")}
                     excludePartnerIds={enabledMerchantPartnerIds}
-                    isLoading={partners.isLoading}
+
                     className="flex-1"
                   />
                   <AddPartnerButton onClick={() => setSupplierPartnerDialogOpen(true)} label={t("postService.actions.addBusinessPartner")} />

@@ -2625,7 +2625,7 @@ export function Revenue() {
                                             </div>
 
                                             <div className="space-y-2">
-                                                <Label isLoading={businessPartners.isLoading || businessPartnerAgents.isLoading}>{t('revenue.filters.party', { defaultValue: 'Counterparty' })}</Label>
+                                                <Label>{t('revenue.filters.party', { defaultValue: 'Counterparty' })}</Label>
                                                 <div className="grid gap-3">
                                                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
                                                         <PartnerAutocompleteInput
@@ -2671,7 +2671,7 @@ export function Revenue() {
                                                             workspaceId={user?.workspaceId || ''}
                                                             includeRealEstateRoles
                                                             includeAgentRoles
-                                                            isLoading={businessPartners.isLoading || businessPartnerAgents.isLoading}
+
                                                             placeholder={t('revenue.filters.selectParty', { defaultValue: 'Select Counterparty' })}
                                                             disabled={!user?.workspaceId}
                                                         />
@@ -2839,13 +2839,12 @@ export function Revenue() {
 
                                             <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
                                                 <div className="space-y-2">
-                                                    <Label isLoading={products.isLoading}>{t('revenue.filters.product', { defaultValue: 'Product / Service' })}</Label>
+                                                    <Label>{t('revenue.filters.product', { defaultValue: 'Product / Service' })}</Label>
                                                     <ProductAutocompleteInput
                                                         value={draftFilters.productSearch}
                                                         onChange={(value) => setDraftFilters((current) => ({ ...current, productSearch: value, product: 'all' }))}
                                                         onSelectProduct={(product) => setDraftFilters((current) => ({ ...current, product: product.id, productSearch: product.name }))}
-                                                        products={products}
-                                                        isLoading={products.isLoading}
+
                                                         placeholder={t('revenue.filters.selectProduct', { defaultValue: 'Select Product' })}
                                                         hasSelection={draftFilters.product !== 'all'}
                                                         linkedLabel={t('revenue.filters.linked', { defaultValue: 'Linked' })}

@@ -300,7 +300,7 @@ export function DirectTransactionDialog({
                             </div>
 
                             <div className="grid gap-2">
-                                <Label isLoading={arePartnersLoading}>{t('directTransactionModal.fields.counterparty', { defaultValue: 'Counterparty' })} <span className="text-destructive">*</span></Label>
+                                <Label>{t('directTransactionModal.fields.counterparty', { defaultValue: 'Counterparty' })} <span className="text-destructive">*</span></Label>
                                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
                                     <PartnerAutocompleteInput
                                         value={counterpartyName}
@@ -314,7 +314,7 @@ export function DirectTransactionDialog({
                                             selectPartner(partner)
                                         }}
                                         workspaceId={workspaceId}
-                                        isLoading={arePartnersLoading}
+
                                         placeholder={t('directTransactionModal.fields.counterpartyPlaceholder', { defaultValue: 'Who received or paid this amount?' })}
                                         disabled={isSubmitting}
                                     />

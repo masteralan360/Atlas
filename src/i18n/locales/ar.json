@@ -738,6 +738,11 @@
     "selected": "محدد",
     "search": "بحث...",
     "searchBox": "بحث",
+    "autocomplete": {
+      "searching": "جارٍ البحث…",
+      "noResults": "لا توجد نتائج مطابقة.",
+      "searchFailed": "تعذر إكمال البحث. حاول مرة أخرى."
+    },
     "viewAll": "عرض الكل",
     "actions": "الإجراءات",
     "confirm": "تأكيد",

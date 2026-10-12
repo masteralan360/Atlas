@@ -162,7 +162,7 @@ export function LoanRegistrationModal({
                             </div>
 
                             <div className="grid gap-2">
-                                <Label isLoading={arePartnersLoading}>{t('loans.borrowerName') || 'Borrower Name'} <span className="text-destructive">*</span></Label>
+                                <Label>{t('loans.borrowerName') || 'Borrower Name'} <span className="text-destructive">*</span></Label>
                                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
                                     <PartnerAutocompleteInput
                                         value={form.borrowerName}
@@ -179,7 +179,7 @@ export function LoanRegistrationModal({
                                             }))
                                         }}
                                         workspaceId={workspaceId}
-                                        isLoading={arePartnersLoading}
+
                                     />
                                     <Button type="button" variant="outline" className="w-full shrink-0 gap-2 md:w-auto" onClick={() => setIsPartyPickerOpen(true)}>
                                         <Users className="h-4 w-4" />

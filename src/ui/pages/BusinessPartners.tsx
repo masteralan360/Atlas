@@ -621,8 +621,7 @@ export function BusinessPartners() {
                                     includeAgentRoles={features.agents}
                                     partnerOptions={mapPartners ?? []}
                                     excludePartnerIds={partnerIdsWithoutLocations}
-                                    disabled={!user?.workspaceId}
-                                    isLoading={isLoadingMap}
+                                    disabled={!user?.workspaceId || isLoadingMap}
                                     placeholder={t('businessPartners.searchMapPlaceholder', { defaultValue: 'Search a partner on the map...' })}
                                 />
                                 <div className="shrink-0 rounded-full bg-primary/10 px-3 py-1 text-sm font-semibold text-primary">

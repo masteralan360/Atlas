@@ -268,16 +268,6 @@ export function StockAdjustments() {
       : storages;
   }, [batchForm.productId, inventory, storages]);
 
-  const batchProductOptions = useMemo(() => {
-    if (!batchForm.storageId) return inventoryProducts;
-    const productIdsInStorage = new Set(
-      inventory
-        .filter((row) => row.storageId === batchForm.storageId)
-        .map((row) => row.productId),
-    );
-    return inventoryProducts.filter((product) => productIdsInStorage.has(product.id));
-  }, [inventoryProducts, inventory, batchForm.storageId]);
-
   useEffect(() => {
     if (!batchDialogOpen) {
       batchUserPickedStorageRef.current = false;
@@ -1016,7 +1006,7 @@ export function StockAdjustments() {
             <DialogBody>
               <div className="grid gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="batch-search" isLoading={products.isLoading}>{t("stockAdjustments.dialog.batch.productSearch", "Product search")}</Label>
+                  <Label htmlFor="batch-search" >{t("stockAdjustments.dialog.batch.productSearch", "Product search")}</Label>
                   <div className="flex items-center">
                     {canOpenBatchProductsView ? (
                       <ProductsViewModalTrigger
@@ -1033,8 +1023,7 @@ export function StockAdjustments() {
                         setBatchForm((current) => ({ ...current, productId: "" }));
                       }}
                       onSelectProduct={(product) => selectBatchProduct(product.id)}
-                      products={batchProductOptions}
-                      isLoading={products.isLoading}
+
                       placeholder={t("stockAdjustments.dialog.batch.productSearchPlaceholder", "Search products by name or SKU")}
                       hasSelection={!!batchForm.productId}
                     />

@@ -2,7 +2,18 @@ Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain En
 
 Allow orders atlas standards line to move
 
-POS
+Allow inventory movement on offline mode
+
+
+#
+DatePicker Entry Input
+Days of month for visits
+Weekly Maintenence
+
+Replace Maintenence Incase homeowner wasn't present
+#
+
+Business partner form save slow
 
 Fix Product Form on mobile
 

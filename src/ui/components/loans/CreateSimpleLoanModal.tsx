@@ -202,7 +202,7 @@ export function CreateSimpleLoanModal({
                         <div className="grid gap-5">
 
                             <div className="grid gap-2">
-                                <Label isLoading={arePartnersLoading}>{counterpartyNameLabel} <span className="text-destructive">*</span></Label>
+                                <Label>{counterpartyNameLabel} <span className="text-destructive">*</span></Label>
                                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
                                     <PartnerAutocompleteInput
                                         value={borrowerName}
@@ -223,7 +223,7 @@ export function CreateSimpleLoanModal({
                                             setBorrowerAddress([partner.address, partner.city].filter(Boolean).join(', '))
                                         }}
                                         workspaceId={workspaceId}
-                                        isLoading={arePartnersLoading}
+
                                     />
                                     <Button type="button" variant="outline" className="w-full shrink-0 gap-2 md:w-auto" onClick={() => setIsPartyPickerOpen(true)}>
                                         <Users className="h-4 w-4" />

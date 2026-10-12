@@ -50,7 +50,6 @@ import {
 } from '@/ui/components'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
-import { AutocompleteLoadingIndicator } from '@/ui/components/AutocompleteLoadingIndicator'
 import { PartnerProductMovementsTemplateDialog } from '@/ui/components/crm/PartnerProductMovementsTemplateDialog'
 import type { PartnerProductMovementsPrintData } from '@/ui/components/crm/PartnerProductMovementsPrintTemplate'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
@@ -398,7 +397,6 @@ export function PartnerProductMovementsStatement() {
                     <div className="space-y-2">
                         <label className="inline-flex items-center gap-1.5 text-sm font-semibold">
                             {t('businessPartners.title', { defaultValue: 'Business Partner' })} *
-                            <AutocompleteLoadingIndicator isLoading={arePartnersLoading} />
                         </label>
                         <PartnerAutocompleteInput
                             value={partnerQuery}
@@ -406,7 +404,7 @@ export function PartnerProductMovementsStatement() {
                             onSelectPartner={selectPartner}
                             workspaceId={workspaceId}
                             includeAgentRoles={hasFeature('agent_sales_accounts')}
-                            isLoading={arePartnersLoading}
+
                             placeholder={t('businessPartners.accountStatement.searchPartner', { defaultValue: 'Search for a business partner' })}
                         />
                         {partner && <div className="flex items-center gap-2 text-xs">

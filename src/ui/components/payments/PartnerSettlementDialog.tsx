@@ -372,7 +372,7 @@ export function PartnerSettlementDialog({
                         <div className="grid gap-4">
                             <div className="grid gap-2">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <Label isLoading={arePartnersLoading}>
+                                    <Label>
                                         {t('payments.table.counterparty', { defaultValue: 'Counterparty' })}
                                         <span className="text-destructive"> *</span>
                                     </Label>
@@ -405,7 +405,7 @@ export function PartnerSettlementDialog({
                                     disabled={isSubmitting}
                                     includeRealEstateRoles
                                     includeAgentRoles={includeSalesAgentCommissionPartners}
-                                    isLoading={arePartnersLoading}
+
                                     eligibleAgentPartnerIds={eligibleSalesAgentCommissionPartnerIds}
                                 />
                                 {partner ? (

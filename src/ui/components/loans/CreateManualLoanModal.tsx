@@ -193,7 +193,7 @@ export function CreateManualLoanModal({
                     <DialogBody className="py-5">
                         <div className="grid gap-5">
                             <div className="grid gap-2">
-                                <Label isLoading={arePartnersLoading}>{t('loans.borrowerName') || 'Borrower Name'} <span className="text-destructive">*</span></Label>
+                                <Label>{t('loans.borrowerName') || 'Borrower Name'} <span className="text-destructive">*</span></Label>
                                 <div className="flex flex-col gap-2 md:flex-row md:items-center">
                                     <PartnerAutocompleteInput
                                         value={borrowerName}
@@ -214,7 +214,7 @@ export function CreateManualLoanModal({
                                             setBorrowerAddress([partner.address, partner.city].filter(Boolean).join(', '))
                                         }}
                                         workspaceId={workspaceId}
-                                        isLoading={arePartnersLoading}
+
                                         disabled={lockParty}
                                     />
                                     {!lockParty ? (

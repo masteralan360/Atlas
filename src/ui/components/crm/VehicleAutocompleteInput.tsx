@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Car, Check } from "lucide-react";
+import { Car, Check, Loader2 } from "lucide-react";
 
-import {
-  type RentalVehicle,
-  type RentalVehicleStatus,
-  useRentalVehicles,
-} from "@/local-db";
+import { searchRentalVehicleAutocompleteSuggestions } from "@/local-db/carRental";
+import type { RentalVehicle, RentalVehicleStatus } from "@/local-db/models";
 import { getRentalVehicleDisplayLabel } from "@/lib/carRentalPresentation";
 import { cn } from "@/lib/utils";
 import { Input } from "@/ui/components";
 import { AutocompletePopover } from "@/ui/components/AutocompletePopover";
+import { useDebouncedAutocompleteSearch } from "@/ui/components/useDebouncedAutocompleteSearch";
 
 interface VehicleAutocompleteInputProps {
   value: string;
@@ -27,7 +25,6 @@ interface VehicleAutocompleteInputProps {
   showLinkedIndicator?: boolean;
   excludeVehicleIds?: string[];
   statuses?: RentalVehicleStatus[];
-  isLoading?: boolean;
 }
 
 export function VehicleAutocompleteInput({
@@ -45,52 +42,47 @@ export function VehicleAutocompleteInput({
   showLinkedIndicator = true,
   excludeVehicleIds = [],
   statuses,
-  isLoading: isLoadingOverride,
 }: VehicleAutocompleteInputProps) {
   const { t } = useTranslation();
-  const vehicles = useRentalVehicles(workspaceId);
   const [isFocused, setIsFocused] = useState(false);
   const [justSelected, setJustSelected] = useState(false);
-  const [showInitialSuggestions, setShowInitialSuggestions] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  const pendingOpenRef = useRef(false);
-  const hadFocusRef = useRef(false);
-  const isLoading = isLoadingOverride ?? vehicles.isLoading;
-  const wasLoadingRef = useRef(isLoading);
-  const isDisabled = Boolean(disabled || isLoading);
-
-  const query = value.trim().toLowerCase();
-  const excludedVehicleIds = useMemo(
-    () => new Set(excludeVehicleIds.filter(Boolean)),
-    [excludeVehicleIds],
+  const query = value.trim();
+  const normalizedQuery = query.toLocaleLowerCase();
+  const excludedIdsKey = [...new Set(excludeVehicleIds.filter(Boolean))].sort().join("|");
+  const normalizedExcludedIds = useMemo(
+    () => excludedIdsKey ? excludedIdsKey.split("|") : [],
+    [excludedIdsKey],
   );
-
-  const filtered = useMemo(() => {
-    const eligibleVehicles = vehicles
-      .filter((vehicle) => !excludedVehicleIds.has(vehicle.id))
-      .filter((vehicle) => !statuses || statuses.includes(vehicle.status))
-    if (!query || query.length < 1) {
-      return showInitialSuggestions ? eligibleVehicles.slice(0, 8) : [];
-    }
-
-    return eligibleVehicles
-      .filter((vehicle) =>
-        [vehicle.make, vehicle.model, vehicle.plateNumber, vehicle.category]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-          .includes(query),
-      )
-      .slice(0, 8);
-  }, [excludedVehicleIds, query, showInitialSuggestions, statuses, vehicles]);
-
-  const showDropdown = isFocused && !justSelected && filtered.length > 0;
+  const statusesKey = statuses?.join("|") ?? "";
+  const normalizedStatuses = useMemo(
+    () => statusesKey ? statusesKey.split("|") as RentalVehicleStatus[] : undefined,
+    [statusesKey],
+  );
+  const searchVehicles = useCallback((search: string) => (
+    searchRentalVehicleAutocompleteSuggestions(workspaceId, search, {
+      statuses: normalizedStatuses,
+      excludeVehicleIds: normalizedExcludedIds,
+    })
+  ), [normalizedExcludedIds, normalizedStatuses, workspaceId]);
+  const search = useDebouncedAutocompleteSearch(
+    query,
+    isFocused && !justSelected && Boolean(workspaceId),
+    searchVehicles,
+  );
+  const isSearchLoading = search.isLoading;
+  const filtered = useMemo(() => search.items.slice(0, 8), [search.items]);
+  const showDropdown = isFocused && !justSelected && Boolean(workspaceId) && (
+    isSearchLoading
+    || Boolean(search.error)
+    || filtered.length > 0
+    || normalizedQuery.length >= 2
+  );
   const shouldShowLinkedIndicator = hasSelection && showLinkedIndicator;
   const resolvedLinkedLabel = linkedLabel || t("carRental.partnerLink.linked");
 
   const handleSelect = useCallback(
     (vehicle: RentalVehicle) => {
-      hadFocusRef.current = false;
       setJustSelected(true);
       setIsFocused(false);
       onChange(getRentalVehicleDisplayLabel(vehicle));
@@ -105,24 +97,6 @@ export function VehicleAutocompleteInput({
     const timeout = setTimeout(() => setJustSelected(false), 200);
     return () => clearTimeout(timeout);
   }, [justSelected]);
-
-  useEffect(() => {
-    if (isLoading && !wasLoadingRef.current && hadFocusRef.current) {
-      pendingOpenRef.current = true;
-      setIsFocused(false);
-    }
-
-    if (!isLoading && wasLoadingRef.current && pendingOpenRef.current) {
-      pendingOpenRef.current = false;
-      if (!disabled) {
-        setShowInitialSuggestions(true);
-        setIsFocused(true);
-        inputRef.current?.focus();
-      }
-    }
-
-    wasLoadingRef.current = isLoading;
-  }, [disabled, isLoading]);
 
   const linkedIndicator = (
     <div
@@ -139,10 +113,7 @@ export function VehicleAutocompleteInput({
   return (
     <AutocompletePopover
       open={showDropdown}
-      onOpenChange={(open) => {
-        if (!open && !isLoading) hadFocusRef.current = false;
-        setIsFocused(open);
-      }}
+      onOpenChange={setIsFocused}
       anchor={(
         <div data-autocomplete-popover-anchor className={cn("relative w-full", className)}>
           <Input
@@ -150,19 +121,12 @@ export function VehicleAutocompleteInput({
             value={value}
             onChange={(event) => {
               setJustSelected(false);
-              setShowInitialSuggestions(false);
               onChange(event.target.value);
             }}
-            onFocus={() => {
-              hadFocusRef.current = true;
-              setIsFocused(true);
-            }}
-            onBlur={() => {
-              if (!isLoading) hadFocusRef.current = false;
-            }}
+            onFocus={() => setIsFocused(true)}
             placeholder={placeholder}
-            disabled={isDisabled}
-            aria-busy={isLoading || undefined}
+            disabled={disabled}
+            aria-busy={isSearchLoading || undefined}
             required={required}
             className={cn(
               "flex-1",
@@ -176,33 +140,48 @@ export function VehicleAutocompleteInput({
       )}
     >
       <div className="rounded-xl border bg-popover shadow-lg">
-          {filtered.map((vehicle) => (
-            <button
-              key={vehicle.id}
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent focus:bg-accent focus:outline-none"
-              onMouseDown={(event) => {
-                event.preventDefault();
-                handleSelect(vehicle);
-              }}
-            >
-              <Car className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-medium">
-                  {getRentalVehicleDisplayLabel(vehicle)}
-                </div>
-                {vehicle.category ? (
-                  <div className="truncate text-xs text-muted-foreground">
-                    {vehicle.category}
-                  </div>
-                ) : null}
+        {isSearchLoading ? (
+          <div role="status" className="flex items-center justify-center gap-2 px-3 py-4 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t("common.autocomplete.searching")}
+          </div>
+        ) : search.error ? (
+          <div role="status" className="px-3 py-4 text-center text-sm text-muted-foreground">
+            {t("common.autocomplete.searchFailed")}
+          </div>
+        ) : null}
+        {filtered.map((vehicle) => (
+          <button
+            key={vehicle.id}
+            type="button"
+            className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent focus:bg-accent focus:outline-none"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              handleSelect(vehicle);
+            }}
+          >
+            <Car className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">
+                {getRentalVehicleDisplayLabel(vehicle)}
               </div>
-              <span className="shrink-0 rounded-full border bg-muted/40 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-                {t(`carRental.vehicleStatuses.${vehicle.status}`)}
-              </span>
-            </button>
-          ))}
-        </div>
+              {vehicle.category ? (
+                <div className="truncate text-xs text-muted-foreground">
+                  {vehicle.category}
+                </div>
+              ) : null}
+            </div>
+            <span className="shrink-0 rounded-full border bg-muted/40 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+              {t(`carRental.vehicleStatuses.${vehicle.status}`)}
+            </span>
+          </button>
+        ))}
+        {!isSearchLoading && !search.error && filtered.length === 0 && normalizedQuery.length >= 2 ? (
+          <div role="status" className="px-3 py-4 text-center text-sm text-muted-foreground">
+            {t("common.autocomplete.noResults")}
+          </div>
+        ) : null}
+      </div>
     </AutocompletePopover>
   );
 }

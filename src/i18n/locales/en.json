@@ -739,6 +739,11 @@
     "selected": "Selected",
     "search": "Search...",
     "searchBox": "Search",
+    "autocomplete": {
+      "searching": "Searching…",
+      "noResults": "No matches found.",
+      "searchFailed": "Search could not be completed. Try again."
+    },
     "viewAll": "View All",
     "actions": "Actions",
     "confirm": "Confirm",

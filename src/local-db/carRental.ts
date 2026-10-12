@@ -3,10 +3,10 @@ import Dexie from "dexie";
 import { useLiveQuery } from "dexie-react-hooks";
 
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
-import { isOnline } from "@/lib/network";
 import { getSupabaseClientForTable } from "@/lib/supabaseSchema";
 import { runSupabaseAction } from "@/lib/supabaseRequest";
-import { generateId, toSnakeCase } from "@/lib/utils";
+import { isOnline } from "@/lib/network";
+import { generateId, toCamelCase, toSnakeCase } from "@/lib/utils";
 import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
@@ -233,6 +233,104 @@ async function syncUpsert(tableName: RentalTableName, entity: RentalEntity) {
 async function hydrateRentalTable(tableName: RentalTableName, workspaceId: string) {
   if (!shouldUseCloudRentalData(workspaceId)) return;
   await fetchTableFromSupabase(tableName, tableFor(tableName), workspaceId);
+}
+
+async function readLocalRentalVehicleAutocompleteSuggestions(
+  workspaceId: string,
+  normalizedSearch: string,
+  options: { statuses?: RentalVehicleStatus[]; excludeVehicleIds?: string[] },
+  pendingOnly = false,
+) {
+  const excludedIdSet = new Set(options.excludeVehicleIds ?? []);
+  return db.rental_vehicles
+    .where("[workspaceId+plateNumber+id]")
+    .between([workspaceId, "", ""], [workspaceId, "\uffff", "\uffff"])
+    .filter((vehicle) => !vehicle.isDeleted
+      && (!pendingOnly || vehicle.syncStatus === "pending" || vehicle.syncStatus === "conflict")
+      && (!options.statuses?.length || options.statuses.includes(vehicle.status))
+      && !excludedIdSet.has(vehicle.id)
+      && [vehicle.make, vehicle.model, vehicle.plateNumber, vehicle.category]
+        .filter(Boolean)
+        .some((field) => String(field).toLocaleLowerCase().includes(normalizedSearch)))
+    .limit(8)
+    .toArray();
+}
+
+export async function searchRentalVehicleAutocompleteSuggestions(
+  workspaceId: string,
+  search: string,
+  options: {
+    statuses?: RentalVehicleStatus[];
+    excludeVehicleIds?: string[];
+  } = {},
+) {
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  if (!workspaceId || normalizedSearch.length < 2) return [];
+
+  const excludedIds = [...new Set((options.excludeVehicleIds ?? []).filter(Boolean))];
+  if (isOnline(workspaceId) && shouldUseCloudRentalData(workspaceId)) {
+    const client = getSupabaseClientForTable(VEHICLES_TABLE);
+    const response = await runSupabaseAction("carRental.vehicleAutocompleteSearch", () =>
+      client.rpc("search_vehicle_autocomplete", {
+        p_workspace_id: workspaceId,
+        p_search: search.trim(),
+        p_statuses: options.statuses?.length ? options.statuses : null,
+        p_excluded_vehicle_ids: excludedIds,
+        p_limit: 8,
+      }),
+    );
+    if (response.error) throw response.error;
+    if (!Array.isArray(response.data)) {
+      throw new Error("The vehicle autocomplete response was invalid.");
+    }
+
+    const syncedAt = new Date().toISOString();
+    const vehicles = response.data.map((value) => ({
+      ...(toCamelCase(value as Record<string, unknown>) as unknown as RentalVehicle),
+      workspaceId,
+      syncStatus: "synced" as const,
+      lastSyncedAt: syncedAt,
+      isDeleted: false,
+    }));
+    if (vehicles.some((vehicle) => vehicle.workspaceId !== workspaceId || !vehicle.id)) {
+      throw new Error("The vehicle autocomplete returned a record outside the active workspace.");
+    }
+
+    const cachedVehicles = await db.rental_vehicles.bulkGet(vehicles.map((vehicle) => vehicle.id));
+    const vehiclesToCache = vehicles.filter((_, index) => {
+      const cached = cachedVehicles[index];
+      return cached?.syncStatus !== "pending" && cached?.syncStatus !== "conflict";
+    });
+    if (vehiclesToCache.length) await db.rental_vehicles.bulkPut(vehiclesToCache);
+    const remoteVehicles = vehicles.map((vehicle, index) => {
+      const cached = cachedVehicles[index];
+      return cached?.syncStatus === "pending" || cached?.syncStatus === "conflict"
+        ? cached
+        : vehicle;
+    }).filter((vehicle) => !vehicle.isDeleted
+      && (!options.statuses?.length || options.statuses.includes(vehicle.status))
+      && !excludedIds.includes(vehicle.id)
+      && [vehicle.make, vehicle.model, vehicle.plateNumber, vehicle.category]
+        .filter(Boolean)
+        .some((field) => String(field).toLocaleLowerCase().includes(normalizedSearch)));
+
+    const localPendingVehicles = await readLocalRentalVehicleAutocompleteSuggestions(
+      workspaceId,
+      normalizedSearch,
+      { ...options, excludeVehicleIds: excludedIds },
+      true,
+    );
+    return [...new Map([...remoteVehicles, ...localPendingVehicles]
+      .map((vehicle) => [vehicle.id, vehicle])).values()]
+      .sort((left, right) => left.plateNumber.localeCompare(right.plateNumber) || left.id.localeCompare(right.id))
+      .slice(0, 8);
+  }
+
+  return readLocalRentalVehicleAutocompleteSuggestions(
+    workspaceId,
+    normalizedSearch,
+    { ...options, excludeVehicleIds: excludedIds },
+  );
 }
 
 async function nextNumber(workspaceId: string, prefix: string, tableName: typeof REQUESTS_TABLE | typeof CONTRACTS_TABLE) {
