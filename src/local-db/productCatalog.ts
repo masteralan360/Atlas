@@ -145,12 +145,14 @@ async function readLocalProductAutocompleteSuggestions(
         .toArray()
       : Promise.resolve([]),
   ])
-  const parentById = new Map(parentRows
-    .filter((product): product is Product => Boolean(product
-      && product.workspaceId === workspaceId
-      && !product.isDeleted
-      && !excludedCategories.has(product.categoryId || '')))
-    .map((product) => [product.id, product]))
+  const parentById = new Map<string, Product>()
+  for (const product of parentRows) {
+    if (!product
+      || product.workspaceId !== workspaceId
+      || product.isDeleted
+      || excludedCategories.has(product.categoryId || '')) continue
+    parentById.set(product.id, product)
+  }
   const childrenByFamilyId = new Map<string, Product[]>()
   for (const child of familyChildren) {
     if (!child.parentProductId) continue

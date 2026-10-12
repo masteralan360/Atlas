@@ -4,7 +4,7 @@ import { ArrowDownLeft, ArrowUpRight, Users, X } from 'lucide-react'
 
 import { useAuth } from '@/auth'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
-import { createManualLoan, useBusinessPartnersLoading, type CurrencyCode, type LoanDirection, type PaymentAccount } from '@/local-db'
+import { createManualLoan, type CurrencyCode, type LoanDirection, type PaymentAccount } from '@/local-db'
 import { buildOrderExchangeRatesSnapshot } from '@/lib/orderCurrency'
 import { getLoanCounterpartyNameLabel, getLoanDirectionLabel } from '@/lib/loanPresentation'
 import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
@@ -53,7 +53,6 @@ export function CreateSimpleLoanModal({
     onCreated
 }: CreateSimpleLoanModalProps) {
     const { t } = useTranslation()
-    const arePartnersLoading = useBusinessPartnersLoading(workspaceId)
     const { toast } = useToast()
     const { user } = useAuth()
     const { features } = useWorkspace()

@@ -94,7 +94,7 @@ export function ProductAutocompleteInput({
         const matches = await searchProductAutocompleteSuggestions(
             user?.workspaceId || '',
             search,
-            selectionAccess.excludedCategoryIds,
+            [...selectionAccess.excludedCategoryIds],
             excludedStorageIds,
         )
         setCandidateProductIds(matches.map((product) => product.id))

@@ -6,7 +6,7 @@ import { useAuth } from '@/auth'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { buildOrderExchangeRatesSnapshot, filterSnapshotByCurrency } from '@/lib/orderCurrency'
 import { formatCurrency, formatLocalDateValue, formatNumberWithCommas, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
-import { createBusinessPartner, createRealEstateTransaction, useBusinessPartnersLoading, type BusinessPartner, type CurrencyCode, type InstallmentFrequency, type RealEstatePropertyType, type RealEstateTransactionType } from '@/local-db'
+import { createBusinessPartner, createRealEstateTransaction, type BusinessPartner, type CurrencyCode, type InstallmentFrequency, type RealEstatePropertyType, type RealEstateTransactionType } from '@/local-db'
 import {
     Button,
     Card,
@@ -54,7 +54,6 @@ export function CreateRealEstateTransactionPage({
     const { toast } = useToast()
     const { user } = useAuth()
     const { features } = useWorkspace()
-    const arePartnersLoading = useBusinessPartnersLoading(workspaceId, { includeRealEstateRoles: features.real_estate })
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
     const [isSaving, setIsSaving] = useState(false)
     const [location, setLocation] = useState('')

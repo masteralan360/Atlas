@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ArrowLeftRight, Users, X } from 'lucide-react'
 import { useAuth } from '@/auth'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
-import { createManualLoan, useBusinessPartnersLoading, type CurrencyCode, type InstallmentFrequency, type LoanDirection, type PaymentAccount } from '@/local-db'
+import { createManualLoan, type CurrencyCode, type InstallmentFrequency, type LoanDirection, type PaymentAccount } from '@/local-db'
 import { buildOrderExchangeRatesSnapshot } from '@/lib/orderCurrency'
 import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
 import { formatCurrency, formatLocalDateValue, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
@@ -56,7 +56,6 @@ export function CreateManualLoanModal({
     initialDirection = 'lent'
 }: CreateManualLoanModalProps) {
     const { t } = useTranslation()
-    const arePartnersLoading = useBusinessPartnersLoading(workspaceId)
     const { toast } = useToast()
     const { user } = useAuth()
     const { features } = useWorkspace()

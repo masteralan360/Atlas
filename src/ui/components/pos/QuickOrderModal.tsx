@@ -8,7 +8,6 @@ import {
     createBusinessPartner,
     useAgents,
     useBusinessPartners,
-    useBusinessPartnersLoading,
     useProductCommissionRuleAgents,
     useProductCommissionRules,
     type BusinessPartner,
@@ -247,7 +246,6 @@ export function QuickOrderModal({
         agentSalesAccountsEnabled,
         userRole: user?.role
     })
-    const areCustomersLoading = useBusinessPartnersLoading(workspaceId, { roles: ['customer'] })
     const { toast } = useToast()
     const commissionTriggerRef = useRef<HTMLButtonElement>(null)
     const commissionAssignmentRef = useRef<SalesOrderCommissionAssignmentHandle>(null)

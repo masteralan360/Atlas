@@ -35,7 +35,6 @@ import type { CustomTemplateLayout } from '@/lib/printPreviewEditorStore'
 import { usePartnerProductMovements } from '@/hooks/usePartnerProductMovements'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import {
-    useBusinessPartnersLoading,
     useWorkspaceContacts
 } from '@/local-db'
 import type { DateRangeType } from '@/context/DateRangeContext'
@@ -71,9 +70,6 @@ export function PartnerProductMovementsStatement() {
     const { features, hasFeature, workspaceName, isLocalMode } = useWorkspace()
     const online = useNetworkStatus()
     const workspaceId = user?.workspaceId
-    const arePartnersLoading = useBusinessPartnersLoading(workspaceId, {
-        includeAgentRoles: hasFeature('agent_sales_accounts')
-    })
     const [location, navigate] = useLocation()
     const urlPartnerSelection = useMemo(() => readPartnerSelection(location), [location])
     const [selectedPartnerId, setSelectedPartnerId] = useState<string | null>(urlPartnerSelection.id)

@@ -41,7 +41,6 @@ import {
   useInstallmentSaleInstallments,
   useInstallmentSalePayments,
   useInstallmentSales,
-  useBusinessPartnersLoading,
   type BusinessPartner,
   type CurrencyCode,
   type InstallmentSale,
@@ -172,7 +171,6 @@ function CreateInstallmentSaleDialog({
   workspaceId: string;
 }) {
   const { t } = useTranslation();
-  const areCustomersLoading = useBusinessPartnersLoading(workspaceId, { roles: ["customer", "both"] });
   const { toast } = useToast();
   const { user } = useAuth();
   const { features } = useWorkspace();

@@ -558,7 +558,6 @@ export function CarRental({
         key={requestDialog ? "open-request" : "closed-request"}
         open={requestDialog}
         workspaceId={workspaceId}
-        vehicles={vehicles}
         partners={partners}
         isSaving={isSaving}
         onOpenChange={(open) => !isSaving && setRequestDialog(open)}
@@ -1568,7 +1567,6 @@ function VehicleDialog({
 function RequestDialog({
   open,
   workspaceId,
-  vehicles,
   partners,
   isSaving,
   onOpenChange,
@@ -1576,7 +1574,6 @@ function RequestDialog({
 }: {
   open: boolean;
   workspaceId: string;
-  vehicles: ReturnType<typeof useRentalVehicles>;
   partners: ReturnType<typeof useBusinessPartners>;
   isSaving: boolean;
   onOpenChange: (open: boolean) => void;

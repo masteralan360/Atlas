@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Users, X } from 'lucide-react'
-import { useBusinessPartnersLoading, type CurrencyCode, type InstallmentFrequency } from '@/local-db'
+import { type CurrencyCode, type InstallmentFrequency } from '@/local-db'
 import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
 import { formatCurrency, formatLocalDateValue, parseLocalDateValue } from '@/lib/utils'
 import {
@@ -65,7 +65,6 @@ export function LoanRegistrationModal({
     isSubmitting = false
 }: LoanRegistrationModalProps) {
     const { t } = useTranslation()
-    const arePartnersLoading = useBusinessPartnersLoading(workspaceId)
     const [form, setForm] = useState<LoanRegistrationFormData>({
         linkedPartyType: null,
         linkedPartyId: null,

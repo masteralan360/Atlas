@@ -59,7 +59,6 @@ import {
     deleteLocalCustomTemplate,
     isAgentBusinessPartnerRole,
     saveLocalCustomTemplate,
-    useBusinessPartnersLoading,
     useWorkspaceContacts
 } from '@/local-db'
 import type { DateRangeType } from '@/context/DateRangeContext'
@@ -469,9 +468,6 @@ export function AccountStatements() {
     const { user } = useAuth()
     const { features, hasFeature, workspaceName, isLocalMode } = useWorkspace()
     const workspaceId = user?.workspaceId
-    const arePartnersLoading = useBusinessPartnersLoading(workspaceId, {
-        includeAgentRoles: hasFeature('agent_sales_accounts')
-    })
     const [, navigate] = useLocation()
     const [urlPartnerSelection, setUrlPartnerSelection] = useState(() => readPartnerSelection(window.location.hash))
     const [selectedPartnerId, setSelectedPartnerId] = useState<string | null>(urlPartnerSelection.id)
