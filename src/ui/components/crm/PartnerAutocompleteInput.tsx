@@ -18,6 +18,9 @@ export interface PartnerAutocompleteAdditionalOption {
     badgeLabel?: string
 }
 
+const EMPTY_PARTNER_IDS: string[] = []
+const EMPTY_ADDITIONAL_OPTIONS: PartnerAutocompleteAdditionalOption[] = []
+
 interface PartnerAutocompleteInputProps {
     value: string
     onChange: (value: string) => void
@@ -51,9 +54,9 @@ export function PartnerAutocompleteInput({
     includeRealEstateRoles = false,
     includeAgentRoles = false,
     eligibleAgentPartnerIds,
-    excludePartnerIds = [],
+    excludePartnerIds = EMPTY_PARTNER_IDS,
     roles,
-    additionalOptions = [],
+    additionalOptions = EMPTY_ADDITIONAL_OPTIONS,
     onSelectAdditionalOption,
     partnerOptions
 }: PartnerAutocompleteInputProps) {
@@ -65,19 +68,35 @@ export function PartnerAutocompleteInput({
     const inputRef = useRef<HTMLInputElement>(null)
     const query = value.trim()
     const normalizedQuery = query.toLocaleLowerCase()
-    const rolesKey = roles?.join('|') ?? ''
+    const rolesKey = roles?.length ? JSON.stringify([...new Set(roles)].sort()) : ''
     const normalizedRoles = useMemo(
-        () => rolesKey ? rolesKey.split('|') as BusinessPartnerRole[] : undefined,
+        () => rolesKey ? JSON.parse(rolesKey) as BusinessPartnerRole[] : undefined,
         [rolesKey]
     )
-    const excludedPartnerIds = useMemo(() => new Set(excludePartnerIds.filter(Boolean)), [excludePartnerIds])
-    const partnerOptionIds = useMemo(
-        () => partnerOptions ? new Set(partnerOptions.map((partner) => partner.id)) : null,
-        [partnerOptions]
+    // Search dependencies are keyed by array contents so fresh inline arrays
+    // from callers do not restart the debounced search on every render.
+    const excludedPartnerIdsKey = JSON.stringify([...new Set(excludePartnerIds.filter(Boolean))].sort())
+    const excludedPartnerIds = useMemo(
+        () => new Set(JSON.parse(excludedPartnerIdsKey) as string[]),
+        [excludedPartnerIdsKey]
     )
+    const partnerOptionIdsKey = partnerOptions
+        ? JSON.stringify([...new Set(partnerOptions.map((partner) => partner.id).filter(Boolean))].sort())
+        : null
+    const partnerOptionIds = useMemo(
+        () => partnerOptionIdsKey === null
+            ? null
+            : new Set(JSON.parse(partnerOptionIdsKey) as string[]),
+        [partnerOptionIdsKey]
+    )
+    const eligibleAgentPartnerIdsKey = eligibleAgentPartnerIds === undefined
+        ? null
+        : JSON.stringify([...new Set(eligibleAgentPartnerIds.filter(Boolean))].sort())
     const eligibleAgentPartnerIdSet = useMemo(
-        () => eligibleAgentPartnerIds === undefined ? null : new Set(eligibleAgentPartnerIds.filter(Boolean)),
-        [eligibleAgentPartnerIds]
+        () => eligibleAgentPartnerIdsKey === null
+            ? null
+            : new Set(JSON.parse(eligibleAgentPartnerIdsKey) as string[]),
+        [eligibleAgentPartnerIdsKey]
     )
     const allowedPartnerIds = useMemo(
         () => partnerOptionIds ? [...partnerOptionIds] : undefined,
@@ -88,11 +107,12 @@ export function PartnerAutocompleteInput({
         excludedPartnerIds: [...excludedPartnerIds],
         eligibleAgentPartnerIds: eligibleAgentPartnerIdSet ? [...eligibleAgentPartnerIdSet] : undefined,
     }), [allowedPartnerIds, eligibleAgentPartnerIdSet, excludedPartnerIds])
+    const groupPrivacyEnabled = hasCapability('businessPartnerGroupPrivacy')
     const viewer = useMemo(() => ({
         userId: user?.id,
         role: user?.role,
-        featureEnabled: hasCapability('businessPartnerGroupPrivacy'),
-    }), [hasCapability, user?.id, user?.role])
+        featureEnabled: groupPrivacyEnabled,
+    }), [groupPrivacyEnabled, user?.id, user?.role])
     const searchOptions = useMemo(() => ({
         roles: normalizedRoles,
         includeRealEstateRoles,

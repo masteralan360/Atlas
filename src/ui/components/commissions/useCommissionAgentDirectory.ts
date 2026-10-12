@@ -66,9 +66,13 @@ type CommissionFeatureData = ReturnType<typeof useCommissionAgentDirectory> & {
 
 const CommissionFeatureDataContext = createContext<CommissionFeatureData | null>(null)
 
-function CommissionFeatureDataProvider({ workspaceId, children }: { workspaceId: string; children: ReactNode }) {
+function CommissionFeatureDataProvider({
+    workspaceId,
+    children,
+    includeAssignments = true
+}: { workspaceId: string; children: ReactNode; includeAssignments?: boolean }) {
     const directory = useCommissionAgentDirectory(workspaceId)
-    const assignments = useSalesOrderAgentAssignments(workspaceId)
+    const assignments = useSalesOrderAgentAssignments(includeAssignments ? workspaceId : undefined)
     const value = useMemo(() => ({ ...directory, assignments }), [assignments, directory])
     return createElement(CommissionFeatureDataContext.Provider, { value }, children)
 }
@@ -76,14 +80,16 @@ function CommissionFeatureDataProvider({ workspaceId, children }: { workspaceId:
 export function CommissionFeatureBoundary({
     enabled,
     workspaceId,
-    children
+    children,
+    includeAssignments = true
 }: {
     enabled: boolean
     workspaceId?: string
     children: ReactNode
+    includeAssignments?: boolean
 }) {
     if (!enabled || !workspaceId) return children
-    return createElement(CommissionFeatureDataProvider, { workspaceId, children })
+    return createElement(CommissionFeatureDataProvider, { workspaceId, children, includeAssignments })
 }
 
 export function useOptionalCommissionFeatureData() {

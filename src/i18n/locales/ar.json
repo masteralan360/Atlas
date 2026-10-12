@@ -2204,7 +2204,7 @@
     "summary": {
       "totalOrders": "إجمالي الطلبات",
       "orderValue": "قيمة الطلبات",
-      "agentCommissionTotal": "إجمالي عمولات المندوبين",
+      "agentCommissionTotal": "تقدير عمولات المندوبين",
       "pendingFulfillment": "طلبات بانتظار التنفيذ",
       "outstandingPayments": "المدفوعات المستحقة",
       "sales": "مبيعات",
@@ -2212,7 +2212,8 @@
       "unpaid": "غير مدفوع",
       "partiallyPaid": "مدفوع جزئيًا",
       "noOutstanding": "لا توجد مدفوعات مستحقة",
-      "totalIn": "الإجمالي بـ {{currency}}"
+      "totalIn": "الإجمالي بـ {{currency}}",
+      "filteredOrdersEstimate": "تقدير جميع الطلبات المطابقة"
     },
     "view": {
       "table": "تفاصيل الطلبات",
@@ -2222,6 +2223,7 @@
     "searchPlaceholder": "البحث في الطلبات...",
     "noCustomers": "قم بإضافة عملاء قبل إنشاء الطلبات.",
     "listTitle": "قائمة الطلبات",
+      "listLoadError": "تعذر تحميل الطلبات. يرجى المحاولة مرة أخرى.",
     "lockTitle": "قفل الطلب؟",
     "lockDescription": "سيؤدي قفل هذا الطلب إلى منع أي تغييرات في حالة الدفع الخاصة به. لا يمكن التراجع عن هذا الإجراء.",
     "lockedSuccess": "تم قفل الطلب بنجاح",

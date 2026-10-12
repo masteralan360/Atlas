@@ -2220,7 +2220,7 @@ async function receivePurchaseOrderRemotely(
     return remoteOrder
 }
 
-async function getSalesOrderIdsAssignedToLinkedFieldAgent(
+export async function getSalesOrderIdsAssignedToLinkedFieldAgent(
     workspaceId: string,
     userId: string | undefined,
     access: 'none' | 'own' | 'assigned' | 'all'
@@ -2273,7 +2273,7 @@ async function getSalesOrderIdsAssignedToLinkedFieldAgent(
         .map((assignment) => assignment.orderId))
 }
 
-function getCommissionAssignedOrderAccess(
+export function getCommissionAssignedOrderAccess(
     workspaceId: string | undefined,
     permissionKeys: readonly string[] | undefined
 ): 'none' | 'own' | 'assigned' | 'all' {

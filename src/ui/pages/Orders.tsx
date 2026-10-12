@@ -1,9 +1,8 @@
 import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { Archive, BadgeCheck, BadgeDollarSign, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, ClipboardCheck, Clock3, CreditCard, EllipsisVertical, Eye, HandCoins, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
+import { Archive, BadgeCheck, BadgeDollarSign, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, ClipboardCheck, Clock3, CreditCard, EllipsisVertical, Eye, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLocalizedOrderError } from '@/lib/orderErrors'
-import { isActiveOrder } from '@/lib/orderArchiving'
 import type { PaymentMethodOption } from '@/lib/paymentMethods'
 import { useLocation, useRoute } from 'wouter'
 
@@ -33,7 +32,6 @@ import {
     createOrdersPaginationState,
     ORDERS_PAGE_SIZE_OPTIONS,
     ORDERS_PAGE_SIZE_STORAGE_KEY,
-    paginateOrders,
     resetOrdersPagination,
     setOrdersPage,
     setOrdersPageSize
@@ -67,12 +65,12 @@ import {
     useCustomers,
     useInventory,
     useProducts,
+    useProductsByIds,
+    useBusinessPartnersLoading,
     useProductCommissionRuleAgents,
     useProductCommissionRules,
-    useArchivedPurchaseOrders,
-    useArchivedSalesOrders,
-    usePurchaseOrders,
-    useSalesOrders,
+    useOrdersListPage,
+    useSalesOrderAgentAssignmentsForOrders,
     useStorages,
     useSuppliers,
     type CurrencyCode,
@@ -289,25 +287,6 @@ function paymentStatusClass(order: SalesOrder | PurchaseOrder, isFullyReturnedSa
     return 'text-amber-600'
 }
 
-function filterOrdersByDate<T>(
-    orders: T[],
-    dateRange: DateRangeType,
-    customDates: { start: string; end: string },
-    getDate: (order: T) => string | null | undefined
-) {
-    const { start, end } = getDateRangeBounds(dateRange, customDates)
-    if (!start && !end) return orders
-
-    return orders.filter((order) => {
-        const date = getDate(order)
-        if (!date) return false
-        const orderDate = new Date(date)
-        if (start && orderDate < start) return false
-        if (end && orderDate >= end) return false
-        return true
-    })
-}
-
 function getPreviousDateRange(dateRange: DateRangeType, customDates: { start: string; end: string }) {
     const { start, end } = getDateRangeBounds(dateRange, customDates)
     if (!start || !end) return null
@@ -393,7 +372,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         const { start, end } = getDateRangeBounds(dateRange, customDates)
         return {
             startDate: start?.toISOString(),
-            endDate: end ? new Date(end.getTime() - 1).toISOString() : undefined
+            endDate: end?.toISOString()
         }
     }, [customDates, dateRange])
     const previousDateRange = useMemo(
@@ -402,34 +381,50 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     )
     const previousOrderDateBounds = useMemo(() => previousDateRange ? {
         startDate: previousDateRange.start.toISOString(),
-        endDate: new Date(previousDateRange.end.getTime() - 1).toISOString()
+        endDate: previousDateRange.end.toISOString()
     } : {}, [previousDateRange])
-    const products = useProducts(workspaceId)
-    const productImageUrls = useMemo(() => products.reduce<Record<string, string>>((imageUrls, product) => {
-        const imageUrl = product.imageUrl?.trim()
-        if (imageUrl) imageUrls[product.id] = imageUrl
-        return imageUrls
-    }, {}), [products])
-    const inventory = useInventory(workspaceId)
-    const storages = useStorages(workspaceId)
-    const customers = useCustomers(workspaceId)
-    const suppliers = useSuppliers(workspaceId)
-    const salesOrders = useSalesOrders(workspaceId, orderDateBounds.startDate, orderDateBounds.endDate)
-    const purchaseOrders = usePurchaseOrders(workspaceId, orderDateBounds.startDate, orderDateBounds.endDate)
-    const previousSalesOrders = useSalesOrders(
+    const [activeTab, setActiveTab] = useState<OrderTab>(initialTab)
+    const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => (localStorage.getItem('orders_view_mode') as 'table' | 'grid') || 'table')
+    const [pagination, setPagination] = useState(() => createOrdersPaginationState(localStorage.getItem(ORDERS_PAGE_SIZE_STORAGE_KEY)))
+    const [search, setSearch] = useState('')
+    const deferredSearch = useDeferredValue(search)
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+    const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all')
+    const [ecommerceFilter, setEcommerceFilter] = useState<EcommerceFilter>('all')
+    const [commissionModeFilter, setCommissionModeFilter] = useState<CommissionModeFilter>('all')
+    const [fulfillmentDateRange, setFulfillmentDateRange] = useState<DateRangeType>('allTime')
+    const [fulfillmentCustomDates, setFulfillmentCustomDates] = useState({ start: '', end: '' })
+    const [isFulfilledDateFilterExpanded, setIsFulfilledDateFilterExpanded] = useState(false)
+    const [archivesOpen, setArchivesOpen] = useState(false)
+    const [moduleWideAuditOpen, setModuleWideAuditOpen] = useState(false)
+    const [archivePagination, setArchivePagination] = useState({ currentPage: 1, pageSize: 20 })
+    const [ordersRefreshToken, setOrdersRefreshToken] = useState(0)
+    const [dialogOpen, setDialogOpen] = useState(false)
+
+    const fulfillmentBounds = useMemo(() => {
+        const { start, end } = getDateRangeBounds(fulfillmentDateRange, fulfillmentCustomDates)
+        return {
+            startDate: start?.toISOString(),
+            endDate: end?.toISOString()
+        }
+    }, [fulfillmentCustomDates, fulfillmentDateRange])
+    const ordersPageQuery = useMemo(() => ({
         workspaceId,
-        previousOrderDateBounds.startDate,
-        previousOrderDateBounds.endDate,
-        Boolean(previousDateRange)
-    )
-    const previousPurchaseOrders = usePurchaseOrders(
-        workspaceId,
-        previousOrderDateBounds.startDate,
-        previousOrderDateBounds.endDate,
-        Boolean(previousDateRange)
-    )
-    const archivedSalesOrders = useArchivedSalesOrders(workspaceId)
-    const archivedPurchaseOrders = useArchivedPurchaseOrders(workspaceId)
+        orderType: activeTab,
+        createdFrom: orderDateBounds.startDate,
+        createdTo: orderDateBounds.endDate,
+        fulfilledFrom: fulfillmentBounds.startDate,
+        fulfilledTo: fulfillmentBounds.endDate,
+        status: statusFilter,
+        paymentStatus: paymentFilter,
+        ecommerceFilter: activeTab === 'sales' ? ecommerceFilter : 'all',
+        commissionMode: activeTab === 'sales' ? commissionModeFilter : 'all',
+        search: deferredSearch,
+        page: pagination.currentPage,
+        pageSize: pagination.pageSize,
+        refreshToken: ordersRefreshToken,
+        enabled: true
+    }), [activeTab, commissionModeFilter, deferredSearch, ecommerceFilter, fulfillmentBounds.endDate, fulfillmentBounds.startDate, orderDateBounds.endDate, orderDateBounds.startDate, ordersRefreshToken, pagination.currentPage, pagination.pageSize, paymentFilter, statusFilter, workspaceId])
     const commissionData = useOptionalCommissionFeatureData()
     const salesAgentCommissionsEnabled = Boolean(commissionData)
     const productCommissionRules = useProductCommissionRules(salesAgentCommissionsEnabled ? workspaceId : undefined)
@@ -449,10 +444,60 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         permissionKeys,
         'salesAgentCommissions.viewOwn'
     )
+    const ordersPage = useOrdersListPage(ordersPageQuery)
+    const products = useProducts(workspaceId, { enabled: dialogOpen })
+    const visibleProductIds = useMemo(() => [...new Set(ordersPage.rows.flatMap((order) => order.items
+        .map((item) => item.productId)
+        .filter((productId): productId is string => Boolean(productId))))], [ordersPage.rows])
+    const pageProducts = useProductsByIds(workspaceId, visibleProductIds)
+    const productImageUrls = useMemo(() => pageProducts.reduce<Record<string, string>>((imageUrls, product) => {
+        const imageUrl = product.imageUrl?.trim()
+        if (imageUrl) imageUrls[product.id] = imageUrl
+        return imageUrls
+    }, {}), [pageProducts])
+    const inventory = useInventory(workspaceId, { enabled: dialogOpen })
+    const storages = useStorages(dialogOpen ? workspaceId : undefined)
+    const customers = useCustomers(dialogOpen ? workspaceId : undefined)
+    const suppliers = useSuppliers(dialogOpen ? workspaceId : undefined)
+    const areCustomersLoading = useBusinessPartnersLoading(dialogOpen ? workspaceId : undefined, { roles: ['customer'] })
+    const areSuppliersLoading = useBusinessPartnersLoading(dialogOpen ? workspaceId : undefined, { roles: ['supplier'] })
+    const defaultStorageId = getPrimaryStorageFromList(storages)?.id || ''
+    const unitRegistry = useUnitRegistry(dialogOpen ? workspaceId : undefined)
+    const previousOrdersPage = useOrdersListPage({
+        ...ordersPageQuery,
+        createdFrom: previousOrderDateBounds.startDate,
+        createdTo: previousOrderDateBounds.endDate,
+        fulfilledFrom: undefined,
+        fulfilledTo: undefined,
+        status: 'all',
+        paymentStatus: 'all',
+        ecommerceFilter: 'all',
+        commissionMode: 'all',
+        search: '',
+        page: 1,
+        pageSize: 1,
+        enabled: Boolean(previousDateRange)
+    })
+    const archivedOrdersPage = useOrdersListPage({
+        workspaceId,
+        orderType: activeTab,
+        page: archivePagination.currentPage,
+        pageSize: archivePagination.pageSize,
+        refreshToken: ordersRefreshToken,
+        includeArchived: true,
+        enabled: archivesOpen
+    })
+
+    const salesOrders = activeTab === 'sales' ? ordersPage.rows as SalesOrder[] : []
+    const visibleSalesOrderIds = useMemo(() => salesOrders.map((order) => order.id), [salesOrders])
+    const pageCommissionAssignments = useSalesOrderAgentAssignmentsForOrders(
+        salesAgentCommissionsEnabled && activeTab === 'sales' ? workspaceId : undefined,
+        visibleSalesOrderIds
+    )
     const activeSalesAgentAssignmentsByOrderId = useMemo(() => new Map(salesOrders.flatMap((order) => {
-        const assignments = getActiveSalesOrderAgentAssignments(commissionData?.assignments || [], order.id)
+        const assignments = getActiveSalesOrderAgentAssignments(pageCommissionAssignments, order.id)
         return assignments.length > 0 ? [[order.id, assignments] as const] : []
-    })), [commissionData?.assignments, salesOrders])
+    })), [pageCommissionAssignments, salesOrders])
     const visibleCommissionAgentsByOrderId = useMemo(() => new Map(Array.from(activeSalesAgentAssignmentsByOrderId, ([orderId, assignments]) => {
         const agents = assignments.flatMap((assignment) => {
             const agent = commissionData?.agentById.get(assignment.agentId)
@@ -474,16 +519,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             canViewAllAgentCommissions: canViewAllSalesAgentAssignments,
             canViewOwnAgentCommissions: canViewOwnSalesAgentAssignments
         })
-    ])), [
-        activeSalesAgentAssignmentsByOrderId,
-        canAssignSalesAgentCommissions,
-        canViewAllSalesAgentAssignments,
-        canViewOwnSalesAgentAssignments,
-        commissionData?.agentById,
-        commissionData?.agents,
-        salesOrders,
-        user?.id
-    ])
+    ])), [activeSalesAgentAssignmentsByOrderId, canAssignSalesAgentCommissions, canViewAllSalesAgentAssignments, canViewOwnSalesAgentAssignments, commissionData?.agentById, commissionData?.agents, salesOrders, user?.id])
     const productCommissionTotalBySalesOrderId = useMemo(() => {
         if (!salesAgentCommissionsEnabled) return new Map<string, number | null>()
         const at = new Date().toISOString()
@@ -499,28 +535,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 at
             }))
         ]))
-    }, [
-        productCommissionPreviewAgentIdsByOrderId,
-        productCommissionRecipients,
-        productCommissionRules,
-        salesAgentCommissionsEnabled,
-        salesOrders
-    ])
-    const defaultStorageId = getPrimaryStorageFromList(storages)?.id || ''
-    const unitRegistry = useUnitRegistry(workspaceId)
-
-    const [activeTab, setActiveTab] = useState<OrderTab>(initialTab)
-    const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => (localStorage.getItem('orders_view_mode') as 'table' | 'grid') || 'table')
-    const [pagination, setPagination] = useState(() => createOrdersPaginationState(localStorage.getItem(ORDERS_PAGE_SIZE_STORAGE_KEY)))
-    const [search, setSearch] = useState('')
-    const deferredSearch = useDeferredValue(search)
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-    const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all')
-    const [ecommerceFilter, setEcommerceFilter] = useState<EcommerceFilter>('all')
-    const [commissionModeFilter, setCommissionModeFilter] = useState<CommissionModeFilter>('all')
-    const [fulfillmentDateRange, setFulfillmentDateRange] = useState<DateRangeType>('allTime')
-    const [fulfillmentCustomDates, setFulfillmentCustomDates] = useState({ start: '', end: '' })
-    const [isFulfilledDateFilterExpanded, setIsFulfilledDateFilterExpanded] = useState(false)
+    }, [productCommissionPreviewAgentIdsByOrderId, productCommissionRecipients, productCommissionRules, salesAgentCommissionsEnabled, salesOrders])
 
     useEffect(() => {
         setActiveTab(initialTab)
@@ -539,7 +554,6 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     useEffect(() => {
         localStorage.setItem(ORDERS_PAGE_SIZE_STORAGE_KEY, String(pagination.pageSize))
     }, [pagination.pageSize])
-    const [dialogOpen, setDialogOpen] = useState(false)
     const [editingSalesOrder, setEditingSalesOrder] = useState<SalesOrder | null>(null)
     const [editingPurchaseOrder, setEditingPurchaseOrder] = useState<PurchaseOrder | null>(null)
     const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null)
@@ -561,8 +575,9 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const [transactionToReverse, setTransactionToReverse] = useState<PaymentTransaction | null>(null)
     const [isReversingPayment, setIsReversingPayment] = useState(false)
     const [showPrintPreview, setShowPrintPreview] = useState(false)
-    const [archivesOpen, setArchivesOpen] = useState(false)
-    const [moduleWideAuditOpen, setModuleWideAuditOpen] = useState(false)
+    const [ordersForPrint, setOrdersForPrint] = useState<Array<SalesOrder | PurchaseOrder> | null>(null)
+    const [ordersForAudit, setOrdersForAudit] = useState<Array<SalesOrder | PurchaseOrder> | null>(null)
+    const [isLoadingFullOrderActionData, setIsLoadingFullOrderActionData] = useState(false)
     const moduleWideAuditAdapter = useMemo(
         () => createSalesOrderModuleWideIntegrityAuditAdapter(workspaceId, getWorkspaceDataMode(workspaceId)),
         [workspaceId]
@@ -643,114 +658,15 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         }))
     }, [defaultStorageId])
 
-    const createdDateFilteredSalesOrders = useMemo(
-        () => filterOrdersByDate(salesOrders, dateRange, customDates, (order) => order.createdAt),
-        [salesOrders, dateRange, customDates]
-    )
-
-    const dateFilteredSalesOrders = useMemo(
-        () => filterOrdersByDate(
-            createdDateFilteredSalesOrders,
-            fulfillmentDateRange,
-            fulfillmentCustomDates,
-            (order) => order.actualDeliveryDate
-        )
-            .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()),
-        [createdDateFilteredSalesOrders, fulfillmentDateRange, fulfillmentCustomDates]
-    )
-
-    const hasEcommerceOrdersForCreatedDate = useMemo(
-        () => createdDateFilteredSalesOrders.some((order) => !order.isArchived && order.sourceChannel === 'marketplace'),
-        [createdDateFilteredSalesOrders]
-    )
+    const summaryTotalCount = ordersPage.totalCount
+    const paginatedOrders = useMemo(() => ({
+        ...ordersPage,
+        currentPage: pagination.currentPage
+    }), [ordersPage, pagination.currentPage])
 
     useEffect(() => {
-        if (!hasEcommerceOrdersForCreatedDate) {
-            setEcommerceFilter('all')
-        }
-    }, [hasEcommerceOrdersForCreatedDate])
-
-    const dateFilteredPurchaseOrders = useMemo(
-        () => filterOrdersByDate(
-            filterOrdersByDate(purchaseOrders, dateRange, customDates, (order) => order.createdAt),
-            fulfillmentDateRange,
-            fulfillmentCustomDates,
-            (order) => order.actualDeliveryDate
-        ),
-        [purchaseOrders, dateRange, customDates, fulfillmentDateRange, fulfillmentCustomDates]
-    )
-
-    const filteredSalesOrders = useMemo(() => {
-        let items = dateFilteredSalesOrders.filter(isActiveOrder)
-
-        if (statusFilter !== 'all') {
-            items = items.filter((order) => order.status === statusFilter)
-        }
-
-        if (ecommerceFilter === 'ecommerce') {
-            items = items.filter((order) => order.sourceChannel === 'marketplace')
-        } else if (ecommerceFilter === 'nonEcommerce') {
-            items = items.filter((order) => order.sourceChannel !== 'marketplace')
-        }
-
-        if (paymentFilter === 'returned') {
-            items = items.filter((order) => order.returnStatus === 'full')
-        } else if (paymentFilter !== 'all') {
-            items = items.filter((order) => getOrderPaymentStatus(order) === paymentFilter)
-        }
-
-        if (commissionModeFilter !== 'all') {
-            items = items.filter((order) => (
-                order.commissionMode ?? (order.commissionEnabled === false ? null : 'payable')
-            ) === commissionModeFilter)
-        }
-
-        const query = deferredSearch.trim().toLowerCase()
-        if (!query) return items
-
-        return items.filter((order) =>
-            order.orderNumber.toLowerCase().includes(query)
-            || order.customerName.toLowerCase().includes(query)
-            || (salesAgentCommissionsEnabled
-                && visibleCommissionAgentsByOrderId.get(order.id)?.some((agent) => agent.name.toLowerCase().includes(query)))
-            || order.items.some((item) => item.productName.toLowerCase().includes(query))
-        )
-    }, [commissionModeFilter, dateFilteredSalesOrders, deferredSearch, ecommerceFilter, paymentFilter, salesAgentCommissionsEnabled, statusFilter, visibleCommissionAgentsByOrderId])
-
-    const filteredPurchaseOrders = useMemo(() => {
-        let items = dateFilteredPurchaseOrders.filter(isActiveOrder)
-
-        if (statusFilter !== 'all') {
-            items = items.filter((order) => order.status === statusFilter)
-        }
-
-        if (paymentFilter === 'returned') {
-            items = []
-        } else if (paymentFilter !== 'all') {
-            items = items.filter((order) => getOrderPaymentStatus(order) === paymentFilter)
-        }
-
-        const query = deferredSearch.trim().toLowerCase()
-        if (!query) return items
-        return items.filter((order) =>
-            order.orderNumber.toLowerCase().includes(query)
-            || order.supplierName.toLowerCase().includes(query)
-            || order.items.some((item) => item.productName.toLowerCase().includes(query))
-        )
-    }, [dateFilteredPurchaseOrders, deferredSearch, statusFilter, paymentFilter])
-
-    const summaryOrders = useMemo(
-        () => activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders,
-        [activeTab, filteredPurchaseOrders, filteredSalesOrders]
-    )
-    const paginatedOrders = useMemo(
-        () => paginateOrders<SalesOrder | PurchaseOrder>(summaryOrders, pagination),
-        [pagination, summaryOrders]
-    )
-
-    useEffect(() => {
-        setPagination((current) => clampOrdersPagination(current, summaryOrders.length))
-    }, [summaryOrders.length])
+        setPagination((current) => clampOrdersPagination(current, summaryTotalCount))
+    }, [summaryTotalCount])
 
     useEffect(() => {
         setPagination(resetOrdersPagination)
@@ -766,90 +682,80 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         search,
         statusFilter
     ])
-    const orderValueOrders = useMemo(
-        () => summaryOrders.filter((order) => order.status !== 'cancelled'),
-        [summaryOrders]
-    )
     const workspaceCurrency = (features.default_currency || 'usd') as CurrencyCode
-    const orderValueByCurrency = useMemo(() => orderValueOrders.reduce<Record<string, number>>((totals, order) => {
-        totals[order.currency] = (totals[order.currency] || 0) + order.total
-        return totals
-    }, {}), [orderValueOrders])
     const orderValueEntries = useMemo(
-        () => Object.entries(orderValueByCurrency).sort(([left], [right]) => {
-            if (left === workspaceCurrency) return -1
-            if (right === workspaceCurrency) return 1
-            return left.localeCompare(right)
-        }),
-        [orderValueByCurrency, workspaceCurrency]
-    )
-    const orderValueInWorkspaceCurrency = useMemo(
-        () => orderValueOrders.reduce((total, order) => total + convertCurrencyAmountWithLiveRates(order.total, order.currency, workspaceCurrency, liveRates), 0),
-        [orderValueOrders, workspaceCurrency, liveRates]
-    )
-    const productCommissionValueEntries = useMemo(() => {
-        if (activeTab !== 'sales' || !salesAgentCommissionsEnabled) return []
-        const totalsByCurrency = new Map<string, { total: number; unavailableConversion: boolean }>()
-        for (const order of filteredSalesOrders) {
-            const summary = totalsByCurrency.get(order.currency) || { total: 0, unavailableConversion: false }
-            const total = productCommissionTotalBySalesOrderId.get(order.id)
-            if (total === null) summary.unavailableConversion = true
-            else summary.total += total || 0
-            totalsByCurrency.set(order.currency, summary)
-        }
-        return [...totalsByCurrency.entries()]
-            .map(([currency, summary]) => ({ currency, ...summary }))
+        () => [...ordersPage.totalsByCurrency]
             .sort((left, right) => {
                 if (left.currency === workspaceCurrency) return -1
                 if (right.currency === workspaceCurrency) return 1
                 return left.currency.localeCompare(right.currency)
             })
-    }, [
-        activeTab,
-        filteredSalesOrders,
-        productCommissionTotalBySalesOrderId,
-        salesAgentCommissionsEnabled,
-        workspaceCurrency
-    ])
-    const productCommissionValueInWorkspaceCurrency = useMemo(() => {
-        if (productCommissionValueEntries.some((entry) => entry.unavailableConversion)) return null
-        return productCommissionValueEntries.reduce((total, entry) => (
-            total + convertCurrencyAmountWithLiveRates(entry.total, entry.currency as CurrencyCode, workspaceCurrency, liveRates)
-        ), 0)
-    }, [liveRates, productCommissionValueEntries, workspaceCurrency])
-    const pendingFulfillmentCount = useMemo(
-        () => activeTab === 'sales' ? summaryOrders.filter((order) => order.status === 'pending').length : 0,
-        [activeTab, summaryOrders]
+            .map((entry) => [entry.currency, entry.total] as const),
+        [ordersPage.totalsByCurrency, workspaceCurrency]
     )
-    const outstandingPayments = useMemo(() => summaryOrders.reduce((summary, order) => {
-        if (order.status === 'draft' || order.status === 'cancelled' || ('returnStatus' in order && order.returnStatus === 'full')) {
-            return summary
-        }
-
-        const status = getOrderPaymentStatus(order)
-        if (status === 'paid') return summary
-
-        const balance = getOrderBalanceAmount(order)
-        if (balance <= 0) return summary
-
-        summary.total += convertCurrencyAmountWithLiveRates(balance, order.currency, workspaceCurrency, liveRates)
-        if (status === 'partial') summary.partiallyPaid += 1
-        else summary.unpaid += 1
-        return summary
-    }, { total: 0, unpaid: 0, partiallyPaid: 0 }), [summaryOrders, workspaceCurrency, liveRates])
-    const previousOrderCount = useMemo(() => {
-        if (!previousDateRange) return null
-        return (activeTab === 'sales' ? previousSalesOrders : previousPurchaseOrders).length
-    }, [activeTab, previousDateRange, previousPurchaseOrders, previousSalesOrders])
+    const orderValueInWorkspaceCurrency = useMemo(
+        () => ordersPage.totalsByCurrency.reduce((total, entry) => (
+            total + convertCurrencyAmountWithLiveRates(entry.total, entry.currency as CurrencyCode, workspaceCurrency, liveRates)
+        ), 0),
+        [liveRates, ordersPage.totalsByCurrency, workspaceCurrency]
+    )
+    const pendingFulfillmentCount = activeTab === 'sales' ? ordersPage.pendingCount : 0
+    const outstandingPayments = useMemo(() => ordersPage.outstandingByCurrency.reduce((summary, entry) => ({
+        total: summary.total + convertCurrencyAmountWithLiveRates(entry.total, entry.currency as CurrencyCode, workspaceCurrency, liveRates),
+        unpaid: summary.unpaid + entry.unpaidCount,
+        partiallyPaid: summary.partiallyPaid + entry.partialCount
+    }), { total: 0, unpaid: 0, partiallyPaid: 0 }), [liveRates, ordersPage.outstandingByCurrency, workspaceCurrency])
+    const previousOrderCount = previousDateRange ? previousOrdersPage.totalCount : null
     const hasAdditionalTableFilters = statusFilter !== 'all'
         || paymentFilter !== 'all'
-        || ecommerceFilter !== 'all'
-        || commissionModeFilter !== 'all'
+        || (activeTab === 'sales' && ecommerceFilter !== 'all')
+        || (activeTab === 'sales' && commissionModeFilter !== 'all')
         || Boolean(search.trim())
         || fulfillmentDateRange !== 'allTime'
     const totalOrdersTrend = !hasAdditionalTableFilters && previousOrderCount && previousOrderCount > 0
-        ? ((summaryOrders.length - previousOrderCount) / previousOrderCount) * 100
+        ? ((summaryTotalCount - previousOrderCount) / previousOrderCount) * 100
         : null
+
+    useEffect(() => {
+        setArchivePagination((current) => ({ ...current, currentPage: 1 }))
+    }, [activeTab, archivesOpen])
+
+    useEffect(() => {
+        if (ordersPage.error) {
+            console.error('[Orders] Failed to load order page:', ordersPage.error)
+        }
+    }, [ordersPage.error])
+
+    const hasOrderListError = Boolean(ordersPage.error)
+
+    const refreshOrdersList = () => setOrdersRefreshToken((current) => current + 1)
+
+    const loadAllFilteredOrders = async () => {
+        setIsLoadingFullOrderActionData(true)
+        try {
+            return await ordersPage.fetchAllMatches()
+        } catch (error) {
+            console.error('[Orders] Failed to load all filtered orders:', error)
+            toast({ title: t('common.error'), description: t('orders.listLoadError'), variant: 'destructive' })
+            return null
+        } finally {
+            setIsLoadingFullOrderActionData(false)
+        }
+    }
+
+    const handleOpenOrderPrint = async () => {
+        const rows = await loadAllFilteredOrders()
+        if (!rows) return
+        setOrdersForPrint(rows)
+        setShowPrintPreview(true)
+    }
+
+    const handleOpenModuleWideAudit = async () => {
+        const rows = await loadAllFilteredOrders()
+        if (!rows) return
+        setOrdersForAudit(rows)
+        setModuleWideAuditOpen(true)
+    }
 
     const salesPreview = useMemo(() => {
         const subtotal = salesForm.items.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)), 0)
@@ -902,16 +808,9 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             return formatLocalizedMonthYear(new Date(now.getFullYear(), now.getMonth() - 1, 1), i18n.language)
         }
         if (dateRange === 'custom') {
-            if (activeTab === 'sales' && filteredSalesOrders && filteredSalesOrders.length > 0) {
-                const dates = filteredSalesOrders.map(s => new Date(s.createdAt).getTime())
-                const minDate = new Date(Math.min(...dates))
-                const maxDate = new Date(Math.max(...dates))
-                return `${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
-            }
-            if (activeTab === 'purchase' && filteredPurchaseOrders && filteredPurchaseOrders.length > 0) {
-                const dates = filteredPurchaseOrders.map(s => new Date(s.createdAt).getTime())
-                const minDate = new Date(Math.min(...dates))
-                const maxDate = new Date(Math.max(...dates))
+            if (ordersPage.minCreatedAt && ordersPage.maxCreatedAt) {
+                const minDate = new Date(ordersPage.minCreatedAt)
+                const maxDate = new Date(ordersPage.maxCreatedAt)
                 return `${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
             }
             if (customDates.start || customDates.end) {
@@ -922,11 +821,9 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             }
         }
         if (dateRange === 'allTime') {
-            const arr = activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders
-            if (arr && arr.length > 0) {
-                const dates = arr.map(s => new Date(s.createdAt).getTime())
-                const minDate = new Date(Math.min(...dates))
-                const maxDate = new Date(Math.max(...dates))
+            if (ordersPage.minCreatedAt && ordersPage.maxCreatedAt) {
+                const minDate = new Date(ordersPage.minCreatedAt)
+                const maxDate = new Date(ordersPage.maxCreatedAt)
                 return `${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
             }
             return t('performance.filters.allTime') || 'All Time'
@@ -1054,6 +951,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 ...input,
                 createdBy: user?.id || null
             })
+            refreshOrdersList()
             toast({ title: settlementTarget.direction === 'incoming' ? 'Collection recorded' : 'Payment recorded' })
             setSettlementTarget(null)
         } catch (error: any) {
@@ -1101,6 +999,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 ...input,
                 createdBy: user?.id || null
             })
+            refreshOrdersList()
             toast({ title: t('payments.reversed', { defaultValue: 'Transaction reversed' }) })
             setTransactionToReverse(null)
         } catch (error: any) {
@@ -1312,6 +1211,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             if (editingSalesOrder) await updateSalesOrder(editingSalesOrder.id, payload, { actingUserRole: user.role })
             else await createSalesOrder(user.workspaceId, payload, user?.id ?? null, { actingUserRole: user.role })
 
+            refreshOrdersList()
             toast({ title: editingSalesOrder ? (t('common.save') || 'Saved') : (t('common.create') || 'Created') })
             setDialogOpen(false)
             resetSalesForm()
@@ -1381,6 +1281,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             if (editingPurchaseOrder) await updatePurchaseOrder(editingPurchaseOrder.id, payload)
             else await createPurchaseOrder(user.workspaceId, payload, user?.id ?? null)
 
+            refreshOrdersList()
             toast({ title: editingPurchaseOrder ? (t('common.save') || 'Saved') : (t('common.create') || 'Created') })
             setDialogOpen(false)
             resetPurchaseForm()
@@ -1394,6 +1295,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     async function runAction(action: () => Promise<unknown>, successMessage: string) {
         try {
             await action()
+            refreshOrdersList()
             toast({ title: successMessage })
         } catch (error: any) {
             toast({
@@ -1412,6 +1314,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
 
         try {
             await action()
+            refreshOrdersList()
             toast({ title: successMessage })
         } catch (error: any) {
             toast({
@@ -1653,6 +1556,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             : () => updatePurchaseOrderStatus(cancelConfirm.orderId, 'cancelled')
         try {
             const result = await action()
+            refreshOrdersList()
             toast({ title: result.status === 'cancelled'
                 ? t('orders.cancellationComplete')
                 : t('orders.cancellationQueued') })
@@ -1687,7 +1591,22 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {rows.length === 0 ? (
+                        {ordersPage.isLoading ? (
+                            <TableRow>
+                                <TableCell colSpan={9 + (activeTab === 'sales' && salesAgentCommissionsEnabled ? 2 : 0)}>
+                                    <div className="flex min-h-60 items-center justify-center gap-2 text-center text-muted-foreground" aria-live="polite">
+                                        <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+                                        {t('common.loading', { defaultValue: 'Loading...' })}
+                                    </div>
+                                </TableCell>
+                            </TableRow>
+                        ) : hasOrderListError ? (
+                            <TableRow>
+                                <TableCell colSpan={9 + (activeTab === 'sales' && salesAgentCommissionsEnabled ? 2 : 0)} className="py-12 text-center text-destructive">
+                                    {t('orders.listLoadError')}
+                                </TableCell>
+                            </TableRow>
+                        ) : rows.length === 0 ? (
                             <TableRow>
                                 <TableCell colSpan={9 + (activeTab === 'sales' && salesAgentCommissionsEnabled ? 2 : 0)} className="py-12 text-center text-muted-foreground">
                                     {t('common.noData') || 'No data available'}
@@ -1827,7 +1746,14 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 "grid gap-4 p-4 bg-muted/5",
                 viewMode === 'grid' && !isMobile() ? "md:grid-cols-2 xl:grid-cols-3" : "grid-cols-1"
             )}>
-                {rows.length === 0 ? (
+                {ordersPage.isLoading ? (
+                    <div className="col-span-full flex min-h-60 items-center justify-center gap-2 text-center text-muted-foreground" aria-live="polite">
+                        <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+                        {t('common.loading', { defaultValue: 'Loading...' })}
+                    </div>
+                ) : hasOrderListError ? (
+                    <div className="col-span-full py-12 text-center text-destructive">{t('orders.listLoadError')}</div>
+                ) : rows.length === 0 ? (
                     <div className="text-center text-muted-foreground py-12 bg-background rounded-lg border">
                         {t('common.noData') || 'No data available'}
                     </div>
@@ -1983,8 +1909,8 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         )
     }
 
-    const salesDisabled = customers.length === 0 || products.length === 0
-    const purchaseDisabled = suppliers.length === 0 || products.length === 0
+    const salesDisabled = dialogOpen && !areCustomersLoading && !products.isLoading && (customers.length === 0 || products.length === 0)
+    const purchaseDisabled = dialogOpen && !areSuppliersLoading && !products.isLoading && (suppliers.length === 0 || products.length === 0)
     const areDateFiltersSynced = dateRange === fulfillmentDateRange
         && customDates.start === fulfillmentCustomDates.start
         && customDates.end === fulfillmentCustomDates.end
@@ -2019,7 +1945,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                         <DateRangeBadge>{getDateDisplay()}</DateRangeBadge>
                     </h1>
                     <p className="text-muted-foreground">
-                        {t('orders.subtitle') || 'Track sales and purchase orders'} <ModulePageFreshness className="ms-2" />
+                        {t('orders.subtitle') || 'Track sales and purchase orders'} <ModulePageFreshness className="ms-2" tableNames={[activeTab === 'sales' ? 'sales_orders' : 'purchase_orders']} />
                     </p>
                 </div>
                 <div className="flex flex-col sm:flex-row lg:items-center gap-4 self-start lg:self-auto w-full lg:w-auto">
@@ -2093,8 +2019,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             </div>
 
             <div className={cn(
-                'grid gap-4 sm:grid-cols-2',
-                salesAgentCommissionsEnabled ? 'xl:grid-cols-5' : 'xl:grid-cols-4'
+                'grid gap-4 sm:grid-cols-2 xl:grid-cols-4'
             )}>
                 <Card className="rounded-2xl border-border/80 shadow-none">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
@@ -2107,7 +2032,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     </CardHeader>
                     <CardContent className="pt-0">
                         <div className="flex items-center gap-2">
-                            <div className="text-3xl font-black tracking-tight">{summaryOrders.length}</div>
+                            <div className="text-3xl font-black tracking-tight">{summaryTotalCount.toLocaleString()}</div>
                             {totalOrdersTrend !== null ? (
                                 <span className={cn(
                                     'rounded-full px-2 py-1 text-xs font-bold',
@@ -2120,62 +2045,12 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             ) : null}
                         </div>
                         <p className="mt-1.5 text-xs text-muted-foreground">
-                            {summaryOrders.length} {activeTab === 'sales'
+                            {summaryTotalCount.toLocaleString()} {activeTab === 'sales'
                                 ? t('orders.summary.sales', { defaultValue: 'sales' })
                                 : t('orders.summary.purchase', { defaultValue: 'purchase' })}
                         </p>
                     </CardContent>
                 </Card>
-
-                {salesAgentCommissionsEnabled ? (
-                    <Card className="rounded-2xl border-violet-500/20 bg-violet-500/[0.025] shadow-none">
-                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                            <CardTitle className="text-sm font-semibold text-muted-foreground">
-                                {t('orders.summary.agentCommissionTotal')}
-                            </CardTitle>
-                            <span className="rounded-xl bg-violet-500/10 p-2 text-violet-700 dark:text-violet-300">
-                                <HandCoins className="h-4 w-4" />
-                            </span>
-                        </CardHeader>
-                        <CardContent className="pt-0">
-                            <TooltipProvider delayDuration={300}>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <div className="cursor-help">
-                                            {productCommissionValueEntries.length > 0 ? productCommissionValueEntries.map((entry, index) => (
-                                                <div
-                                                    key={entry.currency}
-                                                    className={cn(
-                                                        'font-black leading-tight tracking-tight',
-                                                        index === 0 ? 'text-3xl' : 'mt-1 text-base text-muted-foreground'
-                                                    )}
-                                                >
-                                                    {entry.unavailableConversion
-                                                        ? '—'
-                                                        : formatCurrency(entry.total, entry.currency, features.iqd_display_preference)}
-                                                </div>
-                                            )) : (
-                                                <div className="text-3xl font-black tracking-tight">
-                                                    {formatCurrency(0, workspaceCurrency, features.iqd_display_preference)}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="bottom" align="start" className="space-y-1 p-3">
-                                        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                                            {t('orders.summary.totalIn', { currency: workspaceCurrency.toUpperCase() })}
-                                        </div>
-                                        <div className="text-base font-black">
-                                            {productCommissionValueInWorkspaceCurrency === null
-                                                ? '—'
-                                                : formatCurrency(productCommissionValueInWorkspaceCurrency, workspaceCurrency, features.iqd_display_preference)}
-                                        </div>
-                                    </TooltipContent>
-                                </Tooltip>
-                            </TooltipProvider>
-                        </CardContent>
-                    </Card>
-                ) : null}
 
                 <Card className="rounded-2xl border-border/80 shadow-none">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
@@ -2328,7 +2203,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                         <div className="flex flex-wrap items-center gap-3">
                                             <AppPagination
                                                 currentPage={paginatedOrders.currentPage}
-                                                totalCount={summaryOrders.length}
+                                                totalCount={summaryTotalCount}
                                                 pageSize={pagination.pageSize}
                                                 pageSizeOptions={[...ORDERS_PAGE_SIZE_OPTIONS]}
                                                 onPageChange={(page) => setPagination((current) => setOrdersPage(current, page))}
@@ -2345,23 +2220,22 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                         <Button
                                             variant="outline"
                                             allowViewer={true}
-                                            onClick={() => setModuleWideAuditOpen(true)}
+                                            onClick={() => void handleOpenModuleWideAudit()}
+                                            disabled={isLoadingFullOrderActionData || ordersPage.isLoading}
                                             className="gap-2 whitespace-nowrap rounded-xl"
                                         >
-                                            <ClipboardCheck className="h-4 w-4" aria-hidden="true" />
-                                            {t('moduleWideIntegrityAudit.open')}
+                                            {isLoadingFullOrderActionData ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ClipboardCheck className="h-4 w-4" aria-hidden="true" />}
+                                            {isLoadingFullOrderActionData ? t('common.loading', { defaultValue: 'Loading...' }) : t('moduleWideIntegrityAudit.open')}
                                         </Button>
                                       </UiAccessGate>
                                     )}
-                                    {(activeTab === 'sales' ? archivedSalesOrders : archivedPurchaseOrders).length > 0 && (
-                                        <Button variant="outline" allowViewer={true} onClick={() => setArchivesOpen(true)} className="gap-2 rounded-xl">
-                                            <Archive className="h-4 w-4" />
-                                            {t('orders.archive.open')}
-                                        </Button>
-                                    )}
-                                    <Button variant="outline" allowViewer={true} onClick={() => setShowPrintPreview(true)} className="gap-2 rounded-xl">
-                                        <Printer className="h-4 w-4" />
-                                        {t('common.print') || 'Print'}
+                                    <Button variant="outline" allowViewer={true} onClick={() => setArchivesOpen(true)} className="gap-2 rounded-xl">
+                                        <Archive className="h-4 w-4" />
+                                        {t('orders.archive.open')}
+                                    </Button>
+                                    <Button variant="outline" allowViewer={true} onClick={() => void handleOpenOrderPrint()} disabled={isLoadingFullOrderActionData || ordersPage.isLoading} className="gap-2 rounded-xl">
+                                        {isLoadingFullOrderActionData ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+                                        {isLoadingFullOrderActionData ? t('common.loading', { defaultValue: 'Loading...' }) : (t('common.print') || 'Print')}
                                     </Button>
                                 </div>
                             </div>
@@ -2394,7 +2268,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                         onValueChange={setStatusFilter}
                                     />
 
-                                    {activeTab === 'sales' && hasEcommerceOrdersForCreatedDate && (
+                                    {activeTab === 'sales' && (
                                         <FilterDropdown
                                             dir={pageDirection}
                                             value={ecommerceFilter}
@@ -3130,18 +3004,38 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
 
             <AppDialog open={archivesOpen} onOpenChange={setArchivesOpen}>
                 <AppDialogContent className="max-w-4xl">
-                    <AppDialogHeader>
+                    <AppDialogHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <AppDialogTitle className="flex items-center gap-2">
                             <Archive className="h-5 w-5 text-primary" />
                             {activeTab === 'sales' ? t('orders.archive.salesTitle') : t('orders.archive.purchaseTitle')}
                         </AppDialogTitle>
+                        {archivedOrdersPage.totalCount > 0 ? (
+                            <AppPagination
+                                currentPage={archivePagination.currentPage}
+                                totalCount={archivedOrdersPage.totalCount}
+                                pageSize={archivePagination.pageSize}
+                                pageSizeOptions={[...ORDERS_PAGE_SIZE_OPTIONS]}
+                                onPageChange={(page) => setArchivePagination((current) => ({ ...current, currentPage: page }))}
+                                onPageSizeChange={(pageSize) => setArchivePagination({ currentPage: 1, pageSize })}
+                                className="w-auto"
+                            />
+                        ) : null}
                     </AppDialogHeader>
                     <AppDialogBody className="space-y-3">
-                        {(activeTab === 'sales' ? archivedSalesOrders : archivedPurchaseOrders).length === 0 ? (
+                        {archivedOrdersPage.isLoading ? (
+                            <div className="flex min-h-60 items-center justify-center gap-2 text-center text-muted-foreground" aria-live="polite">
+                                <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+                                {t('common.loading', { defaultValue: 'Loading...' })}
+                            </div>
+                        ) : archivedOrdersPage.error ? (
+                            <div className="rounded-xl border border-dashed px-4 py-10 text-center text-sm text-destructive">
+                                {t('orders.listLoadError')}
+                            </div>
+                        ) : archivedOrdersPage.rows.length === 0 ? (
                             <div className="rounded-xl border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
                                 {t('orders.archive.empty')}
                             </div>
-                        ) : (activeTab === 'sales' ? archivedSalesOrders : archivedPurchaseOrders).map((order) => {
+                        ) : archivedOrdersPage.rows.map((order) => {
                             const isReturned = activeTab === 'sales'
                                 ? (order as SalesOrder).returnStatus === 'full' || order.status === 'returned'
                                 : order.status === 'returned'
@@ -3187,9 +3081,9 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             </AppDialog>
 
             <PrintFlow
-                isOpen={showPrintPreview}
-                onClose={() => setShowPrintPreview(false)}
-                onConfirm={() => setShowPrintPreview(false)}
+                isOpen={showPrintPreview && ordersForPrint !== null}
+                onClose={() => { setShowPrintPreview(false); setOrdersForPrint(null) }}
+                onConfirm={() => { setShowPrintPreview(false); setOrdersForPrint(null) }}
                 title={activeTab === 'sales' ? (t('orders.tabs.sales') || 'Sales Orders') : (t('orders.tabs.purchase') || 'Purchase Orders')}
                 module="orders"
                 features={features}
@@ -3197,7 +3091,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 originId={getReportOriginId(user?.workspaceId, 'order_report', `orders:${activeTab}`)}
                 invoiceData={{
                     invoiceid: `ORDERS-${activeTab.toUpperCase()}`,
-                    totalAmount: (activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders).reduce((s, o) => s + o.total, 0),
+                    totalAmount: (ordersForPrint || []).reduce((sum, order) => sum + order.total, 0),
                     settlementCurrency: features.default_currency || 'usd',
                     origin: 'order_report' as const,
                     createdByName: user?.name || 'Unknown',
@@ -3206,7 +3100,9 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 }}
                 pdfBuilder={async ({ format }: { format: PrintFormat; effectiveId: string }) => {
                     const printLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
-                    const orders = activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders
+                    const orders = ordersForPrint || []
+                    const printSalesOrders = activeTab === 'sales' ? orders as SalesOrder[] : []
+                    const printPurchaseOrders = activeTab === 'purchase' ? orders as PurchaseOrder[] : []
                     const metrics = {
                         totalOrders: orders.length,
                         totalValue: orders.reduce((s, o) => s + o.total, 0),
@@ -3218,8 +3114,8 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             <OrderListPrintTemplate
                                 workspaceName={workspaceName}
                                 printLang={printLang}
-                                salesOrders={activeTab === 'sales' ? filteredSalesOrders : []}
-                                purchaseOrders={activeTab === 'purchase' ? filteredPurchaseOrders : []}
+                                salesOrders={printSalesOrders}
+                                purchaseOrders={printPurchaseOrders}
                                 activeTab={activeTab}
                                 iqdPreference={features.iqd_display_preference}
                                 metrics={metrics}
@@ -3232,7 +3128,9 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                 }}
                 printTemplate={() => {
                     const printLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
-                    const orders = activeTab === 'sales' ? filteredSalesOrders : filteredPurchaseOrders
+                    const orders = ordersForPrint || []
+                    const printSalesOrders = activeTab === 'sales' ? orders as SalesOrder[] : []
+                    const printPurchaseOrders = activeTab === 'purchase' ? orders as PurchaseOrder[] : []
                     const metrics = {
                         totalOrders: orders.length,
                         totalValue: orders.reduce((s, o) => s + o.total, 0),
@@ -3243,8 +3141,8 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                         <OrderListPrintTemplate
                             workspaceName={workspaceName}
                             printLang={printLang}
-                            salesOrders={activeTab === 'sales' ? filteredSalesOrders : []}
-                            purchaseOrders={activeTab === 'purchase' ? filteredPurchaseOrders : []}
+                            salesOrders={printSalesOrders}
+                            purchaseOrders={printPurchaseOrders}
                             activeTab={activeTab}
                             iqdPreference={features.iqd_display_preference}
                             metrics={metrics}
@@ -3256,8 +3154,11 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             {activeTab === 'sales' && !isMobile() && (
                 <ModuleWideIntegrityAuditDialog
                     open={moduleWideAuditOpen}
-                    onOpenChange={setModuleWideAuditOpen}
-                    transactions={filteredSalesOrders}
+                    onOpenChange={(open) => {
+                        setModuleWideAuditOpen(open)
+                        if (!open) setOrdersForAudit(null)
+                    }}
+                    transactions={(ordersForAudit || []).filter((order): order is SalesOrder => 'customerName' in order)}
                     adapter={moduleWideAuditAdapter}
                     transactionLabel={t('orders.tabs.sales')}
                 />
@@ -3265,8 +3166,11 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             {activeTab === 'purchase' && !isMobile() && (
                 <ModuleWideIntegrityAuditDialog
                     open={moduleWideAuditOpen}
-                    onOpenChange={setModuleWideAuditOpen}
-                    transactions={filteredPurchaseOrders.filter(isPurchaseOrderIntegrityAuditEligible)}
+                    onOpenChange={(open) => {
+                        setModuleWideAuditOpen(open)
+                        if (!open) setOrdersForAudit(null)
+                    }}
+                    transactions={(ordersForAudit || []).filter((order): order is PurchaseOrder => 'supplierName' in order).filter(isPurchaseOrderIntegrityAuditEligible)}
                     adapter={purchaseModuleWideAuditAdapter}
                     transactionLabel={t('orders.tabs.purchase')}
                     scopeMessageKey="moduleWideIntegrityAudit.purchaseScope"
@@ -3349,7 +3253,7 @@ export function Orders() {
 
     const initialTab: OrderTab = salesTabMatch ? 'sales' : purchaseTabMatch ? 'purchase' : 'sales'
     return (
-        <CommissionFeatureBoundary enabled={hasSalesAgentCommissionAccess} workspaceId={workspaceId}>
+        <CommissionFeatureBoundary enabled={hasSalesAgentCommissionAccess} workspaceId={workspaceId} includeAssignments={false}>
             <OrdersListView workspaceId={workspaceId} initialTab={initialTab} />
         </CommissionFeatureBoundary>
     )

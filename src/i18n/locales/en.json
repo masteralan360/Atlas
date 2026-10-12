@@ -3741,7 +3741,7 @@
     "summary": {
       "totalOrders": "Total orders",
       "orderValue": "Order value",
-      "agentCommissionTotal": "Total agent commission",
+      "agentCommissionTotal": "Agent commission estimate",
       "pendingFulfillment": "Pending fulfillment",
       "outstandingPayments": "Outstanding payments",
       "sales": "sales",
@@ -3749,7 +3749,8 @@
       "unpaid": "unpaid",
       "partiallyPaid": "partially paid",
       "noOutstanding": "No outstanding payments",
-      "totalIn": "Total in {{currency}}"
+      "totalIn": "Total in {{currency}}",
+      "filteredOrdersEstimate": "Estimate across all matching orders"
     },
     "view": {
       "table": "Orders Details",
@@ -3759,6 +3760,7 @@
     "searchPlaceholder": "Search orders...",
     "noCustomers": "Add customers before creating orders.",
     "listTitle": "Order List",
+      "listLoadError": "Could not load orders. Please try again.",
     "lockTitle": "Lock Order?",
     "lockDescription": "Locking this order will prevent any changes to its payment status. This action cannot be undone.",
     "lockedSuccess": "Order locked successfully",

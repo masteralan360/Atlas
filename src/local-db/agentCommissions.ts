@@ -10,7 +10,7 @@ import { normalizeOrderAdjustments } from "@/lib/orderAdjustments";
 import { getAppliedCurrencyConversion } from "@/lib/orderCurrency";
 import { getSupabaseClientForTable } from "@/lib/supabaseSchema";
 import { runSupabaseAction } from "@/lib/supabaseRequest";
-import { generateId, toSnakeCase } from "@/lib/utils";
+import { generateId, toCamelCase, toSnakeCase } from "@/lib/utils";
 import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 import { readWorkspaceCache } from "@/workspace/workspaceCache";
 
@@ -680,6 +680,74 @@ export function useSalesOrderAgentAssignments(workspaceId?: string) {
     rows,
     (left, right) => right.assignedAt.localeCompare(left.assignedAt),
   ), [rows]);
+}
+
+/** Load assignment rows for only the order IDs currently visible in an order list. */
+export function useSalesOrderAgentAssignmentsForOrders(
+  workspaceId: string | undefined,
+  orderIds: readonly string[],
+) {
+  const online = useNetworkStatus();
+  const featureEnabled = Boolean(workspaceId && readWorkspaceCache<{
+    sales_agent_commissions?: boolean;
+  }>(workspaceId)?.features.sales_agent_commissions);
+  const orderIdsKey = useMemo(
+    () => JSON.stringify([...new Set(orderIds)].sort()),
+    [orderIds],
+  );
+  const stableOrderIds = useMemo(() => JSON.parse(orderIdsKey) as string[], [orderIdsKey]);
+  const rows = useLiveQuery<SalesOrderAgentAssignment[]>(
+    async () => {
+      if (!workspaceId || !featureEnabled || stableOrderIds.length === 0) return [];
+      const keys = stableOrderIds.map((orderId) => [workspaceId, orderId]);
+      return db.sales_order_agent_assignments
+        .where("[workspaceId+orderId]")
+        .anyOf(keys)
+        .and((row) => !row.isDeleted)
+        .toArray();
+    },
+    [featureEnabled, orderIdsKey, workspaceId],
+  );
+
+  useEffect(() => {
+    if (!workspaceId || !featureEnabled || !online || !isOnline(workspaceId)
+      || isLocalWorkspaceMode(workspaceId) || stableOrderIds.length === 0) return;
+
+    let cancelled = false;
+    void runSupabaseAction("salesOrderAgentAssignments.page", () => getSupabaseClientForTable(ASSIGNMENT_TABLE)
+      .from(ASSIGNMENT_TABLE)
+      .select("*")
+      .eq("workspace_id", workspaceId)
+      .in("order_id", stableOrderIds))
+      .then(async ({ data, error }) => {
+        if (cancelled || error || !Array.isArray(data)) return;
+        const fetchedAt = new Date().toISOString();
+        const remoteRows = data.map((value) => ({
+          ...toCamelCase(value as Record<string, unknown>),
+          syncStatus: "synced",
+          lastSyncedAt: fetchedAt,
+        })) as unknown as SalesOrderAgentAssignment[];
+        if (remoteRows.length === 0) return;
+        const existingRows = await db.sales_order_agent_assignments.bulkGet(remoteRows.map((row) => row.id));
+        if (cancelled) return;
+        const cacheRows = remoteRows.filter((_, index) => {
+          const existing = existingRows[index];
+          return !existing || (existing.syncStatus !== "pending" && existing.syncStatus !== "conflict");
+        });
+        if (cacheRows.length > 0) await db.sales_order_agent_assignments.bulkPut(cacheRows);
+      })
+      .catch((error) => {
+        if (!cancelled) console.error("[Sales Agent Commissions] Failed to load page assignments:", error);
+      });
+
+    return () => { cancelled = true; };
+  }, [featureEnabled, online, orderIdsKey, stableOrderIds, workspaceId]);
+
+  const liveRows = useLiveCollection(rows, Boolean(workspaceId && featureEnabled) && rows === undefined);
+  return useMemo(() => sortLiveCollection(liveRows,
+    (left, right) => right.assignedAt.localeCompare(left.assignedAt)
+      || left.agentId.localeCompare(right.agentId),
+  ), [liveRows]);
 }
 
 export function useAgentCommissionEntries(workspaceId?: string) {

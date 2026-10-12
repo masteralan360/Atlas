@@ -262,11 +262,12 @@ function useRows<T extends ProductCommissionEntity>(
 }
 
 export function useProductCommissionRules(workspaceId?: string) {
-    return useRows<ProductCommissionRule>(RULE_TABLE, workspaceId)
+    const rules = useRows<ProductCommissionRule>(RULE_TABLE, workspaceId)
+    return useMemo(() => sortLiveCollection(rules,
         // Older local-cache rows can predate the effective-dating fields. Keep
         // them readable until the authoritative CRM pull replaces them.
-        .sort((left, right) => String(right.effectiveFrom || right.updatedAt || right.createdAt || '')
-            .localeCompare(String(left.effectiveFrom || left.updatedAt || left.createdAt || '')))
+        (left, right) => String(right.effectiveFrom || right.updatedAt || right.createdAt || '')
+            .localeCompare(String(left.effectiveFrom || left.updatedAt || left.createdAt || ''))), [rules])
 }
 
 export function useProductCommissionRuleAgents(workspaceId?: string) {
