@@ -751,6 +751,9 @@ export function useProductSelectionAccess(
 ) {
   const online = useNetworkStatus()
   const storageAccess = useStorageAccess(workspaceId, userId)
+  const needsInventoryRows = storageAccess.isReady !== false
+    && !storageAccess.isAdmin
+    && storageAccess.excludedStorageIds.size > 0
   const candidateProductIdsKey = options.candidateProductIds === undefined
     ? null
     : [...new Set(options.candidateProductIds.filter(Boolean))].sort().join('|')
@@ -774,6 +777,7 @@ export function useProductSelectionAccess(
   const inventoryRows = useLiveQuery<Inventory[]>(
     () => {
       if (!workspaceId || options.storageId === null) return []
+      if (!needsInventoryRows) return []
       if (candidateProductIdsKey !== null) {
         if (candidateProductIds.length === 0) return []
         return db.inventory
@@ -787,7 +791,7 @@ export function useProductSelectionAccess(
         : db.inventory.where('workspaceId').equals(workspaceId)
       return query.and((row) => !row.isDeleted).toArray()
     },
-    [candidateProductIdsKey, candidateProductIds, options.storageId, storageId, workspaceId]
+    [candidateProductIdsKey, candidateProductIds, needsInventoryRows, options.storageId, storageId, workspaceId]
   )
 
   useEffect(() => {
@@ -821,7 +825,10 @@ export function useProductSelectionAccess(
     [excludedCategoryIds, inventoryRows, storageAccess]
   )
 
-  const inventoryLoading = candidateProductIdsKey !== null && candidateProductIds.length > 0 && inventoryRows === undefined
+  const inventoryLoading = needsInventoryRows
+    && candidateProductIdsKey !== null
+    && candidateProductIds.length > 0
+    && inventoryRows === undefined
   return useMemo(() => ({
     excludedCategoryIds,
     storageAccess,
@@ -1699,9 +1706,15 @@ async function readLocalBusinessPartnerAutocompleteSuggestions(
       viewer,
     )
     : null
-  const directMatches = await db.business_partners
-    .where('[workspaceId+partnerName+id]')
-    .between([workspaceId, '', ''], [workspaceId, '\uffff', '\uffff'])
+  const directMatchesQuery = pendingOnly
+    ? db.business_partners
+      .where('syncStatus')
+      .anyOf(['pending', 'conflict'])
+      .filter((candidate) => candidate.workspaceId === workspaceId)
+    : db.business_partners
+      .where('[workspaceId+partnerName+id]')
+      .between([workspaceId, '', ''], [workspaceId, '\uffff', '\uffff'])
+  const directMatches = await directMatchesQuery
     .filter((candidate) => {
       if (!directoryPartnerMatches(candidate, options)) return false
       if (pendingOnly && candidate.syncStatus !== 'pending' && candidate.syncStatus !== 'conflict') return false
@@ -1714,10 +1727,14 @@ async function readLocalBusinessPartnerAutocompleteSuggestions(
     })
     .limit(limit)
     .toArray()
+  const agentMatchesQuery = pendingOnly
+    ? db.agents
+      .where('syncStatus')
+      .anyOf(['pending', 'conflict'])
+      .filter((agent) => agent.workspaceId === workspaceId)
+    : db.agents.where('workspaceId').equals(workspaceId)
   const agentMatches = options.includeAgentRoles
-    ? await db.agents
-      .where('workspaceId')
-      .equals(workspaceId)
+    ? await agentMatchesQuery
       .filter((agent) => !agent.isDeleted
         && (!pendingOnly || agent.syncStatus === 'pending' || agent.syncStatus === 'conflict')
         && (!candidatePartnerIds || candidatePartnerIds.has(agent.businessPartnerId) || candidatePartnerIds.has(agent.id))
@@ -1805,8 +1822,8 @@ export async function searchBusinessPartnerAutocompleteSuggestions(
   options: PartnerFilterOptions & { includeEcommerce?: boolean },
   viewer: BusinessPartnerGroupPrivacyViewer,
   constraints: BusinessPartnerAutocompleteSearchConstraints = {},
+  publishPartialResults?: (items: BusinessPartner[], complete?: boolean) => void,
 ) {
-  const pageSize = 100
   const allowedPartnerIds = constraints.allowedPartnerIds === undefined
     ? null
     : new Set(constraints.allowedPartnerIds.filter(Boolean))
@@ -1815,6 +1832,15 @@ export async function searchBusinessPartnerAutocompleteSuggestions(
     ? null
     : new Set(constraints.eligibleAgentPartnerIds.filter(Boolean))
   if (allowedPartnerIds?.size === 0) return []
+  const hasVisibilityConstraints = viewer.featureEnabled && viewer.role !== 'admin'
+  const hasEligibleAgentConstraints = Boolean(eligibleAgentPartnerIds?.size)
+  const shouldPageForEligibleMatches = Boolean(
+    allowedPartnerIds
+    || excludedPartnerIds.size > 0
+    || hasEligibleAgentConstraints
+    || hasVisibilityConstraints
+  )
+  const pageSize = shouldPageForEligibleMatches ? 100 : 8
   const request: BusinessPartnerDirectoryPageOptions = {
     ...options,
     search,
@@ -1840,40 +1866,55 @@ export async function searchBusinessPartnerAutocompleteSuggestions(
     )
     const remoteItems: BusinessPartner[] = []
     const remoteItemIds = new Set<string>()
-    const shouldPageForEligibleMatches = Boolean(allowedPartnerIds || excludedPartnerIds.size > 0)
-    for (let page = 1; page <= (shouldPageForEligibleMatches ? 10 : 1); page += 1) {
-      const remotePage = await fetchRemoteBusinessPartnerDirectoryPage(
+    const localPendingItemsPromise = readLocalBusinessPartnerAutocompleteSuggestions(
         workspaceId,
-        { ...request, page },
-        false,
-        false,
+        search,
+        request,
+        viewer,
+        pageSize,
+        true,
+        visiblePartnerIds,
+        allowedPartnerIds,
+        excludedPartnerIds,
+        eligibleAgentPartnerIds,
+      ).then(
+        (items) => ({ items, error: null as unknown }),
+        (error: unknown) => ({ items: [] as BusinessPartner[], error }),
       )
-      for (const partner of remotePage.items) {
-        if (remoteItemIds.has(partner.id)
-          || (allowedPartnerIds && !allowedPartnerIds.has(partner.id))
-          || excludedPartnerIds.has(partner.id)
-          || (partner.role === 'agent' && eligibleAgentPartnerIds && !eligibleAgentPartnerIds.has(partner.id))
-          || (visiblePartnerIds && !visiblePartnerIds.has(partner.id))) continue
-        remoteItemIds.add(partner.id)
-        remoteItems.push(partner)
-      }
-      if (!shouldPageForEligibleMatches
-        || remoteItems.length >= 8
-        || remotePage.items.length < pageSize) break
+    const remoteItemsPromise = (async () => {
+        for (let page = 1; page <= (shouldPageForEligibleMatches ? 10 : 1); page += 1) {
+          const remotePage = await fetchRemoteBusinessPartnerDirectoryPage(
+            workspaceId,
+            { ...request, page },
+            false,
+            false,
+          )
+          for (const partner of remotePage.items) {
+            if (remoteItemIds.has(partner.id)
+              || (allowedPartnerIds && !allowedPartnerIds.has(partner.id))
+              || excludedPartnerIds.has(partner.id)
+              || (partner.role === 'agent' && eligibleAgentPartnerIds && !eligibleAgentPartnerIds.has(partner.id))
+              || (visiblePartnerIds && !visiblePartnerIds.has(partner.id))) continue
+            remoteItemIds.add(partner.id)
+            remoteItems.push(partner)
+          }
+          if (!shouldPageForEligibleMatches
+            || remoteItems.length >= 8
+            || remotePage.items.length < pageSize) break
+        }
+        return [...remoteItems]
+      })()
+    const remoteResults = (await remoteItemsPromise)
+      .sort((left, right) => left.partnerName.localeCompare(right.partnerName) || left.id.localeCompare(right.id))
+      .slice(0, pageSize)
+    publishPartialResults?.(remoteResults, remoteResults.length > 0)
+
+    const localPendingResult = await localPendingItemsPromise
+    if (localPendingResult.error && remoteResults.length === 0) throw localPendingResult.error
+    if (localPendingResult.error) {
+      console.warn('[BusinessPartners] Local pending autocomplete matches could not be loaded:', localPendingResult.error)
     }
-    const localPendingItems = await readLocalBusinessPartnerAutocompleteSuggestions(
-      workspaceId,
-      search,
-      request,
-      viewer,
-      pageSize,
-      true,
-      visiblePartnerIds,
-      allowedPartnerIds,
-      excludedPartnerIds,
-      eligibleAgentPartnerIds,
-    )
-    return [...new Map([...remoteItems, ...localPendingItems].map((partner) => [partner.id, partner])).values()]
+    return [...new Map([...remoteItems, ...localPendingResult.items].map((partner) => [partner.id, partner])).values()]
       .sort((left, right) => left.partnerName.localeCompare(right.partnerName) || left.id.localeCompare(right.id))
       .slice(0, pageSize)
   }

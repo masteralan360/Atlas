@@ -90,12 +90,19 @@ export function ProductAutocompleteInput({
         () => excludedStorageIdsKey ? excludedStorageIdsKey.split('|') : [],
         [excludedStorageIdsKey]
     )
-    const searchProducts = useCallback(async (search: string) => {
+    const searchProducts = useCallback(async (
+        search: string,
+        publishPartialResults?: (items: ProductAutocompleteSuggestion[], complete?: boolean) => void,
+    ) => {
         const matches = await searchProductAutocompleteSuggestions(
             user?.workspaceId || '',
             search,
             [...selectionAccess.excludedCategoryIds],
             excludedStorageIds,
+            (items, complete) => {
+                setCandidateProductIds(items.map((product) => product.id))
+                publishPartialResults?.(items, complete)
+            },
         )
         setCandidateProductIds(matches.map((product) => product.id))
         return matches

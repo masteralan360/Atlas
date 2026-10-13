@@ -119,8 +119,18 @@ export function PartnerAutocompleteInput({
         includeAgentRoles,
         includeEcommerce: true,
     }), [includeAgentRoles, includeRealEstateRoles, normalizedRoles])
-    const searchPartners = useCallback((search: string) => (
-        searchBusinessPartnerAutocompleteSuggestions(workspaceId, search, searchOptions, viewer, searchConstraints)
+    const searchPartners = useCallback((
+        search: string,
+        publishPartialResults?: (items: BusinessPartner[], complete?: boolean) => void,
+    ) => (
+        searchBusinessPartnerAutocompleteSuggestions(
+            workspaceId,
+            search,
+            searchOptions,
+            viewer,
+            searchConstraints,
+            publishPartialResults,
+        )
     ), [searchConstraints, searchOptions, viewer, workspaceId])
     const remoteSearch = useDebouncedAutocompleteSearch(
         query,

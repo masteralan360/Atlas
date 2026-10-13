@@ -113,20 +113,39 @@ async function readLocalProductAutocompleteSuggestions(
   const matchesSearch = (product: Product) => !product.isDeleted
     && (!pendingOnly || product.syncStatus === 'pending' || product.syncStatus === 'conflict')
     && !excludedCategories.has(product.categoryId || '')
-  const nameMatches = await db.products
-    .where('[workspaceId+name+id]')
-    .between([workspaceId, '', ''], [workspaceId, '\uffff', '\uffff'])
-    .filter((product) => matchesSearch(product)
-      && String(product.name ?? '').toLocaleLowerCase().includes(normalizedSearch))
-    .limit(limit)
-    .toArray()
-  const skuMatches = await db.products
-    .where('[workspaceId+sku+id]')
-    .between([workspaceId, '', ''], [workspaceId, '\uffff', '\uffff'])
-    .filter((product) => matchesSearch(product)
-      && String(product.sku ?? '').toLocaleLowerCase().includes(normalizedSearch))
-    .limit(limit)
-    .toArray()
+  const nameMatchesPromise = pendingOnly
+    ? db.products
+      .where('syncStatus')
+      .anyOf(['pending', 'conflict'])
+      .filter((product) => product.workspaceId === workspaceId
+        && matchesSearch(product)
+        && String(product.name ?? '').toLocaleLowerCase().includes(normalizedSearch))
+      .limit(limit)
+      .toArray()
+    : db.products
+      .where('[workspaceId+name+id]')
+      .between([workspaceId, '', ''], [workspaceId, '\uffff', '\uffff'])
+      .filter((product) => matchesSearch(product)
+        && String(product.name ?? '').toLocaleLowerCase().includes(normalizedSearch))
+      .limit(limit)
+      .toArray()
+  const skuMatchesPromise = pendingOnly
+    ? db.products
+      .where('syncStatus')
+      .anyOf(['pending', 'conflict'])
+      .filter((product) => product.workspaceId === workspaceId
+        && matchesSearch(product)
+        && String(product.sku ?? '').toLocaleLowerCase().includes(normalizedSearch))
+      .limit(limit)
+      .toArray()
+    : db.products
+      .where('[workspaceId+sku+id]')
+      .between([workspaceId, '', ''], [workspaceId, '\uffff', '\uffff'])
+      .filter((product) => matchesSearch(product)
+        && String(product.sku ?? '').toLocaleLowerCase().includes(normalizedSearch))
+      .limit(limit)
+      .toArray()
+  const [nameMatches, skuMatches] = await Promise.all([nameMatchesPromise, skuMatchesPromise])
   const productsById = new Map([...nameMatches, ...skuMatches].map((product) => [product.id, product]))
   const products = [...productsById.values()]
     .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
@@ -195,6 +214,7 @@ export async function searchProductAutocompleteSuggestions(
   search: string,
   excludedCategoryIds: readonly string[],
   excludedStorageIds: readonly string[],
+  publishPartialResults?: (items: ProductAutocompleteSuggestion[], complete?: boolean) => void,
 ): Promise<ProductAutocompleteSuggestion[]> {
   const normalizedSearch = search.trim().toLocaleLowerCase()
   if (!workspaceId || normalizedSearch.length < 2) return []
@@ -234,17 +254,25 @@ export async function searchProductAutocompleteSuggestions(
       const cached = cachedProducts[index]
       return cached?.syncStatus !== 'pending' && cached?.syncStatus !== 'conflict'
     })
-    if (productsToCache.length) await db.products.bulkPut(productsToCache)
-
-    if (inventoryRows.length) {
+    const cacheProductsPromise = productsToCache.length
+      ? db.products.bulkPut(productsToCache)
+      : Promise.resolve()
+    const localPendingProductsPromise = readLocalProductAutocompleteSuggestions(
+      workspaceId,
+      normalizedSearch,
+      excludedCategoryIds,
+      8,
+      true,
+    )
+    const cacheInventoryPromise = (async () => {
+      if (!inventoryRows.length) return
       const cachedInventory = await db.inventory.bulkGet(inventoryRows.map((row) => row.id))
       const inventoryToCache = inventoryRows.filter((_, index) => {
         const cached = cachedInventory[index]
         return cached?.syncStatus !== 'pending' && cached?.syncStatus !== 'conflict'
       })
       if (inventoryToCache.length) await db.inventory.bulkPut(inventoryToCache)
-    }
-
+    })()
     const normalizedProducts = products.map((product, index) => {
       const cached = cachedProducts[index]
       const candidate = cached?.syncStatus === 'pending' || cached?.syncStatus === 'conflict'
@@ -256,13 +284,13 @@ export async function searchProductAutocompleteSuggestions(
       return stillMatches ? candidate : null
     }).filter((product): product is ProductAutocompleteSuggestion => product !== null)
 
-    const localPendingProducts = await readLocalProductAutocompleteSuggestions(
-      workspaceId,
-      normalizedSearch,
-      excludedCategoryIds,
-      8,
-      true,
-    )
+    await Promise.all([cacheProductsPromise, cacheInventoryPromise])
+    if (normalizedProducts.length > 0) {
+      publishPartialResults?.(normalizedProducts, true)
+    }
+
+    const localPendingProducts = await localPendingProductsPromise
+
     const mergedProducts = [...localPendingProducts]
     const mergedIndexes = new Map(mergedProducts.map((product, index) => [product.id, index]))
     for (const product of normalizedProducts) {

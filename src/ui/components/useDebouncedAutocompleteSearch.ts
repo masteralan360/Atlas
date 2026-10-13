@@ -11,7 +11,7 @@ interface SearchState<T> {
 export function useDebouncedAutocompleteSearch<T>(
   query: string,
   enabled: boolean,
-  search: (query: string) => Promise<T[]>,
+  search: (query: string, publishPartialResults?: (items: T[], complete?: boolean) => void) => Promise<T[]>,
   delay = 250,
   minQueryLength = 2,
 ) {
@@ -32,7 +32,12 @@ export function useDebouncedAutocompleteSearch<T>(
 
     setState({ query: normalizedQuery, items: [], isLoading: true, error: null })
     const timeout = window.setTimeout(() => {
-      void search(normalizedQuery)
+      const publishPartialResults = (items: T[], complete = false) => {
+        if (active) {
+          setState({ query: normalizedQuery, items, isLoading: !complete, error: null })
+        }
+      }
+      void search(normalizedQuery, publishPartialResults)
         .then((items) => {
           if (active) setState({ query: normalizedQuery, items, isLoading: false, error: null })
         })

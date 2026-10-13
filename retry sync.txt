@@ -6,6 +6,10 @@ Allow inventory movement on offline mode
 
 Order Advancement slow
 
+Atlas Update
+
+Add by unit in adjustment
+
 #
 DatePicker Entry Input
 Days of month for visits
