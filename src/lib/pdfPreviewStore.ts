@@ -22,35 +22,3 @@ export function getPDFPreviewSource(): PDFPreviewSource | null {
 export function clearPDFPreviewSource() {
     pdfPreviewSource = null
 }
-
-export type PendingPDFPreview = {
-    url: string
-    title: string
-    kind?: 'voucher'
-}
-
-let pendingPDFPreview: PendingPDFPreview | null = null
-const pendingPDFPreviewListeners = new Set<() => void>()
-
-function notifyPendingPDFPreviewListeners() {
-    pendingPDFPreviewListeners.forEach((listener) => listener())
-}
-
-export function subscribeToPendingPDFPreview(listener: () => void): () => void {
-    pendingPDFPreviewListeners.add(listener)
-    return () => pendingPDFPreviewListeners.delete(listener)
-}
-
-export function setPendingPDFPreview(preview: PendingPDFPreview) {
-    pendingPDFPreview = preview
-    notifyPendingPDFPreviewListeners()
-}
-
-export function getPendingPDFPreview(): PendingPDFPreview | null {
-    return pendingPDFPreview
-}
-
-export function clearPendingPDFPreview() {
-    pendingPDFPreview = null
-    notifyPendingPDFPreviewListeners()
-}

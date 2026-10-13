@@ -6,20 +6,10 @@ import {
     getPDFPreviewSource
 } from '@/lib/pdfPreviewStore'
 import { resolvePdfBytes } from '@/lib/pdfViewerBytes'
-import { downloadPdfBlob } from '@/services/pdfGenerator'
+import { savePDFPreviewBlob, sharePDFPreviewBlob } from '@/services/pdfPreviewActions'
 import { printPdfBlob } from '@/services/pdfPrintService'
 import { PdfJsViewer } from '@/ui/components/PdfJsViewer'
 import { useToast } from '@/ui/components/use-toast'
-
-function getPDFPreviewFileName(title: string) {
-    const safeTitle = title
-        .trim()
-        .replace(/[<>:"/\\|?*]|\p{Cc}/gu, '-')
-        .replace(/\s+/g, ' ')
-        .slice(0, 120)
-
-    return `${safeTitle || 'pdf-preview'}.pdf`
-}
 
 export function PDFPreviewPage() {
     const { t } = useTranslation()
@@ -49,7 +39,7 @@ export function PDFPreviewPage() {
 
         setIsWorking(true)
         try {
-            downloadPdfBlob(await getPdfBlob(), getPDFPreviewFileName(title))
+            savePDFPreviewBlob(await getPdfBlob(), title)
         } catch (error) {
             console.error('Failed to save preview PDF:', error)
             toast({
@@ -68,16 +58,8 @@ export function PDFPreviewPage() {
         setIsWorking(true)
         try {
             const blob = await getPdfBlob()
-            const fileName = getPDFPreviewFileName(title)
-            const file = new File([blob], fileName, { type: 'application/pdf' })
-
-            if (navigator.canShare?.({ files: [file] })) {
-                await navigator.share({ title: fileName, files: [file] })
-                return
-            }
-
-            downloadPdfBlob(blob, fileName)
-            toast({
+            const shared = await sharePDFPreviewBlob(blob, title)
+            if (!shared) toast({
                 title: t('pdfPreview.shareUnavailableTitle'),
                 description: t('pdfPreview.shareUnavailableDescription')
             })

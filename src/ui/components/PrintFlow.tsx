@@ -69,7 +69,6 @@ interface PrintFlowProps {
     onCreateReturnTemplate?: () => void
     onPreviewPrint?: (blob: Blob) => Promise<void>
     onPreviewSave?: (blob: Blob) => Promise<string | undefined | void>
-    savedDocumentKind?: 'voucher'
     previewPrintActionLabel?: string
     /** A4 business documents that are independent of the invoice entitlement. */
     allowA4Document?: boolean
@@ -116,7 +115,6 @@ export function PrintFlow({
     onCreateReturnTemplate,
     onPreviewPrint,
     onPreviewSave,
-    savedDocumentKind,
     previewPrintActionLabel,
     allowA4Document = false
 }: PrintFlowProps) {
@@ -339,35 +337,35 @@ export function PrintFlow({
     }, [pdfBuilder, pdfData, printableFeatures, printFormat, effectiveId, workspaceId, workspaceName, translations, printLang, workspaceFooterContacts])
 
     const handleSave = useCallback(async (preGeneratedBlob?: Blob) => {
-        if (isSaving) return
-        if (!hasPdfData) return
-
-        // Barcode labels deliberately never create or update invoice records.
-        if (!isInvoicePrintFormat(printFormat)) {
-            throw new Error('Barcode labels cannot be saved as invoices')
-        }
-        const invoicePrintFormat: InvoicePrintFormat = printFormat
-
+        if (isSaving) throw new Error('Invoice save is already in progress')
         setIsSaving(true)
         try {
+            if (!hasPdfData) throw new Error('Missing PDF data')
+            if (!invoiceData || !workspaceId) throw new Error('Missing invoice data')
+
+            // Barcode labels deliberately never create or update invoice records.
+            if (!isInvoicePrintFormat(printFormat)) {
+                throw new Error('Barcode labels cannot be saved as invoices')
+            }
+            const invoicePrintFormat: InvoicePrintFormat = printFormat
+
             const activeBlob = preGeneratedBlob || await ensureSaveBlob()
             let savedInvoice: Invoice | null = null
 
-            if (invoiceData && workspaceId) {
-                const snapshotData: any = {
-                    ...invoiceData,
-                    sourceId: effectiveId,
-                    createdBy: invoiceData.createdBy || user?.id,
-                    createdByName: invoiceData.createdByName || user?.name,
-                    printFormat: invoicePrintFormat,
-                }
-                if (invoicePrintFormat === 'a4') { snapshotData.pdfBlobA4 = activeBlob }
-                else { snapshotData.pdfBlobReceipt = activeBlob }
-
-                savedInvoice = await saveInvoiceFromSnapshot(workspaceId, snapshotData, effectiveId)
-                const confirmedInvoice = await db.invoices.get(effectiveId)
-                if (confirmedInvoice) savedInvoice = confirmedInvoice
+            const snapshotData: any = {
+                ...invoiceData,
+                sourceId: effectiveId,
+                createdBy: invoiceData.createdBy || user?.id,
+                createdByName: invoiceData.createdByName || user?.name,
+                printFormat: invoicePrintFormat,
             }
+            if (invoicePrintFormat === 'a4') { snapshotData.pdfBlobA4 = activeBlob }
+            else { snapshotData.pdfBlobReceipt = activeBlob }
+
+            savedInvoice = await saveInvoiceFromSnapshot(workspaceId, snapshotData, effectiveId)
+            const confirmedInvoice = await db.invoices.get(effectiveId)
+            if (confirmedInvoice) savedInvoice = confirmedInvoice
+            if (!savedInvoice) throw new Error('Invoice snapshot could not be saved')
 
             if (savedInvoice) {
                 const finalBlob = preGeneratedBlob || (!pdfBuilder && pdfData && printableFeatures
@@ -415,6 +413,7 @@ export function PrintFlow({
                 description: isRetriableWebRequestError(normalized) ? getRetriableActionToast(normalized).description : (t('print.saveErrorDesc') || 'Could not save invoice record.'),
                 variant: 'destructive'
             })
+            throw error
         } finally {
             setIsSaving(false)
         }
@@ -490,7 +489,6 @@ export function PrintFlow({
                     title: previewTitle,
                     onSave: onPreviewSave || (!onPreviewPrint && hasPdfData && (showSaveButton || enableTemplatePreviewSave) ? handleSave : undefined),
                     onPrint: onPreviewPrint,
-                    savedDocumentKind,
                     printActionLabel: previewPrintActionLabel,
                     effectiveId,
                     printFormat,
@@ -565,7 +563,7 @@ export function PrintFlow({
                 variant: 'destructive'
             })
         }
-    }, [printFormat, printLang, title, t, setLocation, handleSave, pdfData, hasPdfData, printableFeatures, workspaceId, workspaceName, workspaceFooterContacts, invoiceData, effectiveId, pdfBuilder, translations, templateContent, templatePreviewProp, customTemplate, templateFieldValues, initialTemplateLayout, allowTemplateFieldEditing, enableTemplatePreviewSave, templatePrimaryActionLabel, generateTemplateLayoutBlob, onPreviewPrint, onPreviewSave, savedDocumentKind, previewPrintActionLabel, showSaveButton, toast])
+    }, [printFormat, printLang, title, t, setLocation, handleSave, pdfData, hasPdfData, printableFeatures, workspaceId, workspaceName, workspaceFooterContacts, invoiceData, effectiveId, pdfBuilder, translations, templateContent, templatePreviewProp, customTemplate, templateFieldValues, initialTemplateLayout, allowTemplateFieldEditing, enableTemplatePreviewSave, templatePrimaryActionLabel, generateTemplateLayoutBlob, onPreviewPrint, onPreviewSave, previewPrintActionLabel, showSaveButton, toast])
 
     useEffect(() => {
         if (!shouldOpenPrintPreviewEditor(isOpen, selectedPrintFormat, previewOpenedRef.current)) return

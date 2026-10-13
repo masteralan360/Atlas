@@ -513,7 +513,6 @@ export function DirectTransactions() {
                         throw error
                     }
                 }}
-                savedDocumentKind="voucher"
             /> : null}
         </div>
     )

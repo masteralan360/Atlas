@@ -3,7 +3,7 @@ import { useHashLocation } from "@/hooks/useHashLocation";
 import { AuthProvider, ProtectedRoute, GuestRoute, useAuth } from "@/auth";
 import { WorkspaceProvider } from "@/workspace";
 import { WorkspaceWarmup } from "@/workspace/WorkspaceWarmup";
-import { Layout, Toaster, TitleBar, PatchNoteModal, PostSaveInvoiceDialog, Progress } from "@/ui/components";
+import { Layout, Toaster, TitleBar, PatchNoteModal, Progress } from "@/ui/components";
 import { DeviceTokenBootstrap } from "@/ui/components/DeviceTokenBootstrap";
 import { SubscriptionExpiryWarningModal } from "@/ui/components/SubscriptionExpiryWarningModal";
 import { WorkspacePaymentController, WorkspacePaymentStatusDialog } from "@/ui/components/WorkspacePaymentDialog";
@@ -2571,7 +2571,6 @@ function App() {
                         </div>
                       </Route>
                         </Switch>
-                        <PostSaveInvoiceDialog />
                       </Router>
                 </Suspense>
               </KdsSecurityGuard>

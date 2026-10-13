@@ -1,17 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
-    clearPendingPDFPreview,
     clearPDFPreviewSource,
-    getPendingPDFPreview,
     getPDFPreviewSource,
-    setPendingPDFPreview,
-    setPDFPreviewSource,
-    subscribeToPendingPDFPreview
+    setPDFPreviewSource
 } from './pdfPreviewStore'
 
 afterEach(() => {
     clearPDFPreviewSource()
-    clearPendingPDFPreview()
 })
 
 describe('PDF preview state', () => {
@@ -23,20 +18,5 @@ describe('PDF preview state', () => {
 
         clearPDFPreviewSource()
         expect(getPDFPreviewSource()).toBeNull()
-    })
-
-    it('publishes a pending PDF preview to subscribers', () => {
-        const listener = vi.fn()
-        const unsubscribe = subscribeToPendingPDFPreview(listener)
-        const preview = { url: 'blob:pdf-preview', title: 'Saved document' }
-
-        setPendingPDFPreview(preview)
-        expect(getPendingPDFPreview()).toBe(preview)
-        expect(listener).toHaveBeenCalledTimes(1)
-
-        unsubscribe()
-        clearPendingPDFPreview()
-        expect(getPendingPDFPreview()).toBeNull()
-        expect(listener).toHaveBeenCalledTimes(1)
     })
 })

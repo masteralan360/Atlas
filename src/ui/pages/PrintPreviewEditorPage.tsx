@@ -1,6 +1,6 @@
 import { type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, Printer, Loader2, Edit3, X, ZoomIn, ZoomOut, Maximize, ImagePlus, Trash2, PenTool, Brush, Palette, Eraser, Hand, Type, RotateCw, Scaling, Move, Languages, Check, Shapes } from 'lucide-react'
+import { ArrowLeft, Printer, Loader2, Edit3, X, ZoomIn, ZoomOut, Maximize, ImagePlus, Trash2, PenTool, Brush, Palette, Eraser, Hand, Type, RotateCw, Scaling, Move, Languages, Check, Shapes, Download, Share2 } from 'lucide-react'
 import {
     A4_PAGE_HEIGHT_MM,
     getPrintPreviewEditorSource,
@@ -17,9 +17,10 @@ import {
     type CustomTemplateShape,
     type CustomTemplateText
 } from '@/lib/printPreviewEditorStore'
-import { setPendingPDFPreview } from '@/lib/pdfPreviewStore'
 import { PdfJsViewer } from '@/ui/components/PdfJsViewer'
+import { CustomTemplateLayoutOverlay } from '@/ui/components/CustomTemplateLayoutOverlay'
 import { printPdfBlob } from '@/services/pdfPrintService'
+import { savePDFPreviewBlob, sharePDFPreviewBlob } from '@/services/pdfPreviewActions'
 import { platformService } from '@/services/platformService'
 import { getMediaUploadErrorCode } from '@/services/mediaUploadService'
 import { paginateOrderItemsStatementPages, paginateOrderItemsTables } from '@/lib/orderItemsTablePagination'
@@ -461,6 +462,9 @@ export function PrintPreviewEditorPage() {
     const isAdmin = hasRole(['admin'])
     const { isAccessKeyHeld } = useUiAccess()
     const [isSaving, setIsSaving] = useState(false)
+    const [isInvoiceSavedThisSession, setIsInvoiceSavedThisSession] = useState(false)
+    const invoiceSavedThisSessionRef = useRef(false)
+    const actionInProgressRef = useRef(false)
     const [tempPrintLang, setTempPrintLang] = useState<string>('auto')
     const { toast, dismiss } = useToast()
 
@@ -478,34 +482,36 @@ export function PrintPreviewEditorPage() {
         }
     }, [dismiss])
 
-    const beginProgressToast = useCallback((toastTitle: string) => {
+    const beginProgressToast = useCallback((toastTitle: string, showToast = true) => {
         finishProgressToast()
         lastProgressPercentRef.current = -1
         lastProgressStageRef.current = ''
-        progressToastRef.current = toast({
+        progressToastRef.current = showToast ? toast({
             title: toastTitle,
             description: <ProgressToast fraction={0} />,
             duration: 600000,
             placement: 'floating',
-        })
+        }) : null
         const progressToast = progressToastRef.current
         unsubscribeProgressRef.current = subscribePdfProgress((report) => {
-            const percent = Math.floor(report.fraction * 100)
+            const percent = Math.max(0, Math.min(100, Math.floor(report.fraction * 100)))
             const stageChanged = report.stageKey !== lastProgressStageRef.current
             if (percent === lastProgressPercentRef.current && !stageChanged) return
             lastProgressPercentRef.current = percent
             lastProgressStageRef.current = report.stageKey
-            progressToastRef.current?.update({
-                id: progressToast.id,
-                description: (
-                    <ProgressToast
-                        fraction={report.fraction}
-                        stageKey={report.stageKey}
-                        page={report.page}
-                        total={report.total}
-                    />
-                )
-            })
+            if (progressToast) {
+                progressToastRef.current?.update({
+                    id: progressToast.id,
+                    description: (
+                        <ProgressToast
+                            fraction={report.fraction}
+                            stageKey={report.stageKey}
+                            page={report.page}
+                            total={report.total}
+                        />
+                    )
+                })
+            }
         })
     }, [finishProgressToast, toast])
 
@@ -1171,34 +1177,6 @@ export function PrintPreviewEditorPage() {
         window.history.back()
     }, [])
 
-    const handleSave = useCallback(async () => {
-        if (!source || !editableData || isSaving) return
-        beginProgressToast(title || t('print.progressTitle', { defaultValue: 'Saving & Printing' }))
-        setIsSaving(true)
-        try {
-            if (source.generatePdfBlob) {
-                const langOverride = tempPrintLang !== 'auto' ? tempPrintLang : undefined
-                const blob = await source.generatePdfBlob(editableData, langOverride)
-                const invoiceId = await source.onSave?.(blob)
-                setPendingPDFPreview({
-                    url: URL.createObjectURL(blob),
-                    title: source.savedDocumentKind === 'voucher' ? invoiceId || title : invoiceId ? `Invoice ${invoiceId}` : title,
-                    kind: source.savedDocumentKind
-                })
-                return
-            } else {
-                await source.onSave?.(new Blob())
-            }
-        } catch (err) {
-            console.error('Failed to save:', err)
-        } finally {
-            finishProgressToast()
-            setIsSaving(false)
-            clearPrintPreviewEditorSource()
-            window.history.back()
-        }
-    }, [source, editableData, isSaving, tempPrintLang, beginProgressToast, finishProgressToast, title, t])
-
     if (!source) {
         return (
             <div className="flex h-screen items-center justify-center bg-background"
@@ -1240,6 +1218,174 @@ export function PrintPreviewEditorPage() {
         }
     }, [source, templatePreview, fieldValues, initialTemplateLayout?.label, templateAnnotations, templateComponentPositions, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateFieldValueOverrides, templateFieldDisplayModes, templateBackground, templateTexts, templateImages, templateShapes, templatePageHeight, templatePageWidth, isLabelPrintTemplate, isLabelPageSizeValid])
 
+    const generateTemplatePreviewPdfBlob = async (layout?: CustomTemplateLayout | null) => {
+        if (!source || !templatePreview || !fieldValues) {
+            throw new Error('Template preview is unavailable.')
+        }
+
+        const overrideLang = fixedTemplatePrintLang || (tempPrintLang !== 'auto' ? tempPrintLang : undefined)
+        const layoutForBlob = source.generateTemplateLayoutBlob
+            ? layout || buildTemplateLayout()
+            : null
+        if (source.generateTemplateLayoutBlob && !layoutForBlob) {
+            throw new Error('Missing template layout for print preview.')
+        }
+
+        if (source.generateTemplateLayoutBlob && layoutForBlob) {
+            return source.generateTemplateLayoutBlob(layoutForBlob, overrideLang, source.effectiveId)
+        }
+
+        const element = templatePreview.createElement(fieldValues, source.effectiveId, overrideLang, {
+            hiddenFields: templateHiddenFields,
+            fieldOrders: templateFieldOrders,
+            fieldLabelOverrides: templateFieldLabelOverrides,
+            fieldValueOverrides: templateFieldValueOverrides,
+            fieldDisplayModes: templateFieldDisplayModes,
+            background: templateBackground ?? undefined,
+            partnerBalanceProgress: requiresFreshPartnerBalance && nextFreshPartnerBalanceState === 'loading'
+                ? freshPartnerBalanceProgress
+                : undefined,
+            workspaceFooterContacts: sourceWorkspaceFooterContacts
+        })
+        const layoutOverlay = {
+            page: { widthMm: templatePageWidth, heightMm: templatePageHeight },
+            annotations: templateAnnotations,
+            texts: templateTexts,
+            images: templateImages,
+            shapes: templateShapes
+        }
+        const exportElement = (
+            <div
+                data-template-layout-root=""
+                className="relative mx-auto overflow-visible bg-white text-black"
+                style={{ width: `${templatePageWidth}mm`, minHeight: `${templateStackHeight}mm` }}
+            >
+                <div className="relative">{element}</div>
+                <CustomTemplateLayoutOverlay
+                    layout={layoutOverlay}
+                    heightMm={templateStackHeight}
+                    reflowLowerPageText={isTemplateTextFlowEnabled(templatePreview, fieldValues)}
+                    resolveLayoutText={templatePreview.resolveLayoutText}
+                />
+            </div>
+        )
+
+        return templatePreview.buildPdf(exportElement, overrideLang, fieldValues)
+    }
+
+    const generateCurrentActionPdfBlob = async () => {
+        if (templatePreview && fieldValues) {
+            return generateTemplatePreviewPdfBlob()
+        }
+        if (source.generatePdfBlob && editableData) {
+            const langOverride = tempPrintLang !== 'auto' ? tempPrintLang : undefined
+            return source.generatePdfBlob(editableData, langOverride)
+        }
+        if (source.generatePreviewPdfBlob) {
+            return generatedPreviewPdf?.blob || source.generatePreviewPdfBlob()
+        }
+        throw new Error('No generated PDF is available for this preview.')
+    }
+
+    const showPersistedDocumentActions = Boolean(
+        source.onSave && ((source.generatePdfBlob && editableData) || (templatePreview && fieldValues))
+    )
+    const withBalanceProgress = (label: string) => isFreshPartnerBalanceLoading
+        ? t('print.actionWithProgress', { action: label, percentage: freshPartnerBalanceLoadingPercentage })
+        : label
+    const documentSaveActionLabel = withBalanceProgress(t('pdfPreview.save', { defaultValue: 'Save' }))
+    const documentShareActionLabel = withBalanceProgress(t('pdfPreview.share', { defaultValue: 'Share' }))
+    const documentPrintActionLabel = withBalanceProgress(isInvoiceSavedThisSession
+        ? t('pdfPreview.print', { defaultValue: 'Print' })
+        : t('print.printAndSave', { defaultValue: 'Print & Save' }))
+
+    const handleDocumentAction = async (action: 'print' | 'share' | 'save') => {
+        if (!source || !showPersistedDocumentActions || actionInProgressRef.current) return
+
+        actionInProgressRef.current = true
+        setIsSaving(true)
+        let isPersisting = false
+        let progressToastStarted = false
+        try {
+            beginProgressToast(
+                title || t('print.progressTitle', { defaultValue: 'Saving & Printing' }),
+                !invoiceSavedThisSessionRef.current
+            )
+            progressToastStarted = true
+
+            const blob = await generateCurrentActionPdfBlob()
+            if (!invoiceSavedThisSessionRef.current) {
+                if (!source.onSave) throw new Error('Invoice saving is unavailable.')
+                isPersisting = true
+                await source.onSave(blob)
+                invoiceSavedThisSessionRef.current = true
+                setIsInvoiceSavedThisSession(true)
+                isPersisting = false
+            }
+
+            if (action === 'print') {
+                if (source.onPrint) await source.onPrint(blob)
+                else await printPdfBlob(blob, { title })
+            } else if (action === 'share') {
+                const shared = await sharePDFPreviewBlob(blob, title)
+                if (!shared) toast({
+                    title: t('pdfPreview.shareUnavailableTitle'),
+                    description: t('pdfPreview.shareUnavailableDescription')
+                })
+            } else {
+                savePDFPreviewBlob(blob, title)
+            }
+        } catch (error) {
+            console.error(`Failed to ${action} invoice preview:`, error)
+            if (!isPersisting && action === 'print') {
+                toast({
+                    title: t('pdfPreview.printErrorTitle', { defaultValue: 'Could not print the PDF' }),
+                    description: t('pdfPreview.printErrorDescription', { defaultValue: 'Try again to print this preview.' }),
+                    variant: 'destructive'
+                })
+            } else if (!isPersisting && action === 'share') {
+                if (!(error instanceof Error && error.name === 'AbortError')) {
+                    toast({
+                        title: t('pdfPreview.shareErrorTitle'),
+                        description: t('pdfPreview.shareErrorDescription'),
+                        variant: 'destructive'
+                    })
+                }
+            } else if (!isPersisting) {
+                toast({
+                    title: t('pdfPreview.saveErrorTitle'),
+                    description: t('pdfPreview.saveErrorDescription'),
+                    variant: 'destructive'
+                })
+            }
+        } finally {
+            if (progressToastStarted) finishProgressToast()
+            actionInProgressRef.current = false
+            setIsSaving(false)
+        }
+    }
+
+    const handlePrintCurrentPreview = async () => {
+        if (!source || actionInProgressRef.current) return
+        actionInProgressRef.current = true
+        setIsSaving(true)
+        try {
+            const blob = await generateCurrentActionPdfBlob()
+            if (source.onPrint) await source.onPrint(blob)
+            else await printPdfBlob(blob, { title })
+        } catch (error) {
+            console.error('Failed to print current preview:', error)
+            toast({
+                title: t('pdfPreview.printErrorTitle', { defaultValue: 'Could not print the PDF' }),
+                description: t('pdfPreview.printErrorDescription', { defaultValue: 'Try again to print this preview.' }),
+                variant: 'destructive'
+            })
+        } finally {
+            actionInProgressRef.current = false
+            setIsSaving(false)
+        }
+    }
+
     const saveTemplatePreview = useCallback(async (layout?: CustomTemplateLayout, label?: string, action: 'primary' | 'print' = 'primary') => {
         if (!source || !templatePreview || !fieldValues || isSaving || !isTemplatePrintReady || !isTemplatePageSizeValid) return
         beginProgressToast(title || t('print.progressTitle', { defaultValue: 'Saving & Printing' }))
@@ -1251,34 +1397,10 @@ export function PrintPreviewEditorPage() {
             }
 
             const shouldBuildPrintBlob = action === 'print'
-                || Boolean(source.onSave)
+                || Boolean(source.onSave && !source.onSaveTemplateLayout)
                 || (!source.onSaveTemplateLayout && Boolean(source.onPrint || source.generateTemplateLayoutBlob))
             if (shouldBuildPrintBlob) {
-                const overrideLang = fixedTemplatePrintLang || (tempPrintLang !== 'auto' ? tempPrintLang : undefined)
-                const layoutForBlob = source.generateTemplateLayoutBlob
-                    ? layout || buildTemplateLayout()
-                    : null
-                if (source.generateTemplateLayoutBlob && !layoutForBlob) {
-                    throw new Error('Missing template layout for print preview.')
-                }
-                const blob = source.generateTemplateLayoutBlob && layoutForBlob
-                    ? await source.generateTemplateLayoutBlob(layoutForBlob, overrideLang, source.effectiveId)
-                    : await templatePreview.buildPdf(
-                        templatePreview.createElement(fieldValues, source.effectiveId, overrideLang, {
-                            hiddenFields: templateHiddenFields,
-                            fieldOrders: templateFieldOrders,
-                            fieldLabelOverrides: templateFieldLabelOverrides,
-                            fieldValueOverrides: templateFieldValueOverrides,
-                            fieldDisplayModes: templateFieldDisplayModes,
-                            background: templateBackground ?? undefined,
-                            partnerBalanceProgress: requiresFreshPartnerBalance && nextFreshPartnerBalanceState === 'loading'
-                                ? freshPartnerBalanceProgress
-                                : undefined,
-                            workspaceFooterContacts: sourceWorkspaceFooterContacts
-                        }),
-                        overrideLang,
-                        fieldValues
-                    )
+                const blob = await generateTemplatePreviewPdfBlob(layout)
 
                 if (source.onPrint && (action === 'print' || !source.onSave)) {
                     await source.onPrint(blob)
@@ -1294,17 +1416,12 @@ export function PrintPreviewEditorPage() {
                     return
                 }
 
-                const invoiceId = await source.onSave(blob)
-                setPendingPDFPreview({
-                    url: URL.createObjectURL(blob),
-                    title: source.savedDocumentKind === 'voucher' ? invoiceId || title : invoiceId ? `Invoice ${invoiceId}` : title,
-                    kind: source.savedDocumentKind
-                })
-                setIsSaving(false)
+                await source.onSave(blob)
+                invoiceSavedThisSessionRef.current = true
+                setIsInvoiceSavedThisSession(true)
+                shouldCloseAfterAction = false
                 setIsTemplateLabelDialogOpen(false)
                 setPendingTemplateLayout(null)
-                clearPrintPreviewEditorSource()
-                window.history.back()
                 return
             }
         } catch (err) {
@@ -1320,7 +1437,7 @@ export function PrintPreviewEditorPage() {
                 window.history.back()
             }
         }
-    }, [source, templatePreview, fieldValues, isSaving, isTemplatePrintReady, isTemplatePageSizeValid, fixedTemplatePrintLang, tempPrintLang, buildTemplateLayout, sourceWorkspaceFooterContacts, templateHiddenFields, templateFieldOrders, templateFieldLabelOverrides, templateFieldValueOverrides, templateFieldDisplayModes, templateBackground, requiresFreshPartnerBalance, nextFreshPartnerBalanceState, freshPartnerBalanceProgress, beginProgressToast, finishProgressToast, title, t])
+    }, [source, templatePreview, fieldValues, isSaving, isTemplatePrintReady, isTemplatePageSizeValid, generateTemplatePreviewPdfBlob, beginProgressToast, finishProgressToast, title, t])
 
     const handleTemplatePreviewSave = useCallback(async () => {
         if (!source || !templatePreview || !fieldValues || isSaving || !isTemplatePrintReady || !isTemplatePageSizeValid) return
@@ -2000,9 +2117,46 @@ export function PrintPreviewEditorPage() {
                                 </span>
                             </button>
                         )}
+                        {showPersistedDocumentActions && (
+                            <>
+                                <button
+                                    type="button"
+                                    className={`inline-flex h-8 ${isFreshPartnerBalanceLoading ? 'w-auto px-2' : 'w-8 px-0'} items-center justify-center gap-1.5 rounded-md bg-secondary text-xs font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50 md:w-auto md:px-3`}
+                                    onClick={() => void handleDocumentAction('save')}
+                                    disabled={isSaving || !isTemplatePrintReady || !isTemplatePageSizeValid}
+                                    aria-label={documentSaveActionLabel}
+                                >
+                                    {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                                    <span className="md:hidden">{isFreshPartnerBalanceLoading ? documentSaveActionLabel : null}</span>
+                                    <span className="hidden md:inline">{documentSaveActionLabel}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`inline-flex h-8 ${isFreshPartnerBalanceLoading ? 'w-auto px-2' : 'w-8 px-0'} items-center justify-center gap-1.5 rounded-md border border-input bg-background text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50 md:w-auto md:px-3`}
+                                    onClick={() => void handleDocumentAction('share')}
+                                    disabled={isSaving || !isTemplatePrintReady || !isTemplatePageSizeValid}
+                                    aria-label={documentShareActionLabel}
+                                >
+                                    {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Share2 className="h-3.5 w-3.5" />}
+                                    <span className="md:hidden">{isFreshPartnerBalanceLoading ? documentShareActionLabel : null}</span>
+                                    <span className="hidden md:inline">{documentShareActionLabel}</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`inline-flex h-8 ${isFreshPartnerBalanceLoading ? 'w-auto px-2' : 'w-8 px-0'} items-center justify-center gap-1.5 rounded-md bg-primary text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 md:w-auto md:px-3`}
+                                    onClick={() => void handleDocumentAction('print')}
+                                    disabled={isSaving || !isTemplatePrintReady || !isTemplatePageSizeValid}
+                                    aria-label={documentPrintActionLabel}
+                                >
+                                    {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
+                                    <span className="md:hidden">{isFreshPartnerBalanceLoading ? documentPrintActionLabel : null}</span>
+                                    <span className="hidden md:inline">{documentPrintActionLabel}</span>
+                                </button>
+                            </>
+                        )}
                         {hasTemplatePrimaryAction && (
                             source.onSave && source.onPrint ? (
-                                <button
+                                !showPersistedDocumentActions && <button
                                     className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs font-medium hover:bg-accent disabled:opacity-50"
                                     onClick={() => void saveTemplatePreview(undefined, undefined, 'print')}
                                     disabled={isSaving || !isTemplatePrintReady}
@@ -2025,7 +2179,7 @@ export function PrintPreviewEditorPage() {
                                 <span>{t('printPreviewEditor.testPrint', { defaultValue: 'Test Print' })}</span>
                             </button>
                         ) : null}
-                        {hasTemplatePrimaryAction && (
+                        {hasTemplatePrimaryAction && (!showPersistedDocumentActions || source.onSaveTemplateLayout) && (
                             <button
                                 className={cn(
                                     'inline-flex items-center justify-center rounded-md h-8 text-xs font-medium transition-colors gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto md:px-3',
@@ -2989,15 +3143,54 @@ export function PrintPreviewEditorPage() {
                             </span>
                         </button>
                     )}
-                    <button
-                        className="inline-flex items-center justify-center rounded-md h-8 w-8 px-0 text-xs font-medium transition-colors gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto md:px-3"
-                        onClick={handleSave}
-                        disabled={isSaving}
-                        aria-label={t('print.printAndSave') || 'Print & Save'}
-                    >
-                        {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
-                        <span className="hidden md:inline">{t('print.printAndSave') || 'Print & Save'}</span>
-                    </button>
+                    {showPersistedDocumentActions ? (
+                        <>
+                            <button
+                                type="button"
+                                className={`inline-flex items-center justify-center rounded-md h-8 ${isFreshPartnerBalanceLoading ? 'w-auto px-2' : 'w-8 px-0'} text-xs font-medium transition-colors gap-1.5 bg-secondary text-secondary-foreground hover:bg-secondary/80 disabled:opacity-50 md:w-auto md:px-3`}
+                                onClick={() => void handleDocumentAction('save')}
+                                disabled={isSaving}
+                                aria-label={documentSaveActionLabel}
+                            >
+                                {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                                <span className="md:hidden">{isFreshPartnerBalanceLoading ? documentSaveActionLabel : null}</span>
+                                <span className="hidden md:inline">{documentSaveActionLabel}</span>
+                            </button>
+                            <button
+                                type="button"
+                                className={`inline-flex items-center justify-center rounded-md h-8 ${isFreshPartnerBalanceLoading ? 'w-auto px-2' : 'w-8 px-0'} text-xs font-medium transition-colors gap-1.5 border border-input bg-background hover:bg-accent hover:text-accent-foreground disabled:opacity-50 md:w-auto md:px-3`}
+                                onClick={() => void handleDocumentAction('share')}
+                                disabled={isSaving}
+                                aria-label={documentShareActionLabel}
+                            >
+                                {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Share2 className="h-3.5 w-3.5" />}
+                                <span className="md:hidden">{isFreshPartnerBalanceLoading ? documentShareActionLabel : null}</span>
+                                <span className="hidden md:inline">{documentShareActionLabel}</span>
+                            </button>
+                            <button
+                                type="button"
+                                className={`inline-flex items-center justify-center rounded-md h-8 ${isFreshPartnerBalanceLoading ? 'w-auto px-2' : 'w-8 px-0'} text-xs font-medium transition-colors gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto md:px-3`}
+                                onClick={() => void handleDocumentAction('print')}
+                                disabled={isSaving}
+                                aria-label={documentPrintActionLabel}
+                            >
+                                {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
+                                <span className="md:hidden">{isFreshPartnerBalanceLoading ? documentPrintActionLabel : null}</span>
+                                <span className="hidden md:inline">{documentPrintActionLabel}</span>
+                            </button>
+                        </>
+                    ) : (
+                        <button
+                            type="button"
+                            className="inline-flex items-center justify-center rounded-md h-8 w-8 px-0 text-xs font-medium transition-colors gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto md:px-3"
+                            onClick={() => void handlePrintCurrentPreview()}
+                            disabled={isSaving}
+                            aria-label={t('common.print', { defaultValue: 'Print' })}
+                        >
+                            {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Printer className="h-3.5 w-3.5" />}
+                            <span className="hidden md:inline">{t('common.print', { defaultValue: 'Print' })}</span>
+                        </button>
+                    )}
                 </div>
             </header>
             <div className="flex flex-1 overflow-hidden light" style={{ colorScheme: 'light' }}>
