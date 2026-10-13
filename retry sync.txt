@@ -4,6 +4,7 @@ Allow orders atlas standards line to move
 
 Allow inventory movement on offline mode
 
+Order Advancement slow
 
 #
 DatePicker Entry Input

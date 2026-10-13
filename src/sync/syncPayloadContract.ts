@@ -60,7 +60,10 @@ const NON_REMOTE_FIELDS_BY_ENTITY: Readonly<Record<string, ReadonlySet<string>>>
   suppliers: new Set(["is_locked", "name", "contact_name", "email", "country"]),
   // Order balances are reconstructed from the Account Statement ledger. This
   // retired field can survive in a queued mutation from an older client.
-  sales_orders: new Set(["partner_balance_snapshot"]),
+  // Sales orders use `source_storage_id`; `destination_storage_id` belongs to
+  // purchase orders. Older or malformed local rows can still carry it, so it
+  // must not be forwarded as an unknown sales-order column.
+  sales_orders: new Set(["partner_balance_snapshot", "destination_storage_id"]),
   purchase_orders: new Set(["partner_balance_snapshot"]),
   // Delivery recipient phone is the only current identifier. These fields may
   // remain in a local offline row created before the simplified contract, but

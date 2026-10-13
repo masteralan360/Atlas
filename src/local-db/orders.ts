@@ -333,6 +333,13 @@ export function sanitizeSyncPayload(
         delete payload.partner_balance_snapshot
     }
 
+    if (tableName === 'sales_orders') {
+        // Sales orders use sourceStorageId. destinationStorageId belongs to
+        // purchase orders and can survive in stale local rows or queued data.
+        delete payload.destinationStorageId
+        delete payload.destination_storage_id
+    }
+
     const snakePayload = Object.fromEntries(
         Object.entries(payload).map(([key, value]) => [key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`), value])
     )
