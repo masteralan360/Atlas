@@ -2,7 +2,6 @@ import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } fro
 import { useTranslation } from 'react-i18next'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { useAuth } from '@/auth'
-import { supabase } from '@/auth/supabase'
 import {
     calculateStockBatchUnitCost,
     calculateStockBatchSourceAvailability,
@@ -170,7 +169,7 @@ import { mapSaleToUniversal } from '@/lib/mappings'
 import { printPosPreprintReceipt } from '@/lib/posPreprintReceipt'
 import { LoanRegistrationModal, type LoanRegistrationData } from '@/ui/components/pos/LoanRegistrationModal'
 import { SaveBorrowerAsPartnerDialog, usePendingSavePartnerPrompt } from '@/ui/components/loans/SaveBorrowerAsPartnerDialog'
-import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
+import { isRetriableWebRequestError, normalizeSupabaseActionError } from '@/lib/supabaseRequest'
 import { isOnline } from '@/lib/network'
 import { useWebHaptics } from 'web-haptics/react'
 import { getLanguageDirection } from '@/lib/i18nRouting'
@@ -492,7 +491,7 @@ export function POS() {
     const { toast } = useToast()
     const { user } = useAuth()
     const { t, i18n } = useTranslation()
-    const { features, hasCapability, hasFeature, workspaceName, isLocalMode, isLoading: isWorkspaceLoading, refreshFeatures } = useWorkspace()
+    const { features, hasCapability, hasFeature, workspaceName, isLocalMode, isLoading: isWorkspaceLoading, refreshFeatures, updateSettings } = useWorkspace()
     const isRTL = getLanguageDirection(i18n.resolvedLanguage || i18n.language) === 'rtl'
     const { permissionKeys, hasPermission, isLoading: arePermissionsLoading } = useWorkspacePermissions()
     const hideCosts = useHideCosts()
@@ -1564,31 +1563,9 @@ export function POS() {
     const saveCurrencyConversionSettings = useCallback(async () => {
         if (!isAdmin || !user) return
 
-        if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            toast({
-                variant: 'destructive',
-                title: t('messages.error'),
-                description: t('pos.currencyConversionOnlineRequired', 'Connect to the internet to update this workspace-wide setting.')
-            })
-            return
-        }
-
         setIsSavingCurrencyConversion(true)
         try {
-            const { data, error } = await runSupabaseAction(
-                'pos.updateCurrencyConversionPolicy',
-                () => supabase
-                    .from('workspaces')
-                    .update({ pos_convert_to_workspace_currency: currencyConversionDraft })
-                    .eq('id', user.workspaceId)
-                    .select('pos_convert_to_workspace_currency')
-                    .maybeSingle()
-            )
-
-            if (error) throw normalizeSupabaseActionError(error)
-            if (!data) throw new Error('Workspace currency conversion setting could not be saved.')
-
-            await refreshFeatures()
+            await updateSettings({ pos_convert_to_workspace_currency: currencyConversionDraft })
             setIsCurrencyConversionDialogOpen(false)
             toast({
                 title: t('messages.success'),
@@ -1606,7 +1583,7 @@ export function POS() {
         } finally {
             setIsSavingCurrencyConversion(false)
         }
-    }, [currencyConversionDraft, isAdmin, refreshFeatures, t, toast, user])
+    }, [currencyConversionDraft, isAdmin, t, toast, updateSettings, user])
 
     const convertPrice = useCallback((amount: number, from: CurrencyCode, to: CurrencyCode) => convertPosPrice(amount, from, to, {
         usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,

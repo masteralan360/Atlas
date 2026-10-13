@@ -18,6 +18,10 @@ import {
     useWorkspaceOrderInstallments
 } from '@/local-db'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
+import {
+    ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MAX_MM,
+    ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM
+} from '@/lib/atlasStandardOrderTablePagination'
 import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import {
@@ -466,6 +470,7 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         if (!printTarget) return undefined
         return {
             fields: [
+                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.headerDividerOffsetMm, label: 'printPreviewEditor.headerDividerPosition', value: String(ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM), type: 'range', min: ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM, max: ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MAX_MM, step: 1, unit: ' mm' },
                 { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' },
                 { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor, label: t('printPreviewEditor.enableTextPositionAnchor'), value: 'true', type: 'boolean' }
             ],

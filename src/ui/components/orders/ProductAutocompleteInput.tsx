@@ -84,12 +84,20 @@ export function ProductAutocompleteInput({
     const inputRef = useRef<HTMLInputElement>(null)
     const query = value.trim()
     const normalizedQuery = query.toLocaleLowerCase()
+    const latestQueryRef = useRef(query)
+    latestQueryRef.current = query
     const selectionAccess = useProductSelectionAccess(user?.workspaceId, user?.id, { candidateProductIds })
     const excludedStorageIdsKey = [...selectionAccess.storageAccess.excludedStorageIds].sort().join('|')
     const excludedStorageIds = useMemo(
         () => excludedStorageIdsKey ? excludedStorageIdsKey.split('|') : [],
         [excludedStorageIdsKey]
     )
+    const excludedCategoryIdsKey = [...selectionAccess.excludedCategoryIds].sort().join('|')
+    const excludedCategoryIds = useMemo(
+        () => excludedCategoryIdsKey ? excludedCategoryIdsKey.split('|') : [],
+        [excludedCategoryIdsKey]
+    )
+    const waitForInventoryCache = !selectionAccess.storageAccess.isAdmin && excludedStorageIds.length > 0
     const searchProducts = useCallback(async (
         search: string,
         publishPartialResults?: (items: ProductAutocompleteSuggestion[], complete?: boolean) => void,
@@ -97,16 +105,21 @@ export function ProductAutocompleteInput({
         const matches = await searchProductAutocompleteSuggestions(
             user?.workspaceId || '',
             search,
-            [...selectionAccess.excludedCategoryIds],
+            excludedCategoryIds,
             excludedStorageIds,
             (items, complete) => {
-                setCandidateProductIds(items.map((product) => product.id))
+                if (latestQueryRef.current === search) {
+                    setCandidateProductIds(items.map((product) => product.id))
+                }
                 publishPartialResults?.(items, complete)
             },
+            waitForInventoryCache,
         )
-        setCandidateProductIds(matches.map((product) => product.id))
+        if (latestQueryRef.current === search) {
+            setCandidateProductIds(matches.map((product) => product.id))
+        }
         return matches
-    }, [excludedStorageIds, selectionAccess.excludedCategoryIds, user?.workspaceId])
+    }, [excludedCategoryIds, excludedStorageIds, user?.workspaceId, waitForInventoryCache])
     const remoteSearch = useDebouncedAutocompleteSearch(
         query,
         isFocused && !justSelected && Boolean(user?.workspaceId) && selectionAccess.storageAccess.isReady !== false,

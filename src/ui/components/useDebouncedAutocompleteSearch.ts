@@ -12,7 +12,7 @@ export function useDebouncedAutocompleteSearch<T>(
   query: string,
   enabled: boolean,
   search: (query: string, publishPartialResults?: (items: T[], complete?: boolean) => void) => Promise<T[]>,
-  delay = 250,
+  delay = 150,
   minQueryLength = 2,
 ) {
   const normalizedQuery = query.trim()

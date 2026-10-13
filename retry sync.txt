@@ -10,6 +10,8 @@ Atlas Update
 
 Add by unit in adjustment
 
+Item line-based currency
+
 #
 DatePicker Entry Input
 Days of month for visits

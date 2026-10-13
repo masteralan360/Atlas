@@ -5,7 +5,17 @@ export const ATLAS_STANDARD_FIRST_PAGE_TABLE_DATA_AREA_MM = 145
 // of breathing room above and below the complete table.
 export const ATLAS_STANDARD_CONTINUATION_TABLE_DATA_AREA_MM = 240
 export const ATLAS_STANDARD_TEXT_ANCHOR_FIELD = 'enableTextPositionAnchor'
+export const ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_FIELD = 'headerDividerOffsetMm'
+export const ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM = 0
+export const ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MAX_MM = 32
 export const ATLAS_STANDARD_PRINTABLE_BOTTOM_MM = 297 - 8
+
+export function getAtlasStandardHeaderDividerOffsetMm(fields?: Record<string, string>) {
+    const parsed = Number(fields?.[ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_FIELD])
+    if (!Number.isFinite(parsed)) return ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM
+    const rounded = Math.round(parsed)
+    return Math.min(ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MAX_MM, Math.max(ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM, rounded))
+}
 
 export function isAtlasStandardSmartRowExpansionEnabled(fields?: Record<string, string>) {
     return fields?.showPrintFooter === 'false' && fields?.[ATLAS_STANDARD_TEXT_ANCHOR_FIELD] === 'false'

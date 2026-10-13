@@ -215,6 +215,7 @@ export async function searchProductAutocompleteSuggestions(
   excludedCategoryIds: readonly string[],
   excludedStorageIds: readonly string[],
   publishPartialResults?: (items: ProductAutocompleteSuggestion[], complete?: boolean) => void,
+  waitForInventoryCache = false,
 ): Promise<ProductAutocompleteSuggestion[]> {
   const normalizedSearch = search.trim().toLocaleLowerCase()
   if (!workspaceId || normalizedSearch.length < 2) return []
@@ -249,21 +250,7 @@ export async function searchProductAutocompleteSuggestions(
       throw new Error('The product autocomplete returned a record outside the active workspace.')
     }
 
-    const cachedProducts = await db.products.bulkGet(products.map((product) => product.id))
-    const productsToCache = products.filter((_, index) => {
-      const cached = cachedProducts[index]
-      return cached?.syncStatus !== 'pending' && cached?.syncStatus !== 'conflict'
-    })
-    const cacheProductsPromise = productsToCache.length
-      ? db.products.bulkPut(productsToCache)
-      : Promise.resolve()
-    const localPendingProductsPromise = readLocalProductAutocompleteSuggestions(
-      workspaceId,
-      normalizedSearch,
-      excludedCategoryIds,
-      8,
-      true,
-    )
+    const inventoryCacheFailure: { current: { error: unknown } | null } = { current: null }
     const cacheInventoryPromise = (async () => {
       if (!inventoryRows.length) return
       const cachedInventory = await db.inventory.bulkGet(inventoryRows.map((row) => row.id))
@@ -272,7 +259,40 @@ export async function searchProductAutocompleteSuggestions(
         return cached?.syncStatus !== 'pending' && cached?.syncStatus !== 'conflict'
       })
       if (inventoryToCache.length) await db.inventory.bulkPut(inventoryToCache)
-    })()
+    })().catch((error: unknown) => {
+      inventoryCacheFailure.current = { error }
+      console.error('[Products] Failed to cache autocomplete inventory:', error)
+    })
+    const localPendingProductsPromise = readLocalProductAutocompleteSuggestions(
+      workspaceId,
+      normalizedSearch,
+      excludedCategoryIds,
+      8,
+      true,
+    )
+    const remoteProducts = products.filter((product) => (
+      familySupportIds.has(product.id)
+      || String(product.name ?? '').toLocaleLowerCase().includes(normalizedSearch)
+      || String(product.sku ?? '').toLocaleLowerCase().includes(normalizedSearch)
+    ))
+    // Cloud results are already authorized and usable. Let the picker render
+    // them while Dexie cache reads and writes run in the background; restricted
+    // members still wait for inventory to be cached before access filtering.
+    if (!waitForInventoryCache && remoteProducts.length > 0) {
+      publishPartialResults?.(remoteProducts, true)
+    }
+
+    const cachedProducts = await db.products.bulkGet(products.map((product) => product.id))
+    const productsToCache = products.filter((_, index) => {
+      const cached = cachedProducts[index]
+      return cached?.syncStatus !== 'pending' && cached?.syncStatus !== 'conflict'
+    })
+    const cacheProductsPromise = productsToCache.length
+      ? db.products.bulkPut(productsToCache)
+      : Promise.resolve()
+    const cacheProductsHandledPromise = cacheProductsPromise.catch((error: unknown) => {
+      console.error('[Products] Failed to cache autocomplete products:', error)
+    })
     const normalizedProducts = products.map((product, index) => {
       const cached = cachedProducts[index]
       const candidate = cached?.syncStatus === 'pending' || cached?.syncStatus === 'conflict'
@@ -284,10 +304,14 @@ export async function searchProductAutocompleteSuggestions(
       return stillMatches ? candidate : null
     }).filter((product): product is ProductAutocompleteSuggestion => product !== null)
 
-    await Promise.all([cacheProductsPromise, cacheInventoryPromise])
+    if (waitForInventoryCache) {
+      await cacheInventoryPromise
+      if (inventoryCacheFailure.current) throw inventoryCacheFailure.current.error
+    }
     if (normalizedProducts.length > 0) {
       publishPartialResults?.(normalizedProducts, true)
     }
+    void cacheProductsHandledPromise
 
     const localPendingProducts = await localPendingProductsPromise
 

@@ -15,6 +15,10 @@ import {
     isTemplateTextFlowEnabled
 } from '@/lib/printPreviewEditorStore'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import {
+    ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MAX_MM,
+    ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM
+} from '@/lib/atlasStandardOrderTablePagination'
 import { CustomTemplateLayoutOverlay } from '@/ui/components/CustomTemplateLayoutOverlay'
 import {
     getRealEstateNativeFieldPlaceholders,
@@ -1181,6 +1185,16 @@ const ATLAS_STANDARD_ORDER_FIELDS = [
         label: 'Show order adjustments',
         value: 'true',
         type: 'boolean' as const
+    },
+    {
+        key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.headerDividerOffsetMm,
+        label: 'printPreviewEditor.headerDividerPosition',
+        value: String(ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM),
+        type: 'range' as const,
+        min: ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM,
+        max: ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MAX_MM,
+        step: 1,
+        unit: ' mm'
     },
     {
         key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter,

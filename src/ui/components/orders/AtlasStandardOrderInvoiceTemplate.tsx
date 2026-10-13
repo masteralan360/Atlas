@@ -47,6 +47,8 @@ import {
     getProductImageSizeMm,
     MAX_PRODUCT_IMAGE_COLUMN_WIDTH,
     MIN_PRODUCT_IMAGE_COLUMN_WIDTH,
+    ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_FIELD,
+    getAtlasStandardHeaderDividerOffsetMm,
     isAtlasStandardSmartRowExpansionEnabled,
     resolveAtlasStandardTableCapacities
 } from '@/lib/atlasStandardOrderTablePagination'
@@ -451,6 +453,7 @@ export const ATLAS_STANDARD_ORDER_PARTNER_BALANCE_FIELD_KEYS = {
 export const ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS = {
     showOrderAdjustments: 'showOrderAdjustments',
     showPrintFooter: 'showPrintFooter',
+    headerDividerOffsetMm: ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_FIELD,
     enableTextPositionAnchor: ATLAS_STANDARD_TEXT_ANCHOR_FIELD
 } as const
 
@@ -1388,6 +1391,7 @@ export function AtlasStandardOrderInvoiceTemplate({
     const showOrderAdjustments = templateFields?.[ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showOrderAdjustments] !== 'false'
     const showPrintFooter = templateFields?.[ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter] !== 'false'
     const enableTextPositionAnchor = templateFields?.[ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor] !== 'false'
+    const headerDividerOffsetMm = getAtlasStandardHeaderDividerOffsetMm(templateFields)
     const smartRowsEnabled = isAtlasStandardSmartRowExpansionEnabled(templateFields)
     const normalizedOrderAdjustments = normalizeOrderAdjustments(order.orderAdjustments, currency)
     const orderAdjustments = isReturnPrint
@@ -1411,7 +1415,9 @@ export function AtlasStandardOrderInvoiceTemplate({
         ...orderAdjustments.map((adjustment) => ({ kind: 'adjustment' as const, adjustment }))
     ]
     const { pageRef, fit: smartRowFit } = useAtlasStandardOrderLayout(smartRowsEnabled, printableTableRows.length, tableItemRowMm)
-    const maxFirstPageRows = smartRowFit?.firstPageRows ?? defaultFirstPageRows
+    const firstPageTableDataAreaMm = Math.max(tableItemRowMm, ATLAS_STANDARD_FIRST_PAGE_TABLE_DATA_AREA_MM - headerDividerOffsetMm)
+    const adjustedFirstPageRows = Math.max(1, Math.min(defaultFirstPageRows, Math.floor(firstPageTableDataAreaMm / tableItemRowMm)))
+    const maxFirstPageRows = smartRowFit?.firstPageRows ?? adjustedFirstPageRows
     const defaultChunks = chunkAtlasStandardTableRows(
         printableTableRows,
         maxFirstPageRows,
@@ -2012,7 +2018,10 @@ export function AtlasStandardOrderInvoiceTemplate({
                 />
             ) : null}
 
-            <header className="mb-1 flex min-h-[13mm] items-center justify-between border-b-2 px-1 pb-1" style={{ borderColor: INK }}>
+            <header
+                className="mb-1 flex min-h-[13mm] items-center justify-between border-b-2 px-1 pb-1"
+                style={{ borderColor: INK, paddingBottom: `calc(0.25rem + ${headerDividerOffsetMm}mm)` }}
+            >
                 <MovableOrderPrintBlock
                     componentKey={ATLAS_STANDARD_ORDER_MOVABLE_COMPONENT_KEYS.workspaceName}
                     label={labels.workspaceName}
@@ -2098,7 +2107,7 @@ export function AtlasStandardOrderInvoiceTemplate({
                         itemChunks[0],
                         0,
                         'atlas-standard-order-items-page-1',
-                        ATLAS_STANDARD_FIRST_PAGE_TABLE_DATA_AREA_MM,
+                        firstPageTableDataAreaMm,
                         false,
                         true
                     )
@@ -2152,7 +2161,6 @@ export function AtlasStandardOrderInvoiceTemplate({
 
             {showPrintFooter ? (
                 <footer
-                    data-atlas-standard-print-footer=""
                     className="grid grid-cols-3 border-t pt-1 text-center text-[10px] font-bold"
                     style={{ borderColor: INK, color: '#374151' }}
                 >

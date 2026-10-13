@@ -23,6 +23,10 @@ import {
     normalizeOrderAdjustments
 } from '@/lib/orderAdjustments'
 import { getOrderPrintOriginalTotal, getOrderPrintReturnState } from '@/lib/orderPrintReturnState'
+import {
+    ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MAX_MM,
+    ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM
+} from '@/lib/atlasStandardOrderTablePagination'
 import { createSalesOrderReturnPrintData } from '@/lib/orderReturnPrintData'
 import { isPositiveQuantity } from '@/lib/quantity'
 import { cn, formatCurrency, formatDate, formatDateTime, formatSnapshotTime } from '@/lib/utils'
@@ -868,6 +872,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         return {
             fields: [
                 { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showOrderAdjustments, label: t('orders.adjustments.showInPrint', { defaultValue: 'Show order adjustments' }), value: 'true', type: 'boolean' },
+                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.headerDividerOffsetMm, label: 'printPreviewEditor.headerDividerPosition', value: String(ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM), type: 'range', min: ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM, max: ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MAX_MM, step: 1, unit: ' mm' },
                 { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' },
                 { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor, label: t('printPreviewEditor.enableTextPositionAnchor'), value: 'true', type: 'boolean' }
             ],
@@ -927,6 +932,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         const { order } = resolved
         return {
             fields: [
+                { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.headerDividerOffsetMm, label: 'printPreviewEditor.headerDividerPosition', value: String(ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM), type: 'range', min: ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM, max: ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MAX_MM, step: 1, unit: ' mm' },
                 { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showPrintFooter, label: t('printPreviewEditor.showAtlasStandardFooter', { defaultValue: 'Show Made by, page, and print date' }), value: 'true', type: 'boolean' },
                 { key: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor, label: t('printPreviewEditor.enableTextPositionAnchor'), value: 'true', type: 'boolean' }
             ],

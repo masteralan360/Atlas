@@ -5857,6 +5857,7 @@
     "enterLabelSize": "Enter a label width and height to start designing.",
     "testPrint": "Test Print",
     "showAtlasStandardFooter": "Show Made by, page, and print date",
+    "headerDividerPosition": "Header divider position (higher moves it down)",
     "enableTextPositionAnchor": "Enable invisible text-position anchor",
     "fitPage": "Fit",
     "bottomWarning": "Avoid placing components here — they may be cut off when printing on A4.",
