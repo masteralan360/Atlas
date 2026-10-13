@@ -52,6 +52,7 @@ export interface ProductCatalogPage {
   products: Product[]
   inventoryRows: Inventory[]
   matchedProductIds: string[]
+  availableCurrencies: CurrencyCode[]
   totalCount: number
   familyCount: number
   pageCount: number
@@ -61,9 +62,25 @@ const EMPTY_PAGE: ProductCatalogPage = {
   products: [],
   inventoryRows: [],
   matchedProductIds: [],
+  availableCurrencies: [],
   totalCount: 0,
   familyCount: 0,
   pageCount: 1
+}
+
+const PRODUCT_CURRENCY_CODES: CurrencyCode[] = ['usd', 'eur', 'iqd', 'try']
+
+function normalizeCatalogCurrencies(value: unknown): CurrencyCode[] {
+  if (!Array.isArray(value)) return []
+
+  const supportedCurrencies = new Set(PRODUCT_CURRENCY_CODES)
+  const currencies = new Set<CurrencyCode>()
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue
+    const currency = entry.trim().toLowerCase() as CurrencyCode
+    if (supportedCurrencies.has(currency)) currencies.add(currency)
+  }
+  return Array.from(currencies)
 }
 
 function parseOptionalNumber(value: string) {
@@ -359,6 +376,7 @@ async function readProductCatalogPage(query: ProductCatalogPageQuery): Promise<P
     products?: unknown[]
     inventory?: unknown[]
     matched_product_ids?: unknown[]
+    available_currencies?: unknown[]
     total_count?: number | string
     family_count?: number | string
     page_count?: number | string
@@ -428,6 +446,7 @@ async function readProductCatalogPage(query: ProductCatalogPageQuery): Promise<P
     matchedProductIds: Array.isArray(result.matched_product_ids)
       ? result.matched_product_ids.filter((id): id is string => typeof id === 'string')
       : [],
+    availableCurrencies: normalizeCatalogCurrencies(result.available_currencies),
     totalCount: Number(result.total_count) || 0,
     familyCount: Number(result.family_count) || 0,
     pageCount: Math.max(1, Number(result.page_count) || 1)

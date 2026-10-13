@@ -2,7 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useState, type React
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
-import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, BadgeCheck, CircleDashed, CreditCard, Eye, LayoutGrid, List, ListFilter, Plus, Printer, Search, Trash2, MessageCircle, Wallet, type LucideIcon } from 'lucide-react'
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, BadgeCheck, CircleDashed, CreditCard, Eye, LayoutGrid, List, ListFilter, Plus, Printer, Search, Trash2, MessageCircle, Wallet, RotateCcw, SlidersHorizontal, type LucideIcon } from 'lucide-react'
 
 import { useAuth } from '@/auth'
 import { useDateRange } from '@/context/DateRangeContext'
@@ -12,9 +12,9 @@ import { calculateLegacySimpleLoanListMetrics, calculateSimpleLoanListMetrics, t
 import { getReportOriginId } from '@/lib/printIdentity'
 import { isMobile } from '@/lib/platform'
 import { getLoanDeleteWarning, getLoanDetailsTitle, getLoanDirection, getLoanDirectionLabel, getSimpleLoanModuleTitle, matchesLoanPaymentFilter, type LoanPaymentFilter } from '@/lib/loanPresentation'
-import { cn, formatCurrency, formatDate, formatDateTime, formatLoanDetailsForWhatsApp } from '@/lib/utils'
+import { cn, formatCurrency, formatDate, formatDateTime, formatLoanDetailsForWhatsApp, formatLocalDateValue, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
 import { whatsappManager } from '@/lib/whatsappWebviewManager'
-import { deleteLoan, isLoanDeletionAllowed, type Loan, useLoanInstallments, useLoanPayments, useLoans } from '@/local-db'
+import { deleteLoan, isLoanDeletionAllowed, type CurrencyCode, type Loan, useLoanInstallments, useLoanPayments, useLoans } from '@/local-db'
 import { db } from '@/local-db/database'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import type { TemplatePreview, TemplatePreviewRenderOptions } from '@/lib/printPreviewEditorStore'
@@ -38,6 +38,21 @@ import {
     ContextMenuTrigger,
     ContextMenuContent,
     ContextMenuItem,
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogDescription,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
+    CurrencySelector,
+    DateTimePicker,
+    Label,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
 } from '@/ui/components'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { FilterDropdown } from '@/ui/components/FilterDropdown'
@@ -54,6 +69,73 @@ import { LoanNoteActionButton } from './LoanNoteActionButton'
 import { LoanNoteDialog } from './LoanNoteDialog'
 
 type SimpleLoanFilter = 'all' | 'lent' | 'borrowed' | 'completed'
+type SimpleLoanSortOption = 'created_desc' | 'created_asc' | 'counterparty_asc' | 'counterparty_desc' | 'principal_asc' | 'principal_desc' | 'balance_asc' | 'balance_desc' | 'due_asc' | 'due_desc'
+
+interface SimpleLoanAdvancedFilters {
+    currency: CurrencyCode[]
+    minPrincipal: string
+    maxPrincipal: string
+    minBalance: string
+    maxBalance: string
+    dueDateFrom: string
+    dueDateTo: string
+    sort: SimpleLoanSortOption
+}
+
+const DEFAULT_SIMPLE_LOAN_ADVANCED_FILTERS: SimpleLoanAdvancedFilters = {
+    currency: [],
+    minPrincipal: '',
+    maxPrincipal: '',
+    minBalance: '',
+    maxBalance: '',
+    dueDateFrom: '',
+    dueDateTo: '',
+    sort: 'created_desc',
+}
+
+function countActiveSimpleLoanAdvancedFilters(filters: SimpleLoanAdvancedFilters) {
+    return [
+        filters.currency.length > 0,
+        !!filters.minPrincipal || !!filters.maxPrincipal,
+        !!filters.minBalance || !!filters.maxBalance,
+        !!filters.dueDateFrom || !!filters.dueDateTo,
+        filters.sort !== 'created_desc',
+    ].filter(Boolean).length
+}
+
+function compareSimpleLoans(left: Loan, right: Loan, sort: SimpleLoanSortOption, locale: string) {
+    const descending = sort.endsWith('_desc')
+    const direction = descending ? -1 : 1
+    let comparison = 0
+
+    switch (sort) {
+        case 'counterparty_asc':
+        case 'counterparty_desc':
+            comparison = left.borrowerName.localeCompare(right.borrowerName, locale, { sensitivity: 'base', numeric: true })
+            break
+        case 'principal_asc':
+        case 'principal_desc':
+            comparison = left.principalAmount - right.principalAmount
+            break
+        case 'balance_asc':
+        case 'balance_desc':
+            comparison = left.balanceAmount - right.balanceAmount
+            break
+        case 'due_asc':
+        case 'due_desc':
+            if (!left.nextDueDate && !right.nextDueDate) comparison = 0
+            else if (!left.nextDueDate) return 1
+            else if (!right.nextDueDate) return -1
+            else comparison = left.nextDueDate.localeCompare(right.nextDueDate)
+            break
+        case 'created_asc':
+        case 'created_desc':
+            comparison = left.createdAt.localeCompare(right.createdAt)
+            break
+    }
+
+    return comparison === 0 ? left.id.localeCompare(right.id) : comparison * direction
+}
 
 const simpleLoanFilterIcons = {
     all: ListFilter,
@@ -112,6 +194,9 @@ export function SimpleLoanListView({
     const deferredSearch = useDeferredValue(search)
     const [filter, setFilter] = useState<SimpleLoanFilter>('all')
     const [paymentFilter, setPaymentFilter] = useState<LoanPaymentFilter>('all')
+    const [advancedFilters, setAdvancedFilters] = useState<SimpleLoanAdvancedFilters>(DEFAULT_SIMPLE_LOAN_ADVANCED_FILTERS)
+    const [draftAdvancedFilters, setDraftAdvancedFilters] = useState<SimpleLoanAdvancedFilters>(advancedFilters)
+    const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
     const [summaryModeByWorkspace, setSummaryModeByWorkspace] = useState<Record<string, SimpleLoanSummaryMode>>({})
     const persistedSummaryMode = useMemo(
         () => getSimpleLoanSummaryMode(workspaceId),
@@ -202,6 +287,11 @@ export function SimpleLoanListView({
 
     const filtered = useMemo(() => {
         const query = deferredSearch.trim().toLowerCase()
+        const minPrincipal = advancedFilters.minPrincipal ? parseFormattedNumber(advancedFilters.minPrincipal) : undefined
+        const maxPrincipal = advancedFilters.maxPrincipal ? parseFormattedNumber(advancedFilters.maxPrincipal) : undefined
+        const minBalance = advancedFilters.minBalance ? parseFormattedNumber(advancedFilters.minBalance) : undefined
+        const maxBalance = advancedFilters.maxBalance ? parseFormattedNumber(advancedFilters.maxBalance) : undefined
+
         return dateScopedSimpleLoans.filter((loan) => {
             const direction = getLoanDirection(loan)
             const overdue = isLoanOverdue(loan)
@@ -210,6 +300,14 @@ export function SimpleLoanListView({
             if (filter === 'lent' && direction !== 'lent') return false
             if (filter === 'borrowed' && direction !== 'borrowed') return false
             if (filter === 'completed' && !(loan.status === 'completed' || loan.balanceAmount <= 0)) return false
+            if (advancedFilters.currency.length > 0 && !advancedFilters.currency.includes(loan.settlementCurrency)) return false
+            if (minPrincipal !== undefined && loan.principalAmount < minPrincipal) return false
+            if (maxPrincipal !== undefined && loan.principalAmount > maxPrincipal) return false
+            if (minBalance !== undefined && loan.balanceAmount < minBalance) return false
+            if (maxBalance !== undefined && loan.balanceAmount > maxBalance) return false
+            const nextDueDate = loan.nextDueDate?.slice(0, 10)
+            if (advancedFilters.dueDateFrom && (!nextDueDate || nextDueDate < advancedFilters.dueDateFrom)) return false
+            if (advancedFilters.dueDateTo && (!nextDueDate || nextDueDate > advancedFilters.dueDateTo)) return false
             if (!query) return true
 
             return (
@@ -218,8 +316,19 @@ export function SimpleLoanListView({
                 loan.loanNo.toLowerCase().includes(query) ||
                 (overdue && (t('loans.statuses.overdue') || 'overdue').toLowerCase().includes(query))
             )
-        })
-    }, [dateScopedSimpleLoans, deferredSearch, filter, paymentFilter, t])
+        }).sort((left, right) => compareSimpleLoans(left, right, advancedFilters.sort, i18n.resolvedLanguage || i18n.language))
+    }, [advancedFilters, dateScopedSimpleLoans, deferredSearch, filter, i18n.language, i18n.resolvedLanguage, paymentFilter, t])
+
+    useEffect(() => {
+        if (isFilterDialogOpen) setDraftAdvancedFilters(advancedFilters)
+    }, [advancedFilters, isFilterDialogOpen])
+
+    const activeAdvancedFilterCount = countActiveSimpleLoanAdvancedFilters(advancedFilters)
+    const handleApplyAdvancedFilters = () => {
+        setAdvancedFilters(draftAdvancedFilters)
+        setCurrentPage(1)
+        setIsFilterDialogOpen(false)
+    }
 
     const metrics = useMemo(
         () => calculateSimpleLoanListMetrics(filtered, features.default_currency),
@@ -617,6 +726,36 @@ export function SimpleLoanListView({
                                     setPaymentFilter(value)
                                 }}
                             />
+                            <Button
+                                type="button"
+                                variant="outline"
+                                allowViewer={true}
+                                onClick={() => setIsFilterDialogOpen(true)}
+                                className="h-10 gap-2 rounded-xl border-border/70 px-3"
+                            >
+                                <SlidersHorizontal className="h-4 w-4" />
+                                {t('loans.advancedFilter.buttonLabel', { defaultValue: 'Filters' })}
+                                {activeAdvancedFilterCount > 0 ? (
+                                    <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
+                                        {activeAdvancedFilterCount}
+                                    </span>
+                                ) : null}
+                            </Button>
+                            {activeAdvancedFilterCount > 0 ? (
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    allowViewer={true}
+                                    onClick={() => {
+                                        setAdvancedFilters(DEFAULT_SIMPLE_LOAN_ADVANCED_FILTERS)
+                                        setCurrentPage(1)
+                                    }}
+                                    className="h-10 gap-2 rounded-xl px-3 text-muted-foreground"
+                                >
+                                    <RotateCcw className="h-4 w-4" />
+                                    {t('loans.advancedFilter.clear', { defaultValue: 'Clear filters' })}
+                                </Button>
+                            ) : null}
                         </div>
                         <div className="flex items-center gap-2">
                             <Button variant="outline" allowViewer={true} onClick={() => setShowPrintPreview(true)} className="gap-2 print:hidden h-10 rounded-xl px-4">
@@ -1011,6 +1150,148 @@ export function SimpleLoanListView({
                 }}
                 onConfirm={handleShareOnWhatsApp}
             />
+
+            <AppDialog open={isFilterDialogOpen} onOpenChange={setIsFilterDialogOpen}>
+                <AppDialogContent className="max-w-4xl">
+                    <AppDialogHeader>
+                        <AppDialogTitle className="flex items-center gap-3">
+                            <span className="rounded-xl bg-primary/10 p-2 text-primary">
+                                <SlidersHorizontal className="h-5 w-5" />
+                            </span>
+                            {t('loans.advancedFilter.dialogTitle', { defaultValue: 'Loan Filters' })}
+                        </AppDialogTitle>
+                        <AppDialogDescription>
+                            {t('loans.advancedFilter.description', { defaultValue: 'Refine loans by currency, amounts, due date, and sort order.' })}
+                        </AppDialogDescription>
+                    </AppDialogHeader>
+                    <AppDialogBody className="space-y-5">
+                        <section className="grid gap-4 lg:grid-cols-2">
+                            <div className="space-y-4 rounded-2xl border border-border/60 bg-background/80 p-4 sm:p-5">
+                                <h3 className="font-bold">{t('loans.advancedFilter.sortTitle', { defaultValue: 'Sort order' })}</h3>
+                                <div className="space-y-2">
+                                    <Label>{t('loans.advancedFilter.sortBy', { defaultValue: 'Sort by' })}</Label>
+                                    <Select
+                                        value={draftAdvancedFilters.sort}
+                                        onValueChange={(sort: SimpleLoanSortOption) => setDraftAdvancedFilters((current) => ({ ...current, sort }))}
+                                    >
+                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="created_desc">{t('loans.advancedFilter.sortCreatedNewest', { defaultValue: 'Created: Newest first' })}</SelectItem>
+                                            <SelectItem value="created_asc">{t('loans.advancedFilter.sortCreatedOldest', { defaultValue: 'Created: Oldest first' })}</SelectItem>
+                                            <SelectItem value="counterparty_asc">{t('loans.advancedFilter.sortCounterpartyAsc', { defaultValue: 'Counterparty: A to Z' })}</SelectItem>
+                                            <SelectItem value="counterparty_desc">{t('loans.advancedFilter.sortCounterpartyDesc', { defaultValue: 'Counterparty: Z to A' })}</SelectItem>
+                                            <SelectItem value="principal_asc">{t('loans.advancedFilter.sortPrincipalAsc', { defaultValue: 'Principal: Low to high' })}</SelectItem>
+                                            <SelectItem value="principal_desc">{t('loans.advancedFilter.sortPrincipalDesc', { defaultValue: 'Principal: High to low' })}</SelectItem>
+                                            <SelectItem value="balance_asc">{t('loans.advancedFilter.sortBalanceAsc', { defaultValue: 'Balance: Low to high' })}</SelectItem>
+                                            <SelectItem value="balance_desc">{t('loans.advancedFilter.sortBalanceDesc', { defaultValue: 'Balance: High to low' })}</SelectItem>
+                                            <SelectItem value="due_asc">{t('loans.advancedFilter.sortDueSoonest', { defaultValue: 'Next due: Soonest first' })}</SelectItem>
+                                            <SelectItem value="due_desc">{t('loans.advancedFilter.sortDueLatest', { defaultValue: 'Next due: Latest first' })}</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+
+                            <div className="space-y-4 rounded-2xl border border-border/60 bg-background/80 p-4 sm:p-5">
+                                <h3 className="font-bold">{t('loans.advancedFilter.amountsTitle', { defaultValue: 'Currency, principal & balance' })}</h3>
+                                <CurrencySelector
+                                    multiple
+                                    label={t('loans.advancedFilter.currency', { defaultValue: 'Currency' })}
+                                    value={draftAdvancedFilters.currency}
+                                    allowedCurrencies={Array.from(new Set([
+                                        ...features.allowed_currencies,
+                                        ...simpleLoans.map((loan) => loan.settlementCurrency),
+                                        ...draftAdvancedFilters.currency,
+                                    ]))}
+                                    allLabel={t('loans.advancedFilter.allCurrencies', { defaultValue: 'All currencies' })}
+                                    multipleLabel={t('loans.advancedFilter.selectedCount', { count: draftAdvancedFilters.currency.length, defaultValue: '{{count}} selected' })}
+                                    onChange={(currency) => setDraftAdvancedFilters((current) => ({ ...current, currency }))}
+                                />
+                                <div className="space-y-2">
+                                    <Label>{t('loans.advancedFilter.principalRange', { defaultValue: 'Principal range' })}</Label>
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                        <Input
+                                            inputMode="decimal"
+                                            value={formatNumericInput(draftAdvancedFilters.minPrincipal)}
+                                            onChange={(event) => setDraftAdvancedFilters((current) => ({ ...current, minPrincipal: sanitizeNumericInput(event.target.value) }))}
+                                            placeholder="0"
+                                            aria-label={t('loans.advancedFilter.minimumPrincipal', { defaultValue: 'Minimum principal' })}
+                                        />
+                                        <Input
+                                            inputMode="decimal"
+                                            value={formatNumericInput(draftAdvancedFilters.maxPrincipal)}
+                                            onChange={(event) => setDraftAdvancedFilters((current) => ({ ...current, maxPrincipal: sanitizeNumericInput(event.target.value) }))}
+                                            placeholder={t('loans.advancedFilter.noMaximum', { defaultValue: 'No maximum' })}
+                                            aria-label={t('loans.advancedFilter.maximumPrincipal', { defaultValue: 'Maximum principal' })}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>{t('loans.advancedFilter.balanceRange', { defaultValue: 'Remaining balance range' })}</Label>
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                        <Input
+                                            inputMode="decimal"
+                                            value={formatNumericInput(draftAdvancedFilters.minBalance)}
+                                            onChange={(event) => setDraftAdvancedFilters((current) => ({ ...current, minBalance: sanitizeNumericInput(event.target.value) }))}
+                                            placeholder="0"
+                                            aria-label={t('loans.advancedFilter.minimumBalance', { defaultValue: 'Minimum balance' })}
+                                        />
+                                        <Input
+                                            inputMode="decimal"
+                                            value={formatNumericInput(draftAdvancedFilters.maxBalance)}
+                                            onChange={(event) => setDraftAdvancedFilters((current) => ({ ...current, maxBalance: sanitizeNumericInput(event.target.value) }))}
+                                            placeholder={t('loans.advancedFilter.noMaximum', { defaultValue: 'No maximum' })}
+                                            aria-label={t('loans.advancedFilter.maximumBalance', { defaultValue: 'Maximum balance' })}
+                                        />
+                                    </div>
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                    {t('loans.advancedFilter.amountCurrencyHint', { defaultValue: 'Amount limits are checked in each loan’s selected currency.' })}
+                                </p>
+                            </div>
+                        </section>
+
+                        <section className="space-y-3 rounded-2xl border border-border/60 bg-background/80 p-4 sm:p-5">
+                            <h3 className="font-bold">{t('loans.advancedFilter.dueDateTitle', { defaultValue: 'Next due date' })}</h3>
+                            <div className="grid gap-4 sm:grid-cols-2">
+                                <div className="space-y-2">
+                                    <Label>{t('loans.advancedFilter.dueDateFrom', { defaultValue: 'Due from' })}</Label>
+                                    <DateTimePicker
+                                        mode="date"
+                                        date={parseLocalDateValue(draftAdvancedFilters.dueDateFrom)}
+                                        setDate={(date) => setDraftAdvancedFilters((current) => ({ ...current, dueDateFrom: date ? formatLocalDateValue(date) : '' }))}
+                                        buttonClassName="w-full justify-start"
+                                        placeholder={t('loans.advancedFilter.anyDueDate', { defaultValue: 'Any date' })}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>{t('loans.advancedFilter.dueDateTo', { defaultValue: 'Due to' })}</Label>
+                                    <DateTimePicker
+                                        mode="date"
+                                        date={parseLocalDateValue(draftAdvancedFilters.dueDateTo)}
+                                        setDate={(date) => setDraftAdvancedFilters((current) => ({ ...current, dueDateTo: date ? formatLocalDateValue(date) : '' }))}
+                                        buttonClassName="w-full justify-start"
+                                        placeholder={t('loans.advancedFilter.anyDueDate', { defaultValue: 'Any date' })}
+                                    />
+                                </div>
+                            </div>
+                        </section>
+                    </AppDialogBody>
+                    <AppDialogFooter className="sm:justify-between">
+                        <Button type="button" variant="ghost" onClick={() => setDraftAdvancedFilters(DEFAULT_SIMPLE_LOAN_ADVANCED_FILTERS)} className="gap-2">
+                            <RotateCcw className="h-4 w-4" />
+                            {t('loans.advancedFilter.resetDraft', { defaultValue: 'Reset draft' })}
+                        </Button>
+                        <div className="flex flex-col-reverse gap-2 sm:flex-row">
+                            <Button type="button" variant="outline" onClick={() => setIsFilterDialogOpen(false)}>
+                                {t('common.cancel', { defaultValue: 'Cancel' })}
+                            </Button>
+                            <Button type="button" onClick={handleApplyAdvancedFilters}>
+                                {t('loans.advancedFilter.apply', { defaultValue: 'Apply filters' })}
+                            </Button>
+                        </div>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
         </div>
     )
 }

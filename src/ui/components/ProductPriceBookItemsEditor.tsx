@@ -22,9 +22,28 @@ export interface ProductPriceBookDraft {
     priceBookId: string
     costPrice: string
     price: string
+    minimumSellingPrice?: string
     parentPrice?: string
+    unitPrices?: Record<string, ProductPriceBookUnitDraft>
     currency: CurrencyCode
     useParentPriceBookCost?: boolean
+}
+
+export interface ProductPriceBookUnitDraft {
+    price: string
+    costPrice: string
+    minimumSellingPrice: string
+    currency: CurrencyCode
+}
+
+export interface ProductPriceBookUnitOption {
+    unitRef: string
+    unitCode: string
+    isBase: boolean
+    isDefaultSelling?: boolean
+    sellingPrice?: string
+    costPrice?: string
+    minimumSellingPrice?: string
 }
 
 interface ProductPriceBookItemsEditorProps {
@@ -35,11 +54,13 @@ interface ProductPriceBookItemsEditorProps {
     defaultPrice: string
     defaultParentPrice?: string
     parentUnitLabel?: string
+    unitOptions?: ProductPriceBookUnitOption[]
     defaultCurrency: CurrencyCode
     allowedCurrencies: CurrencyCode[]
     iqdDisplayPreference: IQDDisplayPreference
     disabled?: boolean
     hideCosts?: boolean
+    hideMinimumSellingPrice?: boolean
     showParentPriceBookCostToggle?: boolean
     highlightMissingCosts?: boolean
     attention?: boolean
@@ -54,11 +75,13 @@ export function ProductPriceBookItemsEditor({
     defaultPrice,
     defaultParentPrice = '',
     parentUnitLabel,
+    unitOptions,
     defaultCurrency,
     allowedCurrencies,
     iqdDisplayPreference,
     disabled = false,
     hideCosts = false,
+    hideMinimumSellingPrice = false,
     showParentPriceBookCostToggle = false,
     highlightMissingCosts = false,
     attention = false,
@@ -71,6 +94,37 @@ export function ProductPriceBookItemsEditor({
     )
     const selectedIds = useMemo(() => new Set(rows.map((row) => row.priceBookId)), [rows])
     const nextAvailableBook = sortedPriceBooks.find((priceBook) => !selectedIds.has(priceBook.id))
+    const hasUnitOptions = Boolean(unitOptions?.length)
+
+    const getUnitDraft = (row: ProductPriceBookDraft, unit: ProductPriceBookUnitOption): ProductPriceBookUnitDraft => {
+        const saved = row.unitPrices?.[unit.unitRef]
+        return {
+            price: saved?.price ?? (unit.isBase ? row.price : unit.sellingPrice ?? ''),
+            costPrice: saved?.costPrice ?? (unit.isBase ? row.costPrice : unit.costPrice ?? ''),
+            minimumSellingPrice: saved?.minimumSellingPrice
+                ?? (unit.isBase ? row.minimumSellingPrice ?? '' : unit.minimumSellingPrice ?? ''),
+            currency: saved?.currency ?? (unit.isBase ? row.currency : defaultCurrency)
+        }
+    }
+
+    const updateUnitDraft = (
+        index: number,
+        unit: ProductPriceBookUnitOption,
+        changes: Partial<ProductPriceBookUnitDraft>
+    ) => {
+        const row = rows[index]
+        if (!row) return
+        const nextUnit = { ...getUnitDraft(row, unit), ...changes }
+        updateRow(index, {
+            unitPrices: { ...row.unitPrices, [unit.unitRef]: nextUnit },
+            ...(unit.isBase ? {
+                price: nextUnit.price,
+                costPrice: nextUnit.costPrice,
+                minimumSellingPrice: nextUnit.minimumSellingPrice,
+                currency: nextUnit.currency
+            } : {})
+        })
+    }
 
     const updateRow = (index: number, changes: Partial<ProductPriceBookDraft>) => {
         const nextRows = rows.map((row, rowIndex) => rowIndex === index ? { ...row, ...changes } : row)
@@ -88,7 +142,14 @@ export function ProductPriceBookItemsEditor({
                 priceBookId: nextAvailableBook.id,
                 costPrice: hideCosts ? '' : defaultCostPrice.trim(),
                 price: defaultPrice.trim() || '0',
-                ...(parentUnitLabel ? { parentPrice: defaultParentPrice.trim() } : {}),
+                ...(hasUnitOptions
+                    ? { unitPrices: Object.fromEntries(unitOptions!.map((unit) => [unit.unitRef, {
+                        price: unit.isBase ? (unit.sellingPrice ?? defaultPrice).trim() : (unit.sellingPrice ?? '').trim(),
+                        costPrice: hideCosts ? '' : (unit.isBase ? (unit.costPrice ?? defaultCostPrice).trim() : (unit.costPrice ?? '').trim()),
+                        minimumSellingPrice: hideMinimumSellingPrice ? '' : (unit.minimumSellingPrice ?? '').trim(),
+                        currency: defaultCurrency
+                    }])) }
+                    : parentUnitLabel ? { parentPrice: defaultParentPrice.trim() } : {}),
                 currency: defaultCurrency,
                 ...(showParentPriceBookCostToggle ? { useParentPriceBookCost: true } : {})
             }
@@ -160,7 +221,9 @@ export function ProductPriceBookItemsEditor({
 
                         return (
                             <div key={`${row.priceBookId}-${index}`} className="rounded-2xl border border-border/60 bg-muted/10 p-4">
-                                <div className={parentUnitLabel
+                                <div className={hasUnitOptions
+                                    ? 'grid gap-4 sm:grid-cols-[minmax(180px,1fr)_40px] sm:items-end'
+                                    : parentUnitLabel
                                     ? 'grid gap-4 md:grid-cols-2 xl:grid-cols-3'
                                     : hideCosts
                                     ? showParentPriceBookCostToggle
@@ -192,7 +255,7 @@ export function ProductPriceBookItemsEditor({
                                         </Select>
                                     </div>
 
-                                    {parentUnitLabel ? (
+                                    {parentUnitLabel && !hasUnitOptions ? (
                                         <div className="space-y-2">
                                             <Label className="flex items-center gap-2">
                                                 <Package className="h-4 w-4 text-primary/60" />
@@ -215,7 +278,7 @@ export function ProductPriceBookItemsEditor({
                                         </div>
                                     ) : null}
 
-                                    <div className="space-y-2">
+                                    {!hasUnitOptions ? <div className="space-y-2">
                                         <Label className="flex items-center gap-2">
                                             <DollarSign className="h-4 w-4 text-primary/60" />
                                             {t('priceBooks.sellingPrice', { defaultValue: 'Selling price' })} *
@@ -231,9 +294,9 @@ export function ProductPriceBookItemsEditor({
                                             placeholder="0.000"
                                             required
                                         />
-                                    </div>
+                                    </div> : null}
 
-                                    {!hideCosts && (
+                                    {!hideCosts && !hasUnitOptions && (
                                         <div className="space-y-2">
                                             <Label className="flex items-center gap-2">
                                                 <Wallet className="h-4 w-4 text-primary/60" />
@@ -271,14 +334,14 @@ export function ProductPriceBookItemsEditor({
                                         </div>
                                     )}
 
-                                    <CurrencySelector
+                                    {!hasUnitOptions ? <CurrencySelector
                                         label={`${t('priceBooks.currency', { defaultValue: 'Currency' })} *`}
                                         value={row.currency}
                                         onChange={(currency) => updateRow(index, { currency })}
                                         iqdDisplayPreference={iqdDisplayPreference}
                                         allowedCurrencies={allowedCurrencies}
                                         disabled={disabled}
-                                    />
+                                    /> : null}
 
                                     <div className="flex justify-end xl:justify-center">
                                         {!disabled && (
@@ -295,6 +358,87 @@ export function ProductPriceBookItemsEditor({
                                         )}
                                     </div>
                                 </div>
+                                {hasUnitOptions ? (
+                                    <div className="mt-4 space-y-3 border-t border-border/60 pt-4">
+                                        <div className="space-y-1">
+                                            <p className="flex items-center gap-2 text-sm font-semibold">
+                                                <Package className="h-4 w-4 text-primary/60" />
+                                                {t('priceBooks.unitPricesTitle', { defaultValue: 'Price Book values by unit' })}
+                                            </p>
+                                            <p className="text-xs text-muted-foreground">
+                                                {t('priceBooks.unitPricesDescription', { defaultValue: 'Set the Price Book values used when this unit is sold.' })}
+                                            </p>
+                                        </div>
+                                        <div className="space-y-3">
+                                            {unitOptions?.map((unit) => {
+                                                const values = getUnitDraft(row, unit)
+                                                const unitLabel = t(`products.units.${unit.unitCode}`, { defaultValue: unit.unitCode })
+                                                const fieldId = `price-book-unit-${row.priceBookId}-${unit.unitRef}`
+                                                return (
+                                                    <div key={unit.unitRef} className="rounded-xl border border-border/60 bg-background/70 p-3">
+                                                        <p className="mb-3 flex items-center gap-2 text-sm font-semibold">
+                                                            <Package className="h-4 w-4 text-primary/60" />
+                                                            {unitLabel}
+                                                            {unit.isBase ? <span className="text-xs font-normal text-muted-foreground">({t('products.uom.baseUnit')})</span> : null}
+                                                        </p>
+                                                        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                                            <div className="space-y-2">
+                                                                <Label htmlFor={`${fieldId}-price`}>{t('priceBooks.sellingPrice', { defaultValue: 'Selling price' })} *</Label>
+                                                                <Input
+                                                                    id={`${fieldId}-price`}
+                                                                    type="text"
+                                                                    inputMode="decimal"
+                                                                    value={formatNumericInput(values.price)}
+                                                                    onChange={(event) => updateUnitDraft(index, unit, { price: sanitizeNumericInput(event.target.value, { maxFractionDigits: 4 }) })}
+                                                                    readOnly={disabled}
+                                                                    placeholder="0"
+                                                                    required
+                                                                />
+                                                            </div>
+                                                            {!hideCosts ? <div className="space-y-2">
+                                                                <Label htmlFor={`${fieldId}-cost`}>{t('priceBooks.costPrice', { defaultValue: 'Unit cost' })} *</Label>
+                                                                <Input
+                                                                    id={`${fieldId}-cost`}
+                                                                    type="text"
+                                                                    inputMode="decimal"
+                                                                    value={formatNumericInput(values.costPrice)}
+                                                                    onChange={(event) => updateUnitDraft(index, unit, { costPrice: sanitizeNumericInput(event.target.value, { maxFractionDigits: 4 }) })}
+                                                                    readOnly={disabled}
+                                                                    placeholder="0"
+                                                                    required
+                                                                    className={cn(
+                                                                        highlightMissingCosts && values.costPrice.trim() === ''
+                                                                            && 'border-destructive bg-destructive/5 ring-2 ring-destructive/20 hover:border-destructive focus-visible:border-destructive focus-visible:ring-destructive/30'
+                                                                    )}
+                                                                />
+                                                            </div> : null}
+                                                            {!hideMinimumSellingPrice ? <div className="space-y-2">
+                                                                <Label htmlFor={`${fieldId}-minimum`}>{t('products.form.minimumSellingPrice', { defaultValue: 'Minimum selling price' })}</Label>
+                                                                <Input
+                                                                    id={`${fieldId}-minimum`}
+                                                                    type="text"
+                                                                    inputMode="decimal"
+                                                                    value={formatNumericInput(values.minimumSellingPrice)}
+                                                                    onChange={(event) => updateUnitDraft(index, unit, { minimumSellingPrice: sanitizeNumericInput(event.target.value, { maxFractionDigits: 4 }) })}
+                                                                    readOnly={disabled}
+                                                                    placeholder="0"
+                                                                />
+                                                            </div> : null}
+                                                            <CurrencySelector
+                                                                label={`${t('priceBooks.currency', { defaultValue: 'Currency' })} *`}
+                                                                value={values.currency}
+                                                                onChange={(currency) => updateUnitDraft(index, unit, { currency })}
+                                                                iqdDisplayPreference={iqdDisplayPreference}
+                                                                allowedCurrencies={allowedCurrencies}
+                                                                disabled={disabled}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    </div>
+                                ) : null}
                             </div>
                         )
                     })}

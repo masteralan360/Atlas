@@ -120,6 +120,7 @@ export interface PriceBookItem extends BaseEntity {
   /** Null means this Price Book has no cost for the product. Zero is valid. */
   costPrice: number | null
   price: number
+  minimumSellingPrice?: number | null
   currency: CurrencyCode
   createdBy?: string | null
 }
@@ -245,12 +246,14 @@ export interface ProductUnitConversion extends BaseEntity {
   createdBy?: string | null
 }
 
-/** Optional Price Book override for either side of a product unit hierarchy. */
+/** Price Book pricing and cost snapshots for one of a product's selling units. */
 export interface PriceBookUnitPrice extends BaseEntity {
   priceBookId: string
   productId: string
   unitRef: UnitRef
   price: number
+  costPrice?: number | null
+  minimumSellingPrice?: number | null
   currency: CurrencyCode
   createdBy?: string | null
 }

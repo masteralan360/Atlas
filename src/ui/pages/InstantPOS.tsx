@@ -1598,9 +1598,10 @@ export function InstantPOS() {
             : selectedUomId
                 ? availableUoms.find((row) => row.id === selectedUomId) ?? getDefaultSellingUom(product)
                 : getDefaultSellingUom(product)
-        const effectiveCost = selectedUom?.costPrice ?? (product.costPrice == null
+        const baseUnitCost = availableUoms.find((row) => row.isBase)?.costPrice ?? product.costPrice
+        const effectiveCost = selectedUom?.costPrice ?? (baseUnitCost == null
             ? null
-            : product.costPrice * (selectedUom?.coefficient ?? 1))
+            : baseUnitCost * (selectedUom?.coefficient ?? 1))
         if (!isService(product) && !hasValidProductCost(effectiveCost)) {
             toast({
                 title: t('common.error') || 'Error',

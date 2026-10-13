@@ -103,7 +103,9 @@ import { ProductMinimumSellingPriceDisclosure } from '@/ui/components/products/P
 import { useUnitRegistry } from '@/ui/components/unitRegistry'
 import {
     ProductPriceBookItemsEditor,
-    type ProductPriceBookDraft
+    type ProductPriceBookDraft,
+    type ProductPriceBookUnitDraft,
+    type ProductPriceBookUnitOption
 } from '@/ui/components/ProductPriceBookItemsEditor'
 import {
     ProductCommissionRuleEditor,
@@ -181,20 +183,42 @@ type ProductFormData = {
 
 function mapPriceBookItemsToDrafts(
     items: PriceBookItem[],
-    unitPrices: Array<{ priceBookId: string; price: number }> = []
+    unitPrices: Array<{
+        priceBookId: string
+        unitRef: string
+        price: number
+        costPrice?: number | null
+        minimumSellingPrice?: number | null
+        currency: CurrencyCode
+    }> = [],
+    baseUnitRef?: string
 ): ProductPriceBookDraft[] {
-    const parentPriceByBook = new Map(unitPrices.map((row) => [row.priceBookId, row.price]))
+    const pricesByBook = new Map<string, Record<string, ProductPriceBookUnitDraft>>()
+    for (const row of unitPrices) {
+        const prices = pricesByBook.get(row.priceBookId) ?? {}
+        prices[row.unitRef] = {
+            price: String(row.price),
+            costPrice: row.costPrice == null ? '' : String(row.costPrice),
+            minimumSellingPrice: row.minimumSellingPrice == null ? '' : String(row.minimumSellingPrice),
+            currency: row.currency
+        }
+        pricesByBook.set(row.priceBookId, prices)
+    }
     return [...items]
         .sort((left, right) => left.priceBookId.localeCompare(right.priceBookId))
-        .map((item) => ({
-            priceBookId: item.priceBookId,
-            costPrice: item.costPrice == null ? '' : String(item.costPrice),
-            price: String(item.price),
-            parentPrice: parentPriceByBook.has(item.priceBookId)
-                ? String(parentPriceByBook.get(item.priceBookId))
-                : '',
-            currency: item.currency
-        }))
+        .map((item) => {
+            const unitValues = pricesByBook.get(item.priceBookId) ?? {}
+            const baseValues = baseUnitRef ? unitValues[baseUnitRef] : undefined
+            return {
+                priceBookId: item.priceBookId,
+                costPrice: baseValues?.costPrice ?? (item.costPrice == null ? '' : String(item.costPrice)),
+                price: baseValues?.price ?? String(item.price),
+                minimumSellingPrice: baseValues?.minimumSellingPrice
+                    ?? (item.minimumSellingPrice == null ? '' : String(item.minimumSellingPrice)),
+                unitPrices: unitValues,
+                currency: baseValues?.currency ?? item.currency
+            }
+        })
 }
 
 function serializePriceBookDrafts(rows: ProductPriceBookDraft[]) {
@@ -204,7 +228,17 @@ function serializePriceBookDrafts(rows: ProductPriceBookDraft[]) {
                 priceBookId: row.priceBookId,
                 costPrice: row.costPrice.trim() === '' ? null : Number(row.costPrice),
                 price: row.price.trim() === '' ? null : Number(row.price),
-                parentPrice: row.parentPrice?.trim() === '' ? null : Number(row.parentPrice),
+                minimumSellingPrice: row.minimumSellingPrice?.trim() === '' || row.minimumSellingPrice == null
+                    ? null
+                    : Number(row.minimumSellingPrice),
+                unitPrices: Object.fromEntries(Object.entries(row.unitPrices ?? {})
+                    .sort(([left], [right]) => left.localeCompare(right))
+                    .map(([unitRef, value]) => [unitRef, {
+                        price: value.price.trim() === '' ? null : Number(value.price),
+                        costPrice: value.costPrice.trim() === '' ? null : Number(value.costPrice),
+                        minimumSellingPrice: value.minimumSellingPrice.trim() === '' ? null : Number(value.minimumSellingPrice),
+                        currency: value.currency
+                    }])),
                 currency: row.currency
             }))
             .sort((left, right) => left.priceBookId.localeCompare(right.priceBookId))
@@ -690,7 +724,11 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
 
         const sourceRows = mode === 'create'
             ? []
-            : mapPriceBookItemsToDrafts(sourcePriceBookItems, sourcePriceBookUomPrices)
+            : mapPriceBookItemsToDrafts(
+                sourcePriceBookItems,
+                sourcePriceBookUomPrices,
+                product ? productUomRefForCode(product.unit, customUnits) : undefined
+            )
         const nextRows = sourceRows
         const nextSnapshot = serializePriceBookDrafts(nextRows)
         if (initializedPriceBookRowsKeyRef.current !== sourceKey) {
@@ -713,6 +751,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         priceBookRows,
         priceBooksEnabled,
         product,
+        customUnits,
         sourcePriceBookItems,
         sourcePriceBookUomPrices
     ])
@@ -1395,31 +1434,48 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             initialProductUomsSnapshotRef.current = JSON.stringify(productUomDrafts)
 
             if (priceBooksEnabled) {
+                const baseUnitRef = productUomRefForCode(persistedProduct.unit, customUnits)
+                const activeProductUoms = nextProductUoms.filter((uom) => uom.isActive)
                 const savedItems = await replaceProductPriceBookItems(
                     workspaceId,
                     savedProductId,
-                    priceBookRows.map((row) => ({
-                        priceBookId: row.priceBookId,
-                        costPrice: row.costPrice.trim() === '' ? null : Number(row.costPrice),
-                        price: Number(row.price),
-                        currency: row.currency
-                    })),
+                    priceBookRows.map((row) => {
+                        const baseValues = row.unitPrices?.[baseUnitRef]
+                        const costPrice = baseValues?.costPrice ?? row.costPrice
+                        const price = baseValues?.price ?? row.price
+                        const minimumSellingPrice = baseValues?.minimumSellingPrice ?? row.minimumSellingPrice ?? ''
+                        return {
+                            priceBookId: row.priceBookId,
+                            costPrice: costPrice.trim() === '' ? null : Number(costPrice),
+                            price: Number(price),
+                            minimumSellingPrice: minimumSellingPrice.trim() === '' ? null : Number(minimumSellingPrice),
+                            currency: baseValues?.currency ?? row.currency
+                        }
+                    }),
                     user?.id || null
                 )
                 const savedUnitPrices = await replaceProductPriceBookUomPrices(
                     workspaceId,
                     savedProductId,
-                    productUomDrafts.some((row) => row.isActive && row.isDefaultSelling)
-                        ? priceBookRows.map((row) => ({
+                    priceBookRows.flatMap((row) => activeProductUoms.filter((uom) => !uom.isBase).map((uom) => {
+                        const unitValues = row.unitPrices?.[uom.unitRef]
+                        const price = unitValues?.price
+                            ?? (uom.isBase ? row.price : String(uom.sellingPrice))
+                        const costPrice = unitValues?.costPrice
+                            ?? (uom.costPrice == null ? '' : String(uom.costPrice))
+                        const minimumSellingPrice = unitValues?.minimumSellingPrice
+                            ?? (uom.minimumSellingPrice == null ? '' : String(uom.minimumSellingPrice))
+                        return {
                             priceBookId: row.priceBookId,
-                            unitRef: (productUomDrafts.find((uom) => uom.isActive && uom.isDefaultSelling)?.unitRef
-                                || productUomRefForCode(persistedProduct.unit, customUnits)) as UnitRef,
-                            price: Number(row.parentPrice),
-                            currency: row.currency
-                        }))
-                        : []
+                            unitRef: uom.unitRef as UnitRef,
+                            price: Number(price),
+                            costPrice: costPrice.trim() === '' ? null : Number(costPrice),
+                            minimumSellingPrice: minimumSellingPrice.trim() === '' ? null : Number(minimumSellingPrice),
+                            currency: unitValues?.currency ?? row.currency
+                        }
+                    }))
                 )
-                const completeSavedRows = mapPriceBookItemsToDrafts(savedItems, savedUnitPrices)
+                const completeSavedRows = mapPriceBookItemsToDrafts(savedItems, savedUnitPrices, baseUnitRef)
                 setPriceBookRows(completeSavedRows)
                 initialPriceBookRowsSnapshotRef.current = serializePriceBookDrafts(completeSavedRows)
             }
@@ -2436,13 +2492,35 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                             onChange={setPriceBookRows}
                                             defaultCostPrice={effectiveCost == null ? '' : String(effectiveCost)}
                                             defaultPrice={String(effectivePrice)}
-                                            defaultParentPrice={String(productUomDrafts.find((row) => row.isActive && row.isDefaultSelling)?.sellingPrice || '')}
-                                            parentUnitLabel={productUomDrafts.find((row) => row.isActive && row.isDefaultSelling)?.unitCode}
+                                            unitOptions={[
+                                                {
+                                                    unitRef: productUomRefForCode(normalizedUnit, customUnits),
+                                                    unitCode: normalizedUnit,
+                                                    isBase: true,
+                                                    sellingPrice: String(effectivePrice),
+                                                    costPrice: hideCosts || effectiveCost == null ? '' : String(effectiveCost),
+                                                    minimumSellingPrice: !canManageMinimumSellingPrice || formData.minimumSellingPrice.trim() === ''
+                                                        ? ''
+                                                        : String(isDynamicUnit(formData.unit)
+                                                            ? Number(formData.minimumSellingPrice) / (Number(formData.perQuantity) || 1)
+                                                            : Number(formData.minimumSellingPrice))
+                                                },
+                                                ...productUomDrafts.filter((row) => row.isActive && row.unitRef && row.unitCode).map((row) => ({
+                                                    unitRef: row.unitRef,
+                                                    unitCode: row.unitCode,
+                                                    isBase: false,
+                                                    isDefaultSelling: row.isDefaultSelling,
+                                                    sellingPrice: row.sellingPrice,
+                                                    costPrice: row.costPrice,
+                                                    minimumSellingPrice: row.minimumSellingPrice
+                                                }))
+                                            ] satisfies ProductPriceBookUnitOption[]}
                                             defaultCurrency={formData.currency}
                                             allowedCurrencies={features.allowed_currencies}
                                             iqdDisplayPreference={features.iqd_display_preference}
                                             disabled={isReadOnly}
                                             hideCosts={hideCosts}
+                                            hideMinimumSellingPrice={!canManageMinimumSellingPrice}
                                             highlightMissingCosts={highlightMissingCosts}
                                             attention={overrideAttention}
                                         />

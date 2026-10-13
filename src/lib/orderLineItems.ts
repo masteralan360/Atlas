@@ -44,6 +44,21 @@ type OrderLineCostLike = OrderLineQuantityLike & {
   convertedUomCostPrice?: unknown
 }
 
+export function normalizeOrderLineUnitCostSnapshot(
+  selectedUnitCost: number,
+  convertedSelectedUnitCost: number,
+  unitFactor: number,
+) {
+  const factor = Number.isFinite(unitFactor) && unitFactor > 0 ? unitFactor : 1
+
+  return {
+    costPrice: selectedUnitCost / factor,
+    convertedCostPrice: convertedSelectedUnitCost / factor,
+    uomCostPrice: selectedUnitCost,
+    convertedUomCostPrice: convertedSelectedUnitCost,
+  }
+}
+
 /** Cost in the selected unit, falling back to the historical base-unit cost. */
 export function getOrderLineSelectedUnitCost(item: OrderLineCostLike) {
   const selectedCost = item.convertedUomCostPrice
@@ -52,8 +67,13 @@ export function getOrderLineSelectedUnitCost(item: OrderLineCostLike) {
   }
   if (item.uomCostPrice !== null && item.uomCostPrice !== undefined
     && Number.isFinite(Number(item.uomCostPrice)) && Number(item.uomCostPrice) >= 0) {
-    const convertedCost = Number(item.convertedCostPrice ?? item.costPrice ?? item.uomCostPrice)
-    return Number.isFinite(convertedCost) && convertedCost >= 0 ? convertedCost : Number(item.uomCostPrice)
+    const sourceBaseCost = Number(item.costPrice)
+    const convertedBaseCost = Number(item.convertedCostPrice)
+    if (Number.isFinite(sourceBaseCost) && sourceBaseCost > 0
+      && Number.isFinite(convertedBaseCost) && convertedBaseCost >= 0) {
+      return Number(item.uomCostPrice) * (convertedBaseCost / sourceBaseCost)
+    }
+    return Number(item.uomCostPrice)
   }
   const baseCost = Number(item.convertedCostPrice ?? item.costPrice ?? 0)
   return Number.isFinite(baseCost) && baseCost >= 0 ? baseCost * getOrderLineUnitFactor(item) : 0

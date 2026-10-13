@@ -181,7 +181,7 @@ import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { useUnitRegistry, getDynamicUnitAdjustmentLabel, type UnitRegistry } from '@/ui/components/unitRegistry'
 import { hasEffectiveSalesAgentCommissionPermission } from '@/permissions/salesAgentCommissionPermissions'
 import { OLD_SALES_AGENT_CONFIGURATION } from '@/ui/components/commissions/oldSalesAgentConfiguration'
-import { getOrderLineFreeBonusQuantity } from '@/lib/orderLineItems'
+import { getOrderLineFreeBonusQuantity, normalizeOrderLineUnitCostSnapshot } from '@/lib/orderLineItems'
 import { FreeBonusUnitSelect } from '@/ui/components/orders/FreeBonusUnitSelect'
 import {
     QuickOrderModal,
@@ -270,6 +270,7 @@ type PosUnitSelection = {
     price: number
     costPrice: number | null
     minimumSellingPrice: number | null
+    minimumSellingPriceCurrency: CurrencyCode
     currency: CurrencyCode
     priceBookId?: string
     priceBookName?: string
@@ -536,7 +537,13 @@ export function POS() {
         [posPriceBooks]
     )
     const priceBookItemByProductId = useMemo(() => {
-        const map = new Map<string, { price: number; costPrice: number | null; currency: CurrencyCode; priceBook: PriceBook }>()
+        const map = new Map<string, {
+            price: number
+            costPrice: number | null
+            minimumSellingPrice: number | null
+            currency: CurrencyCode
+            priceBook: PriceBook
+        }>()
         if (!selectedPriceBookId) {
             return map
         }
@@ -551,6 +558,7 @@ export function POS() {
             map.set(priceBookItem.productId, {
                 price: priceBookItem.price,
                 costPrice: priceBookItem.costPrice,
+                minimumSellingPrice: priceBookItem.minimumSellingPrice ?? null,
                 currency: priceBookItem.currency,
                 priceBook
             })
@@ -921,6 +929,7 @@ export function POS() {
         return {
             price: priceBookItem.price,
             costPrice: priceBookItem.costPrice,
+            minimumSellingPrice: priceBookItem.minimumSellingPrice,
             currency: priceBookItem.currency,
             priceBookId: priceBookItem.priceBook.id,
             priceBookName: priceBookItem.priceBook.name
@@ -993,6 +1002,30 @@ export function POS() {
         getActiveProductUoms(product, unitContextsByProductId.get(product.id) ?? [], unitDescriptors)
     ), [unitContextsByProductId, unitDescriptors])
 
+    const [restoredSale, setRestoredSale] = useState<HeldSale | null>(null)
+
+    // Exchange Rate for advisory display and calculations. Keep these values
+    // above pricing callbacks that capture them in their dependency arrays.
+    const { exchangeData: globalExchangeData, eurRates: globalEurRates, tryRates: globalTryRates, status, currencyStatus, refresh: refreshExchangeRate } = useExchangeRate()
+
+    // Use restored rates if available (historical persistence), otherwise use global live rates
+    const exchangeData = restoredSale ? {
+        rate: restoredSale.rates.usd_iqd * 100,
+        source: restoredSale.rates.sources.usd_iqd,
+        timestamp: restoredSale.timestamp,
+        isFallback: false
+    } as ExchangeRateResult : globalExchangeData
+
+    const eurRates = restoredSale ? {
+        usd_eur: { rate: restoredSale.rates.usd_eur * 100, source: restoredSale.rates.sources.usd_eur, timestamp: restoredSale.timestamp, isFallback: false },
+        eur_iqd: { rate: restoredSale.rates.eur_iqd * 100, source: restoredSale.rates.sources.eur_iqd, timestamp: restoredSale.timestamp, isFallback: false }
+    } : globalEurRates
+
+    const tryRates = restoredSale ? {
+        usd_try: globalTryRates.usd_try, // Fallback to live or null for irrelevant pairs
+        try_iqd: { rate: restoredSale.rates.try_iqd * 100, source: restoredSale.rates.sources.try_iqd, timestamp: restoredSale.timestamp, isFallback: false }
+    } : globalTryRates
+
     const buildPosUnitSelection = useCallback((
         product: PosCatalogProduct,
         uom: ProductUom,
@@ -1009,6 +1042,41 @@ export function POS() {
                 && row.unitRef === uom.unitRef)
             : undefined
         const priceBook = priceBookUnitPrice ? priceBookById.get(priceBookUnitPrice.priceBookId) : undefined
+        const stockSourceBaseCost = stockSource?.type === 'batch' && stockSource.batch.costPrice != null
+            ? pricingProduct.costPrice
+            : base?.costPrice ?? pricingProduct.costPrice
+        const currency = (priceBookUnitPrice?.currency
+            ?? (uom.isBase ? priceBookPricing?.currency : pricingProduct.currency)
+            ?? pricingProduct.currency) as CurrencyCode
+        const fallbackCostPrice = uom.isBase
+            ? priceBookPricing?.costPrice ?? stockSourceBaseCost
+            : uom.costPrice ?? ((priceBookPricing?.costPrice ?? stockSourceBaseCost ?? 0) * uom.coefficient)
+        const fallbackCostCurrency = priceBookPricing?.costPrice != null
+            && (uom.isBase || uom.costPrice == null)
+            ? priceBookPricing.currency
+            : pricingProduct.currency
+        const sourceCostPrice = priceBookUnitPrice?.costPrice ?? fallbackCostPrice
+        const sourceCostCurrency = priceBookUnitPrice?.costPrice != null
+            ? priceBookUnitPrice.currency
+            : fallbackCostCurrency
+        const pricingRates = {
+            usdIqd: exchangeData,
+            eurIqd: eurRates.eur_iqd,
+            usdEur: eurRates.usd_eur,
+            tryIqd: tryRates.try_iqd,
+            usdTry: tryRates.usd_try
+        }
+        const rawMinimumPrice = priceBookUnitPrice?.minimumSellingPrice
+            ?? (priceBookPricing?.minimumSellingPrice == null
+                ? null
+                : priceBookPricing.minimumSellingPrice * uom.coefficient)
+            ?? uom.minimumSellingPrice
+            ?? (product.minimumSellingPrice == null ? null : product.minimumSellingPrice * uom.coefficient)
+        const minimumSellingPriceCurrency = priceBookUnitPrice?.minimumSellingPrice != null
+            ? priceBookUnitPrice.currency
+            : priceBookPricing?.minimumSellingPrice != null
+                ? priceBookPricing.currency
+                : product.currency
         return {
             uomId: uom.id,
             sellingUnitRef: uom.unitRef,
@@ -1017,16 +1085,16 @@ export function POS() {
             baseUnitCode: base?.unitCode ?? product.unit,
             factor: uom.coefficient,
             price: priceBookUnitPrice?.price ?? (uom.isBase ? priceBookPricing?.price ?? pricingProduct.price : uom.sellingPrice),
-            costPrice: uom.isBase
-                ? priceBookPricing?.costPrice ?? pricingProduct.costPrice
-                : uom.costPrice ?? ((pricingProduct.costPrice ?? 0) * uom.coefficient),
-            minimumSellingPrice: uom.minimumSellingPrice
-                ?? (product.minimumSellingPrice == null ? null : product.minimumSellingPrice * uom.coefficient),
-            currency: (priceBookUnitPrice?.currency ?? (uom.isBase ? priceBookPricing?.currency : pricingProduct.currency) ?? pricingProduct.currency) as CurrencyCode,
+            costPrice: sourceCostPrice == null
+                ? null
+                : convertPosPrice(sourceCostPrice, sourceCostCurrency, currency, pricingRates),
+            minimumSellingPrice: rawMinimumPrice,
+            minimumSellingPriceCurrency,
+            currency,
             priceBookId: priceBookUnitPrice?.priceBookId ?? (uom.isBase ? priceBookPricing?.priceBookId : undefined),
             priceBookName: priceBook?.name ?? (uom.isBase ? priceBookPricing?.priceBookName : undefined),
         }
-    }, [getPriceBookPricing, getProductForStockSource, getProductUomOptions, priceBookById, priceBookUomPrices, selectedPriceBookId])
+    }, [exchangeData, eurRates.eur_iqd, eurRates.usd_eur, getPriceBookPricing, getProductForStockSource, getProductUomOptions, priceBookById, priceBookUomPrices, selectedPriceBookId, tryRates.try_iqd, tryRates.usd_try])
 
     const getDefaultPosUnitSelection = useCallback((product: PosCatalogProduct, stockSource?: PosStockSourceSelection | null) => {
         const options = getProductUomOptions(product)
@@ -1283,7 +1351,6 @@ export function POS() {
         }
     }, [cart.length, checkScroll])
     const [isHeldSalesModalOpen, setIsHeldSalesModalOpen] = useState(false)
-    const [restoredSale, setRestoredSale] = useState<HeldSale | null>(null)
     const [isSuccessModalOpen, setIsSuccessModalOpen] = useState(false)
     const [isCurrencyConversionDialogOpen, setIsCurrencyConversionDialogOpen] = useState(false)
     const [currencyConversionDraft, setCurrencyConversionDraft] = useState(true)
@@ -1519,27 +1586,6 @@ export function POS() {
     const getDisplayImageUrl = (url?: string) => getProductImageDisplayUrl(url)
 
 
-    // Exchange Rate for advisory display and calculations
-    const { exchangeData: globalExchangeData, eurRates: globalEurRates, tryRates: globalTryRates, status, currencyStatus, refresh: refreshExchangeRate } = useExchangeRate()
-
-    // Use restored rates if available (historical persistence), otherwise use global live rates
-    const exchangeData = restoredSale ? {
-        rate: restoredSale.rates.usd_iqd * 100,
-        source: restoredSale.rates.sources.usd_iqd,
-        timestamp: restoredSale.timestamp,
-        isFallback: false
-    } as ExchangeRateResult : globalExchangeData
-
-    const eurRates = restoredSale ? {
-        usd_eur: { rate: restoredSale.rates.usd_eur * 100, source: restoredSale.rates.sources.usd_eur, timestamp: restoredSale.timestamp, isFallback: false },
-        eur_iqd: { rate: restoredSale.rates.eur_iqd * 100, source: restoredSale.rates.sources.eur_iqd, timestamp: restoredSale.timestamp, isFallback: false }
-    } : globalEurRates
-
-    const tryRates = restoredSale ? {
-        usd_try: globalTryRates.usd_try, // Fallback to live or null for irrelevant pairs
-        try_iqd: { rate: restoredSale.rates.try_iqd * 100, source: restoredSale.rates.sources.try_iqd, timestamp: restoredSale.timestamp, isFallback: false }
-    } : globalTryRates
-
     const quickOrderCommissionExchangeRates = useMemo(
         () => buildOrderExchangeRatesSnapshot({ exchangeData, eurRates, tryRates }),
         [eurRates, exchangeData, tryRates]
@@ -1598,11 +1644,13 @@ export function POS() {
         if (!product || minimumSellingPrice == null) return null
 
         const effectiveCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
+        const minimumCurrency = item.minimum_selling_price_currency_snapshot ?? product.currency
         const posRates = {
             usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,
             tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try
         }
-        if (!hasPosConversionRate(effectiveCurrency, product.currency, posRates)) {
+        if (!hasPosConversionRate(effectiveCurrency, product.currency, posRates)
+            || !hasPosConversionRate(minimumCurrency, product.currency, posRates)) {
             return { product, minimumSellingPrice, currency: product.currency, currencyUnavailable: true }
         }
         const effectivePriceInProductCurrency = convertPrice(
@@ -1610,7 +1658,7 @@ export function POS() {
             effectiveCurrency,
             product.currency
         )
-        const lineMinimum = minimumSellingPrice
+        const lineMinimum = convertPrice(minimumSellingPrice, minimumCurrency, product.currency)
         return isBelowMinimumSellingPrice(user.role, effectivePriceInProductCurrency, lineMinimum)
             ? { product, minimumSellingPrice: lineMinimum, currency: product.currency }
             : null
@@ -1625,13 +1673,19 @@ export function POS() {
             tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try
         }
         const hasProductCurrencyRate = hasPosConversionRate(effectiveCurrency, product.currency, posRates)
+        const minimumSellingPrice = item.minimum_selling_price_snapshot
+        const minimumCurrency = item.minimum_selling_price_currency_snapshot ?? product.currency
+        const hasMinimumPriceCurrencyRate = minimumSellingPrice == null
+            || hasPosConversionRate(minimumCurrency, product.currency, posRates)
         return [{
             productId: product.id,
             effectiveSellingPrice: convertPrice(getCartEffectivePrice(item), effectiveCurrency, product.currency),
             unitFactor: item.unit_factor ?? 1,
-            minimumSellingPrice: item.minimum_selling_price_snapshot ?? null,
+            minimumSellingPrice: minimumSellingPrice == null || !hasMinimumPriceCurrencyRate
+                ? null
+                : convertPrice(minimumSellingPrice, minimumCurrency, product.currency),
             sellingUomId: item.selling_uom_id ?? null,
-            currency: hasProductCurrencyRate ? product.currency : effectiveCurrency
+            currency: hasProductCurrencyRate && hasMinimumPriceCurrencyRate ? product.currency : effectiveCurrency
         }]
     }), [cart, convertPrice, exchangeData, eurRates.eur_iqd, eurRates.usd_eur, findStockProduct, getEffectiveProductCurrency, tryRates.try_iqd, tryRates.usd_try])
     const hasMinimumSellingPriceViolation = useMemo(
@@ -2227,6 +2281,7 @@ export function POS() {
                     selling_unit_name_snapshot: unitSelection?.sellingUnitCode ?? product.unit,
                     uom_cost_price: unitSelection?.costPrice ?? effectiveCostPrice,
                     minimum_selling_price_snapshot: unitSelection?.minimumSellingPrice ?? null,
+                    minimum_selling_price_currency_snapshot: unitSelection?.minimumSellingPriceCurrency ?? product.currency,
                     is_service: isNonInventoryService,
                     price_book_id: unitSelection?.priceBookId ?? priceBookPricing?.priceBookId,
                     price_book_name: unitSelection?.priceBookName ?? priceBookPricing?.priceBookName
@@ -2316,6 +2371,7 @@ export function POS() {
                     selling_unit_name_snapshot: unitSelection?.sellingUnitCode ?? product.unit,
                     uom_cost_price: unitSelection?.costPrice ?? effectiveCostPrice,
                     minimum_selling_price_snapshot: unitSelection?.minimumSellingPrice ?? null,
+                    minimum_selling_price_currency_snapshot: unitSelection?.minimumSellingPriceCurrency ?? product.currency,
                     base_unit_ref: unitSelection?.baseUnitRef ?? null,
                     base_unit_code: unitSelection?.baseUnitCode ?? product.unit,
                     unit_factor: unitSelection?.factor ?? 1,
@@ -3383,7 +3439,13 @@ export function POS() {
                 selling_uom_id: item.selling_uom_id ?? null,
                 selling_unit_name_snapshot: item.selling_unit_name_snapshot ?? item.selling_unit_code ?? item.unit ?? product?.unit ?? null,
                 uom_cost_price: uomCostPrice,
-                minimum_selling_price_snapshot: item.minimum_selling_price_snapshot ?? null,
+                minimum_selling_price_snapshot: item.minimum_selling_price_snapshot == null || !product
+                    ? null
+                    : convertPrice(
+                        item.minimum_selling_price_snapshot,
+                        item.minimum_selling_price_currency_snapshot ?? product.currency,
+                        product.currency
+                    ),
                 base_unit_ref: item.base_unit_ref ?? null,
                 base_unit_code: item.base_unit_code ?? product?.unit ?? null,
                 unit_factor: unitFactor,
@@ -3608,9 +3670,15 @@ export function POS() {
                 const effectivePrice = getCartEffectivePrice(item)
                 const convertedUnitPrice = roundOrderValue(convertPrice(effectivePrice, originalCurrency, settlementCurrency))
                 const coefficient = item.unit_factor ?? 1
-                const sourceCostPrice = Number(item.uom_cost_price
-                    ?? priceBookItem?.costPrice
-                    ?? (product.costPrice ?? 0) * coefficient)
+                const selectedUnitCostPrice = Number(item.uom_cost_price
+                    ?? (priceBookItem?.costPrice != null
+                        ? convertPrice(priceBookItem.costPrice, priceBookItem.currency, originalCurrency) * coefficient
+                        : (product.costPrice ?? 0) * coefficient))
+                const costSnapshot = normalizeOrderLineUnitCostSnapshot(
+                    selectedUnitCostPrice,
+                    roundOrderValue(convertPrice(selectedUnitCostPrice, originalCurrency, settlementCurrency)),
+                    coefficient
+                )
                 const freeBonusQuantity = getOrderLineFreeBonusQuantity(item)
                 const selectedStockBatch = item.stock_source_type === 'batch'
                     ? product.stockBatches.find((batch) => batch.id === item.stock_source_batch_id)
@@ -3641,7 +3709,13 @@ export function POS() {
                     baseUnitCode: item.base_unit_code ?? product.unit,
                     baseUnitNameSnapshot: item.base_unit_code ?? product.unit,
                     unitFactor: coefficient,
-                    minimumSellingPriceSnapshot: item.minimum_selling_price_snapshot ?? null,
+                    minimumSellingPriceSnapshot: item.minimum_selling_price_snapshot == null
+                        ? null
+                        : convertPrice(
+                            item.minimum_selling_price_snapshot,
+                            item.minimum_selling_price_currency_snapshot ?? product.currency,
+                            product.currency
+                        ),
                     quantity: item.quantity,
                     inventoryQuantity: item.quantity * coefficient,
                     ...(freeBonusQuantity > 0 ? { freeBonusQuantity } : {}),
@@ -3654,8 +3728,7 @@ export function POS() {
                     originalUnitPrice: effectivePrice,
                     convertedUnitPrice,
                     settlementCurrency,
-                    costPrice: sourceCostPrice,
-                    convertedCostPrice: roundOrderValue(convertPrice(sourceCostPrice, originalCurrency, settlementCurrency)),
+                    ...costSnapshot,
                     priceBookId: priceBookItem?.priceBookId ?? item.price_book_id ?? null,
                     priceBookItemId: priceBookItem?.id ?? null,
                     // A null list keeps the normal FEFO allocation behavior;
@@ -5245,19 +5318,24 @@ export function POS() {
                             ?? (editingProduct?.minimumSellingPrice == null
                                 ? null
                                 : editingProduct.minimumSellingPrice * (editingItem.unit_factor ?? 1))
+                        const minimumPriceCurrency = editingItem.minimum_selling_price_currency_snapshot
+                            ?? editingProduct?.currency
                         const editingPriceRates = {
                             usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,
                             tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try
                         }
                         const minimumPriceCurrencyUnavailable = minimumPriceForLine != null
                             && !!editingProduct
-                            && !hasPosConversionRate(effectiveCurrency, editingProduct.currency, editingPriceRates)
+                            && (!hasPosConversionRate(effectiveCurrency, editingProduct.currency, editingPriceRates)
+                                || !hasPosConversionRate(minimumPriceCurrency ?? editingProduct.currency, editingProduct.currency, editingPriceRates))
                         const hasMinimumPriceError = user?.role === 'staff'
                             && minimumPriceForLine != null
                             && isBelowMinimumSellingPrice(
                                 user?.role,
                                 convertPrice(editedPrice, effectiveCurrency, editingProduct?.currency || effectiveCurrency),
-                                minimumPriceForLine
+                                minimumPriceCurrency && editingProduct
+                                    ? convertPrice(minimumPriceForLine, minimumPriceCurrency, editingProduct.currency)
+                                    : minimumPriceForLine
                             )
                         const shouldShowMinimumPriceError = user?.role === 'staff'
                             && minimumPriceForLine != null
@@ -5303,7 +5381,7 @@ export function POS() {
                                     <div>
                                         <Label className="text-muted-foreground">{t('pos.originalPriceLabel') || 'Original Price'}</Label>
                                         <div className="text-lg font-mono font-bold mt-1 p-3 bg-muted/50 rounded border border-border">
-                                            {formatCurrency(editingItem.price, editingProduct?.currency || 'usd', features.iqd_display_preference)}
+                                            {formatCurrency(editingItem.price, effectiveCurrency, features.iqd_display_preference)}
                                         </div>
                                     </div>
 
@@ -5331,11 +5409,11 @@ export function POS() {
                                                 autoFocus
                                             />
                                             <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold uppercase tracking-wider text-muted-foreground/60">
-                                                {editingProduct?.currency === 'iqd' ? features.iqd_display_preference : editingProduct?.currency === 'usd' ? '$' : (editingProduct?.currency || '').toUpperCase()}
+                                                {effectiveCurrency === 'iqd' ? features.iqd_display_preference : effectiveCurrency === 'usd' ? '$' : effectiveCurrency.toUpperCase()}
                                             </span>
                                         </div>
                                         {/* Live Conversion Display */}
-                                        {editingProduct && editingProduct.currency !== features.default_currency && negotiatedPriceInput && !isNaN(parseFormattedNumber(negotiatedPriceInput)) && (
+                                        {editingProduct && effectiveCurrency !== features.default_currency && negotiatedPriceInput && !isNaN(parseFormattedNumber(negotiatedPriceInput)) && (
                                             <div className="mt-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 animate-in fade-in slide-in-from-top-1 duration-200">
                                                 <div className="flex items-center justify-between">
                                                     <span className="text-xs font-medium text-emerald-600/80 uppercase tracking-wider">
@@ -5343,11 +5421,11 @@ export function POS() {
                                                     </span>
                                                     <div className="flex items-center gap-1.5 text-xs text-emerald-600/70 font-mono">
                                                         <TrendingUp className="w-3 h-3" />
-                                                        <span>1 {editingProduct.currency.toUpperCase()} = {formatCurrency(convertPrice(1, editingProduct.currency as any, features.default_currency as any), features.default_currency, features.iqd_display_preference)}</span>
+                                                        <span>1 {effectiveCurrency.toUpperCase()} = {formatCurrency(convertPrice(1, effectiveCurrency, features.default_currency), features.default_currency, features.iqd_display_preference)}</span>
                                                     </div>
                                                 </div>
                                                 <div className="text-xl font-mono font-black text-emerald-500 mt-0.5">
-                                                    {formatCurrency(convertPrice(parseFormattedNumber(negotiatedPriceInput), editingProduct.currency as any, features.default_currency as any), features.default_currency, features.iqd_display_preference)}
+                                                    {formatCurrency(convertPrice(parseFormattedNumber(negotiatedPriceInput), effectiveCurrency, features.default_currency), features.default_currency, features.iqd_display_preference)}
                                                 </div>
                                             </div>
                                         )}
@@ -5360,7 +5438,7 @@ export function POS() {
                                                     ? t('products.minimumSellingPrice.currencyUnavailable', { productName: editingProduct.name })
                                                     : t('products.minimumSellingPrice.staffViolation', {
                                                         productName: editingProduct.name,
-                                                        minimumPrice: formatCurrency(minimumPriceForLine, editingProduct.currency, features.iqd_display_preference)
+                                                        minimumPrice: formatCurrency(minimumPriceForLine, minimumPriceCurrency ?? editingProduct.currency, features.iqd_display_preference)
                                                     })}
                                             </p>
                                         )}
@@ -5370,7 +5448,13 @@ export function POS() {
                                                 ?? (editingProduct?.costPrice == null
                                                     ? null
                                                     : editingProduct.costPrice * (editingItem.unit_factor ?? 1))
-                                            if (costPrice != null && costPrice > 0 && !isNaN(parsedPrice) && parsedPrice < costPrice) {
+                                            const costCurrency = editingItem.uom_cost_price == null
+                                                ? editingProduct?.currency || effectiveCurrency
+                                                : effectiveCurrency
+                                            const costPriceInSaleCurrency = costPrice == null
+                                                ? null
+                                                : convertPrice(costPrice, costCurrency, effectiveCurrency)
+                                            if (costPriceInSaleCurrency != null && costPriceInSaleCurrency > 0 && !isNaN(parsedPrice) && parsedPrice < costPriceInSaleCurrency) {
                                                 return (
                                                     <div className="mt-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 animate-in fade-in slide-in-from-top-1 duration-200">
                                                         <div className="flex items-center gap-2 text-red-600">
@@ -5379,7 +5463,7 @@ export function POS() {
                                                             </span>
                                                         </div>
                                                         <div className="text-xs text-red-500/80 mt-0.5">
-                                                            {formatCurrency(costPrice, editingProduct?.currency || 'usd', features.iqd_display_preference)}
+                                                                    {formatCurrency(costPriceInSaleCurrency, effectiveCurrency, features.iqd_display_preference)}
                                                         </div>
                                                     </div>
                                                 )

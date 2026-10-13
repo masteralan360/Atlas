@@ -173,6 +173,9 @@ type FormItem = {
     priceBookItemId: string
     priceSourceCurrency: CurrencyCode | ''
     priceBookCostPrice: string
+    priceBookCostCurrency: CurrencyCode | ''
+    priceBookMinimumSellingPrice: string
+    priceBookMinimumCurrency: CurrencyCode | ''
     note: string
 }
 
@@ -198,6 +201,9 @@ function createEmptyItem(storageId = '', seq = 1): FormItem {
         priceBookItemId: '',
         priceSourceCurrency: '',
         priceBookCostPrice: '',
+        priceBookCostCurrency: '',
+        priceBookMinimumSellingPrice: '',
+        priceBookMinimumCurrency: '',
         note: ''
     }
 }
@@ -496,7 +502,14 @@ export function SalesOrderFormPage({
                     priceBookId: item.priceBookId || '',
                     priceBookItemId: item.priceBookItemId || '',
                     priceSourceCurrency: item.priceBookId && item.priceBookItemId ? item.originalCurrency : '',
-                    priceBookCostPrice: item.priceBookId && item.priceBookItemId ? String(item.costPrice) : '',
+                    priceBookCostPrice: item.priceBookId && item.priceBookItemId
+                        ? String(item.uomCostPrice ?? item.costPrice)
+                        : '',
+                    priceBookCostCurrency: item.priceBookId && item.priceBookItemId ? item.originalCurrency : '',
+                    priceBookMinimumSellingPrice: item.priceBookId && item.priceBookItemId && item.minimumSellingPriceSnapshot != null
+                        ? String(item.minimumSellingPriceSnapshot)
+                        : '',
+                    priceBookMinimumCurrency: item.priceBookId && item.priceBookItemId ? product?.currency ?? '' : '',
                     note: item.note || ''
                 }
             })
@@ -579,7 +592,14 @@ export function SalesOrderFormPage({
                 priceBookId: item.priceBookId || '',
                 priceBookItemId: item.priceBookItemId || '',
                 priceSourceCurrency: item.priceBookId && item.priceBookItemId ? item.originalCurrency : '',
-                priceBookCostPrice: item.priceBookId && item.priceBookItemId ? String(item.costPrice) : '',
+                priceBookCostPrice: item.priceBookId && item.priceBookItemId
+                    ? String(item.uomCostPrice ?? item.costPrice)
+                    : '',
+                priceBookCostCurrency: item.priceBookId && item.priceBookItemId ? item.originalCurrency : '',
+                priceBookMinimumSellingPrice: item.priceBookId && item.priceBookItemId && item.minimumSellingPriceSnapshot != null
+                    ? String(item.minimumSellingPriceSnapshot)
+                    : '',
+                priceBookMinimumCurrency: item.priceBookId && item.priceBookItemId ? product?.currency ?? '' : '',
                 note: item.note || ''
             }
         }))
@@ -828,7 +848,10 @@ export function SalesOrderFormPage({
         partnerCurrency: CurrencyCode,
         partner: Pick<BusinessPartner, 'priceBookId'> | null | undefined,
         unitRef: string
-    ): Pick<FormItem, 'unitPrice' | 'priceBookId' | 'priceBookItemId' | 'priceSourceCurrency' | 'priceBookCostPrice'> => {
+    ): Pick<FormItem,
+        'unitPrice' | 'priceBookId' | 'priceBookItemId' | 'priceSourceCurrency'
+        | 'priceBookCostPrice' | 'priceBookCostCurrency'
+        | 'priceBookMinimumSellingPrice' | 'priceBookMinimumCurrency'> => {
         const product = products.find((entry) => entry.id === productId)
         if (!product) {
             return {
@@ -836,7 +859,10 @@ export function SalesOrderFormPage({
                 priceBookId: '',
                 priceBookItemId: '',
                 priceSourceCurrency: '',
-                priceBookCostPrice: ''
+                priceBookCostPrice: '',
+                priceBookCostCurrency: '',
+                priceBookMinimumSellingPrice: '',
+                priceBookMinimumCurrency: ''
             }
         }
 
@@ -847,7 +873,10 @@ export function SalesOrderFormPage({
                 priceBookId: '',
                 priceBookItemId: '',
                 priceSourceCurrency: '',
-                priceBookCostPrice: ''
+                priceBookCostPrice: '',
+                priceBookCostCurrency: '',
+                priceBookMinimumSellingPrice: '',
+                priceBookMinimumCurrency: ''
             }
         }
 
@@ -882,9 +911,32 @@ export function SalesOrderFormPage({
                 priceBookId: priceBookItem.priceBookId,
                 priceBookItemId: priceBookItem.id,
                 priceSourceCurrency: sourceCurrency,
-                priceBookCostPrice: unitOption?.costPrice == null
-                    ? priceBookItem.costPrice == null ? '' : String(priceBookItem.costPrice)
-                    : String(unitOption.costPrice)
+                priceBookCostPrice: selectedUnitPrice?.costPrice != null
+                    ? String(selectedUnitPrice.costPrice)
+                    : unitOption?.isBase && priceBookItem.costPrice != null
+                        ? String(priceBookItem.costPrice)
+                        : unitOption?.costPrice != null
+                            ? String(unitOption.costPrice)
+                            : priceBookItem.costPrice == null
+                                ? ''
+                                : String(priceBookItem.costPrice * (unitOption?.factor ?? 1)),
+                priceBookCostCurrency: selectedUnitPrice?.costPrice != null
+                    ? selectedUnitPrice.currency
+                    : unitOption?.isBase && priceBookItem.costPrice != null
+                        ? priceBookItem.currency
+                        : unitOption?.costPrice != null
+                            ? product.currency
+                            : priceBookItem.currency,
+                priceBookMinimumSellingPrice: selectedUnitPrice?.minimumSellingPrice != null
+                    ? String(selectedUnitPrice.minimumSellingPrice)
+                    : unitOption?.isBase && priceBookItem.minimumSellingPrice != null
+                        ? String(priceBookItem.minimumSellingPrice)
+                        : '',
+                priceBookMinimumCurrency: selectedUnitPrice?.minimumSellingPrice != null
+                    ? selectedUnitPrice.currency
+                    : unitOption?.isBase && priceBookItem.minimumSellingPrice != null
+                        ? priceBookItem.currency
+                        : ''
             }
         }
 
@@ -907,7 +959,10 @@ export function SalesOrderFormPage({
             priceBookId: '',
             priceBookItemId: '',
             priceSourceCurrency: '',
-            priceBookCostPrice: unitOption?.costPrice == null ? '' : String(unitOption.costPrice)
+            priceBookCostPrice: unitOption?.costPrice == null ? '' : String(unitOption.costPrice),
+            priceBookCostCurrency: unitOption?.costPrice == null ? '' : product.currency,
+            priceBookMinimumSellingPrice: '',
+            priceBookMinimumCurrency: ''
         }
     }, [getPriceBookItemForPartner, getProductUnitOptions, liveRates, priceBookUomPrices, productUnitContexts, products, resolveDiscountForPrice, stockBatchesById])
 
@@ -916,21 +971,43 @@ export function SalesOrderFormPage({
         const priceBookItem = hasPriceBookProvenance
             ? priceBookItems.find((entry) => entry.id === item.priceBookItemId)
             : undefined
-        // A selected-unit Price Book price may use a different currency from
-        // the base Price Book row. Cost always belongs to the base row.
-        const sourceCurrency = priceBookItem?.currency
-            ?? (hasPriceBookProvenance && item.priceSourceCurrency ? item.priceSourceCurrency : undefined)
-            ?? product.currency
-        const priceBookCostPrice = item.priceBookCostPrice === ''
-            ? (product.costPrice ?? 0)
-            : Number(item.priceBookCostPrice)
-        const sourceCostPrice = hasPriceBookProvenance && Number.isFinite(priceBookCostPrice)
-            ? priceBookCostPrice
-            : (product.costPrice ?? 0)
-
         const unitOption = getFormUnitOption(item, product)
+        const baseUnitOption = getProductUnitOptions(product.id).find((option) => option.isBase)
         const unitFactor = unitOption?.factor ?? 1
-        const selectedUnitCostPrice = unitOption?.costPrice ?? sourceCostPrice * unitFactor
+        const hasPriceBookUnitCost = hasPriceBookProvenance
+            && item.priceBookCostPrice.trim() !== ''
+            && Number.isFinite(Number(item.priceBookCostPrice))
+        const priceBookUnitCost = hasPriceBookUnitCost ? Number(item.priceBookCostPrice) : null
+        const hasPriceBookBaseUnitCost = hasPriceBookProvenance
+            && unitOption?.isBase === true
+            && priceBookItem?.costPrice != null
+        const hasScaledPriceBookBaseCost = hasPriceBookProvenance
+            && !hasPriceBookBaseUnitCost
+            && priceBookItem?.costPrice != null
+            && unitOption?.costPrice == null
+        const selectedUnitCostPrice = hasPriceBookUnitCost
+            ? priceBookUnitCost!
+            : hasPriceBookBaseUnitCost
+                ? priceBookItem!.costPrice!
+                : unitOption?.costPrice != null
+                    ? unitOption.costPrice
+                    : hasScaledPriceBookBaseCost
+                        ? priceBookItem!.costPrice! * unitFactor
+                        : (baseUnitOption?.costPrice ?? product.costPrice ?? 0) * unitFactor
+        const selectedUnitCostCurrency = hasPriceBookUnitCost
+            ? item.priceBookCostCurrency || item.priceSourceCurrency || priceBookItem?.currency || product.currency
+            : hasPriceBookBaseUnitCost || hasScaledPriceBookBaseCost
+                ? priceBookItem?.currency ?? product.currency
+                : product.currency
+        const sourceCurrency = hasPriceBookProvenance && item.priceSourceCurrency
+            ? item.priceSourceCurrency
+            : product.currency
+        const sourceCostPrice = convertCurrencyAmountWithLiveRates(
+            selectedUnitCostPrice / unitFactor,
+            selectedUnitCostCurrency,
+            sourceCurrency,
+            liveRates
+        )
         return {
             sourceCostPrice,
             convertedCostPrice: convertCurrencyAmountWithLiveRates(
@@ -941,13 +1018,50 @@ export function SalesOrderFormPage({
             ),
             selectedConvertedCostPrice: convertCurrencyAmountWithLiveRates(
                 selectedUnitCostPrice,
-                sourceCurrency,
+                selectedUnitCostCurrency,
                 currency,
                 liveRates
             ),
-            selectedUnitCostPrice
+            selectedUnitCostPrice: convertCurrencyAmountWithLiveRates(
+                selectedUnitCostPrice,
+                selectedUnitCostCurrency,
+                sourceCurrency,
+                liveRates
+            )
         }
-    }, [currency, getFormUnitOption, liveRates, priceBookItems])
+    }, [currency, getFormUnitOption, getProductUnitOptions, liveRates, priceBookItems])
+
+    const getItemMinimumPriceDetails = useCallback((item: FormItem, product: typeof products[number]) => {
+        const hasPriceBookProvenance = Boolean(item.priceBookId && item.priceBookItemId)
+        const unitOption = getFormUnitOption(item, product)
+        const priceBookItem = hasPriceBookProvenance
+            ? priceBookItems.find((entry) => entry.id === item.priceBookItemId)
+            : undefined
+        const priceBookMinimum = hasPriceBookProvenance && item.priceBookMinimumSellingPrice.trim() !== ''
+            ? Number(item.priceBookMinimumSellingPrice)
+            : null
+        if (priceBookMinimum != null && Number.isFinite(priceBookMinimum)) {
+            return {
+                amount: priceBookMinimum,
+                currency: item.priceBookMinimumCurrency || item.priceSourceCurrency || product.currency
+            }
+        }
+        if (priceBookItem?.minimumSellingPrice != null) {
+            return {
+                amount: priceBookItem.minimumSellingPrice * (unitOption?.factor ?? 1),
+                currency: priceBookItem.currency
+            }
+        }
+        if (unitOption?.minimumSellingPrice != null) {
+            return { amount: unitOption.minimumSellingPrice, currency: product.currency }
+        }
+        return product.minimumSellingPrice == null
+            ? null
+            : {
+                amount: product.minimumSellingPrice * (unitOption?.factor ?? 1),
+                currency: product.currency
+            }
+    }, [getFormUnitOption, priceBookItems])
 
     const isItemSellingAtLoss = useCallback((item: FormItem, product: typeof products[number] | undefined) => {
         if (!product || item.unitPrice.trim() === '') return false
@@ -1045,6 +1159,9 @@ export function SalesOrderFormPage({
                         next.priceBookItemId = ''
                         next.priceSourceCurrency = ''
                         next.priceBookCostPrice = ''
+                        next.priceBookCostCurrency = ''
+                        next.priceBookMinimumSellingPrice = ''
+                        next.priceBookMinimumCurrency = ''
                     } else {
                         const selectedProduct = products.find((product) => product.id === changes.productId)
                         const unitOptions = getProductUnitOptions(changes.productId)
@@ -1213,6 +1330,7 @@ export function SalesOrderFormPage({
         const product = products.find((entry) => entry.id === item.productId)
         if (!product) return []
         const unitOption = getFormUnitOption(item, product)
+        const minimumPrice = getItemMinimumPriceDetails(item, product)
         const effectivePrice = Number(item.unitPrice) || 0
         const conversion = getAppliedCurrencyConversion(
             effectivePrice,
@@ -1220,57 +1338,56 @@ export function SalesOrderFormPage({
             product.currency,
             buildOrderExchangeRatesSnapshot(liveRates)
         )
+        const minimumConversion = minimumPrice
+            ? getAppliedCurrencyConversion(
+                minimumPrice.amount,
+                minimumPrice.currency,
+                product.currency,
+                buildOrderExchangeRatesSnapshot(liveRates)
+            )
+            : null
         return [{
             productId: product.id,
             effectiveSellingPrice: conversion?.convertedAmount ?? effectivePrice,
             unitFactor: unitOption?.factor ?? 1,
-            minimumSellingPrice: unitOption?.minimumSellingPrice ?? null,
+            minimumSellingPrice: minimumConversion?.convertedAmount ?? null,
             sellingUomId: unitOption?.uomId ?? null,
-            currency: conversion ? product.currency : currency
+            currency: product.currency
         }]
-    }), [currency, getFormUnitOption, items, liveRates, products])
+    }), [currency, getFormUnitOption, getItemMinimumPriceDetails, items, liveRates, products])
     const minimumPriceViolations = useMemo(() => items.flatMap((item, lineIndex) => {
         if (user?.role !== 'staff') return []
         const product = products.find((entry) => entry.id === item.productId)
-        const unitOption = getFormUnitOption(item, product)
-        const minimumSellingPrice = unitOption?.minimumSellingPrice ?? product?.minimumSellingPrice
-        if (!product || minimumSellingPrice == null) return []
+        if (!product) return []
+        const minimumPrice = getItemMinimumPriceDetails(item, product)
+        if (!minimumPrice) return []
         const exchangeSnapshot = buildOrderExchangeRatesSnapshot(liveRates)
         const effectivePrice = Number(item.unitPrice) || 0
-        const effectivePriceConversion = getAppliedCurrencyConversion(
-            effectivePrice,
-            currency,
-            product.currency,
-            exchangeSnapshot
-        )
         const minimumPriceConversion = getAppliedCurrencyConversion(
-            minimumSellingPrice,
-            product.currency,
+            minimumPrice.amount,
+            minimumPrice.currency,
             currency,
             exchangeSnapshot
         )
-        if (!effectivePriceConversion || !minimumPriceConversion) {
+        if (!minimumPriceConversion) {
             return [{
                 lineIndex,
                 product,
-                minimumPrice: minimumSellingPrice,
-                currency: product.currency,
+                minimumPrice: minimumPrice.amount,
+                currency: minimumPrice.currency,
                 currencyUnavailable: true
             }]
         }
-        const minimumPriceInOrderCurrency = unitOption?.minimumSellingPrice != null
-            ? minimumPriceConversion.convertedAmount
-            : minimumPriceConversion.convertedAmount * (unitOption?.factor ?? 1)
-        return isBelowMinimumSellingPrice(user.role, effectivePrice, minimumPriceInOrderCurrency)
+        return isBelowMinimumSellingPrice(user.role, effectivePrice, minimumPriceConversion.convertedAmount)
             ? [{
                 lineIndex,
                 product,
-                minimumPrice: minimumPriceInOrderCurrency,
+                minimumPrice: minimumPriceConversion.convertedAmount,
                 currency,
                 currencyUnavailable: false
             }]
             : []
-    }), [currency, getFormUnitOption, items, liveRates, products, user?.role])
+    }), [currency, getItemMinimumPriceDetails, items, liveRates, products, user?.role])
 
     const initialPayment = roundFormAmount(Math.max(0, Number(initialPaymentAmount || 0)))
     const isFinanced = paymentMethod === 'loan' || paymentMethod === 'installments'
@@ -1409,6 +1526,15 @@ export function SalesOrderFormPage({
                         ? item.priceSourceCurrency
                         : product.currency
                     const { sourceCostPrice, convertedCostPrice, selectedUnitCostPrice, selectedConvertedCostPrice } = getItemCostDetails(item, product)
+                    const minimumPrice = getItemMinimumPriceDetails(item, product)
+                    const minimumPriceInProductCurrency = minimumPrice
+                        ? getAppliedCurrencyConversion(
+                            minimumPrice.amount,
+                            minimumPrice.currency,
+                            product.currency,
+                            buildOrderExchangeRatesSnapshot(liveRates)
+                        )?.convertedAmount ?? null
+                        : null
                     const unitPrice = Number(item.unitPrice || 0)
                     try {
                         assertValidOrderUnitQuantity(freeBonusQuantityValue, unitOption.isDynamic)
@@ -1467,7 +1593,7 @@ export function SalesOrderFormPage({
                         baseUnitCode: unitOption.baseUnitCode,
                         baseUnitNameSnapshot: item.baseUnitNameSnapshot || unitOption.baseUnitCode,
                         unitFactor: unitOption.factor,
-                        minimumSellingPriceSnapshot: unitOption.minimumSellingPrice ?? null,
+                        minimumSellingPriceSnapshot: minimumPriceInProductCurrency,
                         uomCostPrice: selectedUnitCostPrice,
                         convertedUomCostPrice: selectedConvertedCostPrice,
                         quantity,

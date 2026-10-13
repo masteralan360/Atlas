@@ -36,6 +36,7 @@ export interface PriceBookItemInput {
     priceBookId: string
     costPrice: number | null
     price: number
+    minimumSellingPrice?: number | null
     currency: CurrencyCode
 }
 
@@ -109,9 +110,11 @@ function normalizeItemInputs(inputs: PriceBookItemInput[]) {
 
         const costPrice = input.costPrice == null ? null : Number(input.costPrice)
         const price = Number(input.price)
+        const minimumSellingPrice = input.minimumSellingPrice == null ? null : Number(input.minimumSellingPrice)
         if ((costPrice != null && (!Number.isFinite(costPrice) || costPrice < 0))
             || !Number.isFinite(price)
-            || price < 0) {
+            || price < 0
+            || (minimumSellingPrice != null && (!Number.isFinite(minimumSellingPrice) || minimumSellingPrice < 0))) {
             throw new Error('Price Book selling price must be zero or greater, and its cost must be zero or greater when provided')
         }
         if (!SUPPORTED_PRICE_BOOK_CURRENCIES.has(input.currency)) {
@@ -123,6 +126,7 @@ function normalizeItemInputs(inputs: PriceBookItemInput[]) {
             priceBookId,
             costPrice,
             price,
+            minimumSellingPrice,
             currency: input.currency
         })
     }

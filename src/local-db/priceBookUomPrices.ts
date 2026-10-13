@@ -49,13 +49,22 @@ export function usePriceBookUomPrices(workspaceId?: string) {
 export async function replaceProductPriceBookUomPrices(
   workspaceId: string,
   productId: string,
-  inputs: Array<{ priceBookId: string; unitRef: UnitRef; price: number; currency: CurrencyCode }>,
+  inputs: Array<{
+    priceBookId: string
+    unitRef: UnitRef
+    price: number
+    costPrice?: number | null
+    minimumSellingPrice?: number | null
+    currency: CurrencyCode
+  }>,
 ) {
   const seen = new Set<string>()
   for (const input of inputs) {
     const key = `${input.priceBookId}:${input.unitRef}`
     if (!input.priceBookId || !input.unitRef || seen.has(key)) throw new Error('price_book_uom_duplicate')
     if (!Number.isFinite(input.price) || input.price < 0) throw new Error('price_book_uom_price_invalid')
+    if (input.costPrice != null && (!Number.isFinite(input.costPrice) || input.costPrice < 0)) throw new Error('price_book_uom_cost_invalid')
+    if (input.minimumSellingPrice != null && (!Number.isFinite(input.minimumSellingPrice) || input.minimumSellingPrice < 0)) throw new Error('price_book_uom_minimum_price_invalid')
     if (!SUPPORTED_CURRENCIES.has(input.currency)) throw new Error('price_book_uom_currency_invalid')
     seen.add(key)
   }

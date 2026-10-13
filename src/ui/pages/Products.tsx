@@ -2945,6 +2945,9 @@ export function Products() {
                                             label={t('products.filters.currency', { defaultValue: 'Currency' })}
                                             value={draftFilters.currency}
                                             allowedCurrencies={Array.from(new Set([
+                                                ...features.allowed_currencies,
+                                                ...productCatalogPage.availableCurrencies,
+                                                ...catalogProducts.map((product) => product.currency),
                                                 ...products.map((product) => product.currency),
                                                 ...draftFilters.currency,
                                             ]))}

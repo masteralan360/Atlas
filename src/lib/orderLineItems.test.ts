@@ -14,6 +14,7 @@ import {
   getOrderLineCostPerInventoryUnit,
   getOrderLineSelectedUnitCost,
   getOrderLineUnitFactor,
+  normalizeOrderLineUnitCostSnapshot,
   hasOrderLineInventoryQuantity,
   hasOrderLineFreeBonus,
   isFulfilledUnitsAvailableForOrder
@@ -53,6 +54,32 @@ describe('order line item quantity normalization', () => {
     expect(getOrderLineSelectedUnitCost(line)).toBe(21_600)
     expect(getOrderLineCostPerInventoryUnit(line)).toBe(900)
     expect(getOrderLineCostPerInventoryUnit({ unitFactor: 24, convertedCostPrice: 1_000 })).toBe(1_000)
+  })
+
+  it('stores POS UoM cost separately from normalized base-unit cost', () => {
+    const pack = normalizeOrderLineUnitCostSnapshot(35_000, 35_000, 5)
+
+    expect(pack).toEqual({
+      costPrice: 7_000,
+      convertedCostPrice: 7_000,
+      uomCostPrice: 35_000,
+      convertedUomCostPrice: 35_000,
+    })
+    const orderLine = { unitFactor: 5, ...pack }
+    expect(getOrderLineSelectedUnitCost(orderLine)).toBe(35_000)
+    expect(getOrderLineCostPerInventoryUnit(orderLine)).toBe(7_000)
+  })
+
+  it('converts a selected-unit cost with the base-cost exchange rate when its converted snapshot is missing', () => {
+    const pack = {
+      unitFactor: 5,
+      costPrice: 7_000,
+      convertedCostPrice: 14_000,
+      uomCostPrice: 35_000,
+    }
+
+    expect(getOrderLineSelectedUnitCost(pack)).toBe(70_000)
+    expect(getOrderLineCostPerInventoryUnit(pack)).toBe(14_000)
   })
 
   it('prefers immutable inventory snapshots and tolerates legacy or invalid factors', () => {

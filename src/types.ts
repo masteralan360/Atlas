@@ -200,6 +200,8 @@ export interface CartItem {
     selling_unit_name_snapshot?: string | null
     uom_cost_price?: number | null
     minimum_selling_price_snapshot?: number | null
+    /** Currency used by the temporary cart minimum snapshot when it differs from the product currency. */
+    minimum_selling_price_currency_snapshot?: CurrencyCode
     unit_factor?: number
     /** Service lines use the UI-only Services virtual location and never affect stock. */
     is_service?: boolean
