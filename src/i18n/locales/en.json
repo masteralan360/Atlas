@@ -99,6 +99,9 @@
     "mismatch": "This record does not agree with the reconstructed transaction.",
     "auditModelJson": "Audit Model JSON",
     "auditModelDescription": "Snapshot of the transaction, expected effects, persisted records, checks, and summary observed during this audit.",
+    "exportJson": "Export JSON",
+    "exportingJson": "Exporting…",
+    "exportFailed": "The audit report could not be exported. Please try again.",
     "codes": {
       "ORDER_TOTAL_MISMATCH": "The order total does not match its items, adjustments, and returns.",
       "ORDER_SUBTOTAL_MISMATCH": "The purchase order subtotal does not match its item totals.",
@@ -5572,6 +5575,8 @@
       "selectPaymentMethod": "Select Payment Method",
       "selectPaymentStatus": "Select Payment Status",
       "paymentStatusRequired": "Select a payment status before saving the order.",
+      "insufficientStock": "Insufficient stock for {{productName}}.",
+      "unknownProduct": "this product",
       "loanRepaymentRequired": "Enter a positive initial loan repayment to mark this order Partially Paid.",
       "loanRepaymentMustBeLessThanTotal": "The initial loan repayment must be less than the order total.",
       "freeOnlySettledTitle": "Free-only order — no payment to collect",

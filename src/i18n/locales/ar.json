@@ -98,6 +98,9 @@
     "mismatch": "هذا السجل لا يتفق مع المعاملة المعاد حسابها.",
     "auditModelJson": "نموذج التدقيق JSON",
     "auditModelDescription": "لقطة للمعاملة وآثارها المتوقعة وسجلاتها المحفوظة ونتائج الفحوص والملخص وقت إجراء التدقيق.",
+    "exportJson": "تصدير JSON",
+    "exportingJson": "جارٍ التصدير…",
+    "exportFailed": "تعذّر تصدير تقرير التدقيق. يُرجى المحاولة مرة أخرى.",
     "codes": {
       "ORDER_TOTAL_MISMATCH": "إجمالي الطلب لا يطابق البنود والتعديلات والمرتجعات.",
       "ORDER_SUBTOTAL_MISMATCH": "المجموع الفرعي لطلب الشراء لا يطابق إجماليات بنوده.",
@@ -3733,6 +3736,8 @@
       "selectPaymentMethod": "اختر طريقة الدفع",
       "selectPaymentStatus": "اختر حالة الدفع",
       "paymentStatusRequired": "اختر حالة الدفع قبل حفظ الطلب.",
+      "insufficientStock": "المخزون غير كافٍ للمنتج {{productName}}.",
+      "unknownProduct": "هذا المنتج",
       "loanRepaymentRequired": "أدخل مبلغاً موجباً للسداد الأولي للقرض لتحديد الطلب كمدفوع جزئياً.",
       "loanRepaymentMustBeLessThanTotal": "يجب أن يكون مبلغ السداد الأولي للقرض أقل من إجمالي الطلب.",
       "freeOnlySettledTitle": "طلب مجاني فقط — لا يوجد دفع لتحصيله",

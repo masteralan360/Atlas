@@ -3386,6 +3386,22 @@ async function completePaidQuickSalesOrderAtomically(
         supabase.rpc('complete_quick_sales_order', { payload })
     )
     if (error) {
+        const message = error instanceof Error
+            ? error.message
+            : error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
+                ? error.message
+                : typeof error === 'string' ? error : ''
+        const stockError = message.match(
+            /^Insufficient (?:regular )?stock for (?:(?:Quick Order )?product) ([^\s.]+)(?: in storage [^\s.]+)?\.?$/i
+        )
+        if (stockError) {
+            const productName = order.items.find((item) => item.productId === stockError[1])?.productName
+                || i18n.t('pos.quickOrder.unknownProduct', { defaultValue: 'this product' })
+            throw new Error(i18n.t('pos.quickOrder.insufficientStock', {
+                productName,
+                defaultValue: 'Insufficient stock for {{productName}}.'
+            }))
+        }
         throw normalizeSupabaseActionError(error)
     }
 

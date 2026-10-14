@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, CheckCircle2, ClipboardCheck, Database, Loader2, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ClipboardCheck, Database, Download, Loader2, XCircle } from 'lucide-react'
 import type { LoanIntegrityAuditResult } from '@/lib/integrityAudit/loanAudit'
 import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, Button } from '@/ui/components'
 import { AuditModelJsonPanel } from '@/ui/components/integrity-audit/AuditModelJsonPanel'
 import { IntegrityAuditCategoryIcon } from '@/ui/components/integrity-audit/IntegrityAuditCategoryIcon'
+import { downloadIntegrityAuditModel } from '@/lib/integrityAudit/auditModelExport'
 
 const categories = ['loan', 'installments', 'payments', 'relationships', 'mirror'] as const
 
@@ -30,17 +32,34 @@ export function LoanIntegrityAuditDialog({ open, onOpenChange, loanId, result, e
   loading: boolean
 }) {
   const { t } = useTranslation()
+  const [exporting, setExporting] = useState(false)
+  const [exportErrorKey, setExportErrorKey] = useState<string | null>(null)
+  const processing = loading || exporting
 
-  return <AppDialog open={open} onOpenChange={next => { if (!loading) onOpenChange(next) }}>
-    <AppDialogContent className="max-w-3xl" showCloseButton={!loading}
-      onEscapeKeyDown={event => { if (loading) event.preventDefault() }}
-      onPointerDownOutside={event => { if (loading) event.preventDefault() }}>
+  async function exportAuditModel() {
+    if (!result || processing) return
+    setExportErrorKey(null)
+    setExporting(true)
+    try {
+      await downloadIntegrityAuditModel(result)
+    } catch {
+      setExportErrorKey('transactionAudit.exportFailed')
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  return <AppDialog open={open} onOpenChange={next => { if (!processing) onOpenChange(next) }}>
+    <AppDialogContent className="max-w-3xl" showCloseButton={!processing}
+      onEscapeKeyDown={event => { if (processing) event.preventDefault() }}
+      onPointerDownOutside={event => { if (processing) event.preventDefault() }}>
       <AppDialogHeader>
         <AppDialogTitle className="flex items-center gap-2"><ClipboardCheck className="h-5 w-5" />{t('transactionAudit.title')}</AppDialogTitle>
       </AppDialogHeader>
       <AppDialogBody className="space-y-4">
         {loading && <div role="status" className="flex items-center gap-2 py-8 text-sm"><Loader2 className="h-5 w-5 animate-spin" />{t('transactionAudit.running')}</div>}
         {errorKey && <p role="alert" className="rounded-lg border border-destructive/30 p-4 text-sm text-destructive">{t(errorKey)}</p>}
+        {exportErrorKey && <p role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm text-destructive">{t(exportErrorKey)}</p>}
         {result && <>
           <div className="rounded-lg border p-4">
             <div className="flex flex-wrap items-center gap-2 font-semibold"><StatusIcon status={result.integrityStatus} />{t('transactionAudit.transactionStatus')}: {t(`transactionAudit.status.${result.integrityStatus}`)}</div>
@@ -72,7 +91,13 @@ export function LoanIntegrityAuditDialog({ open, onOpenChange, loanId, result, e
           <AuditModelJsonPanel result={result} />
         </>}
       </AppDialogBody>
-      <AppDialogFooter><Button variant="outline" disabled={loading} onClick={() => onOpenChange(false)}>{t('transactionAudit.close')}</Button></AppDialogFooter>
+      <AppDialogFooter>
+        {result && <Button type="button" variant="outline" disabled={processing} onClick={() => { void exportAuditModel() }} className="gap-2">
+          {exporting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
+          {t(exporting ? 'transactionAudit.exportingJson' : 'transactionAudit.exportJson')}
+        </Button>}
+        <Button variant="outline" disabled={processing} onClick={() => onOpenChange(false)}>{t('transactionAudit.close')}</Button>
+      </AppDialogFooter>
     </AppDialogContent>
   </AppDialog>
 }
