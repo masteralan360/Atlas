@@ -1364,7 +1364,7 @@ export function PrintPreviewEditorPage() {
             shareWasAttempted = true
             // Attach a rejection handler immediately so a failed share request
             // does not become unhandled while invoice persistence is in flight.
-            sharePromise = sharePDFPreviewBlob(blob, title).then(
+            return sharePDFPreviewBlob(blob, title).then(
                 (shared) => ({ ok: true as const, shared }),
                 (error) => ({ ok: false as const, error })
             )
@@ -1383,13 +1383,13 @@ export function PrintPreviewEditorPage() {
                 if (!source.onSave) throw new Error('Invoice saving is unavailable.')
                 isPersisting = true
                 const savePromise = source.onSave(blob)
-                if (action === 'share') startShare(blob)
+                if (action === 'share') sharePromise = startShare(blob)
                 await savePromise
                 invoiceSavedThisSessionRef.current = true
                 setIsInvoiceSavedThisSession(true)
                 isPersisting = false
             } else if (action === 'share') {
-                startShare(blob)
+                sharePromise = startShare(blob)
             }
 
             if (action === 'print') {
