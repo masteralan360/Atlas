@@ -12,6 +12,22 @@ export const isMobile = () => typeof navigator !== 'undefined'
     && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 export const isAndroid = () => typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
 export const isAndroidPwa = () => isAndroid() && !isTauri();
+export const isIosPwa = () => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined' || isTauri()) return false;
+
+    const isIos = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (!isIos) return false;
+
+    const pwaNavigator = navigator as Navigator & { standalone?: boolean };
+    if (pwaNavigator.standalone === true) return true;
+
+    try {
+        return window.matchMedia('(display-mode: standalone)').matches;
+    } catch {
+        return false;
+    }
+};
 /** Android native app shell, including the Tauri WebView. */
 export const isTauriAndroid = () => isAndroid() && isTauri();
 export const isDesktop = () => isTauri() && !isMobile();

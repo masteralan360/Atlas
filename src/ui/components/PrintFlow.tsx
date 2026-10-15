@@ -449,7 +449,7 @@ export function PrintFlow({
             const previewTitle = title || t('print.previewTitle') || 'Print Preview'
 
             if (hasPdfDataForPreview) {
-                const generatePdfBlob = async (editedData: any, printLangOverride?: string): Promise<Blob> => {
+                const generatePdfBlob = async (editedData: any, printLangOverride?: string, tableRowCount?: number): Promise<Blob> => {
                     const dataToUse = editedData || pdfData
                     if (pdfBuilder) {
                         return await pdfBuilder({ format: printFormat, effectiveId, printLangOverride })
@@ -467,7 +467,8 @@ export function PrintFlow({
                         },
                         workspaceName: workspaceName || workspaceId || '',
                         translations,
-                        workspaceFooterContacts
+                        workspaceFooterContacts,
+                        tableRowCount
                     })
                 }
 

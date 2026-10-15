@@ -19,7 +19,7 @@ import {
 } from '@/lib/printPreviewEditorStore'
 import { PdfJsViewer } from '@/ui/components/PdfJsViewer'
 import { CustomTemplateLayoutOverlay } from '@/ui/components/CustomTemplateLayoutOverlay'
-import { printPdfBlob } from '@/services/pdfPrintService'
+import { closeUnusedPdfPrintWindow, preparePdfPrintWindow, printPdfBlob } from '@/services/pdfPrintService'
 import { savePDFPreviewBlob, sharePDFPreviewBlob } from '@/services/pdfPreviewActions'
 import { platformService } from '@/services/platformService'
 import { getMediaUploadErrorCode } from '@/services/mediaUploadService'
@@ -413,6 +413,7 @@ function EditablePrintPreviewEditor({
                     hideUnit={hideUnit}
                     hideDiscount={hideDiscount}
                     showNotes={showNotes}
+                    tableRowCount={tableRowCount}
                     hiddenFields={hiddenFields || data.hiddenPrintFields}
                     onHiddenFieldChange={onHiddenFieldChange}
                 />
@@ -571,11 +572,16 @@ export function PrintPreviewEditorPage() {
 
     const handlePrintGeneratedPreview = useCallback(async () => {
         if (!source?.generatePreviewPdfBlob || isSaving) return
+        const printWindow = preparePdfPrintWindow()
+        let printWindowUsed = false
         setIsSaving(true)
         try {
             const blob = generatedPreviewPdf?.blob || await source.generatePreviewPdfBlob()
             if (source.onPrint) await source.onPrint(blob)
-            else await printPdfBlob(blob, { title })
+            else {
+                await printPdfBlob(blob, { title, printWindow })
+                printWindowUsed = true
+            }
         } catch (error) {
             console.error('Failed to print preview PDF:', error)
             toast({
@@ -584,6 +590,7 @@ export function PrintPreviewEditorPage() {
                 variant: 'destructive'
             })
         } finally {
+            if (!printWindowUsed) closeUnusedPdfPrintWindow(printWindow)
             setIsSaving(false)
         }
     }, [generatedPreviewPdf?.blob, isSaving, source, t, title, toast])
@@ -766,7 +773,10 @@ export function PrintPreviewEditorPage() {
                 showNotes: localStorage.getItem('atlas_print_show_notes') || 'false',
                 hideNextDue: localStorage.getItem('atlas_print_hide_next_due') || 'false',
                 hideDueDate: localStorage.getItem('atlas_print_hide_due_date') || 'false',
-                tableRowCount: localStorage.getItem('atlas_print_table_row_count') || '10',
+                tableRowCount: localStorage.getItem('atlas_print_table_row_count')
+                    || (source?.data
+                        ? String(Math.max(1, source.data.items?.length || 0))
+                        : '10'),
             }
             if (templatePreview) {
                 templatePreview.fields.forEach(f => {
@@ -1280,7 +1290,11 @@ export function PrintPreviewEditorPage() {
         }
         if (source.generatePdfBlob && editableData) {
             const langOverride = tempPrintLang !== 'auto' ? tempPrintLang : undefined
-            return source.generatePdfBlob(editableData, langOverride)
+            return source.generatePdfBlob(
+                editableData,
+                langOverride,
+                Math.max(1, Number(fieldValues.tableRowCount) || editableData.items?.length || 0)
+            )
         }
         if (source.generatePreviewPdfBlob) {
             return generatedPreviewPdf?.blob || source.generatePreviewPdfBlob()
@@ -1302,6 +1316,8 @@ export function PrintPreviewEditorPage() {
 
     const handleDocumentAction = async (action: 'print' | 'share' | 'save') => {
         if (!source || !showPersistedDocumentActions || actionInProgressRef.current) return
+        const printWindow = action === 'print' ? preparePdfPrintWindow() : undefined
+        let printWindowUsed = false
 
         // A delayed share can lose the browser's transient user activation while
         // the PDF is generated and saved. Keep that exact PDF so the next tap
@@ -1360,7 +1376,10 @@ export function PrintPreviewEditorPage() {
 
             if (action === 'print') {
                 if (source.onPrint) await source.onPrint(blob)
-                else await printPdfBlob(blob, { title })
+                else {
+                    await printPdfBlob(blob, { title, printWindow })
+                    printWindowUsed = true
+                }
             } else if (action === 'share') {
                 shareWasAttempted = true
                 const shared = await sharePDFPreviewBlob(blob, title)
@@ -1408,6 +1427,7 @@ export function PrintPreviewEditorPage() {
                 })
             }
         } finally {
+            if (!printWindowUsed) closeUnusedPdfPrintWindow(printWindow)
             if (progressToastStarted) finishProgressToast()
             actionInProgressRef.current = false
             setIsSaving(false)
@@ -1416,12 +1436,17 @@ export function PrintPreviewEditorPage() {
 
     const handlePrintCurrentPreview = async () => {
         if (!source || actionInProgressRef.current) return
+        const printWindow = preparePdfPrintWindow()
+        let printWindowUsed = false
         actionInProgressRef.current = true
         setIsSaving(true)
         try {
             const blob = await generateCurrentActionPdfBlob()
             if (source.onPrint) await source.onPrint(blob)
-            else await printPdfBlob(blob, { title })
+            else {
+                await printPdfBlob(blob, { title, printWindow })
+                printWindowUsed = true
+            }
         } catch (error) {
             console.error('Failed to print current preview:', error)
             toast({
@@ -1430,6 +1455,7 @@ export function PrintPreviewEditorPage() {
                 variant: 'destructive'
             })
         } finally {
+            if (!printWindowUsed) closeUnusedPdfPrintWindow(printWindow)
             actionInProgressRef.current = false
             setIsSaving(false)
         }
@@ -3297,7 +3323,7 @@ export function PrintPreviewEditorPage() {
                                 hideUnit={fieldValues.hideUnit === 'true'}
                                 hideDiscount={fieldValues.hideDiscount === 'true'}
                                 showNotes={fieldValues.showNotes === 'true'}
-                                tableRowCount={Number(fieldValues.tableRowCount) || 10}
+                                tableRowCount={Math.max(1, Number(fieldValues.tableRowCount) || editableData.items?.length || 0)}
                                 hiddenFields={editableData.hiddenPrintFields}
                                 onHiddenFieldChange={drawingMode === 'none' ? handleInvoiceHiddenFieldChange : undefined}
                             />

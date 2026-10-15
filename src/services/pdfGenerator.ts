@@ -65,6 +65,7 @@ interface PDFGeneratorOptions {
     workspaceId?: string
     /** Resolution profile for receipts printed from the POS success modal. */
     receiptQuality?: PosReceiptPrintQuality
+    tableRowCount?: number
     translations?: Record<string, string>
     workspaceFooterContacts?: WorkspaceFooterContacts
 }
@@ -679,7 +680,8 @@ export async function generateInvoicePdf(options: PDFGeneratorOptions): Promise<
                 features: processedFeatures,
                 workspaceId,
                 workspaceName: workspaceName || workspaceId || 'Atlas',
-                workspaceFooterContacts
+                workspaceFooterContacts,
+                tableRowCount: options.tableRowCount
             })
             : isModernA4
             ? createElement(ModernA4InvoiceTemplate, {
