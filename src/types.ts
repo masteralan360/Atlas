@@ -1,4 +1,4 @@
-import type { CurrencyCode } from './local-db/models'
+import type { CurrencyCode, ExchangeRateSnapshot } from './local-db/models'
 
 export interface SaleItem {
     id: string
@@ -209,6 +209,12 @@ export interface CartItem {
     price_book_name?: string
     /** Currency used by the selected product, unit, or Price Book for this line. */
     effective_currency?: CurrencyCode
+    /** Explicit currency selected for this cart line in the POS price editor. */
+    price_currency_override?: CurrencyCode
+    /** Converted discounted/list base price captured when the currency is selected. */
+    currency_converted_base_price?: number
+    /** Exchange-rate snapshots used to convert this line into its selected currency. */
+    price_currency_exchange_snapshot?: ExchangeRateSnapshot[]
     /** Explicit POS stock source; omitted means the established automatic allocation behavior. */
     stock_source_type?: 'regular' | 'batch'
     stock_source_batch_id?: string

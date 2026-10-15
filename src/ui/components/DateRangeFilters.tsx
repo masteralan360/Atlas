@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { useState } from 'react'
 import { Calendar } from 'lucide-react'
 import { Button, DateTimePicker } from '@/ui/components'
 import { useDateRange } from '@/context/DateRangeContext'
@@ -9,6 +10,9 @@ type CustomDates = {
     start: string
     end: string
 }
+
+type DateRangeParent = 'today' | 'month'
+type DateRangeSubfilter = { value: DateRangeType; label: string }
 
 interface DateRangeFiltersProps {
     className?: string
@@ -29,13 +33,15 @@ export function DateRangeFilters({
     labelDotClassName,
     allTimeButtonClassName,
     showAllTime = true,
-    showYesterday = false,
+    showYesterday = true,
     dateRange: controlledDateRange,
     customDates: controlledCustomDates,
     onDateRangeChange,
     onCustomDatesChange
 }: DateRangeFiltersProps) {
     const { t } = useTranslation()
+    const [openSubfilterParent, setOpenSubfilterParent] = useState<DateRangeParent | null>(null)
+    const [touchTapPendingParent, setTouchTapPendingParent] = useState<DateRangeParent | null>(null)
     const {
         dateRange: contextDateRange,
         customDates: contextCustomDates,
@@ -45,12 +51,108 @@ export function DateRangeFilters({
     const dateRange = controlledDateRange ?? contextDateRange
     const customDates = controlledCustomDates ?? contextCustomDates
     const setDateRange = onDateRangeChange ?? setContextDateRange
+    const subfiltersByParent: Record<DateRangeParent, DateRangeSubfilter[]> = {
+        today: showYesterday ? [{ value: 'yesterday', label: t('performance.filters.yesterday') }] : [],
+        month: [{ value: 'lastMonth', label: t('performance.filters.lastMonth') }]
+    }
     const updateCustomDates = (next: Partial<CustomDates>) => {
         if (onCustomDatesChange) {
             onCustomDatesChange({ ...customDates, ...next })
             return
         }
         setContextCustomDates((current) => ({ ...current, ...next }))
+    }
+    const selectDateRange = (range: DateRangeType) => {
+        setTouchTapPendingParent(null)
+        setOpenSubfilterParent(null)
+        setDateRange(range)
+    }
+    const handleParentRangeClick = (range: DateRangeParent) => {
+        const isTouchLayout = typeof window.matchMedia === 'function'
+            && window.matchMedia('(hover: none)').matches
+        setDateRange(range)
+
+        if (subfiltersByParent[range].length > 0 && isTouchLayout) {
+            if (touchTapPendingParent === range) {
+                setOpenSubfilterParent(range)
+                setTouchTapPendingParent(null)
+            } else if (openSubfilterParent !== range) {
+                setOpenSubfilterParent(null)
+                setTouchTapPendingParent(range)
+            } else {
+                setTouchTapPendingParent(null)
+            }
+        }
+    }
+    const renderParentRange = (range: DateRangeParent, label: string) => {
+        const subfilters = subfiltersByParent[range]
+        const isVisible = subfilters.length > 0 && (
+            openSubfilterParent === range || subfilters.some((subfilter) => dateRange === subfilter.value)
+        )
+
+        return (
+            <div
+                key={range}
+                className="relative"
+                onMouseEnter={() => {
+                    const supportsHover = typeof window.matchMedia !== 'function'
+                        || window.matchMedia('(hover: hover)').matches
+                    if (supportsHover && subfilters.length > 0) setOpenSubfilterParent(range)
+                }}
+                onMouseLeave={() => {
+                    const supportsHover = typeof window.matchMedia !== 'function'
+                        || window.matchMedia('(hover: hover)').matches
+                    if (supportsHover) {
+                        setOpenSubfilterParent(null)
+                        setTouchTapPendingParent(null)
+                    }
+                }}
+            >
+                <Button
+                    variant={dateRange === range ? 'default' : 'ghost'}
+                    size="sm"
+                    allowViewer={true}
+                    onClick={() => handleParentRangeClick(range)}
+                    className={cn(
+                        "text-xs h-8 px-4 transition-all duration-200",
+                        dateRange === range && "shadow-sm",
+                        isVisible && "rounded-b-none"
+                    )}
+                    type="button"
+                    aria-expanded={subfilters.length > 0 ? isVisible : undefined}
+                >
+                    {label}
+                </Button>
+                {subfilters.length > 0 && (
+                    <div
+                        aria-hidden={!isVisible}
+                        className={cn(
+                            "absolute left-1/2 top-full z-50 -mt-px grid w-max min-w-full -translate-x-1/2 origin-top grid-rows-[0fr] overflow-hidden rounded-lg border border-t-0 border-border bg-popover text-popover-foreground shadow-md transition-all duration-200 ease-out motion-reduce:transition-none",
+                            isVisible
+                                ? "grid-rows-[1fr] translate-y-0 scale-y-100 opacity-100"
+                                : "pointer-events-none -translate-y-1 scale-y-95 opacity-0"
+                        )}
+                    >
+                        <div className="min-h-0 overflow-hidden p-1">
+                            {subfilters.map((subfilter) => (
+                                <Button
+                                    key={subfilter.value}
+                                    variant={dateRange === subfilter.value ? 'default' : 'ghost'}
+                                    size="sm"
+                                    allowViewer={true}
+                                    onClick={() => selectDateRange(subfilter.value)}
+                                    className={cn("h-8 w-max min-w-full justify-start whitespace-nowrap px-4 text-xs", dateRange === subfilter.value && "shadow-sm")}
+                                    type="button"
+                                    tabIndex={isVisible ? 0 : -1}
+                                >
+                                    {subfilter.label}
+                                </Button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </div>
+        )
     }
 
     return (
@@ -63,54 +165,14 @@ export function DateRangeFilters({
             )}
             <div className="flex flex-wrap items-center gap-3">
                 <div className="bg-secondary/50 p-1 rounded-lg flex items-center gap-1 shadow-sm border border-border/50">
-                    <Button
-                        variant={dateRange === 'today' ? 'default' : 'ghost'}
-                        size="sm"
-                        allowViewer={true}
-                        onClick={() => setDateRange('today')}
-                        className={cn("text-xs h-8 px-4 transition-all duration-200", dateRange === 'today' && "shadow-sm")}
-                        type="button"
-                    >
-{t('performance.filters.today')}
-                    </Button>
-                    {showYesterday && (
-                        <Button
-                            variant={dateRange === 'yesterday' ? 'default' : 'ghost'}
-                            size="sm"
-                            allowViewer={true}
-                            onClick={() => setDateRange('yesterday')}
-                            className={cn("text-xs h-8 px-4 transition-all duration-200", dateRange === 'yesterday' && "shadow-sm")}
-                            type="button"
-                        >
-                            {t('performance.filters.yesterday')}
-                        </Button>
-                    )}
-                    <Button
-                        variant={dateRange === 'month' ? 'default' : 'ghost'}
-                        size="sm"
-                        allowViewer={true}
-                        onClick={() => setDateRange('month')}
-                        className={cn("text-xs h-8 px-4 transition-all duration-200", dateRange === 'month' && "shadow-sm")}
-                        type="button"
-                    >
-                        {t('performance.filters.thisMonth')}
-                    </Button>
-                    <Button
-                        variant={dateRange === 'lastMonth' ? 'default' : 'ghost'}
-                        size="sm"
-                        allowViewer={true}
-                        onClick={() => setDateRange('lastMonth')}
-                        className={cn("text-xs h-8 px-4 transition-all duration-200", dateRange === 'lastMonth' && "shadow-sm")}
-                        type="button"
-                    >
-                        {t('performance.filters.lastMonth')}
-                    </Button>
+                    {renderParentRange('today', t('performance.filters.today'))}
+                    {renderParentRange('month', t('performance.filters.thisMonth'))}
                     {showAllTime && (
                         <Button
                             variant={dateRange === 'allTime' ? 'default' : 'ghost'}
                             size="sm"
                             allowViewer={true}
-                            onClick={() => setDateRange('allTime')}
+                            onClick={() => selectDateRange('allTime')}
                             className={cn("text-xs h-8 px-4 transition-all duration-200", allTimeButtonClassName, dateRange === 'allTime' && "shadow-sm")}
                             type="button"
                         >
@@ -121,7 +183,7 @@ export function DateRangeFilters({
                         variant={dateRange === 'custom' ? 'default' : 'ghost'}
                         size="sm"
                         allowViewer={true}
-                        onClick={() => setDateRange('custom')}
+                        onClick={() => selectDateRange('custom')}
                         className={cn("text-xs h-8 px-2.5 transition-all duration-200", dateRange === 'custom' && "shadow-sm")}
                         type="button"
                         title={t('performance.filters.custom')}

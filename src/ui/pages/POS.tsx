@@ -28,6 +28,7 @@ import {
     type BatchAwareInventoryProduct,
     type Category,
     type CurrencyCode,
+    type ExchangeRateSnapshot,
     type InventoryProduct,
     type PriceBook,
     type ActivityTransaction,
@@ -49,6 +50,7 @@ import {
     convertPosPrice,
     getCartBasePrice,
     getCartEffectivePrice,
+    getPosCartItemCurrency,
     shouldShowPosCartStorageLabels,
     hasPosOrderFreeBonus,
     isFreeOnlyPosQuickOrder,
@@ -90,7 +92,7 @@ import {
 } from '@/lib/barcodeScanner'
 import { findPosBarcodeCandidates, getPosBarcodeLookupProducts } from '@/lib/posCatalogBarcodeLookup'
 import { ExchangeRateResult } from '@/lib/exchangeRate'
-import { buildCheckoutRatesSnapshot, getPrimaryCheckoutRate } from '@/lib/currencyRates'
+import { buildCheckoutRatesSnapshot, buildExchangeRateSnapshot, getPrimaryCheckoutRate } from '@/lib/currencyRates'
 import { buildOrderExchangeRatesSnapshot } from '@/lib/orderCurrency'
 import { exchangeSnapshotsToPayloads } from '@/lib/salesExchange'
 import type { ResolvedActiveDiscount } from '@/lib/discounts'
@@ -102,6 +104,7 @@ import {
     AppDialogFooter,
     AppDialogHeader,
     AppDialogTitle,
+    CurrencySelector,
     Input,
     Dialog,
     DialogContent,
@@ -1240,6 +1243,8 @@ export function POS() {
     // Negotiated Price Edit State
     const [editingPriceItemKey, setEditingPriceItemKey] = useState<string | null>(null)
     const [negotiatedPriceInput, setNegotiatedPriceInput] = useState('')
+    const [priceEditCurrency, setPriceEditCurrency] = useState<CurrencyCode | null>(null)
+    const [priceEditExchangeSnapshots, setPriceEditExchangeSnapshots] = useState<ExchangeRateSnapshot[]>([])
     const [serviceNameSuffixInput, setServiceNameSuffixInput] = useState('')
     const isAdmin = user?.role === 'admin'
     const isModifyPriceHidden = !isAdmin && permissionKeys.includes('pos.hideModifyPriceButton' as any)
@@ -1593,12 +1598,31 @@ export function POS() {
 
     const currencyConversionEnabled = features.pos_convert_to_workspace_currency
     const cartCurrencies = useMemo(() => Array.from(new Set(
-        cart.map((item) => item.effective_currency ?? getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId)))
+        cart.map((item) => getPosCartItemCurrency(
+            item,
+            getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))
+        ))
     )), [cart, findStockProduct, getEffectiveProductCurrency])
-    const hasMixedCartCurrencies = cartCurrencies.length > 1
+    const hasExplicitCurrencyOverrides = cart.some((item) => !!item.price_currency_override)
+    // Let a homogeneous cart of explicit line overrides settle in that currency.
+    // Mixed carts still need one common currency for their payment total.
+    const allCartLinesExplicitlyUseOneCurrency = cart.length > 0
+        && cart.every((item) => !!item.price_currency_override)
+        && cartCurrencies.length === 1
+    const hasMixedUnmodifiedCartCurrencies = new Set(cart
+        .filter((item) => !item.price_currency_override)
+        .map((item) => getPosCartItemCurrency(
+            item,
+            getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))
+        ))).size > 1
+    const unmodifiedCartCurrency = cart.find((item) => !item.price_currency_override)
     const settlementCurrency = (currencyConversionEnabled || cartCurrencies.length === 0
-        ? features.default_currency || 'usd'
-        : cartCurrencies[0]) as CurrencyCode
+        ? allCartLinesExplicitlyUseOneCurrency
+            ? cartCurrencies[0]
+            : features.default_currency || 'usd'
+        : unmodifiedCartCurrency
+            ? getPosCartItemCurrency(unmodifiedCartCurrency, features.default_currency || 'usd')
+            : cartCurrencies[0]) as CurrencyCode
 
     const openCurrencyConversionSettings = useCallback(() => {
         if (!isAdmin || isActivitiesCheckout || isServicesStorage) return
@@ -1636,6 +1660,51 @@ export function POS() {
         tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try
     }), [exchangeData, eurRates, tryRates])
 
+    const posExchangeRates = useMemo(() => {
+        const timestamp = new Date().toISOString()
+        const normalizeRate = (entry: { rate: number; source?: string; timestamp?: string } | null | undefined) => entry
+            ? { rate: entry.rate, source: entry.source || 'unknown', timestamp: entry.timestamp || timestamp }
+            : null
+        return {
+            usdIqd: normalizeRate(exchangeData),
+            eurIqd: normalizeRate(eurRates.eur_iqd),
+            tryIqd: normalizeRate(tryRates.try_iqd),
+            usdEur: normalizeRate(eurRates.usd_eur),
+            usdTry: normalizeRate(tryRates.usd_try),
+        }
+    }, [eurRates.eur_iqd, eurRates.usd_eur, exchangeData, tryRates.try_iqd, tryRates.usd_try])
+
+    const priceEditSessionRef = useRef<{
+        baseAmount: number
+        baseCurrency: CurrencyCode
+        rates: typeof posExchangeRates | null
+        manuallyEdited: boolean
+    } | null>(null)
+
+    const buildPosCheckoutExchangeSnapshot = useCallback((items: CartItem[], settlement: CurrencyCode) => {
+        const lineCurrencies = new Set(items.map((item) => getPosCartItemCurrency(
+            item,
+            getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))
+        )))
+        const settlementSnapshots = buildCheckoutRatesSnapshot(lineCurrencies, settlement, posExchangeRates)
+        const usedSnapshots = [
+            ...settlementSnapshots,
+            ...items.flatMap((item) => item.price_currency_exchange_snapshot ?? []),
+        ]
+        const byPair = new Map<string, ExchangeRateSnapshot>()
+        for (const snapshot of usedSnapshots) byPair.set(snapshot.pair.toUpperCase(), snapshot)
+        return [...byPair.values()]
+    }, [findStockProduct, getEffectiveProductCurrency, posExchangeRates])
+
+    const buildPriceCurrencyExchangeSnapshot = useCallback((
+        from: CurrencyCode,
+        to: CurrencyCode,
+        rates: typeof posExchangeRates = posExchangeRates
+    ) => {
+        const snapshot = buildExchangeRateSnapshot(from, to, rates)
+        return snapshot ? [snapshot] : []
+    }, [posExchangeRates])
+
     const getCartMinimumPriceViolation = useCallback((item: CartItem) => {
         if (user?.role !== 'staff') return null
         const product = findStockProduct(item.product_id, item.storageId)
@@ -1643,7 +1712,7 @@ export function POS() {
             ?? (product?.minimumSellingPrice == null ? null : product.minimumSellingPrice * (item.unit_factor ?? 1))
         if (!product || minimumSellingPrice == null) return null
 
-        const effectiveCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
+        const effectiveCurrency = getPosCartItemCurrency(item, getEffectiveProductCurrency(product))
         const minimumCurrency = item.minimum_selling_price_currency_snapshot ?? product.currency
         const posRates = {
             usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,
@@ -1667,7 +1736,7 @@ export function POS() {
     const minimumPriceValidationItems = useMemo(() => cart.flatMap((item) => {
         const product = findStockProduct(item.product_id, item.storageId)
         if (!product) return []
-        const effectiveCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
+        const effectiveCurrency = getPosCartItemCurrency(item, getEffectiveProductCurrency(product))
         const posRates = {
             usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,
             tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try
@@ -1696,7 +1765,7 @@ export function POS() {
     // Calculate totals
     const totalAmount = cart.reduce((sum, item) => {
         const product = findStockProduct(item.product_id, item.storageId)
-        const itemCurrency = item.effective_currency ?? product?.currency ?? 'usd'
+        const itemCurrency = getPosCartItemCurrency(item, (product?.currency ?? 'usd') as CurrencyCode)
         const basePrice = getCartEffectivePrice(item)
         const converted = convertPrice(basePrice, itemCurrency, settlementCurrency)
         return sum + (converted * item.quantity)
@@ -1704,7 +1773,7 @@ export function POS() {
     const isFreeOnlyQuickOrder = isFreeOnlyPosQuickOrder(cart, totalAmount)
     const originalSubtotal = cart.reduce((sum, item) => {
         const product = findStockProduct(item.product_id, item.storageId)
-        const itemCurrency = item.effective_currency ?? product?.currency ?? 'usd'
+        const itemCurrency = getPosCartItemCurrency(item, (product?.currency ?? 'usd') as CurrencyCode)
         const converted = convertPrice(getCartBasePrice(item), itemCurrency, settlementCurrency)
         return sum + (converted * item.quantity)
     }, 0)
@@ -1723,30 +1792,15 @@ export function POS() {
         let loading = false
 
         for (const item of cart) {
-            const itemCurrency = (findStockProduct(item.product_id, item.storageId)?.currency || 'usd') as CurrencyCode
+            const product = findStockProduct(item.product_id, item.storageId)
+            const itemCurrency = getPosCartItemCurrency(item, (product?.currency || 'usd') as CurrencyCode)
             if (itemCurrency === settlementCurrency) continue
-
-            const checkPair = (rateExists: boolean) => {
-                if (!rateExists) {
-                    if (status === 'loading') loading = true
-                    else trulyMissing = true
-                } else if (status === 'loading') {
-                    loading = true
-                }
-            }
-
-            if ((itemCurrency === 'usd' && settlementCurrency === 'iqd') || (itemCurrency === 'iqd' && settlementCurrency === 'usd')) {
-                checkPair(!!exchangeData)
-            } else if ((itemCurrency === 'eur' && settlementCurrency === 'iqd') || (itemCurrency === 'iqd' && settlementCurrency === 'eur')) {
-                checkPair(!!eurRates.eur_iqd)
-            } else if ((itemCurrency === 'usd' && settlementCurrency === 'eur') || (itemCurrency === 'eur' && settlementCurrency === 'usd')) {
-                checkPair(!!eurRates.usd_eur)
-            } else if ((itemCurrency === 'try' && settlementCurrency === 'iqd') || (itemCurrency === 'iqd' && settlementCurrency === 'try')) {
-                checkPair(!!tryRates.try_iqd)
-            } else if ((itemCurrency === 'usd' && settlementCurrency === 'try') || (itemCurrency === 'try' && settlementCurrency === 'usd')) {
-                checkPair(!!tryRates.usd_try)
-            } else if ((itemCurrency === 'try' && settlementCurrency === 'eur') || (itemCurrency === 'eur' && settlementCurrency === 'try')) {
-                checkPair(!!tryRates.try_iqd && !!eurRates.eur_iqd)
+            const rateAvailable = hasPosConversionRate(itemCurrency, settlementCurrency, posExchangeRates)
+            if (!rateAvailable) {
+                if (status === 'loading') loading = true
+                else trulyMissing = true
+            } else if (status === 'loading') {
+                loading = true
             }
         }
 
@@ -1764,18 +1818,8 @@ export function POS() {
 
         const printedAt = new Date().toISOString()
         const previewId = generateId()
-        const usedCurrencies = new Set(cart.map((item) =>
-            item.effective_currency ?? getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))
-        ))
-        const knownRates = {
-            usdIqd: exchangeData ? { rate: exchangeData.rate, source: exchangeData.source, timestamp: exchangeData.timestamp || printedAt } : null,
-            eurIqd: eurRates.eur_iqd ? { rate: eurRates.eur_iqd.rate, source: eurRates.eur_iqd.source, timestamp: eurRates.eur_iqd.timestamp } : null,
-            tryIqd: tryRates.try_iqd ? { rate: tryRates.try_iqd.rate, source: tryRates.try_iqd.source, timestamp: tryRates.try_iqd.timestamp } : null,
-            usdEur: eurRates.usd_eur ? { rate: eurRates.usd_eur.rate, source: eurRates.usd_eur.source, timestamp: eurRates.usd_eur.timestamp } : null,
-            usdTry: tryRates.usd_try ? { rate: tryRates.usd_try.rate, source: tryRates.usd_try.source, timestamp: tryRates.usd_try.timestamp } : null,
-        }
-        const exchangeRatesSnapshot = currencyConversionEnabled
-            ? buildCheckoutRatesSnapshot(usedCurrencies, settlementCurrency, knownRates)
+        const exchangeRatesSnapshot = currencyConversionEnabled || hasExplicitCurrencyOverrides
+            ? buildPosCheckoutExchangeSnapshot(cart, settlementCurrency)
             : []
         const paymentMethod = paymentType === 'cash'
             ? 'cash'
@@ -1791,13 +1835,14 @@ export function POS() {
             created_at: printedAt,
             total_amount: totalAmount,
             settlement_currency: settlementCurrency,
-            currency_conversion_applied: currencyConversionEnabled,
+            currency_conversion_applied: currencyConversionEnabled || exchangeRatesSnapshot.length > 0,
             sales_exchange: exchangeSnapshotsToPayloads(exchangeRatesSnapshot),
             origin: 'pos',
             payment_method: paymentMethod,
             items: cart.map((item) => {
                 const product = findStockProduct(item.product_id, item.storageId)
-                const originalCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
+                const sourceCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
+                const originalCurrency = getPosCartItemCurrency(item, sourceCurrency)
                 const effectivePrice = getCartEffectivePrice(item)
                 const convertedUnitPrice = convertPrice(effectivePrice, originalCurrency, settlementCurrency)
 
@@ -1819,10 +1864,21 @@ export function POS() {
                     unit_price: effectivePrice,
                     total_price: effectivePrice * item.quantity,
                     original_currency: originalCurrency,
-                    original_unit_price: item.price,
+                    original_unit_price: convertPrice(item.price, sourceCurrency, originalCurrency),
                     converted_unit_price: convertedUnitPrice,
                     settlement_currency: settlementCurrency,
                     negotiated_price: item.negotiated_price,
+                    metadata: item.price_currency_override ? {
+                        posPriceCurrencyOverride: {
+                            sourceCurrency,
+                            selectedCurrency: item.price_currency_override,
+                            sourceUnitPrice: item.price,
+                            validationPriceInProductCurrency: product
+                                ? convertPrice(effectivePrice, originalCurrency, product.currency)
+                                : effectivePrice,
+                            exchangeRates: item.price_currency_exchange_snapshot ?? [],
+                        }
+                    } : null,
                 }
             })
         } as any)
@@ -1833,19 +1889,18 @@ export function POS() {
         }
     }, [
         cart,
+        buildPosCheckoutExchangeSnapshot,
         convertPrice,
         currencyConversionEnabled,
         digitalProvider,
-        eurRates,
-        exchangeData,
         findStockProduct,
         getEffectiveProductCurrency,
+        hasExplicitCurrencyOverrides,
         isActivitiesCheckout,
         paymentType,
         selectedStorageId,
         settlementCurrency,
         totalAmount,
-        tryRates,
         user,
     ])
     const canPreprintReceipt = showPreprintReceipt && !!preprintReceiptData && hasPermission('global.print' as any)
@@ -2185,7 +2240,10 @@ export function POS() {
         const activeDiscount = getActiveDiscountForProduct(product, effectivePrice, effectiveCurrency)
 
         if (!currencyConversionEnabled && !isInfiniteActivity) {
-            const cartCurrency = cartCurrencies[0]
+            const unmodifiedCartItem = cart.find((item) => !item.price_currency_override)
+            const cartCurrency = unmodifiedCartItem
+                ? getPosCartItemCurrency(unmodifiedCartItem, (unmodifiedCartItem.effective_currency ?? effectiveCurrency) as CurrencyCode)
+                : null
             if (cartCurrency && cartCurrency !== effectiveCurrency) {
                 toast({
                     variant: 'destructive',
@@ -2290,7 +2348,7 @@ export function POS() {
         })
         hapticTrigger('selection')
         return true
-    }, [canSelectProduct, cart, cartCurrencies, currencyConversionEnabled, features, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, getProductForStockSource, getStockSourceAvailability, t, toast, hapticTrigger])
+    }, [canSelectProduct, cart, currencyConversionEnabled, features, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, getProductForStockSource, getStockSourceAvailability, t, toast, hapticTrigger])
 
     const addFreeOnlyProductToCart = useCallback((product: PosCatalogProduct) => {
         if (!canUseOrderFreeBonus || !quickOrderEnabled || isActivitiesStorage || product.isInfiniteActivity) return false
@@ -2636,7 +2694,15 @@ export function POS() {
         setCart((prev) =>
             prev.map((item) =>
                 getCartItemKey(item) === itemKey
-                    ? { ...item, negotiated_price: price }
+                    ? {
+                        ...item,
+                        negotiated_price: price,
+                        ...(price === undefined ? {
+                            price_currency_override: undefined,
+                            currency_converted_base_price: undefined,
+                            price_currency_exchange_snapshot: undefined,
+                        } : {}),
+                    }
                     : item
             )
         )
@@ -2655,9 +2721,80 @@ export function POS() {
     }
 
     const openPriceEdit = (item: CartItem) => {
+        const product = findStockProduct(item.product_id, item.storageId)
+        const baseCurrency = getPosCartItemCurrency(
+            item,
+            (item.effective_currency ?? product?.currency ?? 'usd') as CurrencyCode
+        )
+        const baseAmount = getCartEffectivePrice(item)
+        priceEditSessionRef.current = {
+            baseAmount,
+            baseCurrency,
+            rates: null,
+            manuallyEdited: false,
+        }
         setEditingPriceItemKey(getCartItemKey(item))
-        setNegotiatedPriceInput(formatNumberWithCommas(getCartEffectivePrice(item).toString()))
+        setNegotiatedPriceInput(formatNumberWithCommas(baseAmount.toString()))
+        setPriceEditCurrency(baseCurrency)
+        setPriceEditExchangeSnapshots(item.price_currency_exchange_snapshot ?? [])
         setServiceNameSuffixInput(item.is_service ? item.service_name_suffix ?? '' : '')
+    }
+
+    const changePriceEditCurrency = (nextCurrency: CurrencyCode) => {
+        const item = cart.find((entry) => getCartItemKey(entry) === editingPriceItemKey)
+        if (!item) return
+
+        const sourceCurrency = (item.effective_currency ?? 'usd') as CurrencyCode
+        const currentCurrency = priceEditCurrency ?? getPosCartItemCurrency(item, sourceCurrency)
+        if (currentCurrency === nextCurrency) return
+
+        const allowedCurrencies = new Set<CurrencyCode>([
+            ...features.allowed_currencies,
+            sourceCurrency,
+        ])
+        if (!allowedCurrencies.has(nextCurrency)) return
+
+        const editSession = priceEditSessionRef.current
+        const hasEditedAmount = !!editSession?.manuallyEdited
+        const conversionFromCurrency = editSession && !hasEditedAmount
+            ? editSession.baseCurrency
+            : currentCurrency
+        const conversionAmount = editSession && !hasEditedAmount
+            ? editSession.baseAmount
+            : parseFormattedNumber(negotiatedPriceInput)
+        let conversionRates = editSession?.rates ?? posExchangeRates
+        if (!hasPosConversionRate(conversionFromCurrency, nextCurrency, conversionRates)
+            && hasPosConversionRate(conversionFromCurrency, nextCurrency, posExchangeRates)) {
+            conversionRates = posExchangeRates
+            if (editSession) editSession.rates = conversionRates
+        }
+
+        if (!hasPosConversionRate(conversionFromCurrency, nextCurrency, conversionRates)) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('pos.priceCurrencyRateUnavailable', 'An exchange rate is unavailable for the selected currency.'),
+            })
+            return
+        }
+        if (editSession && !editSession.rates) editSession.rates = conversionRates
+
+        if (Number.isFinite(conversionAmount)) {
+            setNegotiatedPriceInput(formatNumberWithCommas(
+                convertPosPrice(conversionAmount, conversionFromCurrency, nextCurrency, conversionRates).toString()
+            ))
+        }
+        setPriceEditCurrency(nextCurrency)
+        if (nextCurrency === sourceCurrency) {
+            setPriceEditExchangeSnapshots([])
+        } else {
+            const nextSnapshot = buildPriceCurrencyExchangeSnapshot(conversionFromCurrency, nextCurrency, conversionRates)
+            setPriceEditExchangeSnapshots((current) => {
+                const byPair = new Map(current.map((snapshot) => [snapshot.pair, snapshot]))
+                for (const snapshot of nextSnapshot) byPair.set(snapshot.pair, snapshot)
+                return [...byPair.values()]
+            })
+        }
     }
 
     const savePriceEdit = () => {
@@ -2665,23 +2802,77 @@ export function POS() {
         const newPrice = parseFormattedNumber(negotiatedPriceInput)
         if (!Number.isFinite(newPrice) || newPrice < 0) return
 
+        const editingItem = cart.find((item) => getCartItemKey(item) === editingPriceItemKey)
+        if (!editingItem) return
+        const product = findStockProduct(editingItem.product_id, editingItem.storageId)
+        const sourceCurrency = (editingItem.effective_currency
+            ?? (product ? getEffectiveProductCurrency(product) : 'usd')) as CurrencyCode
+        const selectedCurrency = priceEditCurrency ?? getPosCartItemCurrency(editingItem, sourceCurrency)
+        const allowedCurrencies = new Set<CurrencyCode>([
+            ...features.allowed_currencies,
+            sourceCurrency,
+        ])
+        if (!allowedCurrencies.has(selectedCurrency)) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('pos.priceCurrencyUnavailable', 'This currency is no longer available in the workspace.'),
+            })
+            return
+        }
+        const currentCurrency = getPosCartItemCurrency(editingItem, sourceCurrency)
+        let editRates = priceEditSessionRef.current?.rates ?? posExchangeRates
+        if (!hasPosConversionRate(currentCurrency, selectedCurrency, editRates)
+            && hasPosConversionRate(currentCurrency, selectedCurrency, posExchangeRates)) {
+            editRates = posExchangeRates
+            if (priceEditSessionRef.current) priceEditSessionRef.current.rates = editRates
+        }
+        if (!hasPosConversionRate(currentCurrency, selectedCurrency, editRates)) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('pos.priceCurrencyRateUnavailable', 'An exchange rate is unavailable for the selected currency.'),
+            })
+            return
+        }
+
         const serviceNameSuffix = normalizePosServiceNameSuffix(serviceNameSuffixInput)
-        setCart((current) => current.map((item) => getCartItemKey(item) === editingPriceItemKey
-            ? {
+        setCart((current) => current.map((item) => {
+            if (getCartItemKey(item) !== editingPriceItemKey) return item
+
+            const itemSourceCurrency = (item.effective_currency ?? sourceCurrency) as CurrencyCode
+            const itemCurrentCurrency = getPosCartItemCurrency(item, itemSourceCurrency)
+            const isCurrencyOverride = selectedCurrency !== itemSourceCurrency
+            const convertedBasePrice = isCurrencyOverride
+                ? itemCurrentCurrency === selectedCurrency
+                    ? getCartBasePrice(item)
+                    : convertPosPrice(getCartBasePrice(item), itemCurrentCurrency, selectedCurrency, editRates)
+                : (item.discounted_price ?? item.price)
+
+            return {
                 ...item,
-                negotiated_price: newPrice === getCartBasePrice(item) ? undefined : newPrice,
+                price_currency_override: isCurrencyOverride ? selectedCurrency : undefined,
+                currency_converted_base_price: isCurrencyOverride ? convertedBasePrice : undefined,
+                price_currency_exchange_snapshot: isCurrencyOverride ? priceEditExchangeSnapshots : undefined,
+                negotiated_price: Math.abs(newPrice - convertedBasePrice) < 0.000001 ? undefined : newPrice,
                 ...(item.is_service ? { service_name_suffix: serviceNameSuffix || undefined } : {}),
             }
-            : item))
+        }))
         setEditingPriceItemKey(null)
         setNegotiatedPriceInput('')
+        setPriceEditCurrency(null)
+        setPriceEditExchangeSnapshots([])
         setServiceNameSuffixInput('')
+        priceEditSessionRef.current = null
     }
 
     const cancelPriceEdit = () => {
         setEditingPriceItemKey(null)
         setNegotiatedPriceInput('')
+        setPriceEditCurrency(null)
+        setPriceEditExchangeSnapshots([])
         setServiceNameSuffixInput('')
+        priceEditSessionRef.current = null
     }
 
     const clearNegotiatedPrice = (item: CartItem) => {
@@ -3252,11 +3443,22 @@ export function POS() {
             }
         }
 
-        if (!currencyConversionEnabled && hasMixedCartCurrencies) {
+        if (!currencyConversionEnabled && hasMixedUnmodifiedCartCurrencies) {
             toast({
                 variant: 'destructive',
                 title: t('messages.error'),
                 description: t('pos.currencyConversionSingleCurrencyCart', 'Currency conversion is disabled. A sale can contain products in only one currency.')
+            })
+            return
+        }
+
+        const unavailableOverride = cart.find((item) => item.price_currency_override
+            && !features.allowed_currencies.includes(item.price_currency_override))
+        if (unavailableOverride) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('pos.priceCurrencyUnavailable', 'This currency is no longer available in the workspace.'),
             })
             return
         }
@@ -3275,10 +3477,11 @@ export function POS() {
             setIsLoanRegistrationModalOpen(false)
         }
 
-        const checkoutRates = { usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,
-            tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try }
         const missingConversionRate = cart.some(item => !hasPosConversionRate(
-            item.effective_currency ?? getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId)), settlementCurrency, checkoutRates))
+            getPosCartItemCurrency(item, getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))),
+            settlementCurrency,
+            posExchangeRates
+        ))
         if (missingConversionRate) {
             toast({
                 variant: 'destructive',
@@ -3329,24 +3532,17 @@ export function POS() {
         const checkoutTimestamp = new Date().toISOString()
 
         // Collect actually used exchange rates for this specific checkout
-        const usedCurrencies = new Set(cart.map(item => item.effective_currency ?? getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))))
+        const usedCurrencies = new Set(cart.map((item) => getPosCartItemCurrency(
+            item,
+            getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))
+        )))
 
-        const knownRates = {
-            usdIqd: exchangeData ? { rate: exchangeData.rate, source: exchangeData.source, timestamp: exchangeData.timestamp || new Date().toISOString() } : null,
-            eurIqd: eurRates.eur_iqd ? { rate: eurRates.eur_iqd.rate, source: eurRates.eur_iqd.source, timestamp: eurRates.eur_iqd.timestamp } : null,
-            tryIqd: tryRates.try_iqd ? { rate: tryRates.try_iqd.rate, source: tryRates.try_iqd.source, timestamp: tryRates.try_iqd.timestamp } : null,
-            usdEur: eurRates.usd_eur ? { rate: eurRates.usd_eur.rate, source: eurRates.usd_eur.source, timestamp: eurRates.usd_eur.timestamp } : null,
-            usdTry: tryRates.usd_try ? { rate: tryRates.usd_try.rate, source: tryRates.usd_try.source, timestamp: tryRates.usd_try.timestamp } : null,
-        }
-
-        // Conversion-disabled sales stay in their product currency. Do not let
-        // the snapshot helper's IQD fallback create an exchange record for an
-        // otherwise single-currency checkout.
-        const exchangeRatesSnapshot = currencyConversionEnabled
-            ? buildCheckoutRatesSnapshot(usedCurrencies, settlementCurrency, knownRates)
+        const exchangeRatesSnapshot = currencyConversionEnabled || hasExplicitCurrencyOverrides
+            ? buildPosCheckoutExchangeSnapshot(cart, settlementCurrency)
             : []
-        const primary = currencyConversionEnabled
-            ? getPrimaryCheckoutRate(usedCurrencies, settlementCurrency, knownRates)
+        const primary = currencyConversionEnabled || hasExplicitCurrencyOverrides
+            ? getPrimaryCheckoutRate(usedCurrencies, settlementCurrency, posExchangeRates)
+                ?? exchangeRatesSnapshot[0]
             : null
 
         const snapshotRate = primary?.rate || 0
@@ -3354,6 +3550,8 @@ export function POS() {
         const hasExchangeSnapshot = exchangeRatesSnapshot.length > 0
         const exchangeRatesPayload = hasExchangeSnapshot ? exchangeRatesSnapshot : null
         const salesExchangePayload = exchangeSnapshotsToPayloads(exchangeRatesPayload)
+        const currencyConversionApplied = currencyConversionEnabled
+            || (hasExplicitCurrencyOverrides && hasExchangeSnapshot)
 
         let batchSalePlans: Awaited<ReturnType<typeof getStockBatchSalePlans>>
         const physicalCart = cart.filter((item) => !isService(findStockProduct(item.product_id, item.storageId)))
@@ -3399,32 +3597,53 @@ export function POS() {
         const itemsWithMetadata = cart.map((item) => {
             const product = findStockProduct(item.product_id, item.storageId)
             const service = isService(product)
-            const originalCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
+            const sourceCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
+            const originalCurrency = getPosCartItemCurrency(item, sourceCurrency)
             const priceBookPricing = product ? getPriceBookPricing(product) : null
             const fallbackCostPrice = priceBookPricing?.costPrice ?? product?.costPrice ?? 0
+            const fallbackCostCurrency = priceBookPricing?.costPrice != null
+                ? priceBookPricing.currency
+                : (product?.currency ?? sourceCurrency)
             const unitFactor = item.unit_factor ?? 1
             const effectivePrice = getCartEffectivePrice(item)
             const convertedUnitPrice = convertPrice(effectivePrice, originalCurrency, settlementCurrency)
             const batchPlan = batchPlanByCartKey.get(getCartItemKey(item))
+            const fallbackLineCostPrice = convertPrice(fallbackCostPrice, fallbackCostCurrency, originalCurrency)
             const baseCostPrice = calculateStockBatchUnitCost(
                 batchPlan?.allocations ?? [],
-                fallbackCostPrice,
+                fallbackLineCostPrice,
                 originalCurrency,
                 convertPrice,
                 batchPlan?.requestedQuantity ?? getCartInventoryQuantity(item)
             )
             const baseConvertedCostPrice = calculateStockBatchUnitCost(
                 batchPlan?.allocations ?? [],
-                convertPrice(fallbackCostPrice, originalCurrency, settlementCurrency),
+                convertPrice(fallbackLineCostPrice, originalCurrency, settlementCurrency),
                 settlementCurrency,
                 convertPrice,
                 batchPlan?.requestedQuantity ?? getCartInventoryQuantity(item)
             )
-            const uomCostPrice = item.uom_cost_price
+            const uomCostPrice = item.uom_cost_price == null
+                ? null
+                : convertPrice(item.uom_cost_price, sourceCurrency, originalCurrency)
             const soldUnitCost = uomCostPrice ?? baseCostPrice * unitFactor
             const convertedSoldUnitCost = uomCostPrice == null
                 ? baseConvertedCostPrice * unitFactor
                 : convertPrice(uomCostPrice, originalCurrency, settlementCurrency)
+            const lineMetadata = {
+                ...(service ? createPosServiceNameMetadata(product?.name || item.name, item.service_name_suffix) ?? {} : {}),
+                ...(item.price_currency_override ? {
+                    posPriceCurrencyOverride: {
+                        sourceCurrency,
+                        selectedCurrency: item.price_currency_override,
+                        sourceUnitPrice: item.price,
+                        validationPriceInProductCurrency: product
+                            ? convertPrice(effectivePrice, originalCurrency, product.currency)
+                            : effectivePrice,
+                        exchangeRates: item.price_currency_exchange_snapshot ?? [],
+                    }
+                } : {}),
+            }
 
             return {
                 product_id: item.product_id,
@@ -3455,11 +3674,11 @@ export function POS() {
                 cost_price: soldUnitCost,
                 converted_cost_price: convertedSoldUnitCost,
                 original_currency: originalCurrency,
-                original_unit_price: item.price, // always store original list price
+                original_unit_price: convertPrice(item.price, sourceCurrency, originalCurrency),
                 converted_unit_price: convertedUnitPrice,
                 settlement_currency: settlementCurrency,
                 negotiated_price: item.negotiated_price, // store if negotiated
-                metadata: service ? createPosServiceNameMetadata(product?.name || item.name, item.service_name_suffix) ?? null : null,
+                metadata: Object.keys(lineMetadata).length > 0 ? lineMetadata : null,
                 price_book_id: item.price_book_id ?? null,
                 total: convertedUnitPrice * item.quantity,
                 // Immutable inventory snapshot at checkout time
@@ -3487,7 +3706,7 @@ export function POS() {
             items: itemsWithMetadata,
             total_amount: totalAmount,
             settlement_currency: settlementCurrency,
-            currency_conversion_applied: currencyConversionEnabled,
+            currency_conversion_applied: currencyConversionApplied,
             sales_exchange: salesExchangePayload,
             origin: 'pos',
             payment_method: (paymentType === 'cash'
@@ -3613,6 +3832,27 @@ export function POS() {
         if (cart.some(shouldRemovePosCartItem)) {
             throw new Error(t('pos.invalidCartQuantity'))
         }
+        if (!currencyConversionEnabled && hasMixedUnmodifiedCartCurrencies) {
+            throw new Error(t('pos.currencyConversionSingleCurrencyCart', {
+                defaultValue: 'Currency conversion is disabled. A sale can contain products in only one currency.'
+            }))
+        }
+        if (cart.some((item) => item.price_currency_override
+            && !features.allowed_currencies.includes(item.price_currency_override))) {
+            throw new Error(t('pos.priceCurrencyUnavailable', {
+                defaultValue: 'This currency is no longer available in the workspace.'
+            }))
+        }
+        if (cart.some((item) => {
+            const product = findStockProduct(item.product_id, item.storageId)
+            const itemCurrency = getPosCartItemCurrency(item, getEffectiveProductCurrency(product))
+            return itemCurrency !== settlementCurrency
+                && !hasPosConversionRate(itemCurrency, settlementCurrency, posExchangeRates)
+        })) {
+            throw new Error(t('pos.priceCurrencyRateUnavailable', {
+                defaultValue: 'An exchange rate is unavailable for the selected currency.'
+            }))
+        }
         if (hasFreeOrderBonus && !canUseOrderFreeBonus) {
             throw new Error(t('pos.freeBonusPermissionRequired'))
         }
@@ -3633,7 +3873,7 @@ export function POS() {
         try {
             const checkoutTimestamp = new Date().toISOString()
             const usedCurrencies = new Set(cart.map((item) =>
-                item.effective_currency ?? getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId))
+                getPosCartItemCurrency(item, getEffectiveProductCurrency(findStockProduct(item.product_id, item.storageId)))
             ))
             const knownRates = {
                 usdIqd: exchangeData ? { rate: exchangeData.rate, source: exchangeData.source, timestamp: exchangeData.timestamp || checkoutTimestamp } : null,
@@ -3643,12 +3883,17 @@ export function POS() {
                 usdTry: tryRates.usd_try ? { rate: tryRates.usd_try.rate, source: tryRates.usd_try.source, timestamp: tryRates.usd_try.timestamp } : null,
             }
             const exchangeRates = options?.onOrderCreated
-                ? quickOrderCommissionExchangeRates
-                : currencyConversionEnabled
-                    ? buildCheckoutRatesSnapshot(usedCurrencies, settlementCurrency, knownRates)
+                ? [...new Map([
+                    ...(currencyConversionEnabled || hasExplicitCurrencyOverrides
+                        ? buildPosCheckoutExchangeSnapshot(cart, settlementCurrency)
+                        : []),
+                    ...quickOrderCommissionExchangeRates,
+                ].map((snapshot) => [snapshot.pair.toUpperCase(), snapshot])).values()]
+                : currencyConversionEnabled || hasExplicitCurrencyOverrides
+                    ? buildPosCheckoutExchangeSnapshot(cart, settlementCurrency)
                     : []
-            const primaryRate = currencyConversionEnabled
-                ? getPrimaryCheckoutRate(usedCurrencies, settlementCurrency, knownRates)
+            const primaryRate = currencyConversionEnabled || hasExplicitCurrencyOverrides
+                ? getPrimaryCheckoutRate(usedCurrencies, settlementCurrency, knownRates) ?? exchangeRates[0]
                 : null
 
             const orderItems: SalesOrderItem[] = cart.map((item) => {
@@ -3659,7 +3904,8 @@ export function POS() {
                 }
                 const service = isService(product)
 
-                const originalCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
+                const sourceCurrency = (item.effective_currency ?? getEffectiveProductCurrency(product)) as CurrencyCode
+                const originalCurrency = getPosCartItemCurrency(item, sourceCurrency)
                 const priceBookItem = item.price_book_id
                     ? priceBookCatalog.priceBookItems.find((entry) => (
                         !entry.isDeleted
@@ -3670,10 +3916,11 @@ export function POS() {
                 const effectivePrice = getCartEffectivePrice(item)
                 const convertedUnitPrice = roundOrderValue(convertPrice(effectivePrice, originalCurrency, settlementCurrency))
                 const coefficient = item.unit_factor ?? 1
-                const selectedUnitCostPrice = Number(item.uom_cost_price
-                    ?? (priceBookItem?.costPrice != null
+                const selectedUnitCostPrice = item.uom_cost_price != null
+                    ? convertPrice(item.uom_cost_price, sourceCurrency, originalCurrency)
+                    : priceBookItem?.costPrice != null
                         ? convertPrice(priceBookItem.costPrice, priceBookItem.currency, originalCurrency) * coefficient
-                        : (product.costPrice ?? 0) * coefficient))
+                        : convertPrice(product.costPrice ?? 0, product.currency, originalCurrency) * coefficient
                 const costSnapshot = normalizeOrderLineUnitCostSnapshot(
                     selectedUnitCostPrice,
                     roundOrderValue(convertPrice(selectedUnitCostPrice, originalCurrency, settlementCurrency)),
@@ -3696,8 +3943,19 @@ export function POS() {
                     stockSourceBatchId: service ? undefined : item.stock_source_batch_id,
                     stockSourceBatchNumber: service ? undefined : item.stock_source_batch_number,
                     stockSourceExpiryDate: service ? undefined : item.stock_source_expiry_date,
-                    ...(service
-                        ? { metadata: createPosServiceNameMetadata(product.name, item.service_name_suffix) ?? null }
+                    ...((service || item.price_currency_override)
+                        ? { metadata: {
+                            ...(service ? createPosServiceNameMetadata(product.name, item.service_name_suffix) ?? {} : {}),
+                            ...(item.price_currency_override ? {
+                                posPriceCurrencyOverride: {
+                                    sourceCurrency,
+                                    selectedCurrency: item.price_currency_override,
+                                    sourceUnitPrice: item.price,
+                                    validationPriceInProductCurrency: convertPrice(effectivePrice, originalCurrency, product.currency),
+                                    exchangeRates: item.price_currency_exchange_snapshot ?? [],
+                                }
+                            } : {}),
+                        } }
                         : {}),
                     productSku: product.sku,
                     unit: item.selling_unit_code ?? product.unit,
@@ -4335,15 +4593,18 @@ export function POS() {
                                         </div>
                                     ) : (
                                         cart.map((item, index) => {
-                                            const productCurrency = item.effective_currency
+                                            const sourceCurrency = item.effective_currency
                                                 ?? findStockProduct(item.product_id, item.storageId)?.currency
                                                 ?? 'usd'
+                                            const productCurrency = getPosCartItemCurrency(item, sourceCurrency as CurrencyCode)
                                             const effectivePrice = getCartEffectivePrice(item)
                                             const basePrice = getCartBasePrice(item)
                                             const convertedPrice = convertPrice(effectivePrice, productCurrency, settlementCurrency)
                                             const isConverted = productCurrency !== settlementCurrency
                                             const hasNegotiated = item.negotiated_price !== undefined
                                             const hasDiscount = hasAutomaticDiscount(item)
+                                            const hasPriceCurrencyOverride = !!item.price_currency_override
+                                            const hasModifiedPrice = hasNegotiated || hasDiscount || hasPriceCurrencyOverride
                                             const minimumViolation = getCartMinimumPriceViolation(item)
                                             const itemKey = getCartItemKey(item)
 
@@ -4401,15 +4662,15 @@ export function POS() {
                                                             {/* Show original price (grayed out if discounted or negotiated) */}
                                                             <div className={cn(
                                                                 "text-xs",
-                                                                hasNegotiated || hasDiscount ? "text-muted-foreground/50 line-through" : "text-muted-foreground"
+                                                                hasModifiedPrice ? "text-muted-foreground/50 line-through" : "text-muted-foreground"
                                                             )}>
                                                                 <PosCartPriceQuantity
                                                                     quantity={item.quantity}
                                                                     unitLabel={t(`products.units.${item.unit}`, { defaultValue: item.unit ?? '' }).toUpperCase()}
-                                                                    priceLabel={formatCurrency(item.price, productCurrency, features.iqd_display_preference)}
+                                                                    priceLabel={formatCurrency(item.price, sourceCurrency, features.iqd_display_preference)}
                                                                 />
                                                             </div>
-                                                            {(hasDiscount || hasNegotiated) && (
+                                                            {hasModifiedPrice && (
                                                                 <div className="text-xs text-emerald-600 font-medium flex items-center gap-1">
                                                                     <span>{formatCurrency(effectivePrice, productCurrency, features.iqd_display_preference)} x {item.quantity} {t(`products.units.${item.unit}`, { defaultValue: item.unit ?? '' }).toUpperCase()}</span>
                                                                     {isAdmin && (
@@ -5312,18 +5573,30 @@ export function POS() {
                         const editingProduct = editingItem ? findStockProduct(editingItem.product_id, editingItem.storageId) : undefined
                         if (!editingItem) return null
                         const editedPrice = parseFormattedNumber(negotiatedPriceInput)
-                        const effectiveCurrency = (editingItem.effective_currency
+                        const sourceCurrency = (editingItem.effective_currency
                             ?? (editingProduct ? getEffectiveProductCurrency(editingProduct) : 'usd')) as CurrencyCode
+                        const effectiveCurrency = priceEditCurrency ?? getPosCartItemCurrency(editingItem, sourceCurrency)
+                        const allowedPriceCurrencies = Array.from(new Set<CurrencyCode>([
+                            ...features.allowed_currencies,
+                            sourceCurrency,
+                            effectiveCurrency,
+                        ]))
                         const minimumPriceForLine = editingItem.minimum_selling_price_snapshot
                             ?? (editingProduct?.minimumSellingPrice == null
                                 ? null
                                 : editingProduct.minimumSellingPrice * (editingItem.unit_factor ?? 1))
                         const minimumPriceCurrency = editingItem.minimum_selling_price_currency_snapshot
                             ?? editingProduct?.currency
-                        const editingPriceRates = {
-                            usdIqd: exchangeData, eurIqd: eurRates.eur_iqd, usdEur: eurRates.usd_eur,
-                            tryIqd: tryRates.try_iqd, usdTry: tryRates.usd_try
-                        }
+                        const editingPriceRates = priceEditSessionRef.current?.rates ?? posExchangeRates
+                        const convertEditingPrice = (amount: number, from: CurrencyCode, to: CurrencyCode) =>
+                            convertPosPrice(amount, from, to, editingPriceRates)
+                        const selectedCurrencyAllowed = features.allowed_currencies.includes(effectiveCurrency)
+                            || effectiveCurrency === sourceCurrency
+                        const priceCurrencyRateUnavailable = !hasPosConversionRate(
+                            getPosCartItemCurrency(editingItem, sourceCurrency),
+                            effectiveCurrency,
+                            editingPriceRates
+                        )
                         const minimumPriceCurrencyUnavailable = minimumPriceForLine != null
                             && !!editingProduct
                             && (!hasPosConversionRate(effectiveCurrency, editingProduct.currency, editingPriceRates)
@@ -5332,16 +5605,20 @@ export function POS() {
                             && minimumPriceForLine != null
                             && isBelowMinimumSellingPrice(
                                 user?.role,
-                                convertPrice(editedPrice, effectiveCurrency, editingProduct?.currency || effectiveCurrency),
+                                convertEditingPrice(editedPrice, effectiveCurrency, editingProduct?.currency || effectiveCurrency),
                                 minimumPriceCurrency && editingProduct
-                                    ? convertPrice(minimumPriceForLine, minimumPriceCurrency, editingProduct.currency)
+                                    ? convertEditingPrice(minimumPriceForLine, minimumPriceCurrency, editingProduct.currency)
                                     : minimumPriceForLine
                             )
                         const shouldShowMinimumPriceError = user?.role === 'staff'
                             && minimumPriceForLine != null
                             && (minimumPriceCurrencyUnavailable || hasMinimumPriceError)
 
-                        const canSavePrice = Number.isFinite(editedPrice) && editedPrice >= 0 && !shouldShowMinimumPriceError
+                        const canSavePrice = selectedCurrencyAllowed
+                            && !priceCurrencyRateUnavailable
+                            && Number.isFinite(editedPrice)
+                            && editedPrice >= 0
+                            && !shouldShowMinimumPriceError
 
                         return (
                             <>
@@ -5381,9 +5658,29 @@ export function POS() {
                                     <div>
                                         <Label className="text-muted-foreground">{t('pos.originalPriceLabel') || 'Original Price'}</Label>
                                         <div className="text-lg font-mono font-bold mt-1 p-3 bg-muted/50 rounded border border-border">
-                                            {formatCurrency(editingItem.price, effectiveCurrency, features.iqd_display_preference)}
+                                            {formatCurrency(editingItem.price, sourceCurrency, features.iqd_display_preference)}
                                         </div>
                                     </div>
+
+                                    {!isActivitiesCheckout && (
+                                        <CurrencySelector
+                                            value={effectiveCurrency}
+                                            onChange={changePriceEditCurrency}
+                                            label={`${t('pos.priceCurrency', 'Price currency')} *`}
+                                            iqdDisplayPreference={features.iqd_display_preference}
+                                            allowedCurrencies={allowedPriceCurrencies}
+                                        />
+                                    )}
+                                    {priceCurrencyRateUnavailable && (
+                                        <p role="alert" className="text-sm font-medium text-destructive">
+                                            {t('pos.priceCurrencyRateUnavailable', 'An exchange rate is unavailable for the selected currency.')}
+                                        </p>
+                                    )}
+                                    {!selectedCurrencyAllowed && (
+                                        <p role="alert" className="text-sm font-medium text-destructive">
+                                            {t('pos.priceCurrencyUnavailable', 'This currency is no longer available in the workspace.')}
+                                        </p>
+                                    )}
 
                                     {/* Negotiated Price - Editable */}
                                     <div>
@@ -5398,6 +5695,7 @@ export function POS() {
                                                 value={negotiatedPriceInput}
                                                 onChange={(e) => {
                                                     const raw = e.target.value.replace(/[^0-9.,]/g, '')
+                                                    if (priceEditSessionRef.current) priceEditSessionRef.current.manuallyEdited = true
                                                     setNegotiatedPriceInput(formatNumberWithCommas(raw))
                                                 }}
                                                 placeholder="0"
@@ -5421,11 +5719,17 @@ export function POS() {
                                                     </span>
                                                     <div className="flex items-center gap-1.5 text-xs text-emerald-600/70 font-mono">
                                                         <TrendingUp className="w-3 h-3" />
-                                                        <span>1 {effectiveCurrency.toUpperCase()} = {formatCurrency(convertPrice(1, effectiveCurrency, features.default_currency), features.default_currency, features.iqd_display_preference)}</span>
+                                                        <span>1 {effectiveCurrency.toUpperCase()} = {formatCurrency(convertEditingPrice(1, effectiveCurrency, features.default_currency), features.default_currency, features.iqd_display_preference)}</span>
                                                     </div>
                                                 </div>
-                                                <div className="text-xl font-mono font-black text-emerald-500 mt-0.5">
-                                                    {formatCurrency(convertPrice(parseFormattedNumber(negotiatedPriceInput), effectiveCurrency, features.default_currency), features.default_currency, features.iqd_display_preference)}
+                                                <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                                                    <bdi className="text-sm font-semibold font-mono text-emerald-700/80">
+                                                        {formatCurrency(editedPrice, effectiveCurrency, features.iqd_display_preference)}
+                                                    </bdi>
+                                                    <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-emerald-600/60 rtl:rotate-180" />
+                                                    <bdi className="text-xl font-mono font-black text-emerald-500">
+                                                        {formatCurrency(convertEditingPrice(editedPrice, effectiveCurrency, features.default_currency), features.default_currency, features.iqd_display_preference)}
+                                                    </bdi>
                                                 </div>
                                             </div>
                                         )}
@@ -5450,7 +5754,7 @@ export function POS() {
                                                     : editingProduct.costPrice * (editingItem.unit_factor ?? 1))
                                             const costCurrency = editingItem.uom_cost_price == null
                                                 ? editingProduct?.currency || effectiveCurrency
-                                                : effectiveCurrency
+                                                : sourceCurrency
                                             const costPriceInSaleCurrency = costPrice == null
                                                 ? null
                                                 : convertPrice(costPrice, costCurrency, effectiveCurrency)
@@ -5496,7 +5800,7 @@ export function POS() {
                         if (!item) return null
                         const unitLabel = dynamicUnitModal.type
                         const effectivePrice = getCartEffectivePrice(item)
-                        const currency = (product?.currency || 'usd') as CurrencyCode
+                        const currency = getPosCartItemCurrency(item, (product?.currency || 'usd') as CurrencyCode)
                         const sliderMax = item.max_stock || 1000
                         const sliderStep = 0.01
 
@@ -6774,12 +7078,15 @@ function MobileCart({
                             candidate.id === item.product_id
                             && (!item.storageId || candidate.storageId === item.storageId)
                         ))
-                        const originalCurrency = (item.effective_currency ?? product?.currency ?? 'usd') as CurrencyCode
+                        const sourceCurrency = (item.effective_currency ?? product?.currency ?? 'usd') as CurrencyCode
+                        const originalCurrency = getPosCartItemCurrency(item, sourceCurrency)
                         const settlementCurr = settlementCurrency as CurrencyCode
                         const unitPrice = getCartEffectivePrice(item)
                         const convertedUnitPrice = convertPrice(unitPrice, originalCurrency, settlementCurr)
                         const isExchanged = originalCurrency !== settlementCurr
                         const hasDiscount = hasAutomaticDiscount(item)
+                        const hasPriceCurrencyOverride = !!item.price_currency_override
+                        const hasModifiedPrice = item.negotiated_price !== undefined || hasDiscount || hasPriceCurrencyOverride
                         const minimumViolation = getCartMinimumPriceViolation(item)
                         const itemKey = getCartItemKey(item)
 
@@ -6859,16 +7166,16 @@ function MobileCart({
                                             <div className="text-[10px] space-y-0.5 mt-1">
                                                 <div className={cn(
                                                     "text-muted-foreground transition-all duration-300",
-                                                    item.negotiated_price !== undefined || hasDiscount ? "line-through opacity-50" : ""
+                                                    hasModifiedPrice ? "line-through opacity-50" : ""
                                                 )}>
                                                     <PosCartPriceQuantity
                                                         quantity={item.quantity}
                                                         unitLabel={t(`products.units.${item.unit}`, { defaultValue: item.unit ?? '' }).toUpperCase()}
-                                                        priceLabel={formatCurrency(item.price, originalCurrency, features.iqd_display_preference)}
+                                                        priceLabel={formatCurrency(item.price, sourceCurrency, features.iqd_display_preference)}
                                                     />
                                                 </div>
 
-                                                {(item.negotiated_price !== undefined || hasDiscount) && (
+                                                {hasModifiedPrice && (
                                                     <div className="text-emerald-500 font-bold flex items-center gap-1 animate-in slide-in-from-left-2 duration-300">
                                                         <PosCartPriceQuantity
                                                             quantity={item.quantity}

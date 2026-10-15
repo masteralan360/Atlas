@@ -437,7 +437,7 @@ export function SelectedCapitalPoolCharts({
             <DateRangeFilters
               showYesterday
               label={t('paymentAccounts.capitalPools.charts.cashFlowPeriod')}
-              className="max-w-full overflow-x-auto"
+              className="max-w-full [&>div>div]:flex-wrap"
             />
           </div>
           <p className="text-xs text-muted-foreground">

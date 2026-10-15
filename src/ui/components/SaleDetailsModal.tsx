@@ -166,7 +166,20 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
         item.settlement_currency &&
         item.original_currency !== item.settlement_currency
     ) ?? false
-    const hasExchangeSnapshot = (sale.exchange_rates?.length || 0) > 0
+    const exchangeRates = sale.exchange_rates || []
+    const exchangeRatePairs = new Set(exchangeRates.map(rate => rate.pair.toUpperCase()))
+    const displayExchangeRates = exchangeRates.flatMap((rate: any) => {
+        const [baseCurrency, quoteCurrency] = rate.pair.toUpperCase().split('/')
+        if (baseCurrency !== 'IQD' || !quoteCurrency) return [rate]
+
+        // Older POS snapshots stored reciprocal rates using a 1,000,000
+        // numerator, making IQD-based quotes 100x too large. New snapshots
+        // use the canonical foreign/IQD direction; normalize legacy-only
+        // rows here and suppress them when their direct pair is also present.
+        if (exchangeRatePairs.has(`${quoteCurrency}/IQD`)) return []
+        return [{ ...rate, rate: Number(rate.rate) / 100 }]
+    })
+    const hasExchangeSnapshot = displayExchangeRates.length > 0
 
     const isLoanSale = sale.payment_method === 'loan'
     const loanStatus = resolveEffectiveLoanStatus(linkedLoan)
@@ -424,7 +437,7 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
                     </div>
 
                     {/* ─── Market Rates Snapshot ─── */}
-                    {canUseMultiCurrency && hasExchangeSnapshot && sale.exchange_rates && (
+                    {canUseMultiCurrency && hasExchangeSnapshot && (
                         <div className={cn(
                             "border border-primary/10 rounded-md p-4 space-y-3 bg-primary/5",
                             style === 'neo-orange' && "snapshot-neo"
@@ -437,11 +450,11 @@ export function SaleDetailsModal({ sale, isOpen, onClose, onReturnItem, onExchan
                                     </span>
                                 </div>
                                 <span className="text-[10px] text-muted-foreground italic">
-                                    {t('sales.ratesLockedAt') || 'Rates locked at'}: {formatSnapshotTime(sale.exchange_rates[0]?.timestamp)}
+                                    {t('sales.ratesLockedAt') || 'Rates locked at'}: {formatSnapshotTime(displayExchangeRates[0]?.timestamp)}
                                 </span>
                             </div>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                {sale.exchange_rates.map((rate: any, idx: number) => (
+                                {displayExchangeRates.map((rate: any, idx: number) => (
                                     <div key={idx} className="bg-card border border-primary/10 shadow-sm rounded-sm p-3 space-y-1 relative overflow-hidden">
                                         {/* Source Badge */}
                                         {rate.source && (

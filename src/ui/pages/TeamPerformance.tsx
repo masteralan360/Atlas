@@ -346,6 +346,7 @@ export function TeamPerformance() {
 
     const getDateRangeDisplay = () => {
         if (dateRange === 'today') return t('performance.filters.today')
+        if (dateRange === 'yesterday') return t('performance.filters.yesterday')
         if (dateRange === 'month') return t('performance.filters.thisMonth')
         if (dateRange === 'lastMonth') return t('performance.filters.lastMonth')
         if (dateRange === 'allTime') {
@@ -369,6 +370,11 @@ export function TeamPerformance() {
     const getDateDisplay = () => {
         if (dateRange === 'today') {
             return formatDate(new Date())
+        }
+        if (dateRange === 'yesterday') {
+            const yesterday = new Date()
+            yesterday.setDate(yesterday.getDate() - 1)
+            return formatDate(yesterday)
         }
         if (dateRange === 'month') {
             const now = new Date()

@@ -44,7 +44,16 @@ export function convertPosPrice(amount: number, from: CurrencyCode, to: Currency
     return to === 'iqd' ? Math.round(converted) : Math.round(converted * 100) / 100
 }
 
-export function getCartBasePrice(item: CartItem) { return item.discounted_price ?? item.price }
+export function getPosCartItemCurrency(item: CartItem, fallback: CurrencyCode = 'usd') {
+    return item.price_currency_override ?? item.effective_currency ?? fallback
+}
+
+export function getCartBasePrice(item: CartItem) {
+    if (item.price_currency_override && Number.isFinite(item.currency_converted_base_price)) {
+        return item.currency_converted_base_price as number
+    }
+    return item.discounted_price ?? item.price
+}
 export function getCartEffectivePrice(item: CartItem) { return item.negotiated_price ?? getCartBasePrice(item) }
 export function snapshotPosCart(items: CartItem[]) { return items.map(item => ({ ...item })) }
 

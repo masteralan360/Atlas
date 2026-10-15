@@ -28,6 +28,7 @@ import { getCommissionEntryMode, isPayableCommissionEntry } from '@/local-db/com
 import type { PurchaseOrder, Sale, SalesOrder } from '@/local-db/models'
 import { isDirectTransactionPartnerAccountEffect } from '@/local-db/payments'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import { usePartnerAccountStatementPeriod } from '@/hooks/usePartnerAccountStatementPeriod'
 import { deriveOrderPartnerBalanceAtPosting } from '@/lib/orderPartnerBalance'
 import {
   ALL_ORDER_PARTNER_BALANCE_PRINT_DEMAND,
@@ -692,18 +693,57 @@ export function usePartnerAccountStatementPrintBalances(
   refreshToken?: string | number
 ) {
   const shouldLoadBalances = hasOrderPartnerBalancePrintDemand(demand)
-  const {
-    statementData,
-    isRefreshing,
-    refreshError,
-    liveRefreshProgress,
-    retryLiveRefresh
-  } = usePartnerAccountStatement(
-    shouldLoadBalances ? workspaceId : undefined,
-    shouldLoadBalances ? partnerId : undefined,
-    ALL_TIME_PERIOD,
-    refreshToken
+  const online = useNetworkStatus()
+  const useScopedRemoteStatement = Boolean(
+    shouldLoadBalances
+    && workspaceId
+    && partnerId
+    && online
+    && !isLocalWorkspaceMode(workspaceId)
   )
+  const remoteStatement = usePartnerAccountStatementPeriod(
+    useScopedRemoteStatement ? workspaceId : undefined,
+    useScopedRemoteStatement ? partnerId : undefined,
+    ALL_TIME_PERIOD,
+    {
+      enabled: useScopedRemoteStatement,
+      // The print needs ledger totals and posting events, not statement line
+      // itemization. Keeping both options off avoids fetching POS sale items.
+      itemizeSalesOrders: false,
+      itemizePosSaleLoans: false,
+      refreshToken
+    }
+  )
+  const useLegacyStatement = shouldLoadBalances && (
+    !useScopedRemoteStatement || remoteStatement.fallbackRequired
+  )
+  const legacyStatement = usePartnerAccountStatement(
+    useLegacyStatement ? workspaceId : undefined,
+    useLegacyStatement ? partnerId : undefined,
+    ALL_TIME_PERIOD,
+    refreshToken,
+    { productCommissionScope: 'partner' }
+  )
+  const isRemoteStatementActive = useScopedRemoteStatement && !remoteStatement.fallbackRequired
+  const statementData = isRemoteStatementActive
+    ? remoteStatement.statementData
+    : legacyStatement.statementData
+  const isRefreshing = isRemoteStatementActive
+    ? remoteStatement.isLoading
+    : legacyStatement.isRefreshing
+  const refreshError = isRemoteStatementActive
+    ? remoteStatement.error
+    : legacyStatement.refreshError
+  const liveRefreshProgress = isRemoteStatementActive
+    ? null
+    : legacyStatement.liveRefreshProgress
+  const retryLiveRefresh = useCallback(() => {
+    if (useScopedRemoteStatement) {
+      remoteStatement.retry()
+      return
+    }
+    legacyStatement.retryLiveRefresh()
+  }, [legacyStatement.retryLiveRefresh, remoteStatement.retry, useScopedRemoteStatement])
 
   return useMemo(() => ({
     currentBalances: statementData && demand.current

@@ -43,6 +43,12 @@ export function filterBeautyCenterAppointments(
       return false
     }
 
+    if (dateRange === 'yesterday') {
+      const yesterday = new Date(now)
+      yesterday.setDate(yesterday.getDate() - 1)
+      if (issueDate !== formatLocalDateValue(yesterday)) return false
+    }
+
     if (dateRange === 'month') {
       const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
       if (issueDate < monthStart) return false

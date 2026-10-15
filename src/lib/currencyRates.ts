@@ -22,6 +22,13 @@ function baseRate(currency: CurrencyCode, rates: KnownRates): RateEntry | null {
   return null
 }
 
+// Exchange rates are quoted as the amount of `to` currency for 100 units of
+// `from`. Keep the same basis when reversing a pair: 10000 / directRate.
+function inverseRate(rate: number): number | null {
+  if (!Number.isFinite(rate) || rate <= 0) return null
+  return Math.round((10000 / rate) * 1_000_000) / 1_000_000
+}
+
 export function computePairRate(
   from: CurrencyCode,
   to: CurrencyCode,
@@ -55,28 +62,33 @@ function pairFromRates(from: CurrencyCode, to: CurrencyCode, rates: KnownRates):
   if (from === 'usd' && to === 'try' && rates.usdTry) return rates.usdTry
 
   if (from === 'iqd' && to === 'usd' && rates.usdIqd) {
-    return rates.usdIqd.rate > 0
-      ? { rate: Math.round(1000000 / rates.usdIqd.rate), source: rates.usdIqd.source, timestamp: rates.usdIqd.timestamp }
+    const rate = inverseRate(rates.usdIqd.rate)
+    return rate != null
+      ? { rate, source: rates.usdIqd.source, timestamp: rates.usdIqd.timestamp }
       : null
   }
   if (from === 'iqd' && to === 'eur' && rates.eurIqd) {
-    return rates.eurIqd.rate > 0
-      ? { rate: Math.round(1000000 / rates.eurIqd.rate), source: rates.eurIqd.source, timestamp: rates.eurIqd.timestamp }
+    const rate = inverseRate(rates.eurIqd.rate)
+    return rate != null
+      ? { rate, source: rates.eurIqd.source, timestamp: rates.eurIqd.timestamp }
       : null
   }
   if (from === 'iqd' && to === 'try' && rates.tryIqd) {
-    return rates.tryIqd.rate > 0
-      ? { rate: Math.round(1000000 / rates.tryIqd.rate), source: rates.tryIqd.source, timestamp: rates.tryIqd.timestamp }
+    const rate = inverseRate(rates.tryIqd.rate)
+    return rate != null
+      ? { rate, source: rates.tryIqd.source, timestamp: rates.tryIqd.timestamp }
       : null
   }
   if (from === 'eur' && to === 'usd' && rates.usdEur) {
-    return rates.usdEur.rate > 0
-      ? { rate: Math.round(1000000 / rates.usdEur.rate), source: rates.usdEur.source, timestamp: rates.usdEur.timestamp }
+    const rate = inverseRate(rates.usdEur.rate)
+    return rate != null
+      ? { rate, source: rates.usdEur.source, timestamp: rates.usdEur.timestamp }
       : null
   }
   if (from === 'try' && to === 'usd' && rates.usdTry) {
-    return rates.usdTry.rate > 0
-      ? { rate: Math.round(1000000 / rates.usdTry.rate), source: rates.usdTry.source, timestamp: rates.usdTry.timestamp }
+    const rate = inverseRate(rates.usdTry.rate)
+    return rate != null
+      ? { rate, source: rates.usdTry.source, timestamp: rates.usdTry.timestamp }
       : null
   }
 
@@ -94,7 +106,7 @@ function pairFromRates(from: CurrencyCode, to: CurrencyCode, rates: KnownRates):
   return null
 }
 
-function buildSnapshotForPair(
+export function buildExchangeRateSnapshot(
   from: CurrencyCode,
   to: CurrencyCode,
   rates: KnownRates,
@@ -102,11 +114,23 @@ function buildSnapshotForPair(
   if (from === to) return null
   const computed = computePairRate(from, to, rates)
   if (!computed) return null
+
+  // Store IQD market snapshots in the provider's canonical foreign/IQD
+  // direction. This keeps the snapshot readable and avoids persisting the
+  // lossy inverse direction for future sales.
+  const snapshotFrom = from === 'iqd' ? to : from
+  const snapshotTo = from === 'iqd' ? 'iqd' : to
+  const snapshotRate = from === 'iqd'
+    ? computePairRate(to, 'iqd', rates)
+    : computed
+  if (!snapshotRate) return null
+
   return {
-    pair: `${from.toUpperCase()}/${to.toUpperCase()}`,
-    rate: computed.rate,
-    source: computed.source,
-    timestamp: computed.timestamp,
+    pair: `${snapshotFrom.toUpperCase()}/${snapshotTo.toUpperCase()}`,
+    rate: snapshotRate.rate,
+    source: snapshotRate.source,
+    timestamp: snapshotRate.timestamp,
+    priceBasisAmount: 100,
   }
 }
 
@@ -119,14 +143,14 @@ export function buildCheckoutRatesSnapshot(
 
   for (const itemCurrency of itemCurrencies) {
     if (itemCurrency === settlementCurrency) continue
-    const entry = buildSnapshotForPair(itemCurrency, settlementCurrency, rates)
+    const entry = buildExchangeRateSnapshot(itemCurrency, settlementCurrency, rates)
     if (entry) snapshot.push(entry)
   }
 
   if (snapshot.length === 0 && itemCurrencies.size > 0) {
     const firstCurrency = itemCurrencies.values().next().value
     if (firstCurrency) {
-      const entry = buildSnapshotForPair(firstCurrency, 'iqd', rates)
+      const entry = buildExchangeRateSnapshot(firstCurrency, 'iqd', rates)
       if (entry) snapshot.push(entry)
     }
   }

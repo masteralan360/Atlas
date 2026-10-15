@@ -60,6 +60,7 @@ export function usePartnerAccountStatementPeriod(
     enabled: boolean
     itemizeSalesOrders: boolean
     itemizePosSaleLoans: boolean
+    refreshToken?: string | number
   }
 ) {
   const [retryGeneration, setRetryGeneration] = useState(0)
@@ -76,10 +77,12 @@ export function usePartnerAccountStatementPeriod(
     partnerId,
     period,
     itemizeSalesOrders: options.itemizeSalesOrders,
-    itemizePosSaleLoans: options.itemizePosSaleLoans
+    itemizePosSaleLoans: options.itemizePosSaleLoans,
+    refreshToken: options.refreshToken
   }), [
     options.itemizePosSaleLoans,
     options.itemizeSalesOrders,
+    options.refreshToken,
     partnerId,
     period,
     workspaceId

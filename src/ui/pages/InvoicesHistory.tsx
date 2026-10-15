@@ -113,6 +113,12 @@ export function InvoicesHistory() {
             return formatDate(new Date())
         }
 
+        if (dateRange === 'yesterday') {
+            const yesterday = new Date()
+            yesterday.setDate(yesterday.getDate() - 1)
+            return formatDate(yesterday)
+        }
+
         if (dateRange === 'month') {
             return formatLocalizedMonthYear(new Date(), i18n.language)
         }

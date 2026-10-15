@@ -11,6 +11,7 @@ use tokio::sync::broadcast;
 mod kds_server;
 mod kurdishtts_website_stt;
 mod android_bluetooth_printer;
+mod local_mode_sqlite;
 
 const SINGLE_INSTANCE_PORT: u16 = 41931;
 
@@ -362,6 +363,7 @@ pub fn run() {
             tx,
             last_message: Arc::new(Mutex::new(None)),
         })
+        .manage(local_mode_sqlite::LocalModeSqliteTransactionState::default())
         .setup(|app| {
             let handle = app.handle().clone();
             if !setup_single_instance(handle) {
@@ -408,6 +410,11 @@ pub fn run() {
             list_android_bluetooth_thermal_printers,
             print_android_bluetooth_thermal_printer,
             test_android_bluetooth_thermal_printer,
+            local_mode_sqlite::begin_local_mode_sqlite_transaction,
+            local_mode_sqlite::execute_local_mode_sqlite_transaction,
+            local_mode_sqlite::select_local_mode_sqlite_transaction,
+            local_mode_sqlite::commit_local_mode_sqlite_transaction,
+            local_mode_sqlite::rollback_local_mode_sqlite_transaction,
             kurdishtts_website_stt::atlas_assistant_kurdishtts_website_status,
             kurdishtts_website_stt::atlas_assistant_transcribe_kurdishtts_website
         ])

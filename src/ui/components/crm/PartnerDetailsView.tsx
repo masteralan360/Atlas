@@ -1498,12 +1498,12 @@ export function PartnerDetailsView({
             }
         }
 
-        if (dateRange === 'today' || dateRange === 'month' || dateRange === 'lastMonth') {
+        if (dateRange === 'today' || dateRange === 'yesterday' || dateRange === 'month' || dateRange === 'lastMonth') {
             const inclusiveEnd = dateBounds.endDate
                 ? new Date(new Date(dateBounds.endDate).getTime() - 1).toISOString()
                 : undefined
             return {
-                type: dateRange,
+                type: dateRange === 'yesterday' ? 'custom' : dateRange,
                 start: dateBounds.startDate,
                 end: inclusiveEnd
             }

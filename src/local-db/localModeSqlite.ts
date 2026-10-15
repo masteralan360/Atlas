@@ -1,4 +1,5 @@
 import type Dexie from "dexie";
+import { invoke } from "@tauri-apps/api/core";
 
 import i18n from "@/i18n/config";
 import { isTauri } from "@/lib/platform";
@@ -11,6 +12,50 @@ import type { PaymentTransaction } from "./models";
 import { createPwaSqliteConnection, isOpfsSupported, getPwaDbInstance, ensurePwaDatabase, replacePwaDatabaseFile, validateAtlasLocalDatabase, DB_FILENAME as PWA_DB_FILENAME } from "./pwaSqlite";
 
 const LOCAL_MODE_SQLITE_PATH = "sqlite:atlas-local-mode.db";
+
+function createTauriSqliteConnection(database: {
+  path: string;
+  execute(query: string, bindValues?: unknown[]): Promise<unknown>;
+  select<T>(query: string, bindValues?: unknown[]): Promise<T>;
+  close(database?: string): Promise<boolean>;
+}): SqliteConnection {
+  const connection: SqliteConnection = {
+    execute: (query, bindValues) => database.execute(query, bindValues),
+    select: <T>(query: string, bindValues?: unknown[]) => database.select<T>(query, bindValues),
+    transaction: async <T>(task: (connection: SqliteConnection) => Promise<T>) => {
+      const transactionId = globalThis.crypto.randomUUID();
+      await invoke("begin_local_mode_sqlite_transaction", {
+        db: database.path,
+        transactionId,
+      });
+
+      const transactionConnection: SqliteConnection = {
+        execute: (query, values) => invoke("execute_local_mode_sqlite_transaction", {
+          transactionId,
+          query,
+          values: values ?? [],
+        }),
+        select: <R>(query: string, values?: unknown[]) => invoke<R>(
+          "select_local_mode_sqlite_transaction",
+          { transactionId, query, values: values ?? [] },
+        ),
+        transaction: (nestedTask) => nestedTask(transactionConnection),
+      };
+
+      try {
+        const result = await task(transactionConnection);
+        await invoke("commit_local_mode_sqlite_transaction", { transactionId });
+        return result;
+      } catch (error) {
+        await invoke("rollback_local_mode_sqlite_transaction", { transactionId }).catch(() => undefined);
+        throw error;
+      }
+    },
+    close: (databasePath) => database.close(databasePath),
+  };
+
+  return connection;
+}
 
 export const LOCAL_MODE_SQLITE_TABLES = [
   "products",
@@ -662,9 +707,8 @@ async function ensureConnection() {
       let connection: SqliteConnection;
       if (isTauri()) {
         const { default: Database } = await import("@tauri-apps/plugin-sql");
-        connection = (await Database.load(
-          LOCAL_MODE_SQLITE_PATH,
-        )) as SqliteConnection;
+        const database = await Database.load(LOCAL_MODE_SQLITE_PATH);
+        connection = createTauriSqliteConnection(database);
 
         await connection.execute("PRAGMA busy_timeout = 5000");
         await connection.execute("PRAGMA journal_mode = WAL");

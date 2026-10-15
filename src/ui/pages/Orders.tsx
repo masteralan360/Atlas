@@ -799,6 +799,11 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         if (dateRange === 'today') {
             return formatDate(new Date())
         }
+        if (dateRange === 'yesterday') {
+            const yesterday = new Date()
+            yesterday.setDate(yesterday.getDate() - 1)
+            return formatDate(yesterday)
+        }
         if (dateRange === 'month') {
             const now = new Date()
             return formatLocalizedMonthYear(now, i18n.language)
