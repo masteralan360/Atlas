@@ -2308,6 +2308,8 @@
       "partnerBalanceCurrent": "الرصيد الحالي للشريك",
       "partnerBalanceLoading": "جارٍ التحميل",
       "partnerBalanceLoadingProgress": "جارٍ التحميل {{percentage}}٪",
+      "dragColumnsToReorder": "اسحب الصفوف لتحديد ترتيب الأعمدة في الجدول. الصف العلوي هو العمود الأول.",
+      "showNativeUnitQuantity": "إظهار الكمية بالوحدة الأساسية",
       "partnerBalanceUnavailable": "الرصيد الحالي غير متاح",
       "partnerBalanceAtOrderUnavailable": "رصيد الشريك غير متاح"
     },
@@ -4027,6 +4029,9 @@
     "testPrint": "طباعة تجريبية",
     "showAtlasStandardFooter": "إظهار تم الإنشاء بواسطة والصفحة وتاريخ الطباعة",
     "headerDividerPosition": "موضع الخط الفاصل أسفل الترويسة (القيمة الأعلى تحرّكه للأسفل)",
+    "devAdditionalOrderRows": "أسطر منتجات إضافية (معاينة التطوير)",
+    "devAdditionalOrderRowsHint": "يضيف أسطر منتجات مؤقتة ومعبأة إلى المعاينة لاختبار ترقيم الصفحات. لا يغيّر بيانات الطلب أو إجمالياته، ولا يُحفظ في التخطيطات أو الطلبات المطبوعة.",
+    "devOrderRowFallbackProduct": "منتج للمعاينة",
     "enableTextPositionAnchor": "تفعيل نقطة تثبيت موضع النص غير المرئية",
     "fitPage": "ملائمة",
     "bottomWarning": "تجنب وضع المكونات هنا — قد يتم قصها عند الطباعة على A4.",

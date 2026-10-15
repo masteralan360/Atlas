@@ -2268,6 +2268,7 @@ function createAtlasStandardOrderInvoicePreview(
         fields: printMode === 'order'
             ? ATLAS_STANDARD_ORDER_FIELDS
             : ATLAS_STANDARD_ORDER_FIELDS.filter((field) => field.key !== ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.showOrderAdjustments),
+        supportsDevPreviewOrderRows: printMode === 'order',
         reflowLowerPageText: true,
         textFlowAnchorField: ATLAS_STANDARD_ORDER_TEMPLATE_FIELD_KEYS.enableTextPositionAnchor,
         supportsBackgroundEdit: true,
@@ -2325,6 +2326,7 @@ function createAtlasStandardOrderInvoicePreview(
                 templateFields={data}
                 returnPrintData={returnPrintData}
                 printVersion={effectivePrintVersion}
+                devPreviewAdditionalRows={renderOptions?.devPreviewAdditionalRows}
             />
         ),
         buildPdf: (element, printLangOverride) => generateTemplatePdf({

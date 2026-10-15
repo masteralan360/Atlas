@@ -685,6 +685,29 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     }, [features.default_currency, hideCosts, mode, product, storages])
 
     useEffect(() => {
+        if (mode !== 'create' || storages.length !== 1 || formData.storageId) {
+            return
+        }
+
+        const storageId = storages[0].id
+        setFormData((current) => current.storageId ? current : { ...current, storageId })
+
+        // This is a form default, so it should not make a newly opened form
+        // appear dirty or trigger the unsaved-changes guard.
+        const initialSnapshot = initialFormSnapshotRef.current
+        if (initialSnapshot) {
+            try {
+                const snapshot = JSON.parse(initialSnapshot) as ProductFormData
+                if (!snapshot.storageId) {
+                    initialFormSnapshotRef.current = JSON.stringify({ ...snapshot, storageId })
+                }
+            } catch {
+                // Keep the existing snapshot if it cannot be read safely.
+            }
+        }
+    }, [formData.storageId, mode, storages])
+
+    useEffect(() => {
         const sourceKey = mode === 'create' ? 'create' : product ? `${mode}:${product.id}` : null
         if (!sourceKey || (mode !== 'create' && !productUomCatalog.isReady)) return
         if (initializedProductUomsKeyRef.current === sourceKey) return

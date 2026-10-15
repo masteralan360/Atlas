@@ -2312,6 +2312,8 @@
       "partnerBalanceCurrent": "باڵانسی ئێستای هاوبەش",
       "partnerBalanceLoading": "باردەکرێت",
       "partnerBalanceLoadingProgress": "باردەکرێت {{percentage}}٪",
+      "dragColumnsToReorder": "ڕیزەکان ڕابکێشە بۆ دیاریکردنی ڕیزبەندیی ستوونەکانی خشتەکە. ڕیزی سەرەوە یەکەم ستوونە.",
+      "showNativeUnitQuantity": "بڕ بە یەکەی بنەڕەتی نیشان بدە",
       "partnerBalanceUnavailable": "باڵانسی ئێستا بەردەست نییە",
       "partnerBalanceAtOrderUnavailable": "باڵانسی هاوبەش بەردەست نییە"
     },
@@ -4044,6 +4046,9 @@
     "testPrint": "چاپی تاقیکردنەوە",
     "showAtlasStandardFooter": "دروستکراوە لەلایەن و لاپەڕە و بەرواری چاپ نیشان بدە",
     "headerDividerPosition": "شوێنی هێڵی جیاکەرەوەی سەرپەڕە (بەهای بەرزتر بەرەو خوارەوەی دەبات)",
+    "devAdditionalOrderRows": "هێڵی زیاتر بۆ بەرهەم (پێشبینینی گەشەپێدان)",
+    "devAdditionalOrderRowsHint": "بۆ تاقیکردنەوەی ژمارەی پەڕەکان، هێڵی بەرهەمی کاتی و پڕکراو زیاد دەکات. داتای داواکاری و کۆی بڕەکان ناگۆڕێت و لە قاڵبی پاشەکەوتکراو یان داواکاری چاپکراودا نایەت.",
+    "devOrderRowFallbackProduct": "بەرهەمی پێشبینین",
     "enableTextPositionAnchor": "چالاککردنی خاڵی نەبینراوی جێگیرکردنی شوێنی دەق",
     "fitPage": "لەگونج بکە",
     "bottomWarning": "خۆت لە دانانی پێکهاتەکان لێرە بپارێزە — لەوانەیە لە کاتی چاپکردن لە A4دا ببڕدرێن.",

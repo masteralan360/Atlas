@@ -3843,6 +3843,8 @@
       "partnerBalanceCurrent": "Partner's Current Balance",
       "partnerBalanceLoading": "Loading",
       "partnerBalanceLoadingProgress": "Loading {{percentage}}%",
+      "dragColumnsToReorder": "Drag rows to set the order of columns in the table. The top row is the first column.",
+      "showNativeUnitQuantity": "Show Native Unit Quantity",
       "partnerBalanceUnavailable": "Current balance is unavailable",
       "partnerBalanceAtOrderUnavailable": "Partner balance is unavailable"
     },
@@ -5869,6 +5871,9 @@
     "testPrint": "Test Print",
     "showAtlasStandardFooter": "Show Made by, page, and print date",
     "headerDividerPosition": "Header divider position (higher moves it down)",
+    "devAdditionalOrderRows": "Extra product lines (development preview)",
+    "devAdditionalOrderRowsHint": "Adds temporary filled product lines to this preview for pagination checks. They don't change order data or totals and are excluded from saved layouts and printed orders.",
+    "devOrderRowFallbackProduct": "Preview Product",
     "enableTextPositionAnchor": "Enable invisible text-position anchor",
     "fitPage": "Fit",
     "bottomWarning": "Avoid placing components here — they may be cut off when printing on A4.",

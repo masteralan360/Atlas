@@ -71,6 +71,7 @@ import {
 } from '@/ui/components/dialog'
 import {
     ContextMenu,
+    ContextMenuCheckboxItem,
     ContextMenuContent,
     ContextMenuItem,
     ContextMenuSeparator,
@@ -135,6 +136,8 @@ export interface AtlasStandardOrderInvoiceTemplateProps {
     returnPrintData?: SalesOrderReturnPrintData | null
     /** Whether to show adjusted values, original order values, or return-only values. */
     printVersion?: OrderPrintVersion
+    /** Development-only extra rows for checking order-table pagination in the editor. */
+    devPreviewAdditionalRows?: number
 }
 
 const INK = '#1f2937'
@@ -184,12 +187,14 @@ export const ATLAS_STANDARD_ORDER_HIDDEN_FIELD_KEYS = {
 
 export const ATLAS_STANDARD_ORDER_FIELD_ORDER_KEYS = {
     invoiceDetails: 'atlasStandard.invoiceDetails',
+    table: 'atlasStandard.table',
     financialSummary: 'atlasStandard.financialSummary'
 } as const
 
 export const ATLAS_STANDARD_ORDER_TABLE_SETTING_KEYS = {
     productImageWidth: 'atlasStandard.table.productImage.width',
-    productKgTotal: 'atlasStandard.table.productKgTotal'
+    productKgTotal: 'atlasStandard.table.productKgTotal',
+    nativeUnitQuantity: 'atlasStandard.table.nativeUnitQuantity'
 } as const
 
 type TableColumn = {
@@ -231,6 +236,23 @@ function resolveVisibleTableColumns(
     hiddenFields: Record<string, boolean>
 ): TableColumn[] {
     return resolveTitledTableColumns(columns, fieldLabelOverrides).filter((column) => !hiddenFields[column.key])
+}
+
+function orderTableColumns(columns: TableColumn[], fieldOrder?: string[]) {
+    const columnsByKey = new Map(columns.map((column) => [column.key, column]))
+    const orderedKeys: string[] = []
+    const usedKeys = new Set<string>()
+    for (const key of fieldOrder || []) {
+        if (!columnsByKey.has(key) || usedKeys.has(key)) continue
+        orderedKeys.push(key)
+        usedKeys.add(key)
+    }
+    columns.forEach((column) => {
+        if (usedKeys.has(column.key)) return
+        orderedKeys.push(column.key)
+        usedKeys.add(column.key)
+    })
+    return orderedKeys.map((key) => columnsByKey.get(key)!)
 }
 
 function getProductNameWeightKg(productName?: string | null) {
@@ -1078,6 +1100,9 @@ function HideableTable({
     dialogDescription,
     emptyLabel,
     columns,
+    fieldOrder,
+    onFieldOrderChange,
+    dragInstruction,
     fieldLabelOverrides = {},
     hiddenFields,
     onHiddenFieldChange,
@@ -1094,6 +1119,9 @@ function HideableTable({
     dialogDescription: string
     emptyLabel: string
     columns: TableColumn[]
+    fieldOrder?: string[]
+    onFieldOrderChange?: (fieldKeys: string[]) => void
+    dragInstruction?: string
     fieldLabelOverrides?: Record<string, string>
     hiddenFields: Record<string, boolean>
     onHiddenFieldChange?: (key: string, hidden: boolean) => void
@@ -1109,8 +1137,8 @@ function HideableTable({
     const [open, setOpen] = useState(false)
     const [renamedColumn, setRenamedColumn] = useState<TableColumn | null>(null)
     const [titleDraft, setTitleDraft] = useState('')
-    const canConfigure = Boolean(onHiddenFieldChange || onFieldLabelChange)
-    const titledColumns = resolveTitledTableColumns(columns, fieldLabelOverrides)
+    const canConfigure = Boolean(onHiddenFieldChange || onFieldLabelChange || onFieldOrderChange)
+    const titledColumns = orderTableColumns(resolveTitledTableColumns(columns, fieldLabelOverrides), fieldOrder)
     const visibleColumns = titledColumns.filter((column) => !hiddenFields[column.key])
     const openDialog = () => setOpen(true)
     const openRenameTitle = (column: TableColumn) => {
@@ -1122,6 +1150,59 @@ function HideableTable({
         onFieldLabelChange?.(renamedColumn.key, titleDraft.trim())
         setRenamedColumn(null)
         setTitleDraft('')
+    }
+    const renderColumn = (
+        column: TableColumn,
+        dragHandleProps: DraggableProvidedDragHandleProps | null = null,
+        isDragging = false
+    ) => {
+        const hidden = Boolean(hiddenFields[column.key])
+        const columnButton = (
+            <button
+                type="button"
+                aria-pressed={hidden}
+                className={cn(
+                    'flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-start text-sm transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                    isDragging && 'opacity-50',
+                    hidden && 'text-muted-foreground line-through'
+                )}
+                onClick={() => onHiddenFieldChange?.(column.key, !hidden)}
+            >
+                <span className="font-medium">{column.label}</span>
+                {dragHandleProps ? (
+                    <span
+                        {...dragHandleProps}
+                        className="shrink-0 cursor-grab touch-none text-muted-foreground active:cursor-grabbing"
+                        title={dragInstruction}
+                        onClick={(event) => event.stopPropagation()}
+                    >
+                        <GripVertical className="h-4 w-4" aria-hidden="true" />
+                        {dragInstruction ? <span className="sr-only">{dragInstruction}</span> : null}
+                    </span>
+                ) : null}
+            </button>
+        )
+        if (!column.contextMenu && !onFieldLabelChange) return columnButton
+
+        return (
+            <ContextMenu>
+                <ContextMenuTrigger asChild>{columnButton}</ContextMenuTrigger>
+                <ContextMenuContent className="z-[80] w-72 p-1" onCloseAutoFocus={(event) => event.preventDefault()}>
+                    {column.contextMenu}
+                    {column.contextMenu && onFieldLabelChange ? <ContextMenuSeparator /> : null}
+                    {onFieldLabelChange ? (
+                        <ContextMenuItem onSelect={() => openRenameTitle(column)}>
+                            {renameTitleLabel}
+                        </ContextMenuItem>
+                    ) : null}
+                    {onFieldLabelChange && fieldLabelOverrides[column.key]?.trim() ? (
+                        <ContextMenuItem onSelect={() => onFieldLabelChange(column.key, '')}>
+                            {resetTitleLabel}
+                        </ContextMenuItem>
+                    ) : null}
+                </ContextMenuContent>
+            </ContextMenu>
+        )
     }
     const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
         if (event.key !== 'Enter' && event.key !== ' ') return
@@ -1162,46 +1243,25 @@ function HideableTable({
                     <DialogTitle>{title}</DialogTitle>
                     <DialogDescription>{dialogDescription}</DialogDescription>
                 </DialogHeader>
-                <div className="space-y-1">
-                    {titledColumns.map((column) => {
-                        const hidden = Boolean(hiddenFields[column.key])
-                        const columnButton = (
-                            <button
-                                key={column.key}
-                                type="button"
-                                aria-pressed={hidden}
-                                className={cn(
-                                    'flex w-full items-center justify-between rounded-md border border-border px-3 py-2 text-start text-sm transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
-                                    hidden && 'text-muted-foreground line-through'
-                                )}
-                                onClick={() => onHiddenFieldChange?.(column.key, !hidden)}
-                            >
-                                <span className="font-medium">{column.label}</span>
-                            </button>
-                        )
-                        if (!column.contextMenu && !onFieldLabelChange) return columnButton
-
-                        return (
-                            <ContextMenu key={column.key}>
-                                <ContextMenuTrigger asChild>{columnButton}</ContextMenuTrigger>
-                                <ContextMenuContent className="z-[80] w-72 p-1" onCloseAutoFocus={(event) => event.preventDefault()}>
-                                    {column.contextMenu}
-                                    {column.contextMenu && onFieldLabelChange ? <ContextMenuSeparator /> : null}
-                                    {onFieldLabelChange ? (
-                                        <ContextMenuItem onSelect={() => openRenameTitle(column)}>
-                                            {renameTitleLabel}
-                                        </ContextMenuItem>
-                                    ) : null}
-                                    {onFieldLabelChange && fieldLabelOverrides[column.key]?.trim() ? (
-                                        <ContextMenuItem onSelect={() => onFieldLabelChange(column.key, '')}>
-                                            {resetTitleLabel}
-                                        </ContextMenuItem>
-                                    ) : null}
-                                </ContextMenuContent>
-                            </ContextMenu>
-                        )
-                    })}
-                </div>
+                {onFieldOrderChange ? (
+                    <>
+                        {dragInstruction ? <p className="mb-2 text-xs text-muted-foreground">{dragInstruction}</p> : null}
+                        <ReorderablePickerGrid
+                            droppableId="atlas-standard-order-table-columns"
+                            items={titledColumns}
+                            getItemId={(column) => column.key}
+                            onItemsSwap={(nextColumns) => onFieldOrderChange(nextColumns.map((column) => column.key))}
+                            className="space-y-1"
+                            renderItem={renderColumn}
+                        />
+                    </>
+                ) : (
+                    <div className="space-y-1">
+                        {titledColumns.map((column) => {
+                            return <div key={column.key}>{renderColumn(column)}</div>
+                        })}
+                    </div>
+                )}
             </DialogContent>
             <Dialog open={Boolean(renamedColumn)} onOpenChange={(nextOpen) => {
                 if (!nextOpen) {
@@ -1276,6 +1336,7 @@ export function AtlasStandardOrderInvoiceTemplate({
     background,
     returnPrintData,
     printVersion,
+    devPreviewAdditionalRows = 0,
     templateFields
 }: AtlasStandardOrderInvoiceTemplateProps) {
     const { i18n } = useTranslation()
@@ -1410,8 +1471,33 @@ export function AtlasStandardOrderInvoiceTemplate({
     const items = isReturnPrint
         ? order.items.filter((item) => returnLineByOrderItemId.has(item.id))
         : order.items || []
+    const previewRowsToAdd = import.meta.env.DEV && !isReturnPrint
+        ? Math.max(0, Math.min(100, Math.floor(Number(devPreviewAdditionalRows) || 0)))
+        : 0
+    const tableItems = previewRowsToAdd > 0
+        ? [
+            ...items,
+            ...Array.from({ length: previewRowsToAdd }, (_, index) => {
+                const sourceItem = items[index % Math.max(items.length, 1)]
+                return sourceItem
+                    ? { ...sourceItem, id: `${sourceItem.id}-dev-preview-${index + 1}` }
+                    : {
+                        id: `atlas-standard-dev-preview-${index + 1}`,
+                        productId: `atlas-standard-dev-product-${index + 1}`,
+                        productName: t('printPreviewEditor.devOrderRowFallbackProduct', { defaultValue: 'Preview Product' }),
+                        productSku: `PREVIEW-${index + 1}`,
+                        quantity: 1,
+                        lineTotal: 0,
+                        originalCurrency: currency,
+                        originalUnitPrice: 0,
+                        convertedUnitPrice: 0,
+                        settlementCurrency: currency
+                    } as typeof items[number]
+            })
+        ]
+        : items
     const printableTableRows = [
-        ...items.map((item) => ({ kind: 'item' as const, item })),
+        ...tableItems.map((item) => ({ kind: 'item' as const, item })),
         ...orderAdjustments.map((adjustment) => ({ kind: 'adjustment' as const, adjustment }))
     ]
     const { pageRef, fit: smartRowFit } = useAtlasStandardOrderLayout(smartRowsEnabled, printableTableRows.length, tableItemRowMm)
@@ -1467,6 +1553,7 @@ export function AtlasStandardOrderInvoiceTemplate({
     const freeQuantityUnit = freeQuantityUnits.length === 1 ? freeQuantityUnits[0] : ''
     const productImageWidthDifference = productImageColumnWidth - DEFAULT_PRODUCT_IMAGE_COLUMN_WIDTH
     const productKgTotalEnabled = fieldDisplayModes[tableSettingKeys.productKgTotal] === 'enabled'
+    const nativeUnitQuantityEnabled = fieldDisplayModes[tableSettingKeys.nativeUnitQuantity] === 'enabled'
     const weightGroupedKgTotal = items.reduce(
         (sum, item) => sum + getProductNameWeightKg(item.productName) * getOrderLineInventoryQuantity(item),
         0
@@ -1507,13 +1594,29 @@ export function AtlasStandardOrderInvoiceTemplate({
         },
         { key: tableKeys.expiry, label: labels.expiry, width: '8%' },
         { key: tableKeys.batchNumber, label: labels.batchNumber, width: '9%' },
-        { key: tableKeys.quantity, label: isReturnPrint ? returnLabels.returnedQuantity : labels.quantity, width: '8%' },
+        {
+            key: tableKeys.quantity,
+            label: isReturnPrint ? returnLabels.returnedQuantity : labels.quantity,
+            width: '8%',
+            contextMenu: onFieldDisplayModeChange ? (
+                <ContextMenuCheckboxItem
+                    checked={nativeUnitQuantityEnabled}
+                    onCheckedChange={(checked) => onFieldDisplayModeChange(
+                        tableSettingKeys.nativeUnitQuantity,
+                        checked ? 'enabled' : ''
+                    )}
+                >
+                    {t('orders.print.showNativeUnitQuantity', { defaultValue: 'Show Native Unit Quantity' })}
+                </ContextMenuCheckboxItem>
+            ) : undefined
+        },
         { key: tableKeys.freeQuantity, label: isReturnPrint ? returnLabels.returnedFreeQuantity : labels.freeQuantity, width: '8%' },
         { key: tableKeys.price, label: isReturnPrint ? returnLabels.refundPerUnit : labels.price, width: '10%' },
         { key: tableKeys.total, label: isReturnPrint ? returnLabels.refundedAmount : labels.total, width: '10%' },
         { key: tableKeys.note, label: labels.note, width: `${17 - productImageWidthDifference * 0.3}%` }
     ]
-    const visibleTableColumns = resolveVisibleTableColumns(tableColumns, fieldLabelOverrides, hiddenFields)
+    const orderedTableColumns = orderTableColumns(tableColumns, fieldOrders[fieldOrderKeys.table])
+    const visibleTableColumns = resolveVisibleTableColumns(orderedTableColumns, fieldLabelOverrides, hiddenFields)
     const renderItemsTable = (
         tableItems: typeof printableTableRows,
         rowStartIndex: number,
@@ -1618,8 +1721,22 @@ export function AtlasStandardOrderInvoiceTemplate({
                         const baseUnitLabel = item.baseUnitRef?.startsWith('custom:') && item.baseUnitNameSnapshot
                             ? item.baseUnitNameSnapshot
                             : baseUnit ? t(`products.units.${baseUnit}`, { defaultValue: baseUnit }) : ''
-                        const baseEquivalent = (item.unitFactor || 1) !== 1
-                            ? `${getOrderLinePaidInventoryQuantity(item)}${baseUnitLabel ? ` ${baseUnitLabel}` : ''}`
+                        const selectedAndBaseUnitRefs = item.unitRef && item.baseUnitRef
+                            ? [item.unitRef, item.baseUnitRef]
+                            : null
+                        const selectedUnitCode = normalizeUnitCode(item.unit || item.baseUnitCode)
+                        const baseUnitCode = normalizeUnitCode(item.baseUnitCode || item.unit)
+                        const selectedIsNativeUnit = selectedAndBaseUnitRefs
+                            ? selectedAndBaseUnitRefs[0] === selectedAndBaseUnitRefs[1]
+                            : Boolean(selectedUnitCode && baseUnitCode && selectedUnitCode === baseUnitCode)
+                        const nativeQuantity = isReturnPrint
+                            ? returnLine?.returnedQuantity || 0
+                            : getOrderLinePaidInventoryQuantity(item)
+                        const nativeQuantityDisplay = nativeUnitQuantityEnabled
+                            && !selectedIsNativeUnit
+                            && Boolean(baseUnitLabel)
+                            && nativeQuantity > 0
+                            ? `${nativeQuantity}${baseUnitLabel ? ` ${baseUnitLabel}` : ''}`
                             : ''
                         const freeBonusUnit = normalizeUnitCode(item.freeBonusUnit || item.unit)
                         const returnState = isSales && !isOriginalPrint ? getOrderPrintReturnState(item) : null
@@ -1629,6 +1746,25 @@ export function AtlasStandardOrderInvoiceTemplate({
                         const remainingQuantity = unitLabel
                             ? `${returnState?.remainingQuantity} ${unitLabel}`
                             : returnState?.remainingQuantity
+                        const displayedQuantity = isReturnPrint
+                            ? `${returnLine?.selectedUnitQuantity || 0}${unitLabel ? ` ${unitLabel}` : ''}`
+                            : returnState
+                                ? <OrderPrintReturnValue
+                                    state={returnState}
+                                    original={originalQuantity}
+                                    remaining={remainingQuantity}
+                                    stacked
+                                    className="items-center"
+                                />
+                                : originalQuantity
+                        const quantityWithNative = nativeQuantityDisplay
+                            ? (
+                                <div className="grid justify-items-center gap-[0.3mm] leading-[1.15]">
+                                    <div className="text-[8px] opacity-80">{nativeQuantityDisplay}</div>
+                                    <div>{displayedQuantity}</div>
+                                </div>
+                            )
+                            : displayedQuantity
                         const values: Record<string, ReactNode> = {
                             [tableKeys.productImage]: (
                                 <ProductPrintImage
@@ -1641,19 +1777,7 @@ export function AtlasStandardOrderInvoiceTemplate({
                             [tableKeys.product]: item.productName || '\u00a0',
                             [tableKeys.expiry]: batch.expiry || '\u00a0',
                             [tableKeys.batchNumber]: batch.batchNumber || '\u00a0',
-                            [tableKeys.quantity]: isReturnPrint
-                                ? `${returnLine?.selectedUnitQuantity || 0}${unitLabel ? ` ${unitLabel}` : ''}`
-                                : returnState
-                                ? <OrderPrintReturnValue
-                                    state={returnState}
-                                    original={originalQuantity}
-                                    remaining={remainingQuantity}
-                                    stacked
-                                    className="items-center"
-                                />
-                                : baseEquivalent
-                                    ? <div>{originalQuantity}<div className="text-[8px] opacity-60">{baseEquivalent}</div></div>
-                                    : originalQuantity,
+                            [tableKeys.quantity]: quantityWithNative,
                             [tableKeys.freeQuantity]: isReturnPrint
                                 ? '\u00a0'
                                 : getOrderLineFreeBonusQuantity(item)
@@ -2091,6 +2215,11 @@ export function AtlasStandardOrderInvoiceTemplate({
                 dialogDescription={labels.selectColumns}
                 emptyLabel={labels.noColumns}
                 columns={tableColumns}
+                fieldOrder={fieldOrders[fieldOrderKeys.table]}
+                onFieldOrderChange={onFieldOrderChange
+                    ? (fieldKeys) => onFieldOrderChange(fieldOrderKeys.table, fieldKeys)
+                    : undefined}
+                dragInstruction={t('orders.print.dragColumnsToReorder', { defaultValue: 'Drag rows to set the order of columns in the table.' })}
                 fieldLabelOverrides={fieldLabelOverrides}
                 hiddenFields={hiddenFields}
                 onHiddenFieldChange={onHiddenFieldChange}

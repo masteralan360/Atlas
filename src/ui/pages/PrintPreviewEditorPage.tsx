@@ -764,6 +764,7 @@ export function PrintPreviewEditorPage() {
         ? labelHeightMm ?? 1
         : templatePage?.heightMm || 297
     const canEditTemplateFields = Boolean(source?.allowTemplateFieldEditing || isAdmin)
+    const canPreviewDevelopmentOrderRows = import.meta.env.DEV && Boolean(templatePreview?.supportsDevPreviewOrderRows)
     const sourceWorkspaceFooterContacts = source?.workspaceFooterContacts
     const [fieldValues, setFieldValues] = useState<Record<string, string>>(
         () => {
@@ -792,6 +793,7 @@ export function PrintPreviewEditorPage() {
             return initial
         }
     )
+    const [devPreviewAdditionalOrderRows, setDevPreviewAdditionalOrderRows] = useState(0)
     const [editPanelOpen, setEditPanelOpen] = useState(false)
 
     const [templateAnnotations, setTemplateAnnotations] = useState<CustomTemplateAnnotation[]>(() => initialTemplateLayout?.annotations || [])
@@ -2735,6 +2737,9 @@ export function PrintPreviewEditorPage() {
                                             partnerBalanceProgress: requiresFreshPartnerBalance && nextFreshPartnerBalanceState === 'loading'
                                                 ? freshPartnerBalanceProgress
                                                 : undefined,
+                                            devPreviewAdditionalRows: canPreviewDevelopmentOrderRows
+                                                ? devPreviewAdditionalOrderRows
+                                                : undefined,
                                             onFieldChange: handleFieldChange,
                                             onComponentPositionChange: handleTemplateComponentPositionChange,
                                             onHiddenFieldChange: drawingMode === 'none' ? handleTemplateHiddenFieldChange : undefined,
@@ -2776,6 +2781,36 @@ export function PrintPreviewEditorPage() {
                                     <X className="h-3.5 w-3.5" />
                                 </button>
                             </div>
+                            {canPreviewDevelopmentOrderRows ? (
+                                <div className="space-y-2 border-t pt-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <label
+                                            className="text-[11px] font-medium text-muted-foreground"
+                                            htmlFor="dev-preview-additional-order-rows"
+                                        >
+                                            {t('printPreviewEditor.devAdditionalOrderRows', { defaultValue: 'Additional order rows (development preview)' })}
+                                        </label>
+                                        <output className="text-xs tabular-nums text-muted-foreground">
+                                            {devPreviewAdditionalOrderRows}
+                                        </output>
+                                    </div>
+                                    <input
+                                        id="dev-preview-additional-order-rows"
+                                        type="range"
+                                        min={0}
+                                        max={100}
+                                        step={1}
+                                        value={devPreviewAdditionalOrderRows}
+                                        className="w-full accent-primary"
+                                        onChange={(event) => setDevPreviewAdditionalOrderRows(Number(event.target.value))}
+                                    />
+                                    <p className="text-[10px] leading-4 text-muted-foreground">
+                                        {t('printPreviewEditor.devAdditionalOrderRowsHint', {
+                                            defaultValue: 'Adds temporary filled product rows to the preview. They are excluded from saved layouts and printed orders.'
+                                        })}
+                                    </p>
+                                </div>
+                            ) : null}
                             {templatePreview.supportsBackgroundEdit ? (
                                 <div className="space-y-3 border-t pt-3">
                                     <div className="flex items-center justify-between">

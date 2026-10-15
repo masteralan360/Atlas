@@ -43,6 +43,8 @@ export type TemplatePreviewRenderOptions = {
     fieldDisplayModes?: Record<string, string>
     /** Background watermark rendered behind every template component. */
     background?: CustomTemplateBackground
+    /** Temporary preview-only order rows for development layout checks. */
+    devPreviewAdditionalRows?: number
     onFieldChange?: (key: string, value: string) => void
     onComponentPositionChange?: (key: string, position: CustomTemplateComponentPosition) => void
     onHiddenFieldChange?: (key: string, hidden: boolean) => void
@@ -67,6 +69,8 @@ export type TemplatePreview = {
     movableComponents?: TemplatePreviewMovableComponent[]
     /** Enables the common background watermark editor in the preview's edit panel. */
     supportsBackgroundEdit?: boolean
+    /** Shows a development-only control for simulating extra order item rows. */
+    supportsDevPreviewOrderRows?: boolean
     /** Keeps legacy lower-page notes below dynamic native content when it expands. */
     reflowLowerPageText?: boolean
     /** Common Edit field that disables native text anchoring without hiding saved text. */
