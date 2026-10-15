@@ -5892,6 +5892,8 @@
     "saveErrorDescription": "Try again to save this preview as a PDF.",
     "shareErrorTitle": "Couldn't share the PDF",
     "shareErrorDescription": "Try again to share this preview.",
+    "shareRetryTitle": "Invoice saved",
+    "shareRetryDescription": "Tap Share again to open the sharing options.",
     "shareUnavailableTitle": "Sharing isn't available",
     "shareUnavailableDescription": "The PDF was downloaded instead.",
     "printErrorTitle": "Couldn't print the PDF",

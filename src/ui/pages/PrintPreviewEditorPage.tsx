@@ -465,6 +465,7 @@ export function PrintPreviewEditorPage() {
     const [isInvoiceSavedThisSession, setIsInvoiceSavedThisSession] = useState(false)
     const invoiceSavedThisSessionRef = useRef(false)
     const actionInProgressRef = useRef(false)
+    const shareRetryBlobRef = useRef<Blob | null>(null)
     const [tempPrintLang, setTempPrintLang] = useState<string>('auto')
     const { toast, dismiss } = useToast()
 
@@ -1302,10 +1303,43 @@ export function PrintPreviewEditorPage() {
     const handleDocumentAction = async (action: 'print' | 'share' | 'save') => {
         if (!source || !showPersistedDocumentActions || actionInProgressRef.current) return
 
+        // A delayed share can lose the browser's transient user activation while
+        // the PDF is generated and saved. Keep that exact PDF so the next tap
+        // can open the native share sheet immediately, without saving twice.
+        if (action === 'share' && shareRetryBlobRef.current) {
+            const retryBlob = shareRetryBlobRef.current
+            actionInProgressRef.current = true
+            setIsSaving(true)
+            try {
+                const shared = await sharePDFPreviewBlob(retryBlob, title)
+                shareRetryBlobRef.current = null
+                if (!shared) toast({
+                    title: t('pdfPreview.shareUnavailableTitle'),
+                    description: t('pdfPreview.shareUnavailableDescription')
+                })
+            } catch (error) {
+                if (error instanceof Error && error.name === 'AbortError') return
+
+                console.warn('Could not open invoice sharing after retry:', error)
+                savePDFPreviewBlob(retryBlob, title)
+                shareRetryBlobRef.current = null
+                toast({
+                    title: t('pdfPreview.shareUnavailableTitle'),
+                    description: t('pdfPreview.shareUnavailableDescription')
+                })
+            } finally {
+                actionInProgressRef.current = false
+                setIsSaving(false)
+            }
+            return
+        }
+
         actionInProgressRef.current = true
         setIsSaving(true)
         let isPersisting = false
         let progressToastStarted = false
+        let actionPdfBlob: Blob | null = null
+        let shareWasAttempted = false
         try {
             beginProgressToast(
                 title || t('print.progressTitle', { defaultValue: 'Saving & Printing' }),
@@ -1314,6 +1348,7 @@ export function PrintPreviewEditorPage() {
             progressToastStarted = true
 
             const blob = await generateCurrentActionPdfBlob()
+            actionPdfBlob = blob
             if (!invoiceSavedThisSessionRef.current) {
                 if (!source.onSave) throw new Error('Invoice saving is unavailable.')
                 isPersisting = true
@@ -1327,7 +1362,9 @@ export function PrintPreviewEditorPage() {
                 if (source.onPrint) await source.onPrint(blob)
                 else await printPdfBlob(blob, { title })
             } else if (action === 'share') {
+                shareWasAttempted = true
                 const shared = await sharePDFPreviewBlob(blob, title)
+                shareRetryBlobRef.current = null
                 if (!shared) toast({
                     title: t('pdfPreview.shareUnavailableTitle'),
                     description: t('pdfPreview.shareUnavailableDescription')
@@ -1336,15 +1373,26 @@ export function PrintPreviewEditorPage() {
                 savePDFPreviewBlob(blob, title)
             }
         } catch (error) {
-            console.error(`Failed to ${action} invoice preview:`, error)
-            if (!isPersisting && action === 'print') {
+            const wasCancelled = error instanceof Error && error.name === 'AbortError'
+            if (action === 'share' && shareWasAttempted && actionPdfBlob && !isPersisting) {
+                shareRetryBlobRef.current = actionPdfBlob
+                if (wasCancelled) return
+
+                console.warn('Invoice was saved; sharing needs another tap:', error)
+                toast({
+                    title: t('pdfPreview.shareRetryTitle'),
+                    description: t('pdfPreview.shareRetryDescription')
+                })
+            } else if (!isPersisting && action === 'print') {
+                console.error('Failed to print invoice preview:', error)
                 toast({
                     title: t('pdfPreview.printErrorTitle', { defaultValue: 'Could not print the PDF' }),
                     description: t('pdfPreview.printErrorDescription', { defaultValue: 'Try again to print this preview.' }),
                     variant: 'destructive'
                 })
             } else if (!isPersisting && action === 'share') {
-                if (!(error instanceof Error && error.name === 'AbortError')) {
+                if (!wasCancelled) {
+                    console.error('Failed to prepare invoice preview for sharing:', error)
                     toast({
                         title: t('pdfPreview.shareErrorTitle'),
                         description: t('pdfPreview.shareErrorDescription'),
@@ -1352,6 +1400,7 @@ export function PrintPreviewEditorPage() {
                     })
                 }
             } else if (!isPersisting) {
+                console.error('Failed to save invoice preview:', error)
                 toast({
                     title: t('pdfPreview.saveErrorTitle'),
                     description: t('pdfPreview.saveErrorDescription'),

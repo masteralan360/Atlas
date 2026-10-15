@@ -4067,6 +4067,8 @@
     "saveErrorDescription": "دووبارە هەوڵ بدە بۆ پاشەکەوتکردنی ئەم پێشبینینە وەک PDF.",
     "shareErrorTitle": "نەتوانرا PDF هاوبەش بکرێت",
     "shareErrorDescription": "دووبارە هەوڵ بدە بۆ هاوبەشکردنی ئەم پێشبینینە.",
+    "shareRetryTitle": "پسووڵەکە پاشەکەوت کرا",
+    "shareRetryDescription": "دووبارە کرتە لە هاوبەشکردن بکە بۆ کردنەوەی هەڵبژاردەکانی هاوبەشکردن.",
     "shareUnavailableTitle": "هاوبەشکردن بەردەست نییە",
     "shareUnavailableDescription": "لەبری ئەوە PDFەکە داگیرا.",
     "printErrorTitle": "نەتوانرا PDF چاپ بکرێت",

@@ -4050,6 +4050,8 @@
     "saveErrorDescription": "حاول مرة أخرى لحفظ هذه المعاينة كملف PDF.",
     "shareErrorTitle": "تعذر مشاركة ملف PDF",
     "shareErrorDescription": "حاول مرة أخرى لمشاركة هذه المعاينة.",
+    "shareRetryTitle": "تم حفظ الفاتورة",
+    "shareRetryDescription": "اضغط على مشاركة مرة أخرى لفتح خيارات المشاركة.",
     "shareUnavailableTitle": "المشاركة غير متاحة",
     "shareUnavailableDescription": "تم تنزيل ملف PDF بدلاً من ذلك.",
     "printErrorTitle": "تعذرت طباعة ملف PDF",
