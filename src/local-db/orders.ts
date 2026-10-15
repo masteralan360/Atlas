@@ -3386,11 +3386,7 @@ async function completePaidQuickSalesOrderAtomically(
         supabase.rpc('complete_quick_sales_order', { payload })
     )
     if (error) {
-        const message = error instanceof Error
-            ? error.message
-            : error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
-                ? error.message
-                : typeof error === 'string' ? error : ''
+        const message = error.message
         const stockError = message.match(
             /^Insufficient (?:regular )?stock for (?:(?:Quick Order )?product) ([^\s.]+)(?: in storage [^\s.]+)?\.?$/i
         )
