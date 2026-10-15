@@ -24,6 +24,8 @@ interface ProductAutocompleteInputProps {
     linkedLabel?: string
     linkedTooltip?: string
     showLinkedIndicator?: boolean
+    storageId?: string
+    isProductAvailable?: (product: Product) => boolean
     skuLabel?: string
     storageMissing?: boolean
     onStorageMissingClick?: () => void
@@ -70,6 +72,8 @@ export function ProductAutocompleteInput({
     linkedLabel = 'Linked',
     linkedTooltip,
     showLinkedIndicator = true,
+    storageId,
+    isProductAvailable,
     skuLabel = 'SKU',
     storageMissing,
     onStorageMissingClick,
@@ -86,7 +90,7 @@ export function ProductAutocompleteInput({
     const normalizedQuery = query.toLocaleLowerCase()
     const latestQueryRef = useRef(query)
     latestQueryRef.current = query
-    const selectionAccess = useProductSelectionAccess(user?.workspaceId, user?.id, { candidateProductIds })
+    const selectionAccess = useProductSelectionAccess(user?.workspaceId, user?.id, { candidateProductIds, storageId })
     const excludedStorageIdsKey = [...selectionAccess.storageAccess.excludedStorageIds].sort().join('|')
     const excludedStorageIds = useMemo(
         () => excludedStorageIdsKey ? excludedStorageIdsKey.split('|') : [],
@@ -129,8 +133,8 @@ export function ProductAutocompleteInput({
         || (isFocused && normalizedQuery.length >= 2 && selectionAccess.storageAccess.isReady === false)
         || (remoteSearch.items.length > 0 && selectionAccess.inventoryLoading)
     const selectableProducts = useMemo(
-        () => selectionAccess.filterProducts(remoteSearch.items),
-        [remoteSearch.items, selectionAccess]
+        () => selectionAccess.filterProducts(remoteSearch.items).filter((product) => !isProductAvailable || isProductAvailable(product)),
+        [isProductAvailable, remoteSearch.items, selectionAccess]
     )
     const filtered = useMemo(() => selectableProducts.slice(0, 8), [selectableProducts])
     const productById = useMemo(
@@ -147,7 +151,7 @@ export function ProductAutocompleteInput({
     const shouldShowLinkedIndicator = Boolean(hasSelection && !storageMissing && showLinkedIndicator)
 
     const handleSelect = useCallback((product: Product) => {
-        if (!selectionAccess.canSelectProduct(product)) {
+        if (!selectionAccess.canSelectProduct(product) || (isProductAvailable && !isProductAvailable(product))) {
             return
         }
         setCandidateProductIds([])
@@ -155,7 +159,7 @@ export function ProductAutocompleteInput({
         setIsFocused(false)
         onChange(product.name)
         onSelectProduct(product)
-    }, [onChange, onSelectProduct, selectionAccess])
+    }, [isProductAvailable, onChange, onSelectProduct, selectionAccess])
 
     useEffect(() => {
         if (justSelected) {

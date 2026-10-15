@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 import {
   Activity, ArrowUpRight, BarChart3, Boxes, Building2, Check, ClipboardList,
   FileBarChart2, Instagram, MessageCircle, Package, Plus, Search, ShoppingBag,
-  Pencil, Store, Target, Trash2, TrendingUp, UserRound, UsersRound, Wallet, X,
+  Pencil, Store, Target, Trash2, TrendingUp, Unlink, UserRound, UsersRound, Wallet, X,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -17,9 +17,10 @@ import type { BusinessPartner, CommerceOperationRecord, CommerceOperationRecordT
 import { createSalesOrder } from '@/local-db/orders'
 import { createBusinessPartner } from '@/local-db/businessPartners'
 import { createCommerceOperationRecord, refreshCommerceOperationRecords, updateCommerceOperationRecord } from '@/local-db/commerceOperations'
-import { useProducts, useStorages, usePriceBooks, usePriceBookItems } from '@/local-db'
+import { useProducts, useStorages, usePriceBooks, usePriceBookItems, useInventory } from '@/local-db'
 import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
+import { CompactBusinessPartnerFormDialog, type CompactBusinessPartnerFormPayload } from '@/ui/components/crm/CompactBusinessPartnerFormDialog'
 import { ProductsViewModal, ProductsViewModalTrigger } from '@/ui/components/ProductsViewModal'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
@@ -283,6 +284,7 @@ export function CommerceOperations() {
         onOpenChange={(next) => setOrderDialogOpen(next)}
         channel={orderChannel}
         workspaceId={workspaceId}
+        defaultCurrency={features.default_currency}
         userId={user?.id}
         userName={user?.name || ''}
         userRole={user?.role}
@@ -522,11 +524,12 @@ function recordSummary(record: CommerceOperationRecord, t: (key: string, options
   }
 }
 
-function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, userId, userName, userRole, products, storages, priceBooks, priceBookItems, available, maxDiscountPercent, iqdPreference, onSaved, t }: {
+function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCurrency, userId, userName, userRole, products, storages, priceBooks, priceBookItems, available, maxDiscountPercent, iqdPreference, onSaved, t }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   channel: OrderChannel
   workspaceId?: string
+  defaultCurrency: CurrencyCode
   userId?: string
   userName: string
   userRole?: 'admin' | 'staff' | 'viewer'
@@ -544,6 +547,8 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, userId, u
   const [buyerName, setBuyerName] = useState('')
   const [buyerPhone, setBuyerPhone] = useState('')
   const [buyerPartner, setBuyerPartner] = useState<BusinessPartner | null>(null)
+  const [createCustomerOpen, setCreateCustomerOpen] = useState(false)
+  const [creatingCustomer, setCreatingCustomer] = useState(false)
   const [platform, setPlatform] = useState<(typeof PLATFORM_OPTIONS)[number]>('instagram')
   const [socialHandle, setSocialHandle] = useState('')
   const [seller, setSeller] = useState(userName)
@@ -561,6 +566,21 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, userId, u
   const [saving, setSaving] = useState(false)
   const [attempted, setAttempted] = useState(false)
   const [date, setDate] = useState(new Date())
+  const storageInventory = useInventory(workspaceId, {
+    enabled: open && Boolean(workspaceId && storageId),
+    storageId,
+  })
+  const stockByProductId = useMemo(() => {
+    const stock = new Map<string, number>()
+    for (const row of storageInventory) {
+      stock.set(row.productId, (stock.get(row.productId) || 0) + row.quantity)
+    }
+    return stock
+  }, [storageInventory])
+  const isProductAvailable = useCallback(
+    (product: Product) => (stockByProductId.get(product.id) || 0) > 0,
+    [stockByProductId],
+  )
 
   const chosenPriceBookItem = (product: Product) => channel === 'wholesale' && priceBookId
     ? priceBookItems.find((item) => item.priceBookId === priceBookId && item.productId === product.id)
@@ -578,10 +598,14 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, userId, u
   )
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      setCreateCustomerOpen(false)
+      return
+    }
     setBuyerName('')
     setBuyerPhone('')
     setBuyerPartner(null)
+    setCreateCustomerOpen(false)
     setPlatform('instagram')
     setSocialHandle('')
     setSeller(userName)
@@ -629,6 +653,27 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, userId, u
     if (selectedProduct) setLines((current) => current.filter((line) => line.product.id !== selectedProduct.id))
     setSelectedProduct(null)
     setProductQuery('')
+  }
+
+  async function createAndSelectCustomer(payload: CompactBusinessPartnerFormPayload) {
+    if (!workspaceId) return
+    setCreatingCustomer(true)
+    try {
+      const partner = await createBusinessPartner(workspaceId, payload)
+      setBuyerPartner(partner)
+      setBuyerName(partner.partnerName)
+      setBuyerPhone(partner.phone || '')
+      setCreateCustomerOpen(false)
+      toast({ title: t('customers.messages.addSuccess') })
+    } catch {
+      toast({
+        title: t('common.error'),
+        description: t('customers.messages.addError'),
+        variant: 'destructive',
+      })
+    } finally {
+      setCreatingCustomer(false)
+    }
   }
 
   async function save() {
@@ -732,7 +777,32 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, userId, u
         <AppDialogBody>
           {!available ? <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-muted-foreground">{t('commerceOperations.orders.prerequisite')}</div> : null}
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2"><RequiredLabel>{t('commerceOperations.fields.buyer')}</RequiredLabel><div className="flex gap-2"><PartnerAutocompleteInput value={buyerName} onChange={(value) => { setBuyerName(value); setBuyerPartner(null) }} onSelectPartner={(partner) => { setBuyerPartner(partner); setBuyerName(partner.partnerName); setBuyerPhone(partner.phone || '') }} workspaceId={workspaceId || ''} roles={['customer', 'both', 'online_customer']} placeholder={t('commerceOperations.placeholders.findBuyer')} disabled={saving || !workspaceId} className="min-w-0 flex-1" /><Button type="button" size="icon" variant="outline" aria-label={t('commerceOperations.actions.unlinkBuyer')} title={t('commerceOperations.actions.unlinkBuyer')} disabled={!buyerPartner || saving} onClick={() => { setBuyerPartner(null); setBuyerName(''); setBuyerPhone('') }}><X className="h-4 w-4" /></Button></div>{buyerPartner ? <Badge className="gap-1"><Check className="h-3 w-3" />{t('commerceOperations.labels.linked')}</Badge> : null}{attempted && !buyerName.trim() ? <p className="text-xs text-destructive">{t('commerceOperations.validation.buyerRequired')}</p> : null}</div>
+            <div className="space-y-2">
+              <RequiredLabel>{t('commerceOperations.fields.buyer')}</RequiredLabel>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <PartnerAutocompleteInput value={buyerName} onChange={(value) => { setBuyerName(value); if (buyerPartner) { setBuyerPartner(null); setBuyerPhone('') } }} onSelectPartner={(partner) => { setBuyerPartner(partner); setBuyerName(partner.partnerName); setBuyerPhone(partner.phone || '') }} workspaceId={workspaceId || ''} roles={['customer', 'both', 'online_customer']} placeholder={t('commerceOperations.placeholders.findBuyer')} disabled={saving || !workspaceId} className="min-w-0 flex-1" />
+                {channel === 'social' ? (
+                  <Button type="button" size="icon" variant="outline" className="h-10 w-10 shrink-0" aria-label={t('customers.addQuickCustomer')} title={t('customers.addQuickCustomer')} onClick={() => setCreateCustomerOpen(true)} disabled={saving || creatingCustomer || !workspaceId}>
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                ) : (
+                  <Button type="button" size="icon" variant="outline" aria-label={t('commerceOperations.actions.unlinkBuyer')} title={t('commerceOperations.actions.unlinkBuyer')} disabled={!buyerPartner || saving} onClick={() => { setBuyerPartner(null); setBuyerName(''); setBuyerPhone('') }}><X className="h-4 w-4" /></Button>
+                )}
+              </div>
+              {buyerPartner ? channel === 'social' ? (
+                <div className="flex flex-col gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0">
+                    <Badge className="gap-1"><Check className="h-3 w-3" />{t('commerceOperations.labels.linked')}</Badge>
+                    <p className="mt-1 truncate text-sm font-semibold">{buyerPartner.partnerName}</p>
+                  </div>
+                  <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0 px-2 text-muted-foreground" disabled={saving} onClick={() => { setBuyerPartner(null); setBuyerName(''); setBuyerPhone('') }}>
+                    <Unlink className="h-4 w-4" />
+                    {t('commerceOperations.actions.unlinkBuyer')}
+                  </Button>
+                </div>
+              ) : <Badge className="gap-1"><Check className="h-3 w-3" />{t('commerceOperations.labels.linked')}</Badge> : null}
+              {attempted && !buyerName.trim() ? <p className="text-xs text-destructive">{t('commerceOperations.validation.buyerRequired')}</p> : null}
+            </div>
             <div className="space-y-2"><RequiredLabel htmlFor="commerce-buyer-phone">{t('commerceOperations.fields.phone')}</RequiredLabel><Input id="commerce-buyer-phone" value={buyerPhone} onChange={(event) => setBuyerPhone(event.target.value)} placeholder={t('commerceOperations.placeholders.phone')} disabled={saving} />{attempted && !buyerPhone.trim() ? <p className="text-xs text-destructive">{t('commerceOperations.validation.phoneRequired')}</p> : null}</div>
             <div className="space-y-2"><RequiredLabel htmlFor="commerce-seller">{t('commerceOperations.fields.seller')}</RequiredLabel><Input id="commerce-seller" value={seller} onChange={(event) => setSeller(event.target.value)} placeholder={t('commerceOperations.placeholders.seller')} disabled={saving} />{attempted && !seller.trim() ? <p className="text-xs text-destructive">{t('commerceOperations.validation.sellerRequired')}</p> : null}</div>
             {channel === 'social' ? <div className="space-y-2"><RequiredLabel>{t('commerceOperations.fields.platform')}</RequiredLabel><Select value={platform} onValueChange={(value) => setPlatform(value as typeof platform)} disabled={saving}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PLATFORM_OPTIONS.map((option) => <SelectItem key={option} value={option}>{t(`commerceOperations.platforms.${option}`)}</SelectItem>)}</SelectContent></Select></div> : <div className="space-y-2"><Label>{t('commerceOperations.fields.priceBook')}</Label><Select value={priceBookId || 'none'} onValueChange={(value) => setPriceBookId(value === 'none' ? '' : value)} disabled={saving || lines.length > 0}><SelectTrigger><SelectValue placeholder={t('commerceOperations.placeholders.priceBook')} /></SelectTrigger><SelectContent><SelectItem value="none">{t('commerceOperations.fields.catalogPrices')}</SelectItem>{priceBooks.map((book) => <SelectItem key={book.id} value={book.id}><PriceBookName name={book.name} color={book.color} /></SelectItem>)}</SelectContent></Select>{selectedBook ? <p className="text-xs text-muted-foreground">{t('commerceOperations.order.priceBookHint')}</p> : null}</div>}
@@ -744,7 +814,43 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, userId, u
           </div>
 
             <div className="mt-6 space-y-3 rounded-xl border p-4">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"><h3 className="flex items-center gap-2 font-semibold"><Package className="h-4 w-4 text-primary" /><RequiredLabel>{t('commerceOperations.order.items')}</RequiredLabel></h3><div className="flex gap-2"><ProductsViewModalTrigger onClick={() => setProductsModalOpen(true)} label={t('commerceOperations.actions.browseProducts')} /><div className="flex min-w-0 flex-1 gap-2 sm:w-72"><ProductAutocompleteInput value={productQuery} onChange={(value) => { setProductQuery(value); if (!value) setSelectedProduct(null) }} onSelectProduct={addProduct} hasSelection={Boolean(selectedProduct)} linkedLabel={t('commerceOperations.labels.linked')} placeholder={t('commerceOperations.placeholders.searchProduct')} disabled={saving || !storageId} className="min-w-0 flex-1" /><Button type="button" variant="outline" size="icon" aria-label={t('commerceOperations.actions.unlinkProduct')} title={t('commerceOperations.actions.unlinkProduct')} disabled={!selectedProduct || saving} onClick={unlinkProduct}><X className="h-4 w-4" /></Button></div></div></div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h3 className="flex items-center gap-2 font-semibold"><Package className="h-4 w-4 text-primary" /><RequiredLabel>{t('commerceOperations.order.items')}</RequiredLabel></h3>
+              <div className="flex w-full min-w-0 sm:w-72">
+                <ProductsViewModalTrigger
+                  onClick={() => setProductsModalOpen(true)}
+                  label={t('commerceOperations.actions.browseProducts')}
+                  className="h-10 w-10 rounded-e-none rounded-s-lg border-e-0"
+                />
+                <ProductAutocompleteInput
+                  value={productQuery}
+                  onChange={(value) => { setProductQuery(value); if (!value) setSelectedProduct(null) }}
+                  onSelectProduct={addProduct}
+                  hasSelection={Boolean(selectedProduct)}
+                  linkedLabel={t('commerceOperations.labels.linked')}
+                  placeholder={t('commerceOperations.placeholders.searchProduct')}
+                  disabled={saving || !storageId}
+                  storageId={storageId}
+                  isProductAvailable={isProductAvailable}
+                  className="min-w-0 flex-1"
+                  inputClassName={selectedProduct ? 'rounded-none' : 'rounded-s-none'}
+                />
+                {selectedProduct ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 shrink-0 rounded-e-lg rounded-s-none border-s-0"
+                    aria-label={t('commerceOperations.actions.unlinkProduct')}
+                    title={t('commerceOperations.actions.unlinkProduct')}
+                    disabled={saving}
+                    onClick={unlinkProduct}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                ) : null}
+              </div>
+            </div>
             {lines.length === 0 ? <p className="rounded-lg bg-muted/50 p-4 text-sm text-muted-foreground">{t('commerceOperations.order.noItems')}</p> : <div className="space-y-2">{lines.map((line) => <div key={line.product.id} className="grid grid-cols-1 items-center gap-2 rounded-lg bg-muted/40 p-3 sm:grid-cols-[minmax(0,1fr)_6.5rem_auto]"><div className="min-w-0"><p className="truncate font-medium">{line.product.name}</p><p className="text-xs text-muted-foreground">{line.product.sku || t('commerceOperations.order.noSku')} · {amountLabel(line.price, line.currency, iqdPreference)}</p></div><Input aria-label={t('commerceOperations.fields.quantity')} inputMode="numeric" value={line.quantity} placeholder="0" onChange={(event) => setLines((current) => current.map((entry) => entry.product.id === line.product.id ? { ...entry, quantity: amountInput(event.target.value, true) } : entry))} disabled={saving} className="text-end" /><div className="flex items-center gap-2"><span className="min-w-20 text-end text-sm font-semibold">{amountLabel(line.price * (Number(line.quantity.replace(/,/g, '')) || 0), line.currency, iqdPreference)}</span><Button type="button" size="icon" variant="ghost" aria-label={t('commerceOperations.actions.removeProduct')} disabled={saving} onClick={() => { setLines((current) => current.filter((entry) => entry.product.id !== line.product.id)); if (selectedProduct?.id === line.product.id) { setSelectedProduct(null); setProductQuery('') } }}><Trash2 className="h-4 w-4 text-destructive" /></Button></div></div>)}</div>}
             {attempted && !lines.length ? <p className="text-xs text-destructive">{t('commerceOperations.validation.productRequired')}</p> : null}
             {totalCurrency ? <p className="text-xs text-muted-foreground">{t('commerceOperations.order.currencyNote', { currency: totalCurrency.toUpperCase() })}</p> : null}
@@ -756,7 +862,43 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, userId, u
         </AppDialogBody>
         <AppDialogFooter><Button type="button" variant="outline" disabled={saving} onClick={() => close(false)}>{t('common.cancel')}</Button><Button type="button" disabled={!canSave} onClick={() => void save()}>{saving ? t('commerceOperations.actions.saving') : t('commerceOperations.actions.saveUnpaidOrder')}</Button></AppDialogFooter>
       </AppDialogContent>
-      <ProductsViewModal open={productsModalOpen} onOpenChange={setProductsModalOpen} products={products} storages={storages} initialStorageId={storageId} onSelectProduct={(product, selectedStorageId) => { setStorageId(selectedStorageId); addProduct(product) }} labels={{ title: t('commerceOperations.actions.browseProducts'), description: t('commerceOperations.order.productBrowseHint'), searchLabel: t('commerceOperations.placeholders.searchProduct'), searchPlaceholder: t('commerceOperations.placeholders.searchProduct'), storageLabel: t('commerceOperations.fields.storage'), storagePlaceholder: t('commerceOperations.placeholders.storage') }} />
+      <ProductsViewModal
+        key={storageId}
+        open={productsModalOpen}
+        onOpenChange={setProductsModalOpen}
+        products={products}
+        storages={storages}
+        showStorageSelector={false}
+        initialStorageId={storageId}
+        filterProducts={(availableProducts) => availableProducts.filter(isProductAvailable)}
+        getProductMeta={(product) => t('orders.form.availableQuantity', {
+          quantity: stockByProductId.get(product.id) || 0,
+          defaultValue: `Available: ${stockByProductId.get(product.id) || 0}`,
+        })}
+        onSelectProduct={(product) => addProduct(product)}
+        labels={{
+          title: t('commerceOperations.actions.browseProducts'),
+          description: t('commerceOperations.order.productBrowseHint'),
+          searchLabel: t('commerceOperations.placeholders.searchProduct'),
+          searchPlaceholder: t('commerceOperations.placeholders.searchProduct'),
+          storageLabel: t('commerceOperations.fields.storage'),
+          storagePlaceholder: t('commerceOperations.placeholders.storage'),
+          noProductsLabel: t('inventoryTransfer.noProductsInSource'),
+        }}
+      />
+      {channel === 'social' ? (
+        <CompactBusinessPartnerFormDialog
+          isOpen={createCustomerOpen}
+          onOpenChange={setCreateCustomerOpen}
+          workspaceId={workspaceId}
+          defaultCurrency={defaultCurrency}
+          role="customer"
+          title={t('customers.addQuickCustomer')}
+          submitLabel={t('common.create')}
+          isSaving={creatingCustomer}
+          onSubmit={createAndSelectCustomer}
+        />
+      ) : null}
     </AppDialog>
   )
 }
