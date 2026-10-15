@@ -92,6 +92,32 @@ export async function inlineCaptureableImages(container: HTMLElement) {
         const source = image.currentSrc || image.src
         if (!source || source.startsWith('data:')) return
 
+        const originalSrc = image.getAttribute('src')
+        const originalSrcSet = image.getAttribute('srcset')
+        const originalSizes = image.getAttribute('sizes')
+
+        const setInlineSource = async (dataUrl: string) => {
+            // Decode the data URL on a separate image before replacing the
+            // rendered source. iOS WebKit can report the old image as complete
+            // immediately after `src` changes, then capture the old or empty
+            // resource in html-to-image's SVG clone.
+            const decodedImage = image.ownerDocument.createElement('img')
+            decodedImage.src = dataUrl
+            await waitForPdfImageReady(decodedImage)
+            if (decodedImage.naturalWidth <= 0 || decodedImage.naturalHeight <= 0) {
+                throw new Error('The image could not be decoded for PDF capture.')
+            }
+
+            image.removeAttribute('srcset')
+            image.removeAttribute('sizes')
+            image.loading = 'eager'
+            image.src = dataUrl
+            await waitForPdfImageReady(image)
+            if (image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+                throw new Error('The inline image could not be decoded for PDF capture.')
+            }
+        }
+
         // Tauri asset-protocol URLs (asset://localhost/... on iOS,
         // https://asset.localhost/... on desktop) cannot be fetched from the
         // webview, so html-to-image cannot embed them in its SVG foreignObject
@@ -100,7 +126,7 @@ export async function inlineCaptureableImages(container: HTMLElement) {
         try {
             if (tauriFilePath) {
                 const bytes = await platformService.readFile(tauriFilePath)
-                image.src = await blobToDataUrl(new Blob([bytes], { type: imageMimeFromPath(tauriFilePath) || 'application/octet-stream' }))
+                await setInlineSource(await blobToDataUrl(new Blob([bytes], { type: imageMimeFromPath(tauriFilePath) || 'application/octet-stream' })))
             } else if (/^(https?:|blob:)/i.test(source)) {
                 // PWA media is persisted as a relative path and displayed from
                 // R2. html-to-image fetches that URL again while serializing its
@@ -123,13 +149,20 @@ export async function inlineCaptureableImages(container: HTMLElement) {
                 if (!mimeType) {
                     throw new Error(`Expected an image response but received ${blob.type || 'an unknown content type'}.`)
                 }
-                image.src = await blobToDataUrl(blob.type === mimeType ? blob : new Blob([blob], { type: mimeType }))
+                await setInlineSource(await blobToDataUrl(blob.type === mimeType ? blob : new Blob([blob], { type: mimeType })))
             } else {
                 return
             }
-
-            await waitForPdfImageReady(image)
         } catch (error) {
+            // A failed replacement should not make a previously loaded image
+            // disappear from the best-effort capture fallback.
+            if (originalSrc === null) image.removeAttribute('src')
+            else image.setAttribute('src', originalSrc)
+            if (originalSrcSet === null) image.removeAttribute('srcset')
+            else image.setAttribute('srcset', originalSrcSet)
+            if (originalSizes === null) image.removeAttribute('sizes')
+            else image.setAttribute('sizes', originalSizes)
+
             // Preserve the loaded source as a best-effort fallback for an
             // external image. Workspace media normally takes the R2 branch
             // above, so its PDF capture no longer depends on html-to-image

@@ -586,17 +586,32 @@ async function preprocessLogoUrl(logoUrl?: string | null) {
     }
 
     try {
-        const response = await fetch(logoUrl)
-        if (!response.ok) return undefined
+        const response = await fetch(logoUrl, {
+            credentials: 'omit',
+            referrerPolicy: 'no-referrer'
+        })
+        if (!response.ok) {
+            console.warn(`Could not prefetch workspace logo for PDF (${response.status}); keeping its source URL.`)
+            return logoUrl
+        }
         const blob = await response.blob()
+        const mimeType = blob.type.split(';', 1)[0].trim().toLowerCase()
+        if (!mimeType.startsWith('image/')) return logoUrl
+
         return await new Promise<string>((resolve) => {
             const reader = new FileReader()
-            reader.onloadend = () => resolve(reader.result as string)
-            reader.readAsDataURL(blob)
+            reader.onload = () => {
+                if (typeof reader.result === 'string') resolve(reader.result)
+                else resolve(logoUrl)
+            }
+            reader.onerror = () => resolve(logoUrl)
+            reader.readAsDataURL(blob.type === mimeType ? blob : new Blob([blob], { type: mimeType }))
         })
     } catch (error) {
         console.warn('Failed to fetch logo for PDF:', error)
-        return undefined
+        // Keep the original image available to the PDF capture inliner. The
+        // editor can display the URL even when this optional prefetch fails.
+        return logoUrl
     }
 }
 
