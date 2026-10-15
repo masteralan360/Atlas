@@ -1319,9 +1319,8 @@ export function PrintPreviewEditorPage() {
         const printWindow = action === 'print' ? preparePdfPrintWindow() : undefined
         let printWindowUsed = false
 
-        // A delayed share can lose the browser's transient user activation while
-        // the PDF is generated and saved. Keep that exact PDF so the next tap
-        // can open the native share sheet immediately, without saving twice.
+        // Retry with the generated PDF if the browser still rejects sharing after
+        // PDF generation has consumed the tap's transient user activation.
         if (action === 'share' && shareRetryBlobRef.current) {
             const retryBlob = shareRetryBlobRef.current
             actionInProgressRef.current = true
@@ -1356,6 +1355,21 @@ export function PrintPreviewEditorPage() {
         let progressToastStarted = false
         let actionPdfBlob: Blob | null = null
         let shareWasAttempted = false
+        let sharePromise: Promise<
+            | { ok: true; shared: boolean }
+            | { ok: false; error: unknown }
+        > | null = null
+
+        const startShare = (blob: Blob) => {
+            shareWasAttempted = true
+            // Attach a rejection handler immediately so a failed share request
+            // does not become unhandled while invoice persistence is in flight.
+            sharePromise = sharePDFPreviewBlob(blob, title).then(
+                (shared) => ({ ok: true as const, shared }),
+                (error) => ({ ok: false as const, error })
+            )
+        }
+
         try {
             beginProgressToast(
                 title || t('print.progressTitle', { defaultValue: 'Saving & Printing' }),
@@ -1368,10 +1382,14 @@ export function PrintPreviewEditorPage() {
             if (!invoiceSavedThisSessionRef.current) {
                 if (!source.onSave) throw new Error('Invoice saving is unavailable.')
                 isPersisting = true
-                await source.onSave(blob)
+                const savePromise = source.onSave(blob)
+                if (action === 'share') startShare(blob)
+                await savePromise
                 invoiceSavedThisSessionRef.current = true
                 setIsInvoiceSavedThisSession(true)
                 isPersisting = false
+            } else if (action === 'share') {
+                startShare(blob)
             }
 
             if (action === 'print') {
@@ -1381,10 +1399,11 @@ export function PrintPreviewEditorPage() {
                     printWindowUsed = true
                 }
             } else if (action === 'share') {
-                shareWasAttempted = true
-                const shared = await sharePDFPreviewBlob(blob, title)
+                const result = await sharePromise
+                if (!result) throw new Error('PDF sharing could not be started.')
+                if (!result.ok) throw result.error
                 shareRetryBlobRef.current = null
-                if (!shared) toast({
+                if (!result.shared) toast({
                     title: t('pdfPreview.shareUnavailableTitle'),
                     description: t('pdfPreview.shareUnavailableDescription')
                 })
@@ -1925,8 +1944,8 @@ export function PrintPreviewEditorPage() {
     return (
         <div className="flex h-screen w-screen flex-col bg-gray-50 overflow-hidden animate-in fade-in slide-in-from-right-4 duration-300 motion-reduce:animate-none"
             style={{ marginTop: 'var(--titlebar-height)', height: 'calc(100vh - var(--titlebar-height))' }}>
-                <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-2 py-1.5 shrink-0 bg-card z-20 md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-4 md:py-2">
-                    <div className="order-1 flex min-w-0 flex-1 items-center gap-2 md:order-none md:justify-self-start md:gap-3">
+                <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-2 py-1.5 shrink-0 bg-card z-20 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] 2xl:px-4 2xl:py-2">
+                    <div className="order-1 flex min-w-0 flex-1 items-center gap-2 2xl:order-none 2xl:justify-self-start 2xl:gap-3">
                         <button
                             className="inline-flex items-center justify-center rounded-md h-8 w-8 hover:bg-accent transition-colors shrink-0"
                             onClick={handleBack}
@@ -1936,7 +1955,7 @@ export function PrintPreviewEditorPage() {
                         <h1 className="text-sm font-semibold truncate">{title}</h1>
                     </div>
 
-                    <div className="order-3 flex w-full min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain touch-pan-x bg-secondary/50 rounded-md p-0.5 border border-border [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0 md:order-none md:w-auto md:justify-self-center md:overflow-visible">
+                    <div className="order-3 flex w-full min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain touch-pan-x bg-secondary/50 rounded-md p-0.5 border border-border [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0 2xl:order-none 2xl:w-auto 2xl:justify-self-center 2xl:overflow-visible">
                         {isAdmin && (
                             <>
                                 {!fixedTemplatePrintLang && (
@@ -2179,7 +2198,7 @@ export function PrintPreviewEditorPage() {
                         </div>
                     </div>
 
-                    <div className="order-2 flex shrink-0 items-center gap-1 md:order-none md:justify-self-end md:gap-2">
+                    <div className="order-2 flex shrink-0 items-center gap-1 2xl:order-none 2xl:justify-self-end 2xl:gap-2">
                         {(templatePreview.fields.length > 0 || templatePreview.supportsBackgroundEdit) && canEditTemplateFields && (
                             <button
                                 className="inline-flex items-center justify-center rounded-md h-8 w-8 px-0 text-xs font-medium transition-colors gap-1.5 bg-secondary text-secondary-foreground hover:bg-secondary/80 md:w-auto md:px-3"
@@ -2993,8 +3012,8 @@ export function PrintPreviewEditorPage() {
     return (
             <div className="flex h-screen w-screen flex-col bg-gray-50 overflow-hidden animate-in fade-in slide-in-from-right-4 duration-300 motion-reduce:animate-none"
                 style={{ marginTop: 'var(--titlebar-height)', height: 'calc(100vh - var(--titlebar-height))' }}>
-            <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-2 py-1.5 shrink-0 bg-card z-10 md:grid md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:px-4 md:py-2">
-                <div className="order-1 flex min-w-0 flex-1 items-center gap-2 md:order-none md:justify-self-start md:gap-3">
+            <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-2 py-1.5 shrink-0 bg-card z-10 2xl:grid 2xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] 2xl:px-4 2xl:py-2">
+                <div className="order-1 flex min-w-0 flex-1 items-center gap-2 2xl:order-none 2xl:justify-self-start 2xl:gap-3">
                     <button
                         className="inline-flex items-center justify-center rounded-md h-8 w-8 hover:bg-accent transition-colors shrink-0"
                         onClick={handleBack}
@@ -3004,7 +3023,7 @@ export function PrintPreviewEditorPage() {
                     <h1 className="text-sm font-semibold truncate">{title}</h1>
                 </div>
 
-                <div className="order-3 flex w-full min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain touch-pan-x bg-secondary/50 rounded-md p-0.5 border border-border [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0 md:order-none md:w-auto md:justify-self-center md:overflow-visible">
+                <div className="order-3 flex w-full min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain touch-pan-x bg-secondary/50 rounded-md p-0.5 border border-border [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [&>*]:shrink-0 2xl:order-none 2xl:w-auto 2xl:justify-self-center 2xl:overflow-visible">
                     {isAdmin && (
                         <>
                             <UiAccessGate>
@@ -3205,7 +3224,7 @@ export function PrintPreviewEditorPage() {
                     </div>
                 </div>
 
-                <div className="order-2 flex shrink-0 items-center gap-1 md:order-none md:justify-self-end md:gap-2">
+                <div className="order-2 flex shrink-0 items-center gap-1 2xl:order-none 2xl:justify-self-end 2xl:gap-2">
                     {editableData && isAdmin && (
                         <button
                             className="inline-flex items-center justify-center rounded-md h-8 w-8 px-0 text-xs font-medium transition-colors gap-1.5 bg-secondary text-secondary-foreground hover:bg-secondary/80 md:w-auto md:px-3"
