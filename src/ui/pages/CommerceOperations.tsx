@@ -5,16 +5,17 @@ import { useTranslation } from 'react-i18next'
 import {
   Activity, ArrowUpRight, BarChart3, Boxes, Building2, Check, ClipboardList,
   FileBarChart2, Instagram, MessageCircle, Package, Plus, Search, ShoppingBag,
-  Pencil, Store, Target, Trash2, TrendingUp, Unlink, UserRound, UsersRound, Wallet, X,
+  Pencil, Store, Target, TrendingUp, Unlink, UserRound, UsersRound, Wallet, X,
   type LucideIcon,
 } from 'lucide-react'
 
 import { useOptionalAuth } from '@/auth'
+import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { useWorkspace } from '@/workspace'
 import { useWorkspacePermissions } from '@/permissions'
 import { db } from '@/local-db/database'
-import type { BusinessPartner, CommerceOperationRecord, CommerceOperationRecordType, CurrencyCode, Product, SalesOrder, SalesOrderItem } from '@/local-db/models'
-import { createSalesOrder } from '@/local-db/orders'
+import type { Agent, BusinessPartner, CommerceOperationRecord, CommerceOperationRecordType, CurrencyCode, ExchangeRateSnapshot, Product, SalesOrder, SalesOrderItem } from '@/local-db/models'
+import { createSalesOrder, resolveSocialOrderAgentCreator } from '@/local-db/orders'
 import { createBusinessPartner } from '@/local-db/businessPartners'
 import { createCommerceOperationRecord, refreshCommerceOperationRecords, updateCommerceOperationRecord } from '@/local-db/commerceOperations'
 import { useProducts, useStorages, usePriceBooks, usePriceBookItems, useInventory } from '@/local-db'
@@ -32,7 +33,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table, TableBody, TableCell,
   TableHead, TableHeader, TableRow, Textarea, useToast,
 } from '@/ui/components'
-import { createOrderAdjustment } from '@/lib/orderAdjustments'
+import { calculateOrderTotalWithAdjustments, createOrderAdjustment } from '@/lib/orderAdjustments'
+import { buildOrderExchangeRatesSnapshot, getAppliedCurrencyConversion } from '@/lib/orderCurrency'
+import { fetchEURToIQDRate, fetchTRYToIQDRate, fetchUSDToIQDRate } from '@/lib/exchangeRate'
 import { formatCurrency, formatNumericInput, generateId, sanitizeNumericInput } from '@/lib/utils'
 import { useDateRange } from '@/context/DateRangeContext'
 import { isOnline } from '@/lib/network'
@@ -40,9 +43,36 @@ import { isOnline } from '@/lib/network'
 type CommerceSection = 'social' | 'wholesale' | 'data' | 'coaches'
 type OrderChannel = 'social' | 'wholesale'
 type DataRecordKind = Extract<CommerceOperationRecordType, 'ad_spend' | 'dm_funnel' | 'city_market' | 'competitor'>
-type OrderLineDraft = { product: Product; quantity: string; price: number; costPrice: number; currency: CurrencyCode; priceBookItemId?: string }
+type OrderLineDraft = { id: string; product: Product | null; productQuery: string; quantity: string; price: number; costPrice: number; currency?: CurrencyCode; priceBookItemId?: string }
 
 const PLATFORM_OPTIONS = ['instagram', 'tiktok', 'whatsapp', 'messenger', 'coach', 'other'] as const
+const COMMERCE_CITY_OPTIONS = [
+  { value: 'erbil-soran-districts', key: 'commerceOperations.cities.erbilSoranDistricts', deliveryFeeIqd: 4500 },
+  { value: 'sulaymaniyah-halabja-districts', key: 'commerceOperations.cities.sulaymaniyahHalabjaDistricts', deliveryFeeIqd: 4500 },
+  { value: 'duhok-zakho-akre-districts', key: 'commerceOperations.cities.duhokZakhoAkreDistricts', deliveryFeeIqd: 4500 },
+  { value: 'erbil', key: 'commerceOperations.cities.erbil', deliveryFeeIqd: 2750 },
+  { value: 'sulaymaniyah', key: 'commerceOperations.cities.sulaymaniyah', deliveryFeeIqd: 4500 },
+  { value: 'duhok', key: 'commerceOperations.cities.duhok', deliveryFeeIqd: 4500 },
+  { value: 'kirkuk', key: 'commerceOperations.cities.kirkuk', deliveryFeeIqd: 4500 },
+  { value: 'halabja', key: 'commerceOperations.cities.halabja', deliveryFeeIqd: 4500 },
+  { value: 'baghdad', key: 'commerceOperations.cities.baghdad', deliveryFeeIqd: 5500 },
+  { value: 'basra', key: 'commerceOperations.cities.basra', deliveryFeeIqd: 5500 },
+  { value: 'mosul-nineveh', key: 'commerceOperations.cities.mosulNineveh', deliveryFeeIqd: 5500 },
+  { value: 'najaf', key: 'commerceOperations.cities.najaf', deliveryFeeIqd: 5500 },
+  { value: 'karbala', key: 'commerceOperations.cities.karbala', deliveryFeeIqd: 5500 },
+  { value: 'nasiriyah-dhi-qar', key: 'commerceOperations.cities.nasiriyahDhiQar', deliveryFeeIqd: 5500 },
+  { value: 'maysan', key: 'commerceOperations.cities.maysan', deliveryFeeIqd: 5500 },
+  { value: 'diwaniyah', key: 'commerceOperations.cities.diwaniyah', deliveryFeeIqd: 5500 },
+  { value: 'samawah', key: 'commerceOperations.cities.samawah', deliveryFeeIqd: 5500 },
+  { value: 'diyala', key: 'commerceOperations.cities.diyala', deliveryFeeIqd: 5500 },
+  { value: 'kut-wasit', key: 'commerceOperations.cities.kutWasit', deliveryFeeIqd: 5500 },
+  { value: 'anbar-ramadi', key: 'commerceOperations.cities.anbarRamadi', deliveryFeeIqd: 5500 },
+  { value: 'salah-al-din', key: 'commerceOperations.cities.salahAlDin', deliveryFeeIqd: 5500 },
+  { value: 'samarra', key: 'commerceOperations.cities.samarra', deliveryFeeIqd: 5500 },
+  { value: 'tikrit', key: 'commerceOperations.cities.tikrit', deliveryFeeIqd: 5500 },
+  { value: 'fallujah', key: 'commerceOperations.cities.fallujah', deliveryFeeIqd: 5500 },
+  { value: 'babil-hilla', key: 'commerceOperations.cities.babilHilla', deliveryFeeIqd: 5500 },
+] as const
 const DATA_KIND_OPTIONS: DataRecordKind[] = ['ad_spend', 'dm_funnel', 'city_market', 'competitor']
 const EMPTY_COMMERCE_RECORDS: CommerceOperationRecord[] = []
 const EMPTY_SALES_ORDERS: SalesOrder[] = []
@@ -55,6 +85,29 @@ function parseAmount(value: string) {
 
 function amountInput(value: string, integer = false) {
   return formatNumericInput(sanitizeNumericInput(value, { allowDecimal: !integer, maxFractionDigits: integer ? 0 : 2 }))
+}
+
+async function fetchDeliveryFeeExchangeRates(orderCurrency: CurrencyCode): Promise<ExchangeRateSnapshot[]> {
+  if (orderCurrency === 'iqd') return []
+
+  const timestamp = new Date().toISOString()
+  if (orderCurrency === 'usd') {
+    const result = await fetchUSDToIQDRate()
+    return [{ pair: 'USD/IQD', rate: result.rate, source: result.source, timestamp: result.timestamp || timestamp }]
+  }
+  if (orderCurrency === 'eur') {
+    const result = await fetchEURToIQDRate()
+    return [
+      ...(result.usdEur > 0 ? [{ pair: 'USD/EUR', rate: result.usdEur, source: result.source, timestamp }] : []),
+      { pair: 'EUR/IQD', rate: result.eurIqd, source: result.source, timestamp },
+    ]
+  }
+
+  const result = await fetchTRYToIQDRate()
+  return [
+    ...(result.usdTry > 0 ? [{ pair: 'USD/TRY', rate: result.usdTry, source: result.source, timestamp }] : []),
+    { pair: 'TRY/IQD', rate: result.tryIqd, source: result.source, timestamp },
+  ]
 }
 
 function rangeBounds(range: ReturnType<typeof useDateRange>['dateRange'], custom: { start: string; end: string }) {
@@ -155,12 +208,13 @@ export function CommerceOperations() {
       : [],
     [workspaceId, features.agents],
   ) ?? []
-  const agents = useLiveQuery(
+  const agentsQuery = useLiveQuery(
     () => workspaceId && hasFeature('agents')
       ? db.agents.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray()
       : [],
     [workspaceId, features.agents],
-  ) ?? []
+  )
+  const agents = agentsQuery ?? []
   const commissionEntries = useLiveQuery(
     () => workspaceId && hasFeature('sales_agent_commissions')
       ? db.agent_commission_entries.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray()
@@ -292,6 +346,9 @@ export function CommerceOperations() {
         storages={storages}
         priceBooks={priceBooks}
         priceBookItems={priceBookItems}
+        agents={agents}
+        agentsLoaded={agentsQuery !== undefined}
+        businessPartners={businessPartners}
         available={canCreateOrders}
         maxDiscountPercent={features.max_discount_percent}
         iqdPreference={features.iqd_display_preference}
@@ -524,7 +581,7 @@ function recordSummary(record: CommerceOperationRecord, t: (key: string, options
   }
 }
 
-function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCurrency, userId, userName, userRole, products, storages, priceBooks, priceBookItems, available, maxDiscountPercent, iqdPreference, onSaved, t }: {
+function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCurrency, userId, userName, userRole, products, storages, priceBooks, priceBookItems, agents, agentsLoaded, businessPartners, available, maxDiscountPercent, iqdPreference, onSaved, t }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   channel: OrderChannel
@@ -537,6 +594,9 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
   storages: ReturnType<typeof useStorages>
   priceBooks: ReturnType<typeof usePriceBooks>
   priceBookItems: ReturnType<typeof usePriceBookItems>
+  agents: Agent[]
+  agentsLoaded: boolean
+  businessPartners: BusinessPartner[]
   available: boolean
   maxDiscountPercent: number
   iqdPreference: 'IQD' | 'د.ع'
@@ -544,28 +604,36 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
   t: (key: string, options?: Record<string, unknown>) => string
 }) {
   const { toast } = useToast()
+  const { exchangeData, eurRates, tryRates } = useExchangeRate()
   const [buyerName, setBuyerName] = useState('')
   const [buyerPhone, setBuyerPhone] = useState('')
   const [buyerPartner, setBuyerPartner] = useState<BusinessPartner | null>(null)
   const [createCustomerOpen, setCreateCustomerOpen] = useState(false)
   const [creatingCustomer, setCreatingCustomer] = useState(false)
   const [platform, setPlatform] = useState<(typeof PLATFORM_OPTIONS)[number]>('instagram')
+  const [agentId, setAgentId] = useState('')
+  const [agentNameSnapshot, setAgentNameSnapshot] = useState('')
   const [socialHandle, setSocialHandle] = useState('')
   const [seller, setSeller] = useState(userName)
   const [city, setCity] = useState('')
+  const [otherCity, setOtherCity] = useState('')
   const [address, setAddress] = useState('')
   const [notes, setNotes] = useState('')
   const [storageId, setStorageId] = useState('')
   const [priceBookId, setPriceBookId] = useState('')
   const [lines, setLines] = useState<OrderLineDraft[]>([])
+  const [browseLineId, setBrowseLineId] = useState<string | null>(null)
   const [deliveryFee, setDeliveryFee] = useState('')
+  const [deliveryFeeTouched, setDeliveryFeeTouched] = useState(false)
   const [discount, setDiscount] = useState('')
-  const [productQuery, setProductQuery] = useState('')
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [productsModalOpen, setProductsModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [attempted, setAttempted] = useState(false)
   const [date, setDate] = useState(new Date())
+  const previewExchangeRates = useMemo(
+    () => buildOrderExchangeRatesSnapshot({ exchangeData, eurRates, tryRates }),
+    [exchangeData, eurRates, tryRates],
+  )
   const storageInventory = useInventory(workspaceId, {
     enabled: open && Boolean(workspaceId && storageId),
     storageId,
@@ -585,16 +653,35 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
   const chosenPriceBookItem = (product: Product) => channel === 'wholesale' && priceBookId
     ? priceBookItems.find((item) => item.priceBookId === priceBookId && item.productId === product.id)
     : undefined
-  const totalCurrency = lines[0]?.currency
-  const lineSubtotal = lines.reduce((sum, line) => sum + (Number(line.quantity.replace(/,/g, '')) || 0) * line.price, 0)
+  const totalCurrency = lines.find((line) => line.product)?.currency
+  const lineSubtotal = lines.reduce((sum, line) => sum + (line.product ? (Number(line.quantity.replace(/,/g, '')) || 0) * line.price : 0), 0)
   const fee = parseAmount(deliveryFee) ?? 0
+  const deliveryFeeInvalid = (deliveryFeeTouched || Boolean(city)) && parseAmount(deliveryFee) === null
   const discountAmount = parseAmount(discount) ?? 0
-  const total = Math.max(0, lineSubtotal + fee - discountAmount)
+  const feeConversion = totalCurrency
+    ? getAppliedCurrencyConversion(fee, 'iqd', totalCurrency, previewExchangeRates)
+    : null
+  const feeInOrderCurrency = fee === 0 ? 0 : feeConversion?.convertedAmount ?? null
+  const total = feeInOrderCurrency === null ? null : Math.max(0, lineSubtotal + feeInOrderCurrency - discountAmount)
+  const selectedCityOption = COMMERCE_CITY_OPTIONS.find((option) => option.value === city)
+  const selectedCity = city === 'other'
+    ? otherCity.trim()
+    : selectedCityOption ? t(selectedCityOption.key) : ''
+  const linkedAgents = useMemo(() => agents.flatMap((agent) => {
+    const linkedUserId = agent.linkedUserId?.trim()
+    if (agent.workspaceId !== workspaceId || agent.isDeleted || !linkedUserId) return []
+    const partner = businessPartners.find((candidate) => candidate.id === agent.businessPartnerId && !candidate.isDeleted)
+    const label = partner?.partnerName?.trim() || t('commerceOperations.order.agentFallback')
+    return [{ id: agent.id, label, zone: agent.zone?.trim() || '', linkedUserId }]
+  }), [agents, businessPartners, t, workspaceId])
+  const selectedLinkedAgent = linkedAgents.find((agent) => agent.id === agentId)
+  const selectedAgentAvailable = !agentId || Boolean(selectedLinkedAgent)
   const discountInvalid = lineSubtotal > 0 && discountAmount / lineSubtotal * 100 > maxDiscountPercent
   const canSave = Boolean(
     available && !saving && workspaceId && seller.trim() && buyerName.trim() && buyerPhone.trim()
-    && storageId && lines.length && lines.every((line) => Number(line.quantity.replace(/,/g, '')) > 0)
-    && !discountInvalid && totalCurrency,
+    && storageId && lines.length && lines.every((line) => line.product && line.currency && Number(line.quantity.replace(/,/g, '')) > 0)
+    && (city !== 'other' || otherCity.trim()) && !deliveryFeeInvalid && !discountInvalid && totalCurrency
+    && (!agentId || (platform === 'coach' && agentsLoaded && selectedAgentAvailable)),
   )
 
   useEffect(() => {
@@ -607,18 +694,21 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
     setBuyerPartner(null)
     setCreateCustomerOpen(false)
     setPlatform('instagram')
+    setAgentId('')
+    setAgentNameSnapshot('')
     setSocialHandle('')
     setSeller(userName)
     setCity('')
+    setOtherCity('')
     setAddress('')
     setNotes('')
     setStorageId(storages[0]?.id || '')
     setPriceBookId('')
     setLines([])
+    setBrowseLineId(null)
     setDeliveryFee('')
+    setDeliveryFeeTouched(false)
     setDiscount('')
-    setProductQuery('')
-    setSelectedProduct(null)
     setSaving(false)
     setAttempted(false)
     setDate(new Date())
@@ -629,10 +719,16 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
     onOpenChange(next)
   }
 
-  function addProduct(product: Product) {
+  function addLine() {
+    setLines((current) => [...current, {
+      id: generateId(), product: null, productQuery: '', quantity: '1', price: 0, costPrice: 0,
+    }])
+  }
+
+  function selectProduct(lineId: string, product: Product) {
     const bookItem = chosenPriceBookItem(product)
     const currency = bookItem?.currency || product.currency
-    if (lines.length && totalCurrency !== currency) {
+    if (lines.some((line) => line.id !== lineId && line.product && line.currency !== currency)) {
       toast({ title: t('commerceOperations.toast.currencyMismatch'), variant: 'destructive' })
       return
     }
@@ -641,18 +737,33 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
       toast({ title: t('commerceOperations.toast.costRequired'), description: t('commerceOperations.toast.costRequiredDetail'), variant: 'destructive' })
       return
     }
-    const existing = lines.find((line) => line.product.id === product.id)
-    setLines((current) => existing
-      ? current.map((line) => line.product.id === product.id ? { ...line, quantity: amountInput(String((Number(line.quantity.replace(/,/g, '')) || 0) + 1), true) } : line)
-      : [...current, { product, quantity: '1', price: bookItem?.price ?? product.price, costPrice: costPrice ?? 0, currency, priceBookItemId: bookItem?.id }])
-    setSelectedProduct(product)
-    setProductQuery(product.name)
+    setLines((current) => current.map((line) => line.id === lineId ? {
+      ...line,
+      product,
+      productQuery: product.name,
+      price: bookItem?.price ?? product.price,
+      costPrice: costPrice ?? 0,
+      currency,
+      priceBookItemId: bookItem?.id,
+    } : line))
   }
 
-  function unlinkProduct() {
-    if (selectedProduct) setLines((current) => current.filter((line) => line.product.id !== selectedProduct.id))
-    setSelectedProduct(null)
-    setProductQuery('')
+  function unlinkProduct(lineId: string) {
+    setLines((current) => current.map((line) => line.id === lineId ? {
+      ...line,
+      product: null,
+      productQuery: '',
+      quantity: '1',
+      price: 0,
+      costPrice: 0,
+      currency: undefined,
+      priceBookItemId: undefined,
+    } : line))
+  }
+
+  function removeLine(lineId: string) {
+    setLines((current) => current.filter((line) => line.id !== lineId))
+    if (browseLineId === lineId) setBrowseLineId(null)
   }
 
   async function createAndSelectCustomer(payload: CompactBusinessPartnerFormPayload) {
@@ -681,13 +792,42 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
     if (!canSave || !workspaceId || !totalCurrency) return
     setSaving(true)
     try {
+      let orderCreatorId = userId ?? null
+      if (channel === 'social' && platform === 'coach' && agentId) {
+        if (!agentsLoaded || !selectedAgentAvailable) {
+          toast({ title: t('commerceOperations.toast.orderFailed'), description: t('commerceOperations.validation.agentCreatorInvalid'), variant: 'destructive' })
+          return
+        }
+        try {
+          orderCreatorId = await resolveSocialOrderAgentCreator(workspaceId, agentId)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : ''
+          const description = message === 'social_order_agent_creator_requires_connection'
+            ? t('commerceOperations.validation.agentCreatorConnectionRequired')
+            : message === 'social_order_agent_creator_invalid'
+              ? t('commerceOperations.validation.agentCreatorInvalid')
+              : t('commerceOperations.toast.tryAgain')
+          toast({ title: t('commerceOperations.toast.orderFailed'), description, variant: 'destructive' })
+          return
+        }
+      }
+      let feeExchangeRates: ExchangeRateSnapshot[] = []
+      if (fee > 0 && totalCurrency !== 'iqd') {
+        try {
+          feeExchangeRates = await fetchDeliveryFeeExchangeRates(totalCurrency)
+        } catch {
+          toast({ title: t('commerceOperations.toast.orderFailed'), description: t('commerceOperations.toast.deliveryFeeRateFailed'), variant: 'destructive' })
+          return
+        }
+      }
+
       let partner = buyerPartner
       if (!partner) {
         partner = await createBusinessPartner(workspaceId, {
           partnerName: buyerName.trim(),
           phone: buyerPhone.trim(),
           address: address.trim() || undefined,
-          city: city.trim() || undefined,
+          city: selectedCity || undefined,
           defaultCurrency: totalCurrency,
           role: 'customer',
           creditLimit: 0,
@@ -696,13 +836,21 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
       const savedAt = date.toISOString()
       const subtotal = Math.round(lineSubtotal * 100) / 100
       const adjustment = fee > 0 ? createOrderAdjustment({
-        id: generateId(), type: 'addition', name: t('commerceOperations.order.deliveryFee'), currency: totalCurrency,
+        id: generateId(), type: 'addition', name: t('commerceOperations.order.deliveryFee'), currency: 'iqd',
         amount: String(fee),
-      }, totalCurrency) : null
-      const orderTotal = Math.max(0, Math.round((subtotal - discountAmount + (adjustment?.convertedAmount || 0)) * 100) / 100)
-      const items: SalesOrderItem[] = lines.map((line) => {
+      }, totalCurrency, feeExchangeRates) : null
+      if (fee > 0 && !adjustment) {
+        toast({ title: t('commerceOperations.toast.orderFailed'), description: t('commerceOperations.toast.deliveryFeeRateFailed'), variant: 'destructive' })
+        return
+      }
+      const orderTotal = Math.max(0, calculateOrderTotalWithAdjustments(
+        Math.round((subtotal - discountAmount) * 100) / 100,
+        adjustment ? [adjustment] : [],
+      ))
+      const items: SalesOrderItem[] = lines.flatMap((line) => {
+        if (!line.product || !line.currency) return []
         const quantity = Number(line.quantity.replace(/,/g, ''))
-        return {
+        return [{
           id: generateId(), productId: line.product.id, productName: line.product.name,
           productSku: line.product.sku || '', unit: line.product.unit || null, quantity,
           lineTotal: Math.round(quantity * line.price * 100) / 100,
@@ -710,7 +858,7 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
           convertedUnitPrice: line.price, settlementCurrency: line.currency,
           costPrice: line.costPrice, convertedCostPrice: line.costPrice,
           storageId, ...(priceBookId ? { priceBookId, priceBookItemId: line.priceBookItemId } : {}),
-        }
+        }]
       })
       const orderId = generateId()
       const order = await createSalesOrder(workspaceId, {
@@ -728,7 +876,7 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
         exchangeRate: null,
         exchangeRateSource: null,
         exchangeRateTimestamp: null,
-        exchangeRates: [],
+        exchangeRates: fee > 0 ? feeExchangeRates : [],
         status: 'draft',
         isPaid: false,
         paymentStatus: 'unpaid',
@@ -741,11 +889,11 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
         installmentFrequency: null,
         firstDueDate: null,
         nextDueDate: null,
-        shippingAddress: [city.trim(), address.trim()].filter(Boolean).join(', '),
+        shippingAddress: [selectedCity, address.trim()].filter(Boolean).join(', '),
         notes: notes.trim() || undefined,
         sourceChannel: 'manual',
         createdAt: savedAt,
-      }, userId ?? null, { orderId, actingUserRole: userRole })
+      }, orderCreatorId, { orderId, actingUserRole: userRole })
 
       await createCommerceOperationRecord(workspaceId, {
         recordType: 'order_details', recordDate: savedAt, title: order.orderNumber,
@@ -753,7 +901,7 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
         payload: {
           channel, platform: channel === 'social' ? platform : 'other', socialHandle: socialHandle.trim() || null,
           seller: seller.trim(), buyerName: buyerName.trim(), buyerPhone: buyerPhone.trim(),
-          city: city.trim(), address: address.trim(), deliveryFee: fee, discount: discountAmount,
+          city: selectedCity, address: address.trim(), deliveryFee: fee, deliveryFeeCurrency: 'iqd', discount: discountAmount,
           subtotal, total: orderTotal, currency: totalCurrency, orderNumber: order.orderNumber,
           fulfillmentStatus: 'received', notes: notes.trim() || null,
         },
@@ -805,59 +953,175 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
             </div>
             <div className="space-y-2"><RequiredLabel htmlFor="commerce-buyer-phone">{t('commerceOperations.fields.phone')}</RequiredLabel><Input id="commerce-buyer-phone" value={buyerPhone} onChange={(event) => setBuyerPhone(event.target.value)} placeholder={t('commerceOperations.placeholders.phone')} disabled={saving} />{attempted && !buyerPhone.trim() ? <p className="text-xs text-destructive">{t('commerceOperations.validation.phoneRequired')}</p> : null}</div>
             <div className="space-y-2"><RequiredLabel htmlFor="commerce-seller">{t('commerceOperations.fields.seller')}</RequiredLabel><Input id="commerce-seller" value={seller} onChange={(event) => setSeller(event.target.value)} placeholder={t('commerceOperations.placeholders.seller')} disabled={saving} />{attempted && !seller.trim() ? <p className="text-xs text-destructive">{t('commerceOperations.validation.sellerRequired')}</p> : null}</div>
-            {channel === 'social' ? <div className="space-y-2"><RequiredLabel>{t('commerceOperations.fields.platform')}</RequiredLabel><Select value={platform} onValueChange={(value) => setPlatform(value as typeof platform)} disabled={saving}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PLATFORM_OPTIONS.map((option) => <SelectItem key={option} value={option}>{t(`commerceOperations.platforms.${option}`)}</SelectItem>)}</SelectContent></Select></div> : <div className="space-y-2"><Label>{t('commerceOperations.fields.priceBook')}</Label><Select value={priceBookId || 'none'} onValueChange={(value) => setPriceBookId(value === 'none' ? '' : value)} disabled={saving || lines.length > 0}><SelectTrigger><SelectValue placeholder={t('commerceOperations.placeholders.priceBook')} /></SelectTrigger><SelectContent><SelectItem value="none">{t('commerceOperations.fields.catalogPrices')}</SelectItem>{priceBooks.map((book) => <SelectItem key={book.id} value={book.id}><PriceBookName name={book.name} color={book.color} /></SelectItem>)}</SelectContent></Select>{selectedBook ? <p className="text-xs text-muted-foreground">{t('commerceOperations.order.priceBookHint')}</p> : null}</div>}
+            {channel === 'social' ? <div className="space-y-2"><RequiredLabel>{t('commerceOperations.fields.platform')}</RequiredLabel><Select value={platform} onValueChange={(value) => {
+              const nextPlatform = value as typeof platform
+              setPlatform(nextPlatform)
+              if (nextPlatform !== 'coach') {
+                setAgentId('')
+                setAgentNameSnapshot('')
+              }
+            }} disabled={saving}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PLATFORM_OPTIONS.map((option) => <SelectItem key={option} value={option}>{t(`commerceOperations.platforms.${option}`)}</SelectItem>)}</SelectContent></Select></div> : <div className="space-y-2"><Label>{t('commerceOperations.fields.priceBook')}</Label><Select value={priceBookId || 'none'} onValueChange={(value) => setPriceBookId(value === 'none' ? '' : value)} disabled={saving || lines.some((line) => Boolean(line.product))}><SelectTrigger><SelectValue placeholder={t('commerceOperations.placeholders.priceBook')} /></SelectTrigger><SelectContent><SelectItem value="none">{t('commerceOperations.fields.catalogPrices')}</SelectItem>{priceBooks.map((book) => <SelectItem key={book.id} value={book.id}><PriceBookName name={book.name} color={book.color} /></SelectItem>)}</SelectContent></Select>{selectedBook ? <p className="text-xs text-muted-foreground">{t('commerceOperations.order.priceBookHint')}</p> : null}</div>}
+            {channel === 'social' && platform === 'coach' ? (
+              <div className="space-y-2">
+                <Label htmlFor="commerce-agent">{t('commerceOperations.fields.agent')}</Label>
+                <Select value={agentId || 'none'} onValueChange={(value) => {
+                  if (value === 'none') {
+                    setAgentId('')
+                    setAgentNameSnapshot('')
+                    return
+                  }
+                  const selected = linkedAgents.find((agent) => agent.id === value)
+                  if (!selected) return
+                  setAgentId(selected.id)
+                  setAgentNameSnapshot(selected.label)
+                }} disabled={saving || !agentsLoaded}>
+                  <SelectTrigger id="commerce-agent"><SelectValue placeholder={t('commerceOperations.placeholders.agent')} /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">{t('commerceOperations.order.noAgentAttribution')}</SelectItem>
+                    {agentId && !selectedLinkedAgent ? <SelectItem value={agentId} disabled>{agentNameSnapshot || t('commerceOperations.order.agentFallback')} · {t('commerceOperations.order.agentUnavailable')}</SelectItem> : null}
+                    {linkedAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.zone ? `${agent.label} · ${agent.zone}` : agent.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">{t('commerceOperations.order.agentAttributionHint')}</p>
+                {attempted && agentId && (!agentsLoaded || !selectedAgentAvailable) ? <p className="text-xs text-destructive">{t('commerceOperations.validation.agentCreatorInvalid')}</p> : null}
+              </div>
+            ) : null}
             {channel === 'social' ? <div className="space-y-2"><Label htmlFor="commerce-social-handle">{t('commerceOperations.fields.socialHandle')}</Label><Input id="commerce-social-handle" value={socialHandle} onChange={(event) => setSocialHandle(event.target.value)} placeholder={t('commerceOperations.placeholders.socialHandle')} disabled={saving} /></div> : null}
-            <div className="space-y-2"><Label htmlFor="commerce-city">{t('commerceOperations.fields.city')}</Label><Input id="commerce-city" value={city} onChange={(event) => setCity(event.target.value)} placeholder={t('commerceOperations.placeholders.city')} disabled={saving} /></div>
+            <div className="space-y-2">
+              <Label>{t('commerceOperations.fields.cityRegion')}</Label>
+              <Select value={city || 'unspecified'} onValueChange={(value) => {
+                if (value === 'unspecified') {
+                  setCity('')
+                  setOtherCity('')
+                  setDeliveryFee('')
+                  setDeliveryFeeTouched(false)
+                  return
+                }
+                setCity(value)
+                if (value === 'other') {
+                  setOtherCity('')
+                  setDeliveryFee('')
+                  setDeliveryFeeTouched(true)
+                  return
+                }
+                setOtherCity('')
+                const cityOption = COMMERCE_CITY_OPTIONS.find((option) => option.value === value)
+                setDeliveryFee(cityOption ? amountInput(String(cityOption.deliveryFeeIqd), true) : '')
+                setDeliveryFeeTouched(true)
+              }} disabled={saving}>
+                <SelectTrigger><SelectValue placeholder={t('commerceOperations.placeholders.city')} /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unspecified">{t('commerceOperations.placeholders.city')}</SelectItem>
+                  {COMMERCE_CITY_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{t(option.key)} ({amountLabel(option.deliveryFeeIqd, 'iqd', iqdPreference)})</SelectItem>)}
+                  <SelectItem value="other">{t('commerceOperations.platforms.other')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {city === 'other' ? (
+              <div className="space-y-2">
+                <RequiredLabel htmlFor="commerce-other-city">{t('commerceOperations.fields.cityRegion')}</RequiredLabel>
+                <Input id="commerce-other-city" value={otherCity} onChange={(event) => setOtherCity(event.target.value)} placeholder={t('commerceOperations.placeholders.otherCity')} disabled={saving} />
+                {attempted && !otherCity.trim() ? <p className="text-xs text-destructive">{t('commerceOperations.validation.otherCityRequired')}</p> : null}
+              </div>
+            ) : null}
             <div className="space-y-2"><Label htmlFor="commerce-address">{t('commerceOperations.fields.address')}</Label><Input id="commerce-address" value={address} onChange={(event) => setAddress(event.target.value)} placeholder={t('commerceOperations.placeholders.address')} disabled={saving} /></div>
             <div className="space-y-2"><RequiredLabel>{t('commerceOperations.fields.orderDate')}</RequiredLabel><DateTimePicker date={date} setDate={(next) => next && setDate(next)} mode="date" disabled={saving} placeholder={t('commerceOperations.fields.orderDate')} /></div>
             <div className="space-y-2"><RequiredLabel>{t('commerceOperations.fields.storage')}</RequiredLabel><Select value={storageId} onValueChange={setStorageId} disabled={saving || !storages.length}><SelectTrigger><SelectValue placeholder={t('commerceOperations.placeholders.storage')} /></SelectTrigger><SelectContent>{storages.map((storage) => <SelectItem key={storage.id} value={storage.id}>{storage.name}</SelectItem>)}</SelectContent></Select>{attempted && !storageId ? <p className="text-xs text-destructive">{t('commerceOperations.validation.storageRequired')}</p> : null}</div>
           </div>
 
-            <div className="mt-6 space-y-3 rounded-xl border p-4">
+          <div className="mt-6 space-y-3 rounded-xl border p-4">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <h3 className="flex items-center gap-2 font-semibold"><Package className="h-4 w-4 text-primary" /><RequiredLabel>{t('commerceOperations.order.items')}</RequiredLabel></h3>
-              <div className="flex w-full min-w-0 sm:w-72">
-                <ProductsViewModalTrigger
-                  onClick={() => setProductsModalOpen(true)}
-                  label={t('commerceOperations.actions.browseProducts')}
-                  className="h-10 w-10 rounded-e-none rounded-s-lg border-e-0"
-                />
-                <ProductAutocompleteInput
-                  value={productQuery}
-                  onChange={(value) => { setProductQuery(value); if (!value) setSelectedProduct(null) }}
-                  onSelectProduct={addProduct}
-                  hasSelection={Boolean(selectedProduct)}
-                  linkedLabel={t('commerceOperations.labels.linked')}
-                  placeholder={t('commerceOperations.placeholders.searchProduct')}
-                  disabled={saving || !storageId}
-                  storageId={storageId}
-                  isProductAvailable={isProductAvailable}
-                  className="min-w-0 flex-1"
-                  inputClassName={selectedProduct ? 'rounded-none' : 'rounded-s-none'}
-                />
-                {selectedProduct ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-10 w-10 shrink-0 rounded-e-lg rounded-s-none border-s-0"
-                    aria-label={t('commerceOperations.actions.unlinkProduct')}
-                    title={t('commerceOperations.actions.unlinkProduct')}
-                    disabled={saving}
-                    onClick={unlinkProduct}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                ) : null}
-              </div>
+              <Button type="button" variant="outline" className="gap-2" onClick={addLine} disabled={saving}>
+                <Plus className="h-4 w-4" />{t('commerceOperations.actions.addProductLine')}
+              </Button>
             </div>
-            {lines.length === 0 ? <p className="rounded-lg bg-muted/50 p-4 text-sm text-muted-foreground">{t('commerceOperations.order.noItems')}</p> : <div className="space-y-2">{lines.map((line) => <div key={line.product.id} className="grid grid-cols-1 items-center gap-2 rounded-lg bg-muted/40 p-3 sm:grid-cols-[minmax(0,1fr)_6.5rem_auto]"><div className="min-w-0"><p className="truncate font-medium">{line.product.name}</p><p className="text-xs text-muted-foreground">{line.product.sku || t('commerceOperations.order.noSku')} · {amountLabel(line.price, line.currency, iqdPreference)}</p></div><Input aria-label={t('commerceOperations.fields.quantity')} inputMode="numeric" value={line.quantity} placeholder="0" onChange={(event) => setLines((current) => current.map((entry) => entry.product.id === line.product.id ? { ...entry, quantity: amountInput(event.target.value, true) } : entry))} disabled={saving} className="text-end" /><div className="flex items-center gap-2"><span className="min-w-20 text-end text-sm font-semibold">{amountLabel(line.price * (Number(line.quantity.replace(/,/g, '')) || 0), line.currency, iqdPreference)}</span><Button type="button" size="icon" variant="ghost" aria-label={t('commerceOperations.actions.removeProduct')} disabled={saving} onClick={() => { setLines((current) => current.filter((entry) => entry.product.id !== line.product.id)); if (selectedProduct?.id === line.product.id) { setSelectedProduct(null); setProductQuery('') } }}><Trash2 className="h-4 w-4 text-destructive" /></Button></div></div>)}</div>}
+            {lines.length === 0 ? <p className="rounded-lg bg-muted/50 p-4 text-sm text-muted-foreground">{t('commerceOperations.order.noItems')}</p> : (
+              <div className="space-y-3">
+                {lines.map((line, index) => {
+                  const quantity = Number(line.quantity.replace(/,/g, '')) || 0
+                  return (
+                    <div key={line.id} className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium">{t('commerceOperations.order.itemLine', { number: index + 1 })}</p>
+                        <Button type="button" size="icon" variant="ghost" aria-label={t('commerceOperations.actions.removeProduct')} title={t('commerceOperations.actions.removeProduct')} disabled={saving} onClick={() => removeLine(line.id)}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
+                        <div className="min-w-0 space-y-2">
+                          <RequiredLabel>{t('commerceOperations.fields.product')}</RequiredLabel>
+                          <div className="flex min-w-0">
+                            <ProductsViewModalTrigger
+                              onClick={() => { setBrowseLineId(line.id); setProductsModalOpen(true) }}
+                              label={t('commerceOperations.actions.browseProducts')}
+                              className="h-10 w-10 shrink-0 rounded-e-none rounded-s-lg border-e-0"
+                            />
+                            <ProductAutocompleteInput
+                              value={line.productQuery}
+                              onChange={(value) => setLines((current) => current.map((entry) => entry.id === line.id ? {
+                                ...entry, product: null, productQuery: value, quantity: '1', price: 0, costPrice: 0, currency: undefined, priceBookItemId: undefined,
+                              } : entry))}
+                              onSelectProduct={(product) => selectProduct(line.id, product)}
+                              hasSelection={Boolean(line.product)}
+                              linkedLabel={t('commerceOperations.labels.linked')}
+                              placeholder={t('commerceOperations.placeholders.searchProduct')}
+                              disabled={saving || !storageId}
+                              storageId={storageId}
+                              isProductAvailable={isProductAvailable}
+                              className="min-w-0 flex-1"
+                              inputClassName={line.product ? 'rounded-none' : 'rounded-s-none'}
+                            />
+                            {line.product ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-10 w-10 shrink-0 rounded-e-lg rounded-s-none border-s-0"
+                                aria-label={t('commerceOperations.actions.unlinkProduct')}
+                                title={t('commerceOperations.actions.unlinkProduct')}
+                                disabled={saving}
+                                onClick={() => unlinkProduct(line.id)}
+                              >
+                                <Unlink className="h-4 w-4" />
+                              </Button>
+                            ) : null}
+                          </div>
+                          {attempted && !line.product ? <p className="text-xs text-destructive">{t('commerceOperations.validation.productRequired')}</p> : null}
+                        </div>
+                        <div className="space-y-2">
+                          <RequiredLabel htmlFor={`commerce-line-quantity-${line.id}`}>{t('commerceOperations.fields.quantity')}</RequiredLabel>
+                          <Input id={`commerce-line-quantity-${line.id}`} aria-label={t('commerceOperations.fields.quantity')} inputMode="numeric" value={line.quantity} placeholder="0" onChange={(event) => setLines((current) => current.map((entry) => entry.id === line.id ? { ...entry, quantity: amountInput(event.target.value, true) } : entry))} disabled={saving || !line.product} className="text-end" />
+                        </div>
+                      </div>
+                      {line.product && line.currency ? (
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-sm">
+                          <p className="min-w-0 truncate text-xs text-muted-foreground">{line.product.sku || t('commerceOperations.order.noSku')} · {amountLabel(line.price, line.currency, iqdPreference)} {t('commerceOperations.order.each')}</p>
+                          <span className="font-semibold">{amountLabel(line.price * quantity, line.currency, iqdPreference)}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
             {attempted && !lines.length ? <p className="text-xs text-destructive">{t('commerceOperations.validation.productRequired')}</p> : null}
             {totalCurrency ? <p className="text-xs text-muted-foreground">{t('commerceOperations.order.currencyNote', { currency: totalCurrency.toUpperCase() })}</p> : null}
           </div>
 
-          <div className="mt-4 grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="commerce-delivery-fee">{t('commerceOperations.order.deliveryFee')}</Label><Input id="commerce-delivery-fee" inputMode="decimal" value={deliveryFee} placeholder="0" onChange={(event) => setDeliveryFee(amountInput(event.target.value))} disabled={saving} /></div><div className="space-y-2"><Label htmlFor="commerce-discount">{t('commerceOperations.order.discount')}</Label><Input id="commerce-discount" inputMode="decimal" value={discount} placeholder="0" onChange={(event) => setDiscount(amountInput(event.target.value))} disabled={saving} />{discountInvalid ? <p className="text-xs text-destructive">{t('commerceOperations.validation.discountLimit', { percent: maxDiscountPercent })}</p> : null}</div><div className="space-y-2 sm:col-span-2"><Label htmlFor="commerce-order-notes">{t('commerceOperations.fields.notes')}</Label><Textarea id="commerce-order-notes" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} disabled={saving} /></div></div>
-          <div className="mt-4 rounded-xl bg-primary/5 p-4"><div className="flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.subtotal')}</span><span>{totalCurrency ? amountLabel(lineSubtotal, totalCurrency, iqdPreference) : '—'}</span></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.deliveryFee')}</span><span>{totalCurrency ? amountLabel(fee, totalCurrency, iqdPreference) : '—'}</span></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.discount')}</span><span>{totalCurrency ? amountLabel(discountAmount, totalCurrency, iqdPreference) : '—'}</span></div><div className="mt-3 flex justify-between gap-3 border-t pt-3 text-lg font-bold"><span>{t('commerceOperations.order.total')}</span><span>{totalCurrency ? amountLabel(total, totalCurrency, iqdPreference) : '—'}</span></div></div>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              {deliveryFeeTouched || city
+                ? <RequiredLabel htmlFor="commerce-delivery-fee">{t('commerceOperations.order.deliveryFee')}</RequiredLabel>
+                : <Label htmlFor="commerce-delivery-fee">{t('commerceOperations.order.deliveryFee')}</Label>}
+              <Input id="commerce-delivery-fee" inputMode="numeric" value={deliveryFee} placeholder="0" onChange={(event) => { setDeliveryFeeTouched(true); setDeliveryFee(amountInput(event.target.value, true)) }} disabled={saving} />
+              {attempted && deliveryFeeInvalid ? <p className="text-xs text-destructive">{t('commerceOperations.validation.amountRequired')}</p> : null}
+              <p className="text-xs text-muted-foreground">{t('commerceOperations.order.deliveryFeeHint')}</p>
+            </div>
+            <div className="space-y-2"><Label htmlFor="commerce-discount">{t('commerceOperations.order.discount')}</Label><Input id="commerce-discount" inputMode="decimal" value={discount} placeholder="0" onChange={(event) => setDiscount(amountInput(event.target.value))} disabled={saving} />{discountInvalid ? <p className="text-xs text-destructive">{t('commerceOperations.validation.discountLimit', { percent: maxDiscountPercent })}</p> : null}</div>
+            <div className="space-y-2 sm:col-span-2"><Label htmlFor="commerce-order-notes">{t('commerceOperations.fields.notes')}</Label><Textarea id="commerce-order-notes" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} disabled={saving} /></div>
+          </div>
+          <div className="mt-4 rounded-xl bg-primary/5 p-4"><div className="flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.subtotal')}</span><span>{totalCurrency ? amountLabel(lineSubtotal, totalCurrency, iqdPreference) : '—'}</span></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.deliveryFee')}</span><span>{amountLabel(fee, 'iqd', iqdPreference)}</span></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.discount')}</span><span>{totalCurrency ? amountLabel(discountAmount, totalCurrency, iqdPreference) : '—'}</span></div><div className="mt-3 flex justify-between gap-3 border-t pt-3 text-lg font-bold"><span>{t('commerceOperations.order.total')}</span><span>{totalCurrency && total !== null ? amountLabel(total, totalCurrency, iqdPreference) : '—'}</span></div></div>
           <p className="mt-3 text-xs text-muted-foreground">{t('commerceOperations.order.noPaymentAtIntake')}</p>
         </AppDialogBody>
         <AppDialogFooter><Button type="button" variant="outline" disabled={saving} onClick={() => close(false)}>{t('common.cancel')}</Button><Button type="button" disabled={!canSave} onClick={() => void save()}>{saving ? t('commerceOperations.actions.saving') : t('commerceOperations.actions.saveUnpaidOrder')}</Button></AppDialogFooter>
@@ -865,7 +1129,7 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
       <ProductsViewModal
         key={storageId}
         open={productsModalOpen}
-        onOpenChange={setProductsModalOpen}
+        onOpenChange={(nextOpen) => { setProductsModalOpen(nextOpen); if (!nextOpen) setBrowseLineId(null) }}
         products={products}
         storages={storages}
         showStorageSelector={false}
@@ -875,7 +1139,7 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
           quantity: stockByProductId.get(product.id) || 0,
           defaultValue: `Available: ${stockByProductId.get(product.id) || 0}`,
         })}
-        onSelectProduct={(product) => addProduct(product)}
+        onSelectProduct={(product) => { if (browseLineId) selectProduct(browseLineId, product) }}
         labels={{
           title: t('commerceOperations.actions.browseProducts'),
           description: t('commerceOperations.order.productBrowseHint'),

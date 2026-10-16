@@ -15,7 +15,7 @@
     },
     "actions": {
       "newOrder": "New order", "products": "Products", "openOrder": "Open order", "addRecord": "Add record", "openStockAdjustments": "Open stock adjustments",
-      "addCoach": "Add coach", "openAgents": "Open agents", "openCommissionLedger": "Commission ledger", "browseProducts": "Browse products",
+      "addCoach": "Add coach", "openAgents": "Open agents", "openCommissionLedger": "Commission ledger", "browseProducts": "Browse products", "addProductLine": "Add product line",
       "removeProduct": "Remove product", "unlinkProduct": "Unlink product", "unlinkBuyer": "Unlink buyer", "unlinkCoach": "Unlink coach", "editRecord": "Edit record",
       "saveUnpaidOrder": "Save unpaid order", "saveRecord": "Save record", "updateRecord": "Update record", "saveCoach": "Save coach", "saving": "Saving…"
     },
@@ -23,20 +23,31 @@
     "recordTypes": { "order_details": "Order intake", "ad_spend": "Ad spend", "dm_funnel": "Message funnel", "city_market": "City market", "competitor": "Competitor", "coach_profile": "Coach profile" },
     "fields": {
       "buyer": "Buyer", "seller": "Seller", "phone": "Phone", "socialHandle": "Social handle", "city": "City", "address": "Address",
+      "cityRegion": "City / region",
       "orderDate": "Order date", "date": "Date", "storage": "Storage", "priceBook": "Price book", "catalogPrices": "Use product prices",
-      "quantity": "Quantity", "currency": "Currency", "platform": "Platform", "notes": "Notes"
+      "quantity": "Quantity", "product": "Product", "currency": "Currency", "platform": "Platform", "agent": "Agent", "notes": "Notes"
     },
     "placeholders": {
       "findBuyer": "Search or enter buyer name", "seller": "Staff member", "phone": "Phone number", "socialHandle": "@username",
-      "city": "City", "address": "Delivery address", "storage": "Choose storage", "priceBook": "Choose a price book",
-      "searchProduct": "Search products"
+      "city": "Choose a city or region", "otherCity": "Enter city or region", "address": "Delivery address", "storage": "Choose storage", "priceBook": "Choose a price book",
+      "searchProduct": "Search products", "agent": "Choose an agent"
+    },
+    "cities": {
+      "erbilSoranDistricts": "Erbil and Soran districts", "sulaymaniyahHalabjaDistricts": "Sulaymaniyah and Halabja districts",
+      "duhokZakhoAkreDistricts": "Duhok, Zakho, and Akre districts", "erbil": "Erbil", "sulaymaniyah": "Sulaymaniyah", "duhok": "Duhok",
+      "kirkuk": "Kirkuk", "halabja": "Halabja", "baghdad": "Baghdad", "basra": "Basra", "mosulNineveh": "Mosul and Nineveh",
+      "najaf": "Najaf", "karbala": "Karbala", "nasiriyahDhiQar": "Nasiriyah and Dhi Qar", "maysan": "Maysan", "diwaniyah": "Diwaniyah",
+      "samawah": "Samawah", "diyala": "Diyala", "kutWasit": "Kut and Wasit", "anbarRamadi": "Anbar and Ramadi", "salahAlDin": "Salah al-Din",
+      "samarra": "Samarra", "tikrit": "Tikrit", "fallujah": "Fallujah", "babilHilla": "Babil and Hilla"
     },
     "labels": { "linked": "Linked" },
     "order": {
-      "socialTitle": "New social order", "wholesaleTitle": "New wholesale order", "items": "Products", "noItems": "Add at least one product to this order.",
-      "noSku": "No SKU", "currencyNote": "All order items use {{currency}}.", "deliveryFee": "Delivery fee", "discount": "Discount",
+      "socialTitle": "New social order", "wholesaleTitle": "New wholesale order", "items": "Products", "itemLine": "Item {{number}}", "each": "each", "noItems": "Add at least one product to this order.",
+      "noSku": "No SKU", "currencyNote": "All order items use {{currency}}.", "deliveryFee": "Delivery fee (IQD)", "deliveryFeeHint": "The fee fills from the selected city and can be edited. Enter a fee manually for Other.", "discount": "Discount",
       "subtotal": "Subtotal", "total": "Total", "noPaymentAtIntake": "This creates an unpaid order. Record payment later through the standard order payment flow.",
-      "productBrowseHint": "Choose a product and storage location.", "priceBookHint": "Wholesale prices use the selected price book."
+      "productBrowseHint": "Choose a product and storage location.", "priceBookHint": "Wholesale prices use the selected price book.",
+      "noAgentAttribution": "No agent attribution", "agentFallback": "Agent", "agentUnavailable": "unavailable",
+      "agentAttributionHint": "If selected, the order's Created By uses the agent's linked user account. Leave this empty to use your account."
     },
     "data": {
       "title": "Data center", "subtitle": "Record campaign, market, and competitor observations manually. No external accounts are connected.",
@@ -63,13 +74,15 @@
       "orderSaved": "Unpaid order saved", "orderSavedDetail": "Open the order to continue fulfillment and collect payment later.", "orderFailed": "Could not save order",
       "recordSaved": "Record saved", "recordFailed": "Could not save record", "coachSaved": "Coach profile linked", "coachFailed": "Could not save coach profile",
       "costRequired": "Product cost is missing", "costRequiredDetail": "Add a product cost or a cost to the selected price book before including this product in an order.",
-      "currencyMismatch": "Choose products that use the same currency.", "tryAgain": "Please try again."
+      "currencyMismatch": "Choose products that use the same currency.", "deliveryFeeRateFailed": "The delivery fee could not be converted to the order currency. Check exchange rates and try again.", "tryAgain": "Please try again."
     },
     "validation": {
       "buyerRequired": "Enter or select a buyer.", "phoneRequired": "Enter a buyer phone number.", "sellerRequired": "Enter the staff member taking the order.",
       "storageRequired": "Choose a storage location.", "productRequired": "Add at least one product.", "discountLimit": "Discount cannot exceed {{percent}}%.",
-      "amountRequired": "Enter a valid amount.", "cityRequired": "Enter a city.", "nameRequired": "Enter a name.", "coachRequired": "Select an existing agent.",
-      "coachExists": "This agent is already linked as a coach."
+      "amountRequired": "Enter a valid amount.", "cityRequired": "Enter a city.", "otherCityRequired": "Enter the city or region.", "nameRequired": "Enter a name.", "coachRequired": "Select an existing agent.",
+      "coachExists": "This agent is already linked as a coach.",
+      "agentCreatorInvalid": "This agent no longer has a valid linked user. Choose another agent or clear the selection.",
+      "agentCreatorConnectionRequired": "Connect to verify the selected agent before creating this order."
     },
     "permissions": { "access": "Access Commerce Operations", "accessDescription": "View social and wholesale order intake, market records, and coach performance." }
   },

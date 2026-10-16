@@ -15,7 +15,7 @@
     },
     "actions": {
       "newOrder": "طلب جديد", "products": "المنتجات", "openOrder": "فتح الطلب", "addRecord": "إضافة سجل", "openStockAdjustments": "فتح تسويات المخزون",
-      "addCoach": "إضافة مدرب", "openAgents": "فتح الوكلاء", "openCommissionLedger": "دفتر العمولات", "browseProducts": "استعراض المنتجات",
+      "addCoach": "إضافة مدرب", "openAgents": "فتح الوكلاء", "openCommissionLedger": "دفتر العمولات", "browseProducts": "استعراض المنتجات", "addProductLine": "إضافة سطر منتج",
       "removeProduct": "إزالة المنتج", "unlinkProduct": "إلغاء ربط المنتج", "unlinkBuyer": "إلغاء ربط العميل", "unlinkCoach": "إلغاء ربط المدرب", "editRecord": "تعديل السجل",
       "saveUnpaidOrder": "حفظ طلب غير مدفوع", "saveRecord": "حفظ السجل", "updateRecord": "تحديث السجل", "saveCoach": "حفظ المدرب", "saving": "جارٍ الحفظ…"
     },
@@ -23,19 +23,30 @@
     "recordTypes": { "order_details": "استقبال طلب", "ad_spend": "إنفاق إعلاني", "dm_funnel": "مسار الرسائل", "city_market": "سوق المدينة", "competitor": "منافس", "coach_profile": "ملف المدرب" },
     "fields": {
       "buyer": "المشتري", "seller": "الموظف", "phone": "الهاتف", "socialHandle": "اسم الحساب الاجتماعي", "city": "المدينة", "address": "العنوان",
+      "cityRegion": "المدينة / المنطقة",
       "orderDate": "تاريخ الطلب", "date": "التاريخ", "storage": "المخزن", "priceBook": "قائمة الأسعار", "catalogPrices": "استخدام أسعار المنتجات",
-      "quantity": "الكمية", "currency": "العملة", "platform": "المنصة", "notes": "ملاحظات"
+      "quantity": "الكمية", "product": "المنتج", "currency": "العملة", "platform": "المنصة", "agent": "الوكيل", "notes": "ملاحظات"
     },
     "placeholders": {
       "findBuyer": "ابحث عن المشتري أو أدخل اسمه", "seller": "الموظف", "phone": "رقم الهاتف", "socialHandle": "@اسم_المستخدم",
-      "city": "المدينة", "address": "عنوان التوصيل", "storage": "اختر المخزن", "priceBook": "اختر قائمة أسعار", "searchProduct": "ابحث عن المنتجات"
+      "city": "اختر مدينة أو منطقة", "otherCity": "أدخل المدينة أو المنطقة", "address": "عنوان التوصيل", "storage": "اختر المخزن", "priceBook": "اختر قائمة أسعار", "searchProduct": "ابحث عن المنتجات", "agent": "اختر وكيلاً"
+    },
+    "cities": {
+      "erbilSoranDistricts": "أقضية ونواحي أربيل وسوران", "sulaymaniyahHalabjaDistricts": "أقضية ونواحي السليمانية وحلبجة",
+      "duhokZakhoAkreDistricts": "أقضية ونواحي دهوك وزاخو وعقرة", "erbil": "أربيل", "sulaymaniyah": "السليمانية", "duhok": "دهوك",
+      "kirkuk": "كركوك", "halabja": "حلبجة الشهيدة", "baghdad": "بغداد", "basra": "البصرة", "mosulNineveh": "الموصل ونينوى",
+      "najaf": "النجف", "karbala": "كربلاء", "nasiriyahDhiQar": "الناصرية وذي قار", "maysan": "ميسان", "diwaniyah": "الديوانية",
+      "samawah": "السماوة", "diyala": "ديالى", "kutWasit": "الكوت وواسط", "anbarRamadi": "الأنبار والرمادي", "salahAlDin": "صلاح الدين",
+      "samarra": "سامراء", "tikrit": "تكريت", "fallujah": "الفلوجة", "babilHilla": "بابل والحلة"
     },
     "labels": { "linked": "مرتبط" },
     "order": {
-      "socialTitle": "طلب تواصل اجتماعي جديد", "wholesaleTitle": "طلب جملة جديد", "items": "المنتجات", "noItems": "أضف منتجاً واحداً على الأقل إلى الطلب.",
-      "noSku": "لا يوجد رمز منتج", "currencyNote": "تستخدم جميع عناصر الطلب عملة {{currency}}.", "deliveryFee": "رسوم التوصيل", "discount": "الخصم",
+      "socialTitle": "طلب تواصل اجتماعي جديد", "wholesaleTitle": "طلب جملة جديد", "items": "المنتجات", "itemLine": "العنصر {{number}}", "each": "للوحدة", "noItems": "أضف منتجاً واحداً على الأقل إلى الطلب.",
+      "noSku": "لا يوجد رمز منتج", "currencyNote": "تستخدم جميع عناصر الطلب عملة {{currency}}.", "deliveryFee": "رسوم التوصيل (د.ع)", "deliveryFeeHint": "تُملأ الرسوم حسب المدينة المختارة ويمكنك تعديلها. أدخل الرسوم يدوياً للخيارات الأخرى.", "discount": "الخصم",
       "subtotal": "المجموع الفرعي", "total": "الإجمالي", "noPaymentAtIntake": "ينشئ هذا طلباً غير مدفوع. سجّل الدفع لاحقاً من خلال مسار دفع الطلب المعتاد.",
-      "productBrowseHint": "اختر منتجاً وموقع التخزين.", "priceBookHint": "تُستخدم قائمة الأسعار المحددة لأسعار الجملة."
+      "productBrowseHint": "اختر منتجاً وموقع التخزين.", "priceBookHint": "تُستخدم قائمة الأسعار المحددة لأسعار الجملة.",
+      "noAgentAttribution": "بدون إسناد إلى وكيل", "agentFallback": "وكيل", "agentUnavailable": "غير متاح",
+      "agentAttributionHint": "عند اختيار وكيل، سيُستخدم حساب المستخدم المرتبط به كمنشئ الطلب. اترك الحقل فارغاً لاستخدام حسابك."
     },
     "data": {
       "title": "مركز البيانات", "subtitle": "سجّل يدوياً ملاحظات الحملات والسوق والمنافسين. لا توجد حسابات خارجية مرتبطة.",
@@ -62,13 +73,15 @@
       "orderSaved": "تم حفظ الطلب غير المدفوع", "orderSavedDetail": "افتح الطلب لمتابعة التنفيذ وتحصيل الدفعة لاحقاً.", "orderFailed": "تعذر حفظ الطلب",
       "recordSaved": "تم حفظ السجل", "recordFailed": "تعذر حفظ السجل", "coachSaved": "تم ربط ملف المدرب", "coachFailed": "تعذر حفظ ملف المدرب",
       "costRequired": "تكلفة المنتج غير محددة", "costRequiredDetail": "أضف تكلفة للمنتج أو لقائمة الأسعار المحددة قبل إدراجه في الطلب.",
-      "currencyMismatch": "اختر منتجات تستخدم العملة نفسها.", "tryAgain": "يرجى المحاولة مرة أخرى."
+      "currencyMismatch": "اختر منتجات تستخدم العملة نفسها.", "deliveryFeeRateFailed": "تعذر تحويل رسوم التوصيل إلى عملة الطلب. تحقق من أسعار الصرف وحاول مرة أخرى.", "tryAgain": "يرجى المحاولة مرة أخرى."
     },
     "validation": {
       "buyerRequired": "أدخل مشترياً أو اختره.", "phoneRequired": "أدخل رقم هاتف المشتري.", "sellerRequired": "أدخل اسم الموظف الذي يستلم الطلب.",
       "storageRequired": "اختر موقع التخزين.", "productRequired": "أضف منتجاً واحداً على الأقل.", "discountLimit": "يجب ألا يتجاوز الخصم {{percent}}%.",
-      "amountRequired": "أدخل مبلغاً صالحاً.", "cityRequired": "أدخل المدينة.", "nameRequired": "أدخل اسماً.", "coachRequired": "اختر وكيلاً موجوداً.",
-      "coachExists": "هذا الوكيل مرتبط بالفعل كمدرب."
+      "amountRequired": "أدخل مبلغاً صالحاً.", "cityRequired": "أدخل المدينة.", "otherCityRequired": "أدخل المدينة أو المنطقة.", "nameRequired": "أدخل اسماً.", "coachRequired": "اختر وكيلاً موجوداً.",
+      "coachExists": "هذا الوكيل مرتبط بالفعل كمدرب.",
+      "agentCreatorInvalid": "لم يعد لهذا الوكيل مستخدم مرتبط صالح. اختر وكيلاً آخر أو أزل الاختيار.",
+      "agentCreatorConnectionRequired": "اتصل بالإنترنت للتحقق من الوكيل المحدد قبل إنشاء الطلب."
     },
     "permissions": { "access": "الوصول إلى إدارة التجارة", "accessDescription": "عرض استقبال الطلبات والسجلات السوقية وأداء المدربين." }
   },

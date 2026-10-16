@@ -3766,6 +3766,48 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, plateNumber, make, model, category, status, currency, updatedAt, isDeleted, syncStatus, [workspaceId+plateNumber], [workspaceId+plateNumber+id], [workspaceId+make], [workspaceId+model], [workspaceId+category], [workspaceId+status]'
     })
 
+    // The sales_orders source_channel constraint only accepts manual and
+    // marketplace. Normalize the short-lived social value from cached orders
+    // and queued mutations so failed orders can be retried after upgrade.
+    this.version(153).upgrade(async (tx) => {
+      const normalizeSocialSourceChannel = (value: unknown) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+        const payload = { ...(value as Record<string, unknown>) }
+        let changed = false
+        if (payload.sourceChannel === 'social') {
+          payload.sourceChannel = 'manual'
+          changed = true
+        }
+        if (payload.source_channel === 'social') {
+          payload.source_channel = 'manual'
+          changed = true
+        }
+        return changed ? payload : null
+      }
+
+      const orders = (await tx.table('sales_orders').toArray()) as Array<Record<string, unknown>>
+      const normalizedOrders = orders.flatMap((order) => {
+        const normalized = normalizeSocialSourceChannel(order)
+        return normalized ? [{ ...order, ...normalized }] : []
+      })
+
+      const normalizeQueuedPayloads = async (tableName: 'offline_mutations' | 'syncQueue', field: 'payload' | 'data') => {
+        const rows = (await tx.table(tableName).toArray()) as Array<Record<string, unknown>>
+        const normalizedRows = rows.flatMap((row) => {
+          if (row.entityType !== 'sales_orders') return []
+          const normalized = normalizeSocialSourceChannel(row[field])
+          return normalized ? [{ ...row, [field]: normalized }] : []
+        })
+        if (normalizedRows.length) await tx.table(tableName).bulkPut(normalizedRows)
+      }
+
+      await Promise.all([
+        normalizedOrders.length ? tx.table('sales_orders').bulkPut(normalizedOrders) : Promise.resolve(),
+        normalizeQueuedPayloads('offline_mutations', 'payload'),
+        normalizeQueuedPayloads('syncQueue', 'data')
+      ])
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

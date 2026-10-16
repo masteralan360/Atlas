@@ -136,6 +136,11 @@ export function prepareRemoteMutationPayload(
   }
 
   if (entityType === "sales_orders") {
+    // A short-lived client value was never accepted by the sales_orders
+    // source_channel constraint. Repair queued payloads before sending them.
+    if (remotePayload.source_channel === "social") {
+      remotePayload.source_channel = "manual";
+    }
     removeServicesVirtualStorageFromOrderItems(remotePayload);
   }
 

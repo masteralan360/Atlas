@@ -338,6 +338,10 @@ export function sanitizeSyncPayload(
         // purchase orders and can survive in stale local rows or queued data.
         delete payload.destinationStorageId
         delete payload.destination_storage_id
+        // The remote sales_orders constraint only accepts manual or marketplace.
+        // Normalize the short-lived social value from older local clients.
+        if (payload.sourceChannel === 'social') payload.sourceChannel = 'manual'
+        if (payload.source_channel === 'social') payload.source_channel = 'manual'
     }
 
     const snakePayload = Object.fromEntries(
@@ -386,7 +390,13 @@ async function queueOfflineUpserts(
     workspaceId: string,
     options: Pick<SyncUpsertOptions, 'omitFields'> = {}
 ) {
-    await Promise.all(entities.map((entity) =>
+    const queuedEntities = tableName === 'sales_orders'
+        ? entities.map((entity) => entity.sourceChannel === 'social' || entity.source_channel === 'social'
+            ? { ...entity, sourceChannel: 'manual', source_channel: 'manual' }
+            : entity)
+        : entities
+
+    await Promise.all(queuedEntities.map((entity) =>
         addToOfflineMutations(
             tableName,
             entity.id,
@@ -3162,6 +3172,48 @@ async function buildSalesOrderEntity(
     await assertOrderStorageAccess(order)
 
     return order
+}
+
+/** Resolve the creator for a selected Coach platform agent against authoritative workspace data. */
+export async function resolveSocialOrderAgentCreator(workspaceId: string, agentId: string): Promise<string> {
+    const agent = await db.agents.get(agentId)
+    const linkedUserId = agent?.linkedUserId?.trim()
+    if (!agent || agent.workspaceId !== workspaceId || agent.isDeleted || !linkedUserId) {
+        throw new Error('social_order_agent_creator_invalid')
+    }
+
+    if (isLocalWorkspaceMode(workspaceId)) {
+        const [linkedUser, linkedProfile] = await Promise.all([
+            db.users.get(linkedUserId),
+            db.profiles.get(linkedUserId)
+        ])
+        const isLinkedWorkspaceUser = Boolean(
+            (linkedUser && linkedUser.workspaceId === workspaceId && !linkedUser.isDeleted)
+            || (linkedProfile && linkedProfile.workspaceId === workspaceId)
+        )
+        if (!isLinkedWorkspaceUser) throw new Error('social_order_agent_creator_invalid')
+        return linkedUserId
+    }
+
+    if (!isOnline(workspaceId)) {
+        throw new Error('social_order_agent_creator_requires_connection')
+    }
+
+    const { data, error } = await runMutation('sales_orders.social_creator.resolve', () => supabase.rpc(
+        'resolve_social_order_agent_creator',
+        { p_workspace_id: workspaceId, p_agent_id: agentId }
+    ))
+    if (error) {
+        const errorText = [error.message, error.details, error.hint].filter(Boolean).join(' ')
+        if (errorText.includes('social_order_agent_creator_invalid')) {
+            throw new Error('social_order_agent_creator_invalid')
+        }
+        throw normalizeSupabaseActionError(error)
+    }
+    if (typeof data !== 'string' || !data.trim()) {
+        throw new Error('social_order_agent_creator_invalid')
+    }
+    return data.trim()
 }
 
 export async function createSalesOrder(
