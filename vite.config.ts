@@ -23,6 +23,33 @@ function getGitInfo() {
     }
 }
 
+function atlasDevStartupDarkModePlugin(enabled: boolean) {
+    return {
+        name: 'atlas-dev-startup-dark-mode',
+        transformIndexHtml: {
+            order: 'post' as const,
+            handler(html: string) {
+                if (!enabled) return html
+
+                const startupTheme = `
+<style id="atlas-dev-startup-dark-mode">
+  html, body { background: #020617; }
+  #atlas-shell-startup { background: #020617; color: #f8fafc; color-scheme: dark; }
+  #atlas-shell-startup .atlas-shell-startup-title { color: #f8fafc; }
+  #atlas-shell-startup .atlas-shell-startup-status { color: #cbd5e1; }
+  #atlas-shell-startup .atlas-shell-startup-progress { background: #334155; }
+  #atlas-shell-startup .atlas-shell-startup-detail { color: #94a3b8; }
+  #atlas-shell-retry { background: #475569; cursor: pointer; }
+  #atlas-shell-retry:hover { background: #334155; }
+  #atlas-shell-retry:focus-visible { outline: 2px solid #5eead4; outline-offset: 3px; }
+</style>`
+
+                return html.replace('</body>', `${startupTheme}\n</body>`)
+            }
+        }
+    }
+}
+
 export default defineConfig(({ mode, command, isPreview }) => {
     const devTestingEnabled = command === 'serve' && !isPreview
     const isTauriBuild = Boolean(process.env.TAURI_ENV_PLATFORM)
@@ -36,6 +63,7 @@ export default defineConfig(({ mode, command, isPreview }) => {
         base: isTauriBuild ? './' : '/',
         plugins: [
             react(),
+            atlasDevStartupDarkModePlugin(devTestingEnabled),
             atlasDevTestingPlugin(devTestingEnabled),
             cloudHybridPlaywrightPlugin(devTestingEnabled),
             VitePWA({

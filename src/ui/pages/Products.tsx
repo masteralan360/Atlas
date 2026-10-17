@@ -159,7 +159,7 @@ export const DEFAULT_PRODUCT_FILTERS: ProductFilterState = {
     category: [],
     storage: [],
     stockStorage: [],
-    stockQuantitySelectedStorageOnly: false,
+    stockQuantitySelectedStorageOnly: true,
     currency: [],
     minPrice: '',
     maxPrice: '',
@@ -1184,30 +1184,6 @@ export function Products() {
         return result
     }, [catalogProducts, productBarcodeValuesByProductId, deferredSearch, getCategoryName, getStorageName, filters, catalogType, hasFeature, isProductsExportOpen, isRemoteCatalogBrowse, catalogActionProducts, localStockProductIds, useRemoteCatalogPage])
 
-    useEffect(() => {
-        if (
-            !filters.stockQuantitySelectedStorageOnly
-            || filters.stockStorage.length === 0
-            || isFilterDialogOpen
-            || !useRemoteCatalogPage
-            || !productCatalogPage.isReady
-            || productCatalogPage.error
-            || productCatalogPage.hasMultiStorageStock
-        ) return
-
-        setFilters((current) => current.stockQuantitySelectedStorageOnly
-            ? { ...current, stockQuantitySelectedStorageOnly: false }
-            : current)
-    }, [
-        filters.stockQuantitySelectedStorageOnly,
-        filters.stockStorage.length,
-        isFilterDialogOpen,
-        productCatalogPage.error,
-        productCatalogPage.hasMultiStorageStock,
-        productCatalogPage.isReady,
-        useRemoteCatalogPage
-    ])
-
     const productById = useMemo(
         () => new Map([...products, ...catalogSupportProducts, ...catalogProducts].map((product) => [product.id, product] as const)),
         [catalogProducts, catalogSupportProducts, products]
@@ -1439,11 +1415,19 @@ export function Products() {
 
     const activeFilterCount = countActiveProductFilters(filters)
 
+    const isAppliedStockStorageSelection = draftFilters.stockStorage.length === filters.stockStorage.length
+        && draftFilters.stockStorage.every((storageId) => filters.stockStorage.includes(storageId))
+    const hasApplicableStockQuantityDisplayMode = draftHasMultiStorageStock || (
+        filters.stockQuantitySelectedStorageOnly && isAppliedStockStorageSelection
+    )
+    const showStockQuantitySelectedStorageOnly = draftFilters.stockStorage.length > 0
+        && hasApplicableStockQuantityDisplayMode
+
     const handleApplyFilters = () => {
         setFilters({
             ...draftFilters,
             stockQuantitySelectedStorageOnly: draftFilters.stockQuantitySelectedStorageOnly
-                && draftHasMultiStorageStock
+                && hasApplicableStockQuantityDisplayMode
         })
         setIsFilterDialogOpen(false)
         setCurrentPage(1)
@@ -3138,12 +3122,10 @@ export function Products() {
                                                 ...current,
                                                 stockStorage,
                                                 stockQuantitySelectedStorageOnly: stockStorage.length > 0
-                                                    ? current.stockQuantitySelectedStorageOnly
-                                                    : false
                                             }))}
                                         />
                                     </div>
-                                    {draftFilters.stockStorage.length > 0 && draftHasMultiStorageStock && (
+                                    {showStockQuantitySelectedStorageOnly && (
                                         <label className="flex cursor-pointer items-start gap-2 text-sm text-foreground">
                                             <Checkbox
                                                 checked={draftFilters.stockQuantitySelectedStorageOnly}
