@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { BadgeDollarSign, BadgePercent, CircleDollarSign, ClipboardList, Link2, Loader2, ShoppingCart, UserRound, Warehouse, X } from 'lucide-react'
+import { BadgeDollarSign, BadgePercent, CircleDollarSign, ClipboardList, Link2, Loader2, NotebookPen, ShoppingCart, UserRound, Warehouse, X } from 'lucide-react'
 
 import { useAuth } from '@/auth'
 import type { CartItem } from '@/types'
@@ -47,6 +47,7 @@ import {
     SelectItem,
     SelectTrigger,
     SelectValue,
+    Textarea,
     useToast
 } from '@/ui/components'
 import { AddPartnerButton } from '@/ui/components/crm/AddPartnerButton'
@@ -83,6 +84,7 @@ export type QuickOrderCheckoutData = {
     installmentFrequency: InstallmentFrequency
     initialPaymentAmount: number
     firstDueDate: string | null
+    notes: string
     paymentAccountId?: string | null
     paymentAccountNameSnapshot?: string | null
 }
@@ -266,6 +268,8 @@ export function QuickOrderModal({
     const [firstDueDate, setFirstDueDate] = useState('')
     const [loanInitialRepaymentAmount, setLoanInitialRepaymentAmount] = useState('')
     const [loanDueDate, setLoanDueDate] = useState('')
+    const [notes, setNotes] = useState('')
+    const [isNotesVisible, setIsNotesVisible] = useState(false)
     const [isCommissionPanelOpen, setIsCommissionPanelOpen] = useState(false)
     const [submitError, setSubmitError] = useState<string | null>(null)
     const [commissionSummaries, setCommissionSummaries] = useState<SalesOrderCommissionAssignmentSummary[]>([])
@@ -415,6 +419,12 @@ export function QuickOrderModal({
         setCommissionSummaries([])
     }, [isFreeOnlyOrder, isOpen])
 
+    useEffect(() => {
+        if (!isOpen) return
+        setNotes('')
+        setIsNotesVisible(false)
+    }, [isOpen])
+
     const validateQuickOrder = () => {
         if (!orderCounterparty) {
             setSubmitError(t('orders.form.selectCustomer'))
@@ -550,6 +560,7 @@ export function QuickOrderModal({
                 firstDueDate: isInstallmentBased
                     ? firstDueDate
                     : isLoanPartiallyPaid ? loanDueDate || null : null,
+                notes,
                 paymentAccountId: isFreeOnlyOrder ? null : paymentAccount?.id ?? null,
                 paymentAccountNameSnapshot: isFreeOnlyOrder ? null : paymentAccount?.name ?? null,
             }, shouldSaveCommissionAssignments ? {
@@ -574,7 +585,23 @@ export function QuickOrderModal({
                     <ShoppingCart className="h-5 w-5 text-primary" />
                     {t('pos.quickOrder.title')}
                 </AppDialogTitle>
-                <AppDialogDescription>{t('pos.quickOrder.description')}</AppDialogDescription>
+                <div className="flex items-center justify-between gap-2">
+                    <AppDialogDescription className="min-w-0 flex-1">{t('pos.quickOrder.description')}</AppDialogDescription>
+                    <Button
+                        type="button"
+                        variant={isNotesVisible ? 'secondary' : 'ghost'}
+                        size="icon"
+                        className={`shrink-0 ${isNotesVisible ? 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary' : ''}`}
+                        onClick={() => setIsNotesVisible((visible) => !visible)}
+                        disabled={isSubmitting}
+                        aria-label={t('orders.form.notes', { defaultValue: 'Notes' })}
+                        aria-expanded={isNotesVisible}
+                        aria-controls="quick-order-notes"
+                        title={t('orders.form.notes', { defaultValue: 'Notes' })}
+                    >
+                        <NotebookPen className="h-4 w-4" />
+                    </Button>
+                </div>
                 {!isCommissionPanelOpen ? (
                     <Button
                         type="button"
@@ -955,6 +982,20 @@ export function QuickOrderModal({
                         currency={settlementCurrency}
                         iqdPreference={iqdPreference}
                     />
+                ) : null}
+
+                {isNotesVisible ? (
+                    <div id="quick-order-notes" className="space-y-2">
+                        <Label htmlFor="quick-order-notes-input">{t('orders.form.notes', { defaultValue: 'Notes' })}</Label>
+                        <Textarea
+                            id="quick-order-notes-input"
+                            rows={4}
+                            value={notes}
+                            onChange={(event) => setNotes(event.target.value)}
+                            placeholder={t('orders.form.notesPlaceholder', { defaultValue: 'Order notes, special instructions...' })}
+                            disabled={isSubmitting}
+                        />
+                    </div>
                 ) : null}
 
                 <div className="rounded-2xl border bg-muted/20 p-4">

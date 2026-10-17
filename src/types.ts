@@ -181,6 +181,8 @@ export interface CartItem {
     discount_source?: 'product' | 'category'
     discount_ends_at?: string
     quantity: number
+    /** Optional note persisted on this line when the POS cart becomes a Sales Order. */
+    note?: string
     /** Free quantity carried into a Sales Order when POS uses the Order payment flow. */
     freeBonusQuantity?: number
     /** Display-only unit override for the POS order free-bonus quantity. */

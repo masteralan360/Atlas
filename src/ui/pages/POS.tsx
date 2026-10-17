@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense, type MouseEvent as ReactMouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { useAuth } from '@/auth'
@@ -116,6 +116,7 @@ import {
     DialogClose,
     useToast,
     Label,
+    Textarea,
     Switch,
     Popover,
     PopoverTrigger,
@@ -152,6 +153,7 @@ import {
     ClipboardCheck,
     Gift,
     Receipt,
+    NotebookPen,
     Package,
     Boxes
 } from 'lucide-react'
@@ -1246,6 +1248,8 @@ export function POS() {
     const [priceEditCurrency, setPriceEditCurrency] = useState<CurrencyCode | null>(null)
     const [priceEditExchangeSnapshots, setPriceEditExchangeSnapshots] = useState<ExchangeRateSnapshot[]>([])
     const [serviceNameSuffixInput, setServiceNameSuffixInput] = useState('')
+    const [priceEditNoteInput, setPriceEditNoteInput] = useState('')
+    const [isPriceEditNoteVisible, setIsPriceEditNoteVisible] = useState(false)
     const isAdmin = user?.role === 'admin'
     const isModifyPriceHidden = !isAdmin && permissionKeys.includes('pos.hideModifyPriceButton' as any)
     const isPriceBelowCostHidden = hideCosts || (!isAdmin && permissionKeys.includes('pos.hidePriceBelowCostIndicator' as any))
@@ -2545,16 +2549,22 @@ export function POS() {
         hapticTrigger('error')
     }
 
-    const updateQuantity = (itemKey: string, delta: number) => {
+    const updateQuantity = (
+        itemKey: string,
+        delta: number,
+        modifiers?: Pick<ReactMouseEvent<HTMLButtonElement>, 'ctrlKey' | 'shiftKey'>
+    ) => {
+        const step = modifiers?.ctrlKey ? 10 : modifiers?.shiftKey ? 5 : 1
+        const quantityDelta = delta * step
         const currentItem = cart.find((item) => getCartItemKey(item) === itemKey)
-        if (currentItem && delta < 0 && !canSetPosPaidQuantity(currentItem, currentItem.quantity + delta)) {
+        if (currentItem && quantityDelta < 0 && !canSetPosPaidQuantity(currentItem, currentItem.quantity + quantityDelta)) {
             showPaidQuantityRequiresFreeBonus()
             return
         }
         setCart((prev) => {
             const updatedCart = prev.map((item) => {
                 if (getCartItemKey(item) === itemKey) {
-                    const newQty = Math.max(0, item.quantity + delta)
+                    const newQty = Math.max(0, item.quantity + quantityDelta)
                     if (!canSetPosPaidQuantity(item, newQty)) return item
                     const product = findStockProduct(item.product_id, item.storageId)
                     const otherItems = prev.filter((other) => other !== item)
@@ -2571,7 +2581,7 @@ export function POS() {
                             : product ? Math.max(0, product.inventoryQuantity - otherInventoryQuantity) : item.max_stock
                     const maxStock = inventoryQuantityToSellingAvailability(sourceAvailableQuantity, item.unit_factor ?? 1)
                     const nextItem = { ...item, quantity: newQty, max_stock: maxStock }
-                    if (delta > 0 && product && (
+                    if (quantityDelta > 0 && product && (
                         otherInventoryQuantity + getCartInventoryQuantity(nextItem) > product.inventoryQuantity + 0.000001
                         || getCartInventoryQuantity(nextItem) > sourceAvailableQuantity + 0.000001
                     )) {
@@ -2738,6 +2748,8 @@ export function POS() {
         setPriceEditCurrency(baseCurrency)
         setPriceEditExchangeSnapshots(item.price_currency_exchange_snapshot ?? [])
         setServiceNameSuffixInput(item.is_service ? item.service_name_suffix ?? '' : '')
+        setPriceEditNoteInput(item.note ?? '')
+        setIsPriceEditNoteVisible(Boolean(item.note?.trim()))
     }
 
     const changePriceEditCurrency = (nextCurrency: CurrencyCode) => {
@@ -2855,6 +2867,7 @@ export function POS() {
                 currency_converted_base_price: isCurrencyOverride ? convertedBasePrice : undefined,
                 price_currency_exchange_snapshot: isCurrencyOverride ? priceEditExchangeSnapshots : undefined,
                 negotiated_price: Math.abs(newPrice - convertedBasePrice) < 0.000001 ? undefined : newPrice,
+                note: priceEditNoteInput.trim() || undefined,
                 ...(item.is_service ? { service_name_suffix: serviceNameSuffix || undefined } : {}),
             }
         }))
@@ -2863,6 +2876,8 @@ export function POS() {
         setPriceEditCurrency(null)
         setPriceEditExchangeSnapshots([])
         setServiceNameSuffixInput('')
+        setPriceEditNoteInput('')
+        setIsPriceEditNoteVisible(false)
         priceEditSessionRef.current = null
     }
 
@@ -2872,6 +2887,8 @@ export function POS() {
         setPriceEditCurrency(null)
         setPriceEditExchangeSnapshots([])
         setServiceNameSuffixInput('')
+        setPriceEditNoteInput('')
+        setIsPriceEditNoteVisible(false)
         priceEditSessionRef.current = null
     }
 
@@ -3937,6 +3954,7 @@ export function POS() {
                 return {
                     id: generateId(),
                     productId: product.id,
+                    note: item.note?.trim() || null,
                     storageId,
                     productName: formatPosServiceName(product.name, service ? item.service_name_suffix : undefined),
                     stockSourceType: service ? undefined : item.stock_source_type,
@@ -4057,6 +4075,7 @@ export function POS() {
                 firstDueDate: isFinanced ? checkout.firstDueDate : null,
                 nextDueDate: isFinanced ? checkout.firstDueDate : null,
                 reservedAt: null,
+                notes: checkout.notes || undefined,
                 // The order is deliberately a normal Sales Order, never a POS
                 // sale or POS-origin record.
                 sourceChannel: 'manual',
@@ -4708,7 +4727,12 @@ export function POS() {
                                                             {!isModifyPriceHidden && (
                                                                 <button
                                                                     onClick={() => openPriceEdit(item)}
-                                                                    className="transition-opacity p-1 hover:bg-muted rounded bg-muted/30 border border-border/50"
+                                                                    className={cn(
+                                                                        'transition-opacity p-1 hover:bg-muted rounded bg-muted/30 border',
+                                                                        item.note?.trim()
+                                                                            ? 'border-primary ring-2 ring-primary/20'
+                                                                            : 'border-border/50'
+                                                                    )}
                                                                     title={t('pos.modifyPrice') || 'Modify Price'}
                                                                 >
                                                                     <Pencil className="w-3.5 h-3.5 text-primary" />
@@ -4793,7 +4817,7 @@ export function POS() {
                                                                     variant="outline"
                                                                     size="icon"
                                                                     className="h-6 w-6 rounded-md"
-                                                                    onClick={() => updateQuantity(itemKey, -1)}
+                                                                    onClick={(event) => updateQuantity(itemKey, -1, event)}
                                                                 >
                                                                     <Minus className="w-3 h-3" />
                                                                 </Button>
@@ -4805,7 +4829,7 @@ export function POS() {
                                                                     variant="outline"
                                                                     size="icon"
                                                                     className="h-6 w-6 rounded-md"
-                                                                    onClick={() => updateQuantity(itemKey, 1)}
+                                                                    onClick={(event) => updateQuantity(itemKey, 1, event)}
                                                                     disabled={item.quantity >= item.max_stock}
                                                                 >
                                                                     <Plus className="w-3 h-3" />
@@ -5623,12 +5647,34 @@ export function POS() {
                         return (
                             <>
                                 <AppDialogHeader>
-                                    <AppDialogTitle className="flex items-center justify-center gap-2 text-center">
-                                        <Pencil className="h-4 w-4 text-primary" />
-                                        {editingItem.is_service
-                                            ? t('pos.modifyPriceAndServiceName')
-                                            : t('pos.modifyPrice') || 'Modify Price'}
-                                    </AppDialogTitle>
+                                    <div className="flex items-center justify-center gap-2">
+                                        <AppDialogTitle className="flex min-w-0 items-center gap-2 text-center">
+                                            <Pencil className="h-4 w-4 shrink-0 text-primary" />
+                                            {editingItem.is_service
+                                                ? t('pos.modifyPriceAndServiceName')
+                                                : t('pos.modifyPrice') || 'Modify Price'}
+                                        </AppDialogTitle>
+                                        {paymentType === 'order' ? (
+                                            <Button
+                                                type="button"
+                                                variant={isPriceEditNoteVisible || Boolean(priceEditNoteInput.trim()) ? 'secondary' : 'ghost'}
+                                                size="icon"
+                                                className={cn(
+                                                    'shrink-0',
+                                                    (isPriceEditNoteVisible || Boolean(priceEditNoteInput.trim()))
+                                                        && 'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
+                                                )}
+                                                onClick={() => setIsPriceEditNoteVisible((visible) => !visible)}
+                                                aria-label={t('orders.form.lineItemNote', { defaultValue: 'Line item note' })}
+                                                aria-pressed={isPriceEditNoteVisible}
+                                                aria-expanded={isPriceEditNoteVisible}
+                                                aria-controls="pos-price-edit-line-note"
+                                                title={t('orders.form.lineItemNote', { defaultValue: 'Line item note' })}
+                                            >
+                                                <NotebookPen className="h-4 w-4" />
+                                            </Button>
+                                        ) : null}
+                                    </div>
                                 </AppDialogHeader>
                                 <AppDialogBody className="space-y-4">
                                     {editingItem.is_service ? (
@@ -5733,6 +5779,19 @@ export function POS() {
                                                 </div>
                                             </div>
                                         )}
+                                        {paymentType === 'order' && isPriceEditNoteVisible ? (
+                                            <div id="pos-price-edit-line-note" className="mt-3 space-y-2">
+                                                <Label htmlFor="pos-price-edit-line-note-input">
+                                                    {t('orders.form.lineItemNote', { defaultValue: 'Line item note' })}
+                                                </Label>
+                                                <Textarea
+                                                    id="pos-price-edit-line-note-input"
+                                                    value={priceEditNoteInput}
+                                                    onChange={(event) => setPriceEditNoteInput(event.target.value)}
+                                                    className="min-h-24 resize-y"
+                                                />
+                                            </div>
+                                        ) : null}
                                         <p className="text-xs text-muted-foreground mt-1">
                                             {t('pos.originalPriceDesc') || 'Original price will be preserved in records.'}
                                         </p>
@@ -7143,7 +7202,12 @@ function MobileCart({
                                                     {!isModifyPriceHidden && (
                                                         <button
                                                             onClick={() => openPriceEdit(item)}
-                                                            className="p-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20 transition-colors"
+                                                            className={cn(
+                                                                'p-1.5 rounded-lg bg-primary/10 text-primary border transition-colors',
+                                                                item.note?.trim()
+                                                                    ? 'border-primary ring-2 ring-primary/20'
+                                                                    : 'border-primary/20'
+                                                            )}
                                                         >
                                                             <Pencil className="w-3.5 h-3.5" />
                                                         </button>
