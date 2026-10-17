@@ -342,7 +342,12 @@ export function auditSalesOrderGraph(graph: SalesOrderTransactionGraph, workspac
   }
   if (loan || !financed) {
     const paid = loan ? roundOrderValue(Math.min(order.total, orderPaid + active(graph.loanPayments).reduce((sum, row) => sum + amount(row.amount), 0))) : orderPaid
-    const expectedStatus = paid >= order.total - ORDER_AMOUNT_EPSILON ? 'paid' : paid > ORDER_AMOUNT_EPSILON ? 'partial' : 'unpaid'
+    const fullyReturnedWithoutPayment = order.returnStatus === 'full'
+      && order.total <= ORDER_AMOUNT_EPSILON
+      && paid <= ORDER_AMOUNT_EPSILON
+    const expectedStatus = fullyReturnedWithoutPayment
+      ? 'unpaid'
+      : paid >= order.total - ORDER_AMOUNT_EPSILON ? 'paid' : paid > ORDER_AMOUNT_EPSILON ? 'partial' : 'unpaid'
     add('payments', 'ORDER_PAYMENT_STATUS_MISMATCH', order.paymentStatus === expectedStatus && order.isPaid === (expectedStatus === 'paid'), 'sales_order', order.id, expectedStatus, order.paymentStatus)
   }
   for (const row of graph.orderInstallments) add('relationships', 'WRONG_INSTALLMENT_REFERENCE', row.orderId === order.id && row.orderType === 'sales', 'order_installment', row.id)
@@ -404,7 +409,7 @@ export async function runSalesOrderIntegrityAudit(
             checks.push(buildCheck('mirror', 'SQLITE_MIRROR_RECORD_MISSING', false, key, row.id, 'present', 'missing', true))
             continue
           }
-          const fields = key === 'order' ? ['workspaceId', 'status', 'subtotal', 'discount', 'tax', 'total', 'paidAmount', 'balanceAmount', 'linkedLoanId', 'items', 'returnStatus', 'returnedAmount']
+          const fields = key === 'order' ? ['workspaceId', 'status', 'subtotal', 'discount', 'tax', 'total', 'currency', 'paymentMethod', 'paymentStatus', 'isPaid', 'paidAt', 'paidAmount', 'balanceAmount', 'initialPaymentAmount', 'linkedLoanId', 'items', 'returnStatus', 'returnedAmount']
             : key === 'inventoryMovements' ? ['workspaceId', 'referenceId', 'referenceType', 'productId', 'storageId', 'quantityDelta', 'transactionType']
               : key === 'payments' ? ['workspaceId', 'sourceType', 'sourceRecordId', 'sourceSubrecordId', 'amount', 'currency', 'direction', 'accountId', 'reversalOfTransactionId', 'isDeleted']
                 : key === 'loans' ? ['workspaceId', 'orderId', 'orderType', 'principalAmount', 'totalPaidAmount', 'balanceAmount', 'settlementCurrency', 'status']

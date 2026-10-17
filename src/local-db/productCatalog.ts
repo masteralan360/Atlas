@@ -37,6 +37,7 @@ export interface ProductCatalogPageQuery {
   catalogType: 'all' | 'products' | 'services'
   categoryIds: string[]
   storageIds: string[]
+  stockStorageIds: string[]
   currencies: CurrencyCode[]
   minPrice: string
   maxPrice: string
@@ -360,6 +361,7 @@ async function readProductCatalogPage(query: ProductCatalogPageQuery): Promise<P
       p_catalog_type: query.catalogType,
       p_category_ids: query.categoryIds,
       p_storage_ids: query.storageIds,
+      p_stock_storage_ids: query.stockStorageIds,
       p_currencies: query.currencies.map((currency) => currency.toLowerCase()),
       p_min_price: parseOptionalNumber(query.minPrice),
       p_max_price: parseOptionalNumber(query.maxPrice),

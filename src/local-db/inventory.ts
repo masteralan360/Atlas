@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
@@ -1525,6 +1525,35 @@ export function useInventory(workspaceId: string | undefined, options: UseInvent
     )
 
     return inventory ?? []
+}
+
+/** Returns products with positive stock in any selected storage using the scoped inventory index. */
+export function useInventoryProductIdsInStorages(
+    workspaceId: string | undefined,
+    storageIds: string[],
+    enabled = true
+) {
+    const storageAccess = useStorageAccess(workspaceId)
+    const normalizedStorageIds = useMemo(
+        () => Array.from(new Set(storageIds.filter(Boolean))).sort(),
+        [storageIds]
+    )
+    const inventoryProductIds = useLiveQuery(async () => {
+        if (!enabled || !workspaceId || normalizedStorageIds.length === 0) return []
+
+        const storageKeys = normalizedStorageIds.map((storageId) => [workspaceId, storageId])
+        const rows = await db.inventory
+            .where('[workspaceId+storageId]')
+            .anyOf(storageKeys)
+            .filter((row) => !row.isDeleted
+                && Number(row.quantity) > 0
+                && canAccessStorage(row.storageId, storageAccess))
+            .toArray()
+
+        return Array.from(new Set(rows.map((row) => row.productId)))
+    }, [enabled, normalizedStorageIds, storageAccess.signature, workspaceId])
+
+    return useMemo(() => new Set(inventoryProductIds ?? []), [inventoryProductIds])
 }
 
 export function useInventoryProducts(workspaceId: string | undefined, options: UseInventoryOptions = {}) {

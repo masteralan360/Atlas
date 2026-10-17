@@ -1375,11 +1375,14 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                     }
                     : {})
             })
+            const returnSuccessDescription = 'paymentAction' in result && result.paymentAction === 'none'
+                ? t('orders.return.successWithoutPayment', { defaultValue: 'Return recorded. No payment remained to refund.' })
+                : result.order.returnStatus === 'full'
+                    ? t('orders.return.successFull', { defaultValue: 'Order returned successfully.' })
+                    : t('orders.return.successPartial', { defaultValue: 'Order items returned successfully.' })
             toast({
                 title: t('orders.return.title', { defaultValue: 'Return Order' }),
-                description: result.order.returnStatus === 'full'
-                    ? t('orders.return.successFull', { defaultValue: 'Order returned and payment reversed.' })
-                    : t('orders.return.successPartial', { defaultValue: 'Order items returned and payment adjusted.' })
+                description: returnSuccessDescription
             })
             setReturnTarget(null)
             setReturnPaymentAccount(null)

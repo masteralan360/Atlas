@@ -31,7 +31,7 @@ import {
 import { isPositiveQuantity, quantitiesEqual, roundQuantity } from '@/lib/quantity'
 import { getMissingPriceBookCostMessage, hasValidProductCost } from '@/lib/productCost'
 import { canBePurchased, isService } from '@/lib/catalogItem'
-import { getPartnerSyncWriteRpc, getSupabaseClientForTable } from '@/lib/supabaseSchema'
+import { getPartnerSyncWriteRpc, getSupabaseClientForTable, getSupabaseRemoteTableName } from '@/lib/supabaseSchema'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId, toCamelCase } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
@@ -100,6 +100,8 @@ import type {
     Inventory,
     InventoryTransaction,
     Loan,
+    LoanInstallment,
+    LoanPayment,
     UserRole,
     OrderInstallment,
     OrderAdjustment,
@@ -4403,6 +4405,72 @@ function getPaymentTransactionRemainingAmount(transaction: PaymentTransaction, r
     return roundOrderAmount(Math.max(0, Number(transaction.amount || 0) - reversalTotal), transaction.currency)
 }
 
+async function loadSalesOrderLoanReturnPaymentContext(order: SalesOrder, loan: Loan) {
+    const [installments, loanPayments] = await Promise.all([
+        db.loan_installments.where('loanId').equals(loan.id).and((item) => !item.isDeleted).sortBy('installmentNo'),
+        db.loan_payments.where('loanId').equals(loan.id).and((item) => !item.isDeleted).toArray()
+    ])
+    const loanPaymentIds = loanPayments.map(payment => payment.id)
+    const linkedPaymentTransactionIds = loanPayments.flatMap(payment =>
+        [payment.paymentTransactionId, payment.reversalTransactionId].filter((id): id is string => !!id)
+    )
+    const relevantPaymentSourceIds = [...new Set([order.id, loan.id, ...loanPaymentIds])]
+    const [paymentsBySource, paymentsBySubrecord, paymentsById] = await Promise.all([
+        db.payment_transactions.where('sourceRecordId').anyOf(relevantPaymentSourceIds).toArray(),
+        loanPaymentIds.length
+            ? db.payment_transactions.where('sourceSubrecordId').anyOf(loanPaymentIds).toArray()
+            : Promise.resolve([] as PaymentTransaction[]),
+        linkedPaymentTransactionIds.length
+            ? db.payment_transactions.bulkGet(linkedPaymentTransactionIds)
+            : Promise.resolve([] as Array<PaymentTransaction | undefined>)
+    ])
+    const paymentRows = [...new Map([...paymentsBySource, ...paymentsBySubrecord, ...paymentsById.filter(Boolean)]
+        .filter((row): row is PaymentTransaction => !!row && row.workspaceId === order.workspaceId)
+        .map(row => [row.id, row])).values()]
+    const paymentIds = [...new Set(paymentRows.map(row => row.id))]
+    const reversals = paymentIds.length
+        ? await db.payment_transactions.where('reversalOfTransactionId').anyOf(paymentIds).toArray()
+        : []
+    const paymentTransactions = [...new Map([...paymentRows, ...reversals]
+        .filter(row => row.workspaceId === order.workspaceId)
+        .map(row => [row.id, row])).values()]
+    return { installments, loanPayments, paymentTransactions }
+}
+
+function findLoanPaymentSourceTransaction(payment: LoanPayment, rows: PaymentTransaction[]) {
+    if (payment.paymentTransactionId) {
+        const linked = rows.find(row => row.id === payment.paymentTransactionId)
+        if (linked && !linked.isDeleted && !linked.reversalOfTransactionId) return linked
+    }
+    return rows
+        .filter(row => !row.isDeleted && !row.reversalOfTransactionId)
+        .find(row => row.metadata?.loanPaymentId === payment.id
+            || (row.sourceSubrecordId === payment.id && row.sourceType !== 'loan_installment'))
+}
+
+async function assertSalesOrderLoanReturnPaymentsReversible(order: SalesOrder, returnAmount: number) {
+    const loan = order.linkedLoanId ? await db.loans.get(order.linkedLoanId) : null
+    if (!loan || loan.isDeleted || loan.source !== 'order' || loan.orderId !== order.id || loan.orderType !== 'sales') {
+        throw new Error('The linked order loan was not found')
+    }
+    const { loanPayments, paymentTransactions } = await loadSalesOrderLoanReturnPaymentContext(order, loan)
+    let remainingRefund = roundAmount(Math.max(0, returnAmount - Number(loan.balanceAmount || 0)), loan.settlementCurrency)
+    const newestFirst = loanPayments.slice().sort((left, right) =>
+        right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
+    )
+    for (const payment of newestFirst) {
+        if (remainingRefund <= ORDER_AMOUNT_EPSILON) break
+        const applied = roundAmount(Math.min(Math.max(0, payment.amount), remainingRefund), loan.settlementCurrency)
+        if (applied <= ORDER_AMOUNT_EPSILON) continue
+        const transaction = findLoanPaymentSourceTransaction(payment, paymentTransactions)
+        if (!transaction || transaction.voidId
+            || getPaymentTransactionRemainingAmount(transaction, paymentTransactions) + ORDER_AMOUNT_EPSILON < applied) {
+            throw new Error(i18n.t('orders.form.errors.loanRepaymentTransactionUnavailable'))
+        }
+        remainingRefund = roundAmount(Math.max(0, remainingRefund - applied), loan.settlementCurrency)
+    }
+}
+
 async function appendOrderReturnPaymentReversal(input: {
     id?: string
     transaction: PaymentTransaction
@@ -4561,11 +4629,7 @@ async function applySalesOrderReturnToFinancing(input: {
         throw new Error('The linked order loan was not found')
     }
 
-    const [installments, loanPayments, paymentTransactions] = await Promise.all([
-        db.loan_installments.where('loanId').equals(loan.id).and((item) => !item.isDeleted).sortBy('installmentNo'),
-        db.loan_payments.where('loanId').equals(loan.id).and((item) => !item.isDeleted).toArray(),
-        db.payment_transactions.where('workspaceId').equals(input.order.workspaceId).toArray()
-    ])
+    const { installments, loanPayments, paymentTransactions } = await loadSalesOrderLoanReturnPaymentContext(input.order, loan)
     const initialPaymentIsLoanRepayment = paymentTransactions.some((payment) =>
         payment.sourceRecordId === loan.id && isOrderLoanInitialRepaymentTransaction(payment)
     )
@@ -4578,7 +4642,6 @@ async function applySalesOrderReturnToFinancing(input: {
         amount: number
         reversalTransactionId?: string
     }> = []
-    let unmappedLoanPaymentRefund = 0
     let refundedLoanInitialPayment = 0
     const paymentsByNewestFirst = loanPayments
         .slice()
@@ -4590,20 +4653,17 @@ async function applySalesOrderReturnToFinancing(input: {
         if (applied <= ORDER_AMOUNT_EPSILON) continue
 
         const nextAmount = roundAmount(Math.max(0, payment.amount - applied), loan.settlementCurrency)
-        const sourceTransaction = paymentTransactions
-            .filter((transaction) => !transaction.isDeleted && !transaction.reversalOfTransactionId)
-            .find((transaction) => transaction.metadata?.loanPaymentId === payment.id
-                || (transaction.sourceSubrecordId === payment.id && transaction.sourceType !== 'loan_installment'))
+        const sourceTransaction = findLoanPaymentSourceTransaction(payment, paymentTransactions)
         const isFullyReversed = nextAmount <= ORDER_AMOUNT_EPSILON
         const reversalTransactionId = isFullyReversed && sourceTransaction
             ? payment.reversalTransactionId || generateId()
             : null
 
-        // v1 loan payments are immutable money movements. A full refund keeps
-        // the original amount and records the matching reversal row instead of
-        // rewriting the payment to zero. The latter is rejected by
-        // loan_payments_v1_integrity_check and obscures the ledger audit trail.
-        if (isFullyReversed && (payment.integrityVersion || 0) > 0 && !sourceTransaction) {
+        // A return can only reverse a loan repayment through its original
+        // payment transaction. Legacy rows without that link must be repaired
+        // before any loan balance or refund is changed.
+        if (!sourceTransaction || sourceTransaction.voidId
+            || getPaymentTransactionRemainingAmount(sourceTransaction, paymentTransactions) + ORDER_AMOUNT_EPSILON < applied) {
             throw new Error(i18n.t('orders.form.errors.loanRepaymentTransactionUnavailable'))
         }
         const updatedPayment = {
@@ -4634,8 +4694,6 @@ async function applySalesOrderReturnToFinancing(input: {
                     input.order.currency
                 )
             }
-        } else {
-            unmappedLoanPaymentRefund = roundAmount(unmappedLoanPaymentRefund + applied, input.order.currency)
         }
     }
 
@@ -4770,29 +4828,6 @@ async function applySalesOrderReturnToFinancing(input: {
             accountNameSnapshot: input.accountNameSnapshot
         })
     ))
-    if (unmappedLoanPaymentRefund > ORDER_AMOUNT_EPSILON) {
-        await appendPaymentTransaction(input.order.workspaceId, {
-            sourceModule: 'orders',
-            sourceType: 'order_return',
-            sourceRecordId: input.returnId,
-            direction: 'outgoing',
-            amount: unmappedLoanPaymentRefund,
-            currency: input.order.currency,
-            paymentMethod: 'cash',
-            paidAt: input.timestamp,
-            counterpartyName: input.order.customerName,
-            referenceLabel: input.order.orderNumber,
-            note: `Order return ${input.returnId}: loan repayment refund`,
-            createdBy: input.returnedBy || null,
-            accountId: input.accountId ?? null,
-            accountNameSnapshot: input.accountNameSnapshot ?? null,
-            metadata: {
-                orderId: input.order.id,
-                orderReturnId: input.returnId,
-                loanRepaymentRefund: true
-            }
-        })
-    }
     if (standardInitialPaymentRefund > ORDER_AMOUNT_EPSILON) {
         const initialPayments = paymentTransactions
             .filter((transaction) => !transaction.isDeleted
@@ -4999,7 +5034,7 @@ async function prepareSalesOrderReturn(
     }
 }
 
-async function returnUnpaidEcommerceOrder(order: SalesOrder, input: ReturnSalesOrderInput) {
+async function returnUnpaidSalesOrder(order: SalesOrder, input: ReturnSalesOrderInput) {
     const {
         quantitiesByItemId,
         returnedQuantityByItemId,
@@ -5050,7 +5085,7 @@ async function returnUnpaidEcommerceOrder(order: SalesOrder, input: ReturnSalesO
         subtotal: roundAmount(Math.max(0, Number(order.subtotal || 0) * scale), order.currency),
         discount: roundAmount(Math.max(0, Number(order.discount || 0) * scale), order.currency),
         tax: roundAmount(Math.max(0, Number(order.tax || 0) * scale), order.currency),
-        balanceAmount: nextBalance,
+        balanceAmount: willBeFullyReturned ? 0 : nextBalance,
         paymentStatus: 'unpaid',
         paidAmount: order.paidAmount,
         paidAt: order.paidAt,
@@ -5139,7 +5174,7 @@ async function returnUnpaidEcommerceOrder(order: SalesOrder, input: ReturnSalesO
         input.returnedBy
     )
 
-    return { order: updatedOrder, return: orderReturn, items: orderReturnItems }
+    return { order: updatedOrder, return: orderReturn, items: orderReturnItems, paymentAction: 'none' as const }
 }
 
 const salesOrderReturnRequestsInFlight = new Map<string, { fingerprint: string; task: Promise<Awaited<ReturnType<typeof returnSalesOrderOnce>>> }>()
@@ -5156,10 +5191,157 @@ export function returnSalesOrder(input: ReturnSalesOrderInput) {
     return task
 }
 
+type SalesOrderReturnRemoteFilter = { column: string; value: string | string[] }
+
+async function readSalesOrderReturnRemoteRows(tableName: string, workspaceId: string, filters: SalesOrderReturnRemoteFilter[]) {
+    if (filters.some(filter => Array.isArray(filter.value) && filter.value.length === 0)) return []
+
+    const client = getSupabaseClientForTable(tableName)
+    const remoteTableName = getSupabaseRemoteTableName(tableName)
+    const rows: Array<Record<string, unknown>> = []
+    for (let from = 0; ; from += 500) {
+        let query: any = client.from(remoteTableName).select('*').eq('workspace_id', workspaceId)
+        for (const filter of filters) {
+            query = Array.isArray(filter.value)
+                ? query.in(filter.column, filter.value)
+                : query.eq(filter.column, filter.value)
+        }
+        const result = await runSupabaseAction(`orders.returnContext.${tableName}`, () =>
+            query.order('id').range(from, from + 499)
+        )
+        if (result.error) throw normalizeSupabaseActionError(result.error)
+        const page: Record<string, unknown>[] = Array.isArray(result.data) ? result.data : []
+        rows.push(...page.map(row => toCamelCase(row) as Record<string, unknown>))
+        if (page.length < 500) return rows
+    }
+}
+
+function asFreshRemoteOrderRow<T extends { id: string; workspaceId: string }>(row: Record<string, unknown>, syncedAt: string): T {
+    return { ...row, syncStatus: 'synced', lastSyncedAt: syncedAt } as unknown as T
+}
+
+async function replaceFreshRemoteOrderRows(
+    table: any,
+    localRows: Array<{ id: string; workspaceId: string; syncStatus?: string }>,
+    remoteRows: Array<{ id: string; workspaceId: string }>,
+    workspaceId: string
+) {
+    const scopedLocalRows = localRows.filter(row => row.workspaceId === workspaceId)
+    const remoteIds = new Set(remoteRows.map(row => row.id))
+    const unconfirmedLocalRows = scopedLocalRows.filter(row => row.syncStatus && row.syncStatus !== 'synced')
+    if (unconfirmedLocalRows.length > 0) throw new Error('return_request_identity_mismatch')
+
+    const staleIds = scopedLocalRows
+        .filter(row => !remoteIds.has(row.id) && (!row.syncStatus || row.syncStatus === 'synced'))
+        .map(row => row.id)
+    if (staleIds.length > 0) await table.bulkDelete(staleIds)
+    if (remoteRows.length > 0) await table.bulkPut(remoteRows)
+}
+
+async function readFreshSalesOrderFromSupabase(orderId: string, workspaceId: string): Promise<SalesOrder> {
+    const remoteOrderRows = await readSalesOrderReturnRemoteRows('sales_orders', workspaceId, [
+        { column: 'id', value: orderId }
+    ])
+    const remoteOrderRow = remoteOrderRows[0]
+    if (!remoteOrderRow || remoteOrderRow.workspaceId !== workspaceId || remoteOrderRow.isDeleted) {
+        throw new Error('Sales order not found')
+    }
+    return asFreshRemoteOrderRow<SalesOrder>(remoteOrderRow, new Date().toISOString())
+}
+
+/** Refresh the single order's return and payment evidence from Cloud/Hybrid source of truth. */
+async function refreshSalesOrderReturnContext(orderId: string, workspaceId: string): Promise<SalesOrder> {
+    const freshOrder = await readFreshSalesOrderFromSupabase(orderId, workspaceId)
+    const cachedOrder = await db.sales_orders.get(orderId)
+    if (cachedOrder && ((cachedOrder.syncStatus && cachedOrder.syncStatus !== 'synced')
+        || Number(cachedOrder.version || 0) > Number(freshOrder.version || 0))) {
+        throw new Error('return_request_identity_mismatch')
+    }
+
+    const [remoteReturnsRaw, remoteReturnItemsRaw, remoteLoansRaw] = await Promise.all([
+        readSalesOrderReturnRemoteRows('order_returns', workspaceId, [
+            { column: 'order_id', value: orderId }
+        ]),
+        readSalesOrderReturnRemoteRows('order_return_items', workspaceId, [
+            { column: 'order_id', value: orderId }
+        ]),
+        freshOrder.linkedLoanId
+            ? readSalesOrderReturnRemoteRows('loans', workspaceId, [{ column: 'id', value: freshOrder.linkedLoanId }])
+            : Promise.resolve([])
+    ])
+    const syncedAt = freshOrder.lastSyncedAt || new Date().toISOString()
+    const remoteReturns = remoteReturnsRaw.map(row => asFreshRemoteOrderRow<OrderReturn>(row, syncedAt))
+    const remoteReturnItems = remoteReturnItemsRaw.map(row => asFreshRemoteOrderRow<OrderReturnItem>(row, syncedAt))
+    const remoteLoans = remoteLoansRaw.map(row => asFreshRemoteOrderRow<Loan>(row, syncedAt))
+    const loanIds = remoteLoans.map(row => row.id)
+    const remoteLoanPaymentsRaw = loanIds.length
+        ? await readSalesOrderReturnRemoteRows('loan_payments', workspaceId, [{ column: 'loan_id', value: loanIds }])
+        : []
+    const remoteLoanInstallmentsRaw = loanIds.length
+        ? await readSalesOrderReturnRemoteRows('loan_installments', workspaceId, [{ column: 'loan_id', value: loanIds }])
+        : []
+    const remoteLoanPayments = remoteLoanPaymentsRaw.map(row => asFreshRemoteOrderRow<LoanPayment>(row, syncedAt))
+    const remoteLoanInstallments = remoteLoanInstallmentsRaw.map(row => asFreshRemoteOrderRow<LoanInstallment>(row, syncedAt))
+    const sourceRecordIds = [...new Set([orderId, ...loanIds, ...remoteReturns.map(row => row.id)])]
+    const linkedPaymentIds = [...new Set(remoteLoanPayments.flatMap(row =>
+        [row.paymentTransactionId, row.reversalTransactionId].filter((id): id is string => !!id)
+    ))]
+    const [paymentsBySource, paymentsById, paymentsBySubrecord] = await Promise.all([
+        readSalesOrderReturnRemoteRows('payment_transactions', workspaceId, [{ column: 'source_record_id', value: sourceRecordIds }]),
+        linkedPaymentIds.length
+            ? readSalesOrderReturnRemoteRows('payment_transactions', workspaceId, [{ column: 'id', value: linkedPaymentIds }])
+            : Promise.resolve([]),
+        remoteLoanPayments.length
+            ? readSalesOrderReturnRemoteRows('payment_transactions', workspaceId, [{ column: 'source_subrecord_id', value: remoteLoanPayments.map(row => row.id) }])
+            : Promise.resolve([])
+    ])
+    const originalPaymentIds = [...new Set([...paymentsBySource, ...paymentsById, ...paymentsBySubrecord].map(row => String(row.id)))]
+    const remoteReversals = originalPaymentIds.length
+        ? await readSalesOrderReturnRemoteRows('payment_transactions', workspaceId, [{ column: 'reversal_of_transaction_id', value: originalPaymentIds }])
+        : []
+    const remotePayments = [...new Map([...paymentsBySource, ...paymentsById, ...paymentsBySubrecord, ...remoteReversals]
+        .map(row => [String(row.id), asFreshRemoteOrderRow<PaymentTransaction>(row, syncedAt)])).values()]
+    const localReturnRows = await db.order_returns.where('orderId').equals(orderId).toArray()
+    const localReturnItemRows = await db.order_return_items.where('orderId').equals(orderId).toArray()
+    const localLoanRows = freshOrder.linkedLoanId ? [await db.loans.get(freshOrder.linkedLoanId)].filter(Boolean) as Loan[] : []
+    const localLoanPaymentRows = loanIds.length ? await db.loan_payments.where('loanId').anyOf(loanIds).toArray() : []
+    const localLoanInstallmentRows = loanIds.length ? await db.loan_installments.where('loanId').anyOf(loanIds).toArray() : []
+    const localPaymentSources = await db.payment_transactions.where('sourceRecordId').anyOf(sourceRecordIds).toArray()
+    const localLinkedPayments = linkedPaymentIds.length ? await db.payment_transactions.bulkGet(linkedPaymentIds) : []
+    const possibleOriginalIds = [...new Set([
+        ...originalPaymentIds,
+        ...localPaymentSources.map(row => row.id),
+        ...linkedPaymentIds
+    ])]
+    const localPaymentReversals = possibleOriginalIds.length
+        ? await db.payment_transactions.where('reversalOfTransactionId').anyOf(possibleOriginalIds).toArray()
+        : []
+    const localPaymentRows = [...new Map([...localPaymentSources, ...localLinkedPayments.filter(Boolean), ...localPaymentReversals]
+        .map(row => [row!.id, row!])).values()]
+
+    await db.transaction('rw', [
+        db.sales_orders, db.order_returns, db.order_return_items, db.loans, db.loan_payments,
+        db.loan_installments, db.payment_transactions
+    ], async () => {
+        await db.sales_orders.put(freshOrder)
+        await replaceFreshRemoteOrderRows(db.order_returns, localReturnRows, remoteReturns, workspaceId)
+        await replaceFreshRemoteOrderRows(db.order_return_items, localReturnItemRows, remoteReturnItems, workspaceId)
+        await replaceFreshRemoteOrderRows(db.loans, localLoanRows, remoteLoans, workspaceId)
+        await replaceFreshRemoteOrderRows(db.loan_payments, localLoanPaymentRows, remoteLoanPayments, workspaceId)
+        await replaceFreshRemoteOrderRows(db.loan_installments, localLoanInstallmentRows, remoteLoanInstallments, workspaceId)
+        await replaceFreshRemoteOrderRows(db.payment_transactions, localPaymentRows, remotePayments, workspaceId)
+    })
+    return freshOrder
+}
+
 async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
-    const order = await db.sales_orders.get(input.orderId)
+    let order = await db.sales_orders.get(input.orderId)
     if (!order || order.isDeleted) {
         throw new Error('Sales order not found')
+    }
+    const cloudBacked = shouldUseCloudBusinessData(order.workspaceId) && isOnline(order.workspaceId)
+    if (cloudBacked) {
+        order = await readFreshSalesOrderFromSupabase(order.id, order.workspaceId)
     }
     if (!canReturnSalesOrder({
         actorRole: input.actorRole,
@@ -5170,16 +5352,17 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
         throw new Error(SALES_ORDER_RETURN_NOT_ALLOWED)
     }
     if (input.idempotencyKey) {
+        const returnWorkspaceId = order.workspaceId
         let previous = await db.order_returns.get(input.idempotencyKey)
         // A normal authenticated read recovers retry identity after a cache reset.
-        if (!previous && shouldUseCloudBusinessData(order.workspaceId) && isOnline(order.workspaceId)) {
+        if (!previous && shouldUseCloudBusinessData(returnWorkspaceId) && isOnline(returnWorkspaceId)) {
             const result = await runSupabaseAction('orders.returnRetry.read', () => getSupabaseClientForTable('order_returns')
-                .from('order_returns').select('*').eq('workspace_id', order.workspaceId).eq('id', input.idempotencyKey!).maybeSingle())
+                .from('order_returns').select('*').eq('workspace_id', returnWorkspaceId).eq('id', input.idempotencyKey!).maybeSingle())
             if (result.error) throw normalizeSupabaseActionError(result.error)
             if (result.data) {
                 previous = toCamelCase(result.data) as unknown as OrderReturn
                 const lines = await runSupabaseAction('orders.returnRetry.readItems', () => getSupabaseClientForTable('order_return_items')
-                    .from('order_return_items').select('*').eq('workspace_id', order.workspaceId).eq('return_id', previous!.id))
+                    .from('order_return_items').select('*').eq('workspace_id', returnWorkspaceId).eq('return_id', previous!.id))
                 if (lines.error) throw normalizeSupabaseActionError(lines.error)
                 await db.order_returns.put(previous)
                 await db.order_return_items.bulkPut((lines.data ?? []).map(row => toCamelCase(row) as unknown as OrderReturnItem))
@@ -5197,6 +5380,9 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
             return { order, return: previous, items }
         }
     }
+    if (cloudBacked) {
+        order = await refreshSalesOrderReturnContext(order.id, order.workspaceId)
+    }
     if (order.status !== 'completed') {
         throw new Error('Only completed sales orders can be returned')
     }
@@ -5208,16 +5394,6 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
     }
     if (input.items.length === 0) {
         throw new Error('Select at least one item to return')
-    }
-
-    if (
-        order.sourceChannel === 'marketplace'
-        && !isOrderFinancingMethod(order.paymentMethod)
-        && !order.linkedLoanId
-        && order.paymentStatus !== 'paid'
-        && getOrderPaidAmount(order) <= ORDER_AMOUNT_EPSILON
-    ) {
-        return returnUnpaidEcommerceOrder(order, input)
     }
 
     const {
@@ -5246,9 +5422,17 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
             getActiveOrderPayments(standardPaymentRows).reduce((sum, payment) => sum + payment.amount, 0),
             order.currency
         )
+        if (activePaymentAmount <= ORDER_AMOUNT_EPSILON
+            && order.paymentStatus === 'unpaid'
+            && !order.isPaid
+            && getOrderPaidAmount(order) <= ORDER_AMOUNT_EPSILON) {
+            return returnUnpaidSalesOrder(order, input)
+        }
         if (activePaymentAmount + ORDER_AMOUNT_EPSILON < returnAmount) {
             throw new Error('The order does not have enough posted payments to reverse this return')
         }
+    } else {
+        await assertSalesOrderLoanReturnPaymentsReversible(order, returnAmount)
     }
 
     const restoredLines = await restoreInventoryForSalesOrderReturn(order, preparedLines, timestamp, returnId)

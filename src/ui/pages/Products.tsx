@@ -12,6 +12,7 @@ import {
     useCategories,
     usePriceBookCatalogState,
     useInventory,
+    useInventoryProductIdsInStorages,
     useProducts,
     useProductCatalogPage,
     useWorkspaceProductBarcodes,
@@ -142,6 +143,7 @@ export type ProductSortOption = 'name_asc' | 'name_desc' | 'sku_asc' | 'sku_desc
 export interface ProductFilterState {
     category: string[]
     storage: string[]
+    stockStorage: string[]
     currency: CurrencyCode[]
     minPrice: string
     maxPrice: string
@@ -153,6 +155,7 @@ export interface ProductFilterState {
 export const DEFAULT_PRODUCT_FILTERS: ProductFilterState = {
     category: [],
     storage: [],
+    stockStorage: [],
     currency: [],
     minPrice: '',
     maxPrice: '',
@@ -275,6 +278,7 @@ function countActiveProductFilters(filters: ProductFilterState) {
     return [
         filters.category.length > 0,
         filters.storage.length > 0,
+        filters.stockStorage.length > 0,
         filters.currency.length > 0,
         !!filters.minPrice,
         !!filters.maxPrice,
@@ -451,6 +455,7 @@ export function Products() {
         catalogType,
         categoryIds: filters.category,
         storageIds: filters.storage,
+        stockStorageIds: filters.stockStorage,
         currencies: filters.currency,
         minPrice: filters.minPrice,
         maxPrice: filters.maxPrice,
@@ -483,6 +488,11 @@ export function Products() {
         })
     }, [productCatalogPage.error, t, toast])
     const useRemoteCatalogPage = remoteCatalogPageEnabled && !productCatalogPage.error
+    const localStockProductIds = useInventoryProductIdsInStorages(
+        workspaceId,
+        filters.stockStorage,
+        !useRemoteCatalogPage && filters.stockStorage.length > 0
+    )
     const matchedCatalogProductIds = useMemo(
         () => new Set(productCatalogPage.matchedProductIds),
         [productCatalogPage.matchedProductIds]
@@ -621,6 +631,7 @@ export function Products() {
             catalogType: type,
             categoryIds: catalogFilters.category,
             storageIds: catalogFilters.storage,
+            stockStorageIds: catalogFilters.stockStorage,
             currencies: catalogFilters.currency,
             minPrice: catalogFilters.minPrice,
             maxPrice: catalogFilters.maxPrice,
@@ -993,6 +1004,9 @@ export function Products() {
         if (filters.storage.length > 0) {
             result = result.filter((product) => !!product.storageId && filters.storage.includes(product.storageId))
         }
+        if (filters.stockStorage.length > 0 && !useRemoteCatalogPage) {
+            result = result.filter((product) => localStockProductIds.has(product.id))
+        }
         if (filters.currency.length > 0) {
             result = result.filter((product) => filters.currency.includes(product.currency))
         }
@@ -1030,7 +1044,7 @@ export function Products() {
         })
 
         return result
-    }, [catalogProducts, productBarcodeValuesByProductId, deferredSearch, getCategoryName, getStorageName, filters, catalogType, hasFeature])
+    }, [catalogProducts, productBarcodeValuesByProductId, deferredSearch, getCategoryName, getStorageName, filters, catalogType, hasFeature, localStockProductIds, useRemoteCatalogPage])
 
     const productById = useMemo(
         () => new Map([...products, ...catalogSupportProducts, ...catalogProducts].map((product) => [product.id, product] as const)),
@@ -2930,6 +2944,22 @@ export function Products() {
                                             allLabel={t('products.filters.allStorages', { defaultValue: 'All Storages' })}
                                             multipleLabel={t('products.filters.selectedCount', { count: draftFilters.storage.length, defaultValue: '{{count}} selected' })}
                                             onChange={(storage) => setDraftFilters((current) => ({ ...current, storage }))}
+                                        />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <Label>{t('products.filters.stockStorage', { defaultValue: 'Has stock in' })}</Label>
+                                        <ProductFilterMultiSelect
+                                            value={draftFilters.stockStorage}
+                                            options={[
+                                                ...storages.map((storage) => ({ value: storage.id, label: storage.name })),
+                                                ...draftFilters.stockStorage
+                                                    .filter((storageId) => !storages.some((storage) => storage.id === storageId))
+                                                    .map((storageId) => ({ value: storageId, label: storageId })),
+                                            ]}
+                                            allLabel={t('products.filters.allStockStorages', { defaultValue: 'Any storage' })}
+                                            multipleLabel={t('products.filters.selectedCount', { count: draftFilters.stockStorage.length, defaultValue: '{{count}} selected' })}
+                                            onChange={(stockStorage) => setDraftFilters((current) => ({ ...current, stockStorage }))}
                                         />
                                     </div>
                                 </div>
