@@ -5,13 +5,9 @@ Allow inventory movement on offline mode
 Order Advancement slow
 Make inventory transactions faster
 
-Atlas Update
-
 Add by unit in adjustment
 
 Item line-based currency
-
-add Yesterday to DateRangeFilter
 
 #
 DatePicker Entry Input

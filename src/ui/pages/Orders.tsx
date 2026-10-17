@@ -67,10 +67,9 @@ import {
     useProducts,
     useProductsByIds,
     useBusinessPartnersLoading,
-    useProductCommissionRuleAgents,
-    useProductCommissionRules,
     useOrdersListPage,
     useSalesOrderAgentAssignmentsForOrders,
+    useWorkspaceUsers,
     useStorages,
     useSuppliers,
     type CurrencyCode,
@@ -157,9 +156,6 @@ import {
     CommissionFeatureBoundary,
     useOptionalCommissionFeatureData
 } from '@/ui/components/commissions/useCommissionAgentDirectory'
-import { getProductCommissionPreviewTotal } from '@/ui/components/commissions/ProductCommissionPreview'
-import { buildProductCommissionPreviewRows } from '@/ui/components/commissions/productCommissionCalculation'
-import { getProductCommissionPreviewAgentIds } from '@/ui/components/commissions/productCommissionAgent'
 import { getWorkspaceDataMode } from '@/workspace/workspaceMode'
 
 type OrderTab = 'sales' | 'purchase'
@@ -364,6 +360,14 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const { user } = useAuth()
     const { features, workspaceName } = useWorkspace()
     const { permissionKeys } = useWorkspacePermissions()
+    const workspaceUsers = useWorkspaceUsers(workspaceId)
+    const workspaceUserNamesById = useMemo(() => new Map(
+        workspaceUsers.map((workspaceUser) => [workspaceUser.id, workspaceUser.name.trim()] as const)
+    ), [workspaceUsers])
+    const getCreatedByName = (createdBy: string | null | undefined) => {
+        if (!createdBy) return t('common.unknown', { defaultValue: 'Unknown' })
+        return workspaceUserNamesById.get(createdBy) || t('common.unknown', { defaultValue: 'Unknown' })
+    }
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
     const { toast } = useToast()
     const [, navigate] = useLocation()
@@ -427,8 +431,6 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     }), [activeTab, commissionModeFilter, deferredSearch, ecommerceFilter, fulfillmentBounds.endDate, fulfillmentBounds.startDate, orderDateBounds.endDate, orderDateBounds.startDate, ordersRefreshToken, pagination.currentPage, pagination.pageSize, paymentFilter, statusFilter, workspaceId])
     const commissionData = useOptionalCommissionFeatureData()
     const salesAgentCommissionsEnabled = Boolean(commissionData)
-    const productCommissionRules = useProductCommissionRules(salesAgentCommissionsEnabled ? workspaceId : undefined)
-    const productCommissionRecipients = useProductCommissionRuleAgents(salesAgentCommissionsEnabled ? workspaceId : undefined)
     const canAssignSalesAgentCommissions = hasEffectiveSalesAgentCommissionPermission(
         user?.role,
         permissionKeys,
@@ -507,36 +509,6 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         })
         return [orderId, agents] as const
     })), [activeSalesAgentAssignmentsByOrderId, canViewAllSalesAgentAssignments, canViewOwnSalesAgentAssignments, commissionData?.agentById, user?.id])
-    const productCommissionPreviewAgentIdsByOrderId = useMemo(() => new Map(salesOrders.map((order) => [
-        order.id,
-        getProductCommissionPreviewAgentIds({
-            activeAssignments: activeSalesAgentAssignmentsByOrderId.get(order.id) || [],
-            agents: commissionData?.agents.map((entry) => entry.agent) || [],
-            getAgent: (agentId) => commissionData?.agentById.get(agentId)?.agent,
-            userId: user?.id,
-            orderCreatedBy: order.createdBy,
-            canAssignSalesAgents: canAssignSalesAgentCommissions,
-            canViewAllAgentCommissions: canViewAllSalesAgentAssignments,
-            canViewOwnAgentCommissions: canViewOwnSalesAgentAssignments
-        })
-    ])), [activeSalesAgentAssignmentsByOrderId, canAssignSalesAgentCommissions, canViewAllSalesAgentAssignments, canViewOwnSalesAgentAssignments, commissionData?.agentById, commissionData?.agents, salesOrders, user?.id])
-    const productCommissionTotalBySalesOrderId = useMemo(() => {
-        if (!salesAgentCommissionsEnabled) return new Map<string, number | null>()
-        const at = new Date().toISOString()
-        return new Map(salesOrders.map((order) => [
-            order.id,
-            getProductCommissionPreviewTotal(buildProductCommissionPreviewRows({
-                items: order.items,
-                agentIds: productCommissionPreviewAgentIdsByOrderId.get(order.id) || [],
-                rules: productCommissionRules,
-                recipients: productCommissionRecipients,
-                currency: order.currency,
-                exchangeRates: order.exchangeRates || [],
-                at
-            }))
-        ]))
-    }, [productCommissionPreviewAgentIdsByOrderId, productCommissionRecipients, productCommissionRules, salesAgentCommissionsEnabled, salesOrders])
-
     useEffect(() => {
         setActiveTab(initialTab)
     }, [initialTab])
@@ -1585,9 +1557,9 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             <TableHead>{t('orders.table.orderNumber') || 'Order #'}</TableHead>
                             <TableHead>{activeTab === 'sales' ? (t('orders.table.customer') || 'Customer') : (t('suppliers.title') || 'Supplier')}</TableHead>
                             {activeTab === 'sales' && salesAgentCommissionsEnabled ? <TableHead>{t('salesAgentCommissions.salesAgent')}</TableHead> : null}
+                            {activeTab === 'sales' ? <TableHead>{t('orders.table.createdBy')}</TableHead> : null}
                             <TableHead>{t('orders.table.items') || 'Items'}</TableHead>
                             <TableHead>{t('common.status') || 'Status'}</TableHead>
-                            {activeTab === 'sales' && salesAgentCommissionsEnabled ? <TableHead>{t('orders.table.totalCommission')}</TableHead> : null}
                             <TableHead>{t('common.total') || 'Total'}</TableHead>
                             <TableHead>{t('orders.form.date') || 'Date'}</TableHead>
                             <TableHead>{t('orders.table.fulfilledDate', { defaultValue: 'Fulfilled date' })}</TableHead>
@@ -1598,7 +1570,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     <TableBody>
                         {ordersPage.isLoading ? (
                             <TableRow>
-                                <TableCell colSpan={9 + (activeTab === 'sales' && salesAgentCommissionsEnabled ? 2 : 0)}>
+                                <TableCell colSpan={9 + (activeTab === 'sales' ? 1 : 0) + (activeTab === 'sales' && salesAgentCommissionsEnabled ? 1 : 0)}>
                                     <div className="flex min-h-60 items-center justify-center gap-2 text-center text-muted-foreground" aria-live="polite">
                                         <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
                                         {t('common.loading', { defaultValue: 'Loading...' })}
@@ -1607,13 +1579,13 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             </TableRow>
                         ) : hasOrderListError ? (
                             <TableRow>
-                                <TableCell colSpan={9 + (activeTab === 'sales' && salesAgentCommissionsEnabled ? 2 : 0)} className="py-12 text-center text-destructive">
+                                <TableCell colSpan={9 + (activeTab === 'sales' ? 1 : 0) + (activeTab === 'sales' && salesAgentCommissionsEnabled ? 1 : 0)} className="py-12 text-center text-destructive">
                                     {t('orders.listLoadError')}
                                 </TableCell>
                             </TableRow>
                         ) : rows.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={9 + (activeTab === 'sales' && salesAgentCommissionsEnabled ? 2 : 0)} className="py-12 text-center text-muted-foreground">
+                                <TableCell colSpan={9 + (activeTab === 'sales' ? 1 : 0) + (activeTab === 'sales' && salesAgentCommissionsEnabled ? 1 : 0)} className="py-12 text-center text-muted-foreground">
                                     {t('common.noData') || 'No data available'}
                                 </TableCell>
                             </TableRow>
@@ -1625,9 +1597,6 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             const canDelete = canDeleteOrders && isDraft
                             const returnStatus = activeTab === 'sales' ? (row as SalesOrder).returnStatus : 'none'
                             const isFullyReturnedSalesOrder = activeTab === 'sales' && returnStatus === 'full'
-                            const productCommissionTotal = activeTab === 'sales' && salesAgentCommissionsEnabled
-                                ? productCommissionTotalBySalesOrderId.get(row.id)
-                                : undefined
 
                             return (
                                 <TableRow key={row.id} className={isApprovalRequested ? 'bg-violet-50/70 hover:bg-violet-50 dark:bg-violet-950/20 dark:hover:bg-violet-950/30' : undefined}>
@@ -1676,6 +1645,11 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                             })()}
                                         </TableCell>
                                     ) : null}
+                                    {activeTab === 'sales' ? (
+                                        <TableCell className="max-w-48 truncate" title={getCreatedByName(row.createdBy)}>
+                                            {getCreatedByName(row.createdBy)}
+                                        </TableCell>
+                                    ) : null}
                                     <TableCell>{row.items.length}</TableCell>
                                     <TableCell>
                                         <div className="flex flex-wrap gap-1.5">
@@ -1692,13 +1666,6 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                             ) : null}
                                         </div>
                                     </TableCell>
-                                    {activeTab === 'sales' && salesAgentCommissionsEnabled ? (
-                                        <TableCell className="font-semibold tabular-nums">
-                                            {productCommissionTotal === null
-                                                ? '—'
-                                                : formatCurrency(productCommissionTotal || 0, row.currency, features.iqd_display_preference)}
-                                        </TableCell>
-                                    ) : null}
                                     <TableCell>{formatCurrency(row.total, row.currency, features.iqd_display_preference)}</TableCell>
                                     <TableCell>{formatDate(row.createdAt)}</TableCell>
                                     <TableCell>{row.actualDeliveryDate ? formatDate(row.actualDeliveryDate) : '—'}</TableCell>
@@ -1770,9 +1737,6 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     const canDelete = canDeleteOrders && isDraft
                     const returnStatus = activeTab === 'sales' ? (row as SalesOrder).returnStatus : 'none'
                     const isFullyReturnedSalesOrder = activeTab === 'sales' && returnStatus === 'full'
-                    const productCommissionTotal = activeTab === 'sales' && salesAgentCommissionsEnabled
-                        ? productCommissionTotalBySalesOrderId.get(row.id)
-                        : undefined
 
                     return (
                         <div
@@ -1856,19 +1820,17 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
 
                             <div className={cn(
                                 'grid gap-2 border-y border-border/50 py-3',
-                                activeTab === 'sales' && salesAgentCommissionsEnabled ? 'grid-cols-4' : 'grid-cols-3'
+                                activeTab === 'sales' ? 'grid-cols-4' : 'grid-cols-3'
                             )}>
                                 <div className="text-center">
                                     <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">{t('orders.table.items') || 'Items'}</div>
                                     <div className="text-[11px] font-bold">{row.items.length}</div>
                                 </div>
-                                {activeTab === 'sales' && salesAgentCommissionsEnabled ? (
+                                {activeTab === 'sales' ? (
                                     <div className="text-center border-s border-border/50">
-                                        <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">{t('orders.table.totalCommission')}</div>
-                                        <div className="text-[11px] font-bold text-violet-700 dark:text-violet-300">
-                                            {productCommissionTotal === null
-                                                ? '—'
-                                                : formatCurrency(productCommissionTotal || 0, row.currency, features.iqd_display_preference)}
+                                        <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">{t('orders.table.createdBy')}</div>
+                                        <div className="truncate text-[11px] font-bold" title={getCreatedByName(row.createdBy)}>
+                                            {getCreatedByName(row.createdBy)}
                                         </div>
                                     </div>
                                 ) : null}

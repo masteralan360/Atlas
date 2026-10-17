@@ -2331,6 +2331,7 @@
       "customer": "العميل",
       "items": "العناصر",
       "status": "الحالة",
+      "createdBy": "أنشئ بواسطة",
       "totalCommission": "إجمالي العمولة",
       "total": "الإجمالي",
       "date": "التاريخ",

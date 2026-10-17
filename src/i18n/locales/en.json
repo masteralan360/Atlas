@@ -3866,6 +3866,7 @@
       "customer": "Customer",
       "items": "Items",
       "status": "Status",
+      "createdBy": "Created By",
       "totalCommission": "Total commission",
       "total": "Total",
       "date": "Date",

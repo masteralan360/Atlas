@@ -15,8 +15,13 @@ import { db } from './database'
 import { getAccessibleBusinessPartnerFacetIdsInLocalCache, getAccessibleBusinessPartnerIdsInLocalCache } from './businessPartnerAccess'
 import { getOrderBalanceAmount, getOrderPaymentStatus } from './orderInstallments'
 import { getCurrentStorageAccess, redactPurchaseOrderForStorageAccess, redactSalesOrderForStorageAccess, useStorageAccess } from './storagePermissions'
-import { getCommissionAssignedOrderAccess, getSalesOrderIdsAssignedToLinkedFieldAgent } from './orders'
+import {
+  getCommissionAssignedOrderAccess,
+  getLinkedSalesAccountAgentIdsForOwnOrders,
+  getSalesOrderIdsAssignedToLinkedFieldAgent
+} from './orders'
 import { getAppliedCurrencyConversion } from '@/lib/orderCurrency'
+import { useWorkspace } from '@/workspace'
 import type {
   Agent,
   ProductCommissionRule,
@@ -88,6 +93,7 @@ type LocalOrdersListContext = {
   storageAccess: OrderListAccess
   viewOwn: { isRestricted: boolean; userId?: string }
   permissionKeys?: readonly string[]
+  agentSalesAccountsFeatureEnabled?: boolean
 }
 
 function normalizeOrder(value: unknown, workspaceId: string): SalesOrder | PurchaseOrder {
@@ -109,7 +115,8 @@ function normalizeOrder(value: unknown, workspaceId: string): SalesOrder | Purch
 function matchesOrderFilters(
   order: SalesOrder | PurchaseOrder,
   query: OrdersListPageQuery,
-  searchAgentOrderIds: ReadonlySet<string>
+  searchAgentOrderIds: ReadonlySet<string>,
+  searchCreatorUserIds: ReadonlySet<string>
 ) {
   if (order.isDeleted) return false
   if (query.includeArchived ? !order.isArchived : order.isArchived) return false
@@ -143,9 +150,29 @@ function matchesOrderFilters(
     : (order as PurchaseOrder).supplierName
   return order.orderNumber.toLocaleLowerCase().includes(search)
     || counterparty.toLocaleLowerCase().includes(search)
+    || Boolean(order.createdBy && searchCreatorUserIds.has(order.createdBy))
     || order.items.some((item) => String(item.productName ?? '').toLocaleLowerCase().includes(search)
       || String(item.productSku ?? '').toLocaleLowerCase().includes(search))
     || searchAgentOrderIds.has(order.id)
+}
+
+async function getCreatorIdsMatchingSearch(workspaceId: string, search: string) {
+  if (!search) return new Set<string>()
+
+  const matchesName = (name: string | undefined) => Boolean(name?.toLocaleLowerCase().includes(search))
+  const [sourceWorkspaceProfileIds, currentWorkspaceProfileIds, userIds] = await Promise.all([
+    db.profiles.where('workspaceId').equals(workspaceId)
+      .filter((profile) => matchesName(profile.name))
+      .primaryKeys(),
+    db.profiles.where('currentWorkspaceId').equals(workspaceId)
+      .filter((profile) => matchesName(profile.name))
+      .primaryKeys(),
+    db.users.where('workspaceId').equals(workspaceId)
+      .filter((user) => !user.isDeleted && matchesName(user.name))
+      .primaryKeys()
+  ])
+
+  return new Set([...sourceWorkspaceProfileIds, ...currentWorkspaceProfileIds, ...userIds])
 }
 
 async function readLocalOrdersListPage(
@@ -153,7 +180,8 @@ async function readLocalOrdersListPage(
   access: OrderListAccess,
   viewOwn: { isRestricted: boolean; userId?: string },
   permissionKeys: readonly string[] = [],
-  commissionPreview?: OrdersProductCommissionPreviewContext
+  commissionPreview?: OrdersProductCommissionPreviewContext,
+  agentSalesAccountsFeatureEnabled?: boolean
 ): Promise<OrdersListPage> {
   const workspaceId = query.workspaceId
   if (!workspaceId || !access.isReady) return EMPTY_ORDERS_PAGE
@@ -170,6 +198,7 @@ async function readLocalOrdersListPage(
   )
 
   const search = query.search?.trim().toLocaleLowerCase() || ''
+  const searchCreatorUserIds = await getCreatorIdsMatchingSearch(workspaceId, search)
   const assignedOrderAccess = isSales && viewOwn.isRestricted
     ? getCommissionAssignedOrderAccess(workspaceId, permissionKeys)
     : 'none'
@@ -181,6 +210,13 @@ async function readLocalOrdersListPage(
   const needsAgentSearch = isSales && Boolean(search) && (canSearchAllAgentNames || canSearchOwnAgentNames)
   let assignedOrderIds = new Set<string>()
   let searchAgentOrderIds = new Set<string>()
+  const linkedSalesAccountAgentIds = isSales && viewOwn.isRestricted
+    ? await getLinkedSalesAccountAgentIdsForOwnOrders(
+      workspaceId,
+      viewOwn.userId,
+      agentSalesAccountsFeatureEnabled
+    )
+    : new Set<string>()
 
   if (assignedOrderAccess === 'own' || assignedOrderAccess === 'assigned') {
     assignedOrderIds = await getSalesOrderIdsAssignedToLinkedFieldAgent(workspaceId, viewOwn.userId, assignedOrderAccess)
@@ -221,13 +257,17 @@ async function readLocalOrdersListPage(
     || order.createdBy === viewOwn.userId
     || (isSales && canViewAllSalesOrders)
     || (isSales && assignedOrderIds.has(order.id))
+    || (isSales && Boolean(
+      (order as SalesOrder).salesAccountAgentId
+      && linkedSalesAccountAgentIds.has((order as SalesOrder).salesAccountAgentId as string)
+    ))
   )
   const getVisibleMatchingOrder = (rawOrder: SalesOrder | PurchaseOrder) => {
     if (rawOrder.isDeleted || !isInViewOwnScope(rawOrder)) return null
     const order = isSales
       ? redactSalesOrderForStorageAccess(rawOrder as SalesOrder, access)
       : redactPurchaseOrderForStorageAccess(rawOrder as PurchaseOrder, access)
-    return order && matchesOrderFilters(order, query, searchAgentOrderIds) ? order : null
+    return order && matchesOrderFilters(order, query, searchAgentOrderIds, searchCreatorUserIds) ? order : null
   }
 
   // Resolve access only for partners referenced by matching orders. This keeps
@@ -492,7 +532,14 @@ export async function fetchOrdersListPage(
 
   const storageAccess = localContext?.storageAccess ?? await getLocalStorageAccessSnapshot(workspaceId)
   const viewOwn = localContext?.viewOwn ?? { isRestricted: false }
-  return readLocalOrdersListPage(query, storageAccess, viewOwn, localContext?.permissionKeys, commissionPreview)
+  return readLocalOrdersListPage(
+    query,
+    storageAccess,
+    viewOwn,
+    localContext?.permissionKeys,
+    commissionPreview,
+    localContext?.agentSalesAccountsFeatureEnabled
+  )
 }
 
 async function fetchRemoteProductCommissionPreview(query: OrdersListPageQuery) {
@@ -544,6 +591,7 @@ async function getLocalStorageAccessSnapshot(workspaceId: string): Promise<Order
 
 export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?: OrdersProductCommissionPreviewContext) {
   const online = useNetworkStatus()
+  const { features, activeWorkspace } = useWorkspace()
   const queryKey = useMemo(() => JSON.stringify(query), [query])
   const request = useMemo(() => JSON.parse(queryKey) as OrdersListPageQuery, [queryKey])
   const workspaceId = request.workspaceId
@@ -570,12 +618,22 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
   const storageAccess = useStorageAccess(workspaceId)
   const viewOwn = useViewOwnRecordScope('orders.view_own')
   const permissions = useOptionalWorkspacePermissions()
+  const agentSalesAccountsFeatureEnabled = Boolean(
+    activeWorkspace?.id === workspaceId && features.agent_sales_accounts
+  )
   const usesRemote = Boolean(workspaceId && online && !isLocalWorkspaceMode(workspaceId))
   const localPage = useLiveQuery(
     () => request.enabled === false || usesRemote
       ? EMPTY_ORDERS_PAGE
-      : readLocalOrdersListPage(request, storageAccess, viewOwn, permissions?.permissionKeys),
-    [request, storageAccess.signature, viewOwn.isRestricted, viewOwn.userId, permissions?.permissionKeys, usesRemote],
+      : readLocalOrdersListPage(
+        request,
+        storageAccess,
+        viewOwn,
+        permissions?.permissionKeys,
+        undefined,
+        agentSalesAccountsFeatureEnabled
+      ),
+    [request, storageAccess.signature, viewOwn.isRestricted, viewOwn.userId, permissions?.permissionKeys, usesRemote, agentSalesAccountsFeatureEnabled],
     EMPTY_ORDERS_PAGE
   )
   const localCommissionPreview = useLiveQuery(
@@ -586,7 +644,8 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
         storageAccess,
         viewOwn,
         permissions?.permissionKeys,
-        commissionPreview
+        commissionPreview,
+        agentSalesAccountsFeatureEnabled
       ).then((page) => page.productCommissionPreviewByCurrency),
     [
       commissionSummaryQueryKey,
@@ -595,7 +654,8 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
       viewOwn.userId,
       permissions?.permissionKeys,
       usesRemote,
-      commissionPreview
+      commissionPreview,
+      agentSalesAccountsFeatureEnabled
     ],
     []
   )
@@ -614,7 +674,8 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
   const fetchAllMatches = () => fetchAllOrdersListMatches(request, {
     storageAccess,
     viewOwn,
-    permissionKeys: permissions?.permissionKeys
+    permissionKeys: permissions?.permissionKeys,
+    agentSalesAccountsFeatureEnabled
   })
 
   useEffect(() => {
@@ -636,7 +697,7 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
       })
 
     return () => { cancelled = true }
-  }, [queryKey, request, usesRemote, workspaceId])
+  }, [queryKey, request, usesRemote, workspaceId, agentSalesAccountsFeatureEnabled])
 
   useEffect(() => {
     if (!request.enabled || !workspaceId || !usesRemote || request.orderType !== 'sales' || !commissionPreview) {
