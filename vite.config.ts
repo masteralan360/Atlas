@@ -33,7 +33,6 @@ function atlasDevStartupDarkModePlugin(enabled: boolean) {
 
                 const startupTheme = `
 <style id="atlas-dev-startup-dark-mode">
-  html, body { background: #020617; }
   #atlas-shell-startup { background: #020617; color: #f8fafc; color-scheme: dark; }
   #atlas-shell-startup .atlas-shell-startup-title { color: #f8fafc; }
   #atlas-shell-startup .atlas-shell-startup-status { color: #cbd5e1; }

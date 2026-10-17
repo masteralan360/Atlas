@@ -1,3 +1,11 @@
+Profit for Commerce Operations
+Notification when an order is done
+
+
+Sale Order Exchange
+
+Cart and Catalog Localize
+
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide 
 
 Allow inventory movement on offline mode

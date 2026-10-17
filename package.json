@@ -38,6 +38,7 @@
     "test:products:live": "node scripts/dev-testing/cli.mjs --suite products --environment hosted-supabase",
     "test:pos": "node scripts/dev-testing/cli.mjs --suite pos",
     "test:pos:live": "node scripts/dev-testing/cli.mjs --suite pos --environment hosted-supabase",
+    "test:cloud-hybrid-playwright": "node --test scripts/cloud-hybrid-playwright/executionState.test.mjs scripts/cloud-hybrid-playwright/salesOrderDriverCleanup.test.mjs scripts/cloud-hybrid-playwright/salesOrderLocalization.test.mjs scripts/cloud-hybrid-playwright/salesOrderScenarioMatrix.test.mjs scripts/cloud-hybrid-playwright/salesOrderServiceAssertions.test.mjs scripts/cloud-hybrid-playwright/salesOrderWorkspaceSafety.test.mjs scripts/cloud-hybrid-playwright/salesOrderWorkspaceSnapshot.test.mjs scripts/cloud-hybrid-playwright/suiteRouting.test.mjs",
     "test:post-service": "node scripts/dev-testing/cli.mjs --suite post-service",
     "build": "node scripts/build.mjs",
     "cf:dev": "wrangler dev --config cloudflare-web/wrangler.toml",

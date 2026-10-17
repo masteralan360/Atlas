@@ -315,6 +315,74 @@ because POS, Business Partners and focused order contracts legitimately use them
 Useful financing, service, UoM, pricing, print and audit regressions remain under
 `domain-contracts`; they do not generate Cartesian scenarios.
 
+### Integrated Sales Order Hybrid Playwright
+
+The Sales Order Resilience Lab dialog exposes **Hybrid Playwright** from the
+existing developer testing interface. The browser runner has the suite ID
+`sales-order-resilience`; POS keeps its existing `pos` runner, default routes,
+scenario matrix and report format. Both share the local Vite API and a single
+active-execution lock, while status, prepared plans, cancellation, progress,
+diagnostics and artifacts remain scoped by suite and run ID. A Sales Order
+prepared plan ID and scenario signature are mandatory for execution. POS rejects
+Sales Order plan IDs, and Sales Order rejects missing, stale or mismatched plans.
+
+The runner reads the dedicated root file `.env.atlas-live-playwright-tests.local`
+with `ATLAS_LIVE_SUPABASE_URL`, `ATLAS_LIVE_SUPABASE_KEY` (publishable/anon),
+`ATLAS_LIVE_TEST_EMAIL`, `ATLAS_LIVE_TEST_PASSWORD`, and
+`ATLAS_LIVE_WORKSPACE_ID`; `ATLAS_LIVE_WORKSPACE_NAME` may be set to require an
+exact name match. Sales Order preflight requires a workspace whose name begins
+`DEV TEST`, configured and unlocked state, a scoped admin/staff ordinary user,
+and `data_mode=hybrid`. Preparation and execution recheck Hybrid mode and app
+workspace capabilities. Cloud and Local are rejected for this suite. The
+browser authenticates by submitting the ordinary credentials to Atlas login;
+the runner does not use a service-role key or the current browser session.
+
+Preparation opens the real Sales Orders form to read the app's persisted
+workspace feature snapshot and supported payment-method values, then generates
+eight bounded risk-based rows rather than a Cartesian matrix. Five order paths
+are executable when their workspace capabilities are present: create/reload,
+edit/reload, cancel, repeated-save protection, and `SO-HYB-005` service-only plus
+mixed product/service drafts. The service path creates its service through the
+authenticated Atlas product module API, saves both drafts through the real form,
+and checks business-partner and customer-facet links, line totals, storage
+semantics, cache/reload, payment absence, and unchanged inventory. It also
+requires Products and Storage. Payment rows are skipped when discovered payment
+capabilities are unavailable and blocked if the feature exists but the runner
+lacks a real workflow/cleanup executor.
+Approval is skipped until a separate authorized actor flow is configured.
+Unlinking, order completion, quantity boundaries, discounts, payment-account
+variants/reversals, role/plan restrictions, controlled failed/lost responses,
+native SQLite and desktop restart recovery remain explicitly unverified or
+blocked. The SORL document has the per-ID matrix, exact assertions, usage and
+failure boundaries.
+
+Run the suite-isolation, Hybrid workspace guard, prepared-matrix, localization
+and fixture-cleanup regression tests with `npm run test:cloud-hybrid-playwright`.
+
+Each browser run creates fixtures through authenticated Atlas module APIs and
+performs order operations through the UI. Independent Supabase reads verify
+order state, relationships, totals, payment absence and unchanged inventory;
+the app Dexie cache is checked after reload. Run-created customer and product
+records use unique run markers; an existing workspace storage may be reused.
+Cleanup verifies workspace, unique marker, identity, and dependencies. It
+soft-deletes unpaid run-owned drafts through the authenticated workspace API
+after checking for payment and inventory records, deletes products/services
+with the Atlas product API, and retires customer facets and partners through
+authorized workspace-scoped CRM sync RPCs after checking for active orders and
+loans. It retires only storage created by the run. Cleanup runs after success,
+failure and cancellation;
+terminal cancellation is published only after cleanup completion or an explicit
+cleanup failure. Inspect the run's JSON export, screenshot paths, Playwright
+trace and `report.json` beneath
+`.cloud-hybrid-playwright/artifacts/sales-order-resilience/<run-id>/`.
+
+Browser execution against Hybrid verifies the web app, Supabase persistence and
+the Dexie cache only. It does not prove SQLite mirroring, Electron/Tauri startup,
+native offline recovery or desktop restart behavior. Never report those as
+passing until a desktop runtime adapter exercises them. If the capability
+fingerprint differs from the prepared plan, stop and prepare a new timeline;
+do not regenerate dimensions during scenario execution.
+
 ### Independent regular POS suite
 
 Regular POS is registered as `pos` and mounted on `/pos`, without an Instant POS

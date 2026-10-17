@@ -1,0 +1,1816 @@
+{
+  "id": "25540014-829d-4257-8af7-4c56f74a9a00",
+  "suiteId": "sales-order-resilience",
+  "title": "Sales Order Hybrid Playwright",
+  "status": "cancelled",
+  "planOnly": false,
+  "stage": "cancelled",
+  "currentScenario": null,
+  "currentIndex": 5,
+  "totalScenarios": 5,
+  "passed": 0,
+  "failed": 4,
+  "blocked": 1,
+  "startedAt": "2026-10-17T21:19:28.307Z",
+  "updatedAt": "2026-10-17T21:23:38.954Z",
+  "finishedAt": "2026-10-17T21:23:38.954Z",
+  "cancelRequested": true,
+  "target": {
+    "workspaceName": "DEV TEST Atlas",
+    "workspaceId": "4405a449-7d3e-483f-ba44-b27c115b279a",
+    "mode": "hybrid",
+    "supabaseHost": "eboispangcayxxheoufy.supabase.co"
+  },
+  "results": [
+    {
+      "id": "SO-HYB-001",
+      "name": "Draft create and reload",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.draftCreateReload",
+      "status": "failed",
+      "signature": "b7bddc96f3c8a7221755571844596cb1273f688f48fbb9136df258fb919c51b1",
+      "preparedDimensions": {
+        "action": "create-draft-reload",
+        "quantity": 1,
+        "unit": "native",
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      },
+      "startedAt": "2026-10-17T21:20:02.495Z",
+      "cleanup": {
+        "completed": false,
+        "errors": []
+      },
+      "errors": [
+        "Timed out waiting for the expected Sales Order state to persist in Supabase. Browser requests still pending: [{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":56950},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":56939},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":56938},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":56927},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":56926},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":56926},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-EUR/blackMarket\",\"elapsedMs\":47579},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":46808},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":46316},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":46308},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":46308}]."
+      ],
+      "artifacts": {
+        "screenshot": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\25540014-829d-4257-8af7-4c56f74a9a00/SO-HYB-001-failure.png"
+      },
+      "finishedAt": "2026-10-17T21:20:43.078Z"
+    },
+    {
+      "id": "SO-HYB-002",
+      "name": "Draft edit and reload",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.draftEditReload",
+      "status": "failed",
+      "signature": "4af9afbe0c094c272362feb2e0f2633ef356327920239ad6bafbfa738fda4326",
+      "preparedDimensions": {
+        "action": "edit-draft-reload",
+        "initialQuantity": 1,
+        "savedQuantity": 2,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      },
+      "startedAt": "2026-10-17T21:20:43.089Z",
+      "cleanup": {
+        "completed": false,
+        "errors": []
+      },
+      "errors": [
+        "Timed out waiting for the expected Sales Order state to persist in Supabase. Browser requests still pending: [{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":92165},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":92165},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-EUR/blackMarket\",\"elapsedMs\":82818},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":82047},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":81555},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":81547},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":81547},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-EUR/blackMarket\",\"elapsedMs\":22021},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":21499},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":20992},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":20983},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":20982}]."
+      ],
+      "artifacts": {
+        "screenshot": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\25540014-829d-4257-8af7-4c56f74a9a00/SO-HYB-002-failure.png"
+      },
+      "finishedAt": "2026-10-17T21:21:18.483Z"
+    },
+    {
+      "id": "SO-HYB-003",
+      "name": "Draft cancellation",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.draftCancel",
+      "status": "failed",
+      "signature": "d5a5f27fbf7b66a083de462cf2bab1953bf939ce64acaa65762df571c974cb65",
+      "preparedDimensions": {
+        "action": "create-cancel-draft",
+        "quantity": 1,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      },
+      "startedAt": "2026-10-17T21:21:18.504Z",
+      "cleanup": {
+        "completed": false,
+        "errors": []
+      },
+      "errors": [
+        "locator.waitFor: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Save Order', exact: true }) to be visible\u001b[22m\n"
+      ],
+      "artifacts": {
+        "screenshot": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\25540014-829d-4257-8af7-4c56f74a9a00/SO-HYB-003-failure.png"
+      },
+      "finishedAt": "2026-10-17T21:21:43.093Z"
+    },
+    {
+      "id": "SO-HYB-004",
+      "name": "Repeated save protection",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.repeatedSave",
+      "status": "failed",
+      "signature": "3fc961818603860dd32e46b09d10f7fa3dcc3aabbbf1c377a0f3ba979d3a5f71",
+      "preparedDimensions": {
+        "action": "repeated-save",
+        "quantity": 1,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid",
+        "submissions": 2
+      },
+      "startedAt": "2026-10-17T21:21:43.108Z",
+      "cleanup": {
+        "completed": false,
+        "errors": []
+      },
+      "errors": [
+        "Timed out waiting for the expected Sales Order state to persist in Supabase. Browser requests still pending: [{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":151278},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":151278},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-EUR/blackMarket\",\"elapsedMs\":91752},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":91230},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":90723},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":90714},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":90713},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-EUR/blackMarket\",\"elapsedMs\":32556},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":31320},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":30898},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":30894},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":30893}]."
+      ],
+      "artifacts": {
+        "screenshot": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\25540014-829d-4257-8af7-4c56f74a9a00/SO-HYB-004-failure.png"
+      },
+      "finishedAt": "2026-10-17T21:22:28.031Z"
+    },
+    {
+      "id": "SO-HYB-005",
+      "name": "Service-only and mixed line orders",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.serviceOrders",
+      "status": "cancelled",
+      "signature": "54f9df6184583c1429815749e5a34077a2bfd7264b9afddf01080c20a25ff5d8",
+      "preparedDimensions": {
+        "actions": [
+          "service-only-draft",
+          "mixed-product-service-draft"
+        ],
+        "serviceQuantity": 1,
+        "serviceUnitPrice": 70,
+        "productQuantity": 2,
+        "productUnitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      },
+      "startedAt": "2026-10-17T21:22:28.087Z",
+      "cleanup": {
+        "completed": false,
+        "errors": [
+          "page.evaluate: Target page, context or browser has been closed",
+          "page.evaluate: Target page, context or browser has been closed"
+        ]
+      },
+      "actual": {
+        "orders": [],
+        "completedActions": [],
+        "cancelled": true,
+        "inventoryUnchanged": true,
+        "serviceInventoryRows": 0,
+        "paymentTransactions": 0
+      },
+      "cancelledActions": [],
+      "finishedAt": "2026-10-17T21:22:28.392Z"
+    }
+  ],
+  "scenarioPlan": [
+    {
+      "id": "SO-HYB-001",
+      "name": "Draft create and reload",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.draftCreateReload",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.draftCreateReload",
+      "domain": "sales-order",
+      "coverage": [
+        "lifecycle",
+        "relationships",
+        "persistence",
+        "inventory"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "businessPartners",
+        "products",
+        "storages"
+      ],
+      "prerequisites": [
+        "Verified Hybrid workspace",
+        "Authorized user with Sales Orders access",
+        "Run-owned customer and product fixture"
+      ],
+      "dimensions": {
+        "action": "create-draft-reload",
+        "quantity": 1,
+        "unit": "native",
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      },
+      "expectedUi": [
+        "Select the linked customer and product in the Sales Order form",
+        "Save the draft and reopen it after a browser reload"
+      ],
+      "expectedEffects": [
+        "One draft with the selected customer and one line is persisted",
+        "No payment transaction or inventory movement is created"
+      ],
+      "assertions": [
+        "Order count is exactly one",
+        "Order, line quantity, total, customer, and product match the prepared dimensions",
+        "Inventory and payment baselines are unchanged"
+      ],
+      "signature": "b7bddc96f3c8a7221755571844596cb1273f688f48fbb9136df258fb919c51b1",
+      "status": "failed",
+      "statusReason": null,
+      "missingCapabilities": [],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "action": "create-draft-reload",
+        "quantity": 1,
+        "unit": "native",
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      }
+    },
+    {
+      "id": "SO-HYB-002",
+      "name": "Draft edit and reload",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.draftEditReload",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.draftEditReload",
+      "domain": "sales-order",
+      "coverage": [
+        "lifecycle",
+        "relationships",
+        "pricing",
+        "persistence"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "businessPartners",
+        "products",
+        "storages"
+      ],
+      "prerequisites": [
+        "Verified Hybrid workspace",
+        "Authorized user with Sales Orders access",
+        "Run-owned customer and product fixture"
+      ],
+      "dimensions": {
+        "action": "edit-draft-reload",
+        "initialQuantity": 1,
+        "savedQuantity": 2,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      },
+      "expectedUi": [
+        "Create a draft in the form",
+        "Edit its quantity, save, and reload the existing order"
+      ],
+      "expectedEffects": [
+        "The original order ID remains stable",
+        "The persisted line quantity and total reflect the saved edit"
+      ],
+      "assertions": [
+        "Exactly one order exists for the scenario marker",
+        "The same order ID has quantity 2 and the matching total after reload",
+        "No payment or inventory side effects are recorded"
+      ],
+      "signature": "4af9afbe0c094c272362feb2e0f2633ef356327920239ad6bafbfa738fda4326",
+      "status": "failed",
+      "statusReason": null,
+      "missingCapabilities": [],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "action": "edit-draft-reload",
+        "initialQuantity": 1,
+        "savedQuantity": 2,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      }
+    },
+    {
+      "id": "SO-HYB-003",
+      "name": "Draft cancellation",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.draftCancel",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.draftCancel",
+      "domain": "sales-order",
+      "coverage": [
+        "lifecycle",
+        "cancellation",
+        "inventory"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "businessPartners",
+        "products",
+        "storages"
+      ],
+      "prerequisites": [
+        "Verified Hybrid workspace",
+        "Authorized user with Sales Orders management permission",
+        "Run-owned customer and product fixture"
+      ],
+      "dimensions": {
+        "action": "create-cancel-draft",
+        "quantity": 1,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      },
+      "expectedUi": [
+        "Create an unpaid draft",
+        "Cancel it from the Sales Orders list and confirm in the application dialog"
+      ],
+      "expectedEffects": [
+        "The existing order transitions from draft to cancelled",
+        "No payment or stock movement is posted"
+      ],
+      "assertions": [
+        "The order retains its ID and becomes cancelled",
+        "Inventory and payment baselines remain unchanged"
+      ],
+      "signature": "d5a5f27fbf7b66a083de462cf2bab1953bf939ce64acaa65762df571c974cb65",
+      "status": "failed",
+      "statusReason": null,
+      "missingCapabilities": [],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "action": "create-cancel-draft",
+        "quantity": 1,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      }
+    },
+    {
+      "id": "SO-HYB-004",
+      "name": "Repeated save protection",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.repeatedSave",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.repeatedSave",
+      "domain": "sales-order",
+      "coverage": [
+        "failure-recovery",
+        "idempotency",
+        "persistence"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "businessPartners",
+        "products",
+        "storages"
+      ],
+      "prerequisites": [
+        "Verified Hybrid workspace",
+        "Authorized user with Sales Orders access",
+        "Run-owned customer and product fixture"
+      ],
+      "dimensions": {
+        "action": "repeated-save",
+        "quantity": 1,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid",
+        "submissions": 2
+      },
+      "expectedUi": [
+        "Submit the same prepared draft twice through the Save Order control"
+      ],
+      "expectedEffects": [
+        "At most one draft is created for the unique scenario marker"
+      ],
+      "assertions": [
+        "One persisted order exists after repeated UI submission",
+        "No payment or inventory side effects are created"
+      ],
+      "signature": "3fc961818603860dd32e46b09d10f7fa3dcc3aabbbf1c377a0f3ba979d3a5f71",
+      "status": "failed",
+      "statusReason": null,
+      "missingCapabilities": [],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "action": "repeated-save",
+        "quantity": 1,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid",
+        "submissions": 2
+      }
+    },
+    {
+      "id": "SO-HYB-005",
+      "name": "Service-only and mixed line orders",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.serviceOrders",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.serviceOrders",
+      "domain": "sales-order",
+      "coverage": [
+        "relationships",
+        "services",
+        "inventory"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "services",
+        "products",
+        "storages"
+      ],
+      "prerequisites": [
+        "Service feature enabled and exposed by the application workspace snapshot"
+      ],
+      "dimensions": {
+        "actions": [
+          "service-only-draft",
+          "mixed-product-service-draft"
+        ],
+        "serviceQuantity": 1,
+        "serviceUnitPrice": 70,
+        "productQuantity": 2,
+        "productUnitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      },
+      "expectedUi": [
+        "Select a service and, separately, a service plus product through the real order form"
+      ],
+      "expectedEffects": [
+        "Service lines persist without stock movement"
+      ],
+      "assertions": [
+        "Service-only and mixed lines persist with correct totals",
+        "Service-only flow creates no inventory movement"
+      ],
+      "signature": "54f9df6184583c1429815749e5a34077a2bfd7264b9afddf01080c20a25ff5d8",
+      "status": "cancelled",
+      "statusReason": null,
+      "missingCapabilities": [],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "actions": [
+          "service-only-draft",
+          "mixed-product-service-draft"
+        ],
+        "serviceQuantity": 1,
+        "serviceUnitPrice": 70,
+        "productQuantity": 2,
+        "productUnitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      }
+    },
+    {
+      "id": "SO-HYB-006",
+      "name": "Approval request and review",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.approval",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.approval",
+      "domain": "sales-order",
+      "coverage": [
+        "lifecycle",
+        "permissions",
+        "approval"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "authorizedApproverIdentity"
+      ],
+      "prerequisites": [
+        "Separate authorized staff requester and approver credentials in the dedicated test configuration"
+      ],
+      "dimensions": {
+        "actions": [
+          "request",
+          "approve",
+          "reject"
+        ]
+      },
+      "expectedUi": [
+        "Request approval as staff and review using an authorized approver identity"
+      ],
+      "expectedEffects": [
+        "Approval request state and subsequent review are persisted"
+      ],
+      "assertions": [
+        "Only authorized roles can request, approve, or reject"
+      ],
+      "signature": "2553d4263fca5b7b7a76bf3c07fbcf08a756311c50194e2055471cb76cfd9961",
+      "status": "skipped",
+      "statusReason": "devTesting.salesOrderHybrid.reasons.capabilityUnavailable",
+      "missingCapabilities": [
+        "authorizedApproverIdentity"
+      ],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "actions": [
+          "request",
+          "approve",
+          "reject"
+        ]
+      }
+    },
+    {
+      "id": "SO-HYB-007",
+      "name": "Payment, refund, reversal, and financing",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.financial",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.financial",
+      "domain": "sales-order",
+      "coverage": [
+        "payments",
+        "ledger",
+        "payment-accounts",
+        "financing",
+        "returns"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "payments"
+      ],
+      "prerequisites": [
+        "Discovered payment methods and financing options",
+        "Verified reversals and audit-preserving cleanup plan"
+      ],
+      "dimensions": {
+        "actions": [
+          "paid-on-creation",
+          "partial-payment",
+          "loan",
+          "installments",
+          "return",
+          "refund",
+          "reversal"
+        ]
+      },
+      "expectedUi": [
+        "Use the real payment, financing, return, refund, and reversal dialogs"
+      ],
+      "expectedEffects": [
+        "Payment transactions, ledger entries, account movements, financing records, and counter-entries match each operation"
+      ],
+      "assertions": [
+        "Exact persisted financial effects and no duplicate entries"
+      ],
+      "signature": "bdd00d7bf546f19c89abce8b5c76c81c78fd9062a0b95dc46c34890b668d2c75",
+      "status": "skipped",
+      "statusReason": "devTesting.salesOrderHybrid.reasons.capabilityUnavailable",
+      "missingCapabilities": [
+        "payments"
+      ],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "actions": [
+          "paid-on-creation",
+          "partial-payment",
+          "loan",
+          "installments",
+          "return",
+          "refund",
+          "reversal"
+        ]
+      }
+    },
+    {
+      "id": "SO-HYB-008",
+      "name": "Native Hybrid mirror and restart recovery",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.nativeHybrid",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.nativeHybrid",
+      "domain": "sales-order",
+      "coverage": [
+        "hybrid-native",
+        "sqlite",
+        "restart-recovery"
+      ],
+      "requiredCapabilities": [
+        "desktopHybridRuntime"
+      ],
+      "prerequisites": [
+        "Atlas desktop runtime with Hybrid SQLite mirror and restart controls"
+      ],
+      "dimensions": {
+        "actions": [
+          "disconnect",
+          "sync",
+          "restart",
+          "reconcile"
+        ]
+      },
+      "expectedUi": [
+        "Exercise the desktop runtime and reopen the application after a controlled interruption"
+      ],
+      "expectedEffects": [
+        "Native SQLite, Dexie, and Supabase converge after recovery"
+      ],
+      "assertions": [
+        "Native mirror and restart recovery are independently inspected"
+      ],
+      "signature": "5230c54445e568fab257fbdcb45aef26468907aba72f817cfb4b267475cdb69b",
+      "status": "blocked",
+      "statusReason": "devTesting.salesOrderHybrid.reasons.desktopRuntimeUnavailable",
+      "missingCapabilities": [
+        "desktopHybridRuntime"
+      ],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "actions": [
+          "disconnect",
+          "sync",
+          "restart",
+          "reconcile"
+        ]
+      }
+    }
+  ],
+  "scenarioPlanId": "2ee5ae2b-1244-4336-a94d-d531e08f0f3f:013f496ede387e0c",
+  "coverageSummary": {
+    "available": [
+      "SO-HYB-001",
+      "SO-HYB-002",
+      "SO-HYB-003",
+      "SO-HYB-004",
+      "SO-HYB-005"
+    ],
+    "skipped": [
+      {
+        "id": "SO-HYB-006",
+        "reason": "devTesting.salesOrderHybrid.reasons.capabilityUnavailable",
+        "missingCapabilities": [
+          "authorizedApproverIdentity"
+        ]
+      },
+      {
+        "id": "SO-HYB-007",
+        "reason": "devTesting.salesOrderHybrid.reasons.capabilityUnavailable",
+        "missingCapabilities": [
+          "payments"
+        ]
+      }
+    ],
+    "blocked": [
+      {
+        "id": "SO-HYB-008",
+        "reason": "devTesting.salesOrderHybrid.reasons.desktopRuntimeUnavailable"
+      }
+    ],
+    "unverified": [
+      "customer-product-unlink",
+      "completion-fulfillment",
+      "approval-rejection",
+      "quantity-boundaries",
+      "discounts",
+      "payment-account-optional",
+      "payment-reversals",
+      "role-restrictions",
+      "plan-entitlements",
+      "alternate-uom",
+      "currency-conversion",
+      "payment-ledger",
+      "financing",
+      "returns-refunds",
+      "approval-roles",
+      "failed-request-retry",
+      "lost-response-recovery",
+      "native-sqlite",
+      "desktop-restart"
+    ]
+  },
+  "hybridBoundaries": {
+    "browser": "Real Atlas UI in Playwright; authenticated with the configured ordinary live-test account.",
+    "supabase": "Verified directly through an authenticated Supabase client using that ordinary account and workspace RLS.",
+    "dexie": "The application Dexie order cache is read independently in the authenticated browser after save and reload.",
+    "nativeSqlite": "Not exercised by this browser runner; SQLite mirroring is unverified.",
+    "desktopRuntime": "Electron/Tauri desktop runtime and restart recovery are not exercised."
+  },
+  "scenarioSelection": {
+    "mode": "all"
+  },
+  "logs": [
+    {
+      "at": "2026-10-17T21:19:46.293Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.293Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.293Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.293Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.293Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.293Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.304Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.304Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.304Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.305Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.393Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.394Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:55.513Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-EUR/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:55.513Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.309Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.309Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.892Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.892Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.893Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.893Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.893Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.893Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:57.092Z",
+      "level": "info",
+      "message": "payment-method-discovery.skipped",
+      "details": {
+        "reason": "The Payment Method selector is disabled in the authenticated Atlas UI; no methods were reported as available."
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:02.495Z",
+      "level": "info",
+      "message": "Created run-owned Sales Order fixtures through the authenticated Atlas module APIs.",
+      "details": {
+        "customerId": "dc74be7e-ca07-47d7-b45a-f463d467e990",
+        "productId": "b28ac8d8-9a0e-4038-a616-584057d22ca5",
+        "serviceId": "6d5dbea6-8526-43e8-85dc-c6edf4cf8ef7",
+        "storageId": "de3ef944-9927-4c63-84c6-5107275bc18c",
+        "storageOwnedByRun": false
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:15.163Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 409,
+        "method": "POST",
+        "pathname": "/rest/v1/sales_orders"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:15.163Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 409 ()"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:15.238Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "[Orders] Failed to sync sales_orders: {code: 23503, details: null, hint: null, message: Order item UoM is unavailable for new orders}"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:43.078Z",
+      "level": "error",
+      "message": "SO-HYB-001 failed.",
+      "details": {
+        "message": "Timed out waiting for the expected Sales Order state to persist in Supabase. Browser requests still pending: [{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":56950},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":56939},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":56938},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":56927},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":56926},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":56926},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-EUR/blackMarket\",\"elapsedMs\":47579},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":46808},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":46316},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":46308},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":46308}].",
+        "screenshot": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\25540014-829d-4257-8af7-4c56f74a9a00/SO-HYB-001-failure.png"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:56.551Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-EUR/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:56.552Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.109Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.109Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.532Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.532Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.558Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.558Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.573Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.573Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:18.483Z",
+      "level": "error",
+      "message": "SO-HYB-002 failed.",
+      "details": {
+        "message": "Timed out waiting for the expected Sales Order state to persist in Supabase. Browser requests still pending: [{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":92165},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":92165},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-EUR/blackMarket\",\"elapsedMs\":82818},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":82047},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":81555},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":81547},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":81547},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-EUR/blackMarket\",\"elapsedMs\":22021},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":21499},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":20992},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":20983},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":20982}].",
+        "screenshot": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\25540014-829d-4257-8af7-4c56f74a9a00/SO-HYB-002-failure.png"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:43.093Z",
+      "level": "error",
+      "message": "SO-HYB-003 failed.",
+      "details": {
+        "message": "locator.waitFor: Timeout 20000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByRole('button', { name: 'Save Order', exact: true }) to be visible\u001b[22m\n",
+        "screenshot": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\25540014-829d-4257-8af7-4c56f74a9a00/SO-HYB-003-failure.png"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:55.724Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-EUR/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:55.724Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:55.726Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 409,
+        "method": "POST",
+        "pathname": "/rest/v1/sales_orders"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:55.726Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 409 ()"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:55.745Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "[Orders] Failed to sync sales_orders: {code: 23503, details: null, hint: null, message: Order item UoM is unavailable for new orders}"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:56.920Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:56.920Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:57.802Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:57.802Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:57.802Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:57.802Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:57.802Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:57.802Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:28.031Z",
+      "level": "error",
+      "message": "SO-HYB-004 failed.",
+      "details": {
+        "message": "Timed out waiting for the expected Sales Order state to persist in Supabase. Browser requests still pending: [{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":151278},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":151278},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-EUR/blackMarket\",\"elapsedMs\":91752},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":91230},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":90723},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":90714},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":90713},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-EUR/blackMarket\",\"elapsedMs\":32556},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":31320},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/USD-to-IQD/blackMarket\",\"elapsedMs\":30898},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/EUR-to-IQD/blackMarket\",\"elapsedMs\":30894},{\"method\":\"GET\",\"host\":\"localhost:5173\",\"pathname\":\"/api-forexfy/en/currency/TRY-to-IQD/blackMarket\",\"elapsedMs\":30893}].",
+        "screenshot": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\25540014-829d-4257-8af7-4c56f74a9a00/SO-HYB-004-failure.png"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:28.383Z",
+      "level": "warning",
+      "message": "Cancellation requested. The active scenario will finish cleanup first."
+    },
+    {
+      "at": "2026-10-17T21:22:55.855Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-EUR/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:55.855Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.516Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.516Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.718Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.718Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.741Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.742Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.982Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.982Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:23:08.114Z",
+      "level": "error",
+      "message": "Run-owned fixture cleanup failed.",
+      "details": {
+        "errors": [
+          "page.evaluate: Target page, context or browser has been closed",
+          "page.evaluate: Target page, context or browser has been closed"
+        ]
+      }
+    },
+    {
+      "at": "2026-10-17T21:23:38.954Z",
+      "level": "warning",
+      "message": "Cancellation reached its terminal state after fixture cleanup completed or reported its failure."
+    }
+  ],
+  "diagnosticsPath": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\25540014-829d-4257-8af7-4c56f74a9a00\\report.json",
+  "tracePath": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\25540014-829d-4257-8af7-4c56f74a9a00\\25540014-829d-4257-8af7-4c56f74a9a00-trace.zip",
+  "capabilityFingerprint": "013f496ede387e0c74d9a41d0a705502deb326fa8257d445ad3d45db7a37e29c",
+  "scenarioDimensions": {
+    "capabilities": {
+      "workspaceId": "4405a449-7d3e-483f-ba44-b27c115b279a",
+      "dataMode": "hybrid",
+      "isConfigured": true,
+      "isLocked": false,
+      "orders": true,
+      "businessPartners": true,
+      "customers": true,
+      "products": true,
+      "storages": true,
+      "services": true,
+      "loans": true,
+      "installments": false,
+      "multiCurrency": false,
+      "payments": false,
+      "paymentMethodSelectorEnabled": false,
+      "paymentMethods": [],
+      "allowedCurrencies": [],
+      "defaultCurrency": "iqd",
+      "authorizedApproverIdentity": false,
+      "authorizedFinancialCleanup": false,
+      "desktopHybridRuntime": false
+    }
+  },
+  "diagnostics": [
+    {
+      "at": "2026-10-17T21:19:46.293Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.293Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.293Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.293Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.293Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.293Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.304Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.304Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.304Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.305Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.393Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:46.394Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:55.513Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-EUR/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:55.513Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.309Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.309Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.892Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.892Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.893Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.893Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.893Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:56.893Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:19:57.092Z",
+      "message": "payment-method-discovery.skipped",
+      "details": {
+        "reason": "The Payment Method selector is disabled in the authenticated Atlas UI; no methods were reported as available."
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:15.163Z",
+      "message": "http.error",
+      "details": {
+        "status": 409,
+        "method": "POST",
+        "pathname": "/rest/v1/sales_orders"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:15.163Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 409 ()"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:15.238Z",
+      "message": "console.error",
+      "details": {
+        "message": "[Orders] Failed to sync sales_orders: {code: 23503, details: null, hint: null, message: Order item UoM is unavailable for new orders}"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:56.551Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-EUR/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:56.552Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.109Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.109Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.532Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.532Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.558Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.558Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.573Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:20:57.573Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:55.724Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-EUR/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:55.724Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:55.726Z",
+      "message": "http.error",
+      "details": {
+        "status": 409,
+        "method": "POST",
+        "pathname": "/rest/v1/sales_orders"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:55.726Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 409 ()"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:55.745Z",
+      "message": "console.error",
+      "details": {
+        "message": "[Orders] Failed to sync sales_orders: {code: 23503, details: null, hint: null, message: Order item UoM is unavailable for new orders}"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:56.920Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:56.920Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:57.802Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:57.802Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:57.802Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:57.802Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:57.802Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:21:57.802Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:55.855Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-EUR/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:55.855Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.516Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.516Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.718Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.718Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.741Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.742Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.982Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T21:22:56.982Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    }
+  ],
+  "fixtureCleanup": {
+    "completed": false,
+    "errors": [
+      "page.evaluate: Target page, context or browser has been closed",
+      "page.evaluate: Target page, context or browser has been closed"
+    ],
+    "removed": []
+  }
+}

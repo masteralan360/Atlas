@@ -1,0 +1,427 @@
+{
+  "id": "af3f849e-45da-4bfa-b687-c95b8791d4bd",
+  "suiteId": "sales-order-resilience",
+  "title": "Sales Order Hybrid Playwright",
+  "status": "failed",
+  "planOnly": true,
+  "stage": "failed",
+  "currentScenario": null,
+  "currentIndex": 0,
+  "totalScenarios": 0,
+  "passed": 0,
+  "failed": 0,
+  "blocked": 0,
+  "startedAt": "2026-10-17T18:47:19.496Z",
+  "updatedAt": "2026-10-17T18:48:24.712Z",
+  "finishedAt": "2026-10-17T18:48:24.712Z",
+  "cancelRequested": false,
+  "target": {
+    "workspaceName": "DEV TEST Atlas",
+    "workspaceId": "4405a449-7d3e-483f-ba44-b27c115b279a",
+    "mode": "hybrid",
+    "supabaseHost": "eboispangcayxxheoufy.supabase.co"
+  },
+  "results": [],
+  "scenarioPlan": [],
+  "scenarioPlanId": null,
+  "coverageSummary": null,
+  "hybridBoundaries": {
+    "browser": "Real Atlas UI in Playwright; authenticated with the configured ordinary live-test account.",
+    "supabase": "Verified directly through an authenticated Supabase client using that ordinary account and workspace RLS.",
+    "dexie": "The application Dexie order cache is read independently in the authenticated browser after save and reload.",
+    "nativeSqlite": "Not exercised by this browser runner; SQLite mirroring is unverified.",
+    "desktopRuntime": "Electron/Tauri desktop runtime and restart recovery are not exercised."
+  },
+  "scenarioSelection": null,
+  "logs": [
+    {
+      "at": "2026-10-17T18:47:20.286Z",
+      "level": "info",
+      "message": "Hybrid mode, dedicated DEV TEST workspace, ordinary user, configured state, and unlocked state verified."
+    },
+    {
+      "at": "2026-10-17T18:47:29.004Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.004Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.005Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.005Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.006Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.006Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.087Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.087Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.087Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.087Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.146Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.146Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:31.736Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-EUR/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:31.736Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.487Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.487Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.828Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.828Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.835Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.835Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.845Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.845Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:48:24.712Z",
+      "level": "error",
+      "message": "locator.waitFor: Timeout 45000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByPlaceholder('Select Customer', { exact: true }) to be visible\u001b[22m\n"
+    }
+  ],
+  "diagnosticsPath": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\af3f849e-45da-4bfa-b687-c95b8791d4bd\\report.json",
+  "tracePath": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\af3f849e-45da-4bfa-b687-c95b8791d4bd\\plan-trace.zip",
+  "capabilityFingerprint": null,
+  "diagnostics": [
+    {
+      "at": "2026-10-17T18:47:29.004Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.004Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.005Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.005Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.006Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.006Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.087Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.087Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.087Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.087Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.146Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:29.146Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:31.736Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-EUR/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:31.736Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.487Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.487Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.828Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.828Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.835Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.835Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.845Z",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T18:47:32.845Z",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    }
+  ]
+}

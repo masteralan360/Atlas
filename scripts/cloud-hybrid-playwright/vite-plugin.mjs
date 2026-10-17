@@ -1,4 +1,5 @@
 import { cloudHybridPreflight, currentCloudHybridRun, prepareCloudHybridScenarioPlan, requestCloudHybridCancellation, startCloudHybridRun } from './run.mjs'
+import { normalizePlaywrightSuiteId, PLAYWRIGHT_SUITE_IDS } from './executionState.mjs'
 
 const API_PREFIX = '/api/cloud-hybrid-playwright/'
 
@@ -51,37 +52,44 @@ export function cloudHybridPlaywrightPlugin(enabled) {
         void (async () => {
           try {
             const action = path.slice(API_PREFIX.length)
+            const requestUrl = new URL(request.url ?? '/', 'http://localhost')
             let payload = {}
             if (request.method === 'POST') payload = await readJson(request)
             if (!authorizeLocalBrowserRequest(request, payload.baseUrl)) return send(response, 403, { error: 'This runner is available only from the local Atlas development app.' })
 
             if (request.method === 'GET' && action === 'preflight') {
-              const readiness = await cloudHybridPreflight()
+              const suiteId = normalizePlaywrightSuiteId(requestUrl.searchParams.get('suiteId') ?? PLAYWRIGHT_SUITE_IDS.POS)
+              const readiness = await cloudHybridPreflight(suiteId)
               return send(response, 200, readiness)
             }
             if (request.method === 'GET' && action === 'status') {
-              return send(response, 200, { run: currentCloudHybridRun() })
+              const suiteId = normalizePlaywrightSuiteId(requestUrl.searchParams.get('suiteId') ?? PLAYWRIGHT_SUITE_IDS.POS)
+              return send(response, 200, { run: currentCloudHybridRun(suiteId) })
             }
             if (request.method === 'POST' && action === 'start') {
-              if (!payload.baseUrl) return send(response, 400, { error: 'Open the local POS app before starting the runner.' })
+              const suiteId = normalizePlaywrightSuiteId(payload.suiteId ?? PLAYWRIGHT_SUITE_IDS.POS)
+              if (!payload.baseUrl) return send(response, 400, { error: 'Open the local Atlas app before starting the runner.' })
               try {
-                const run = startCloudHybridRun({ baseUrl: payload.baseUrl, scenarioSelection: payload.scenarioSelection })
+                const run = startCloudHybridRun({ suiteId, baseUrl: payload.baseUrl, scenarioSelection: payload.scenarioSelection })
                 return send(response, 202, { run })
               } catch (error) {
                 return send(response, 409, { error: error instanceof Error ? error.message : 'A run could not be started.' })
               }
             }
             if (request.method === 'POST' && action === 'plan') {
-              if (!payload.baseUrl) return send(response, 400, { error: 'Open the local POS app before preparing the scenario timeline.' })
+              const suiteId = normalizePlaywrightSuiteId(payload.suiteId ?? PLAYWRIGHT_SUITE_IDS.POS)
+              if (!payload.baseUrl) return send(response, 400, { error: 'Open the local Atlas app before preparing the scenario timeline.' })
               try {
-                const run = prepareCloudHybridScenarioPlan({ baseUrl: payload.baseUrl })
+                const run = prepareCloudHybridScenarioPlan({ suiteId, baseUrl: payload.baseUrl })
                 return send(response, 202, { run })
               } catch (error) {
                 return send(response, 409, { error: error instanceof Error ? error.message : 'The scenario timeline could not be prepared.' })
               }
             }
             if (request.method === 'POST' && action === 'cancel') {
-              return send(response, 200, { run: requestCloudHybridCancellation() })
+              const suiteId = normalizePlaywrightSuiteId(payload.suiteId ?? PLAYWRIGHT_SUITE_IDS.POS)
+              const run = requestCloudHybridCancellation(suiteId, payload.runId)
+              return send(response, 200, { run })
             }
             return send(response, 404, { error: 'Runner endpoint not found.' })
           } catch (error) {

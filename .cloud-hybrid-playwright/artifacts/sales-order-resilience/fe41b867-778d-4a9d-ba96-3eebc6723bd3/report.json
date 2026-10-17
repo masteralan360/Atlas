@@ -1,0 +1,1057 @@
+{
+  "id": "fe41b867-778d-4a9d-ba96-3eebc6723bd3",
+  "suiteId": "sales-order-resilience",
+  "title": "Sales Order Hybrid Playwright",
+  "status": "planned",
+  "planOnly": true,
+  "stage": "scenario-plan-ready",
+  "currentScenario": null,
+  "currentIndex": 0,
+  "totalScenarios": 5,
+  "passed": 0,
+  "failed": 0,
+  "blocked": 1,
+  "startedAt": "2026-10-17T19:29:14.164Z",
+  "updatedAt": "2026-10-17T19:29:36.361Z",
+  "finishedAt": "2026-10-17T19:29:36.361Z",
+  "cancelRequested": false,
+  "target": {
+    "workspaceName": "DEV TEST Atlas",
+    "workspaceId": "4405a449-7d3e-483f-ba44-b27c115b279a",
+    "mode": "hybrid",
+    "supabaseHost": "eboispangcayxxheoufy.supabase.co"
+  },
+  "results": [],
+  "scenarioPlan": [
+    {
+      "id": "SO-HYB-001",
+      "name": "Draft create and reload",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.draftCreateReload",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.draftCreateReload",
+      "domain": "sales-order",
+      "coverage": [
+        "lifecycle",
+        "relationships",
+        "persistence",
+        "inventory"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "businessPartners",
+        "products",
+        "storages"
+      ],
+      "prerequisites": [
+        "Verified Hybrid workspace",
+        "Authorized user with Sales Orders access",
+        "Run-owned customer and product fixture"
+      ],
+      "dimensions": {
+        "action": "create-draft-reload",
+        "quantity": 1,
+        "unit": "native",
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      },
+      "expectedUi": [
+        "Select the linked customer and product in the Sales Order form",
+        "Save the draft and reopen it after a browser reload"
+      ],
+      "expectedEffects": [
+        "One draft with the selected customer and one line is persisted",
+        "No payment transaction or inventory movement is created"
+      ],
+      "assertions": [
+        "Order count is exactly one",
+        "Order, line quantity, total, customer, and product match the prepared dimensions",
+        "Inventory and payment baselines are unchanged"
+      ],
+      "signature": "b7bddc96f3c8a7221755571844596cb1273f688f48fbb9136df258fb919c51b1",
+      "status": "pending",
+      "statusReason": null,
+      "missingCapabilities": [],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "action": "create-draft-reload",
+        "quantity": 1,
+        "unit": "native",
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      }
+    },
+    {
+      "id": "SO-HYB-002",
+      "name": "Draft edit and reload",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.draftEditReload",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.draftEditReload",
+      "domain": "sales-order",
+      "coverage": [
+        "lifecycle",
+        "relationships",
+        "pricing",
+        "persistence"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "businessPartners",
+        "products",
+        "storages"
+      ],
+      "prerequisites": [
+        "Verified Hybrid workspace",
+        "Authorized user with Sales Orders access",
+        "Run-owned customer and product fixture"
+      ],
+      "dimensions": {
+        "action": "edit-draft-reload",
+        "initialQuantity": 1,
+        "savedQuantity": 2,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      },
+      "expectedUi": [
+        "Create a draft in the form",
+        "Edit its quantity, save, and reload the existing order"
+      ],
+      "expectedEffects": [
+        "The original order ID remains stable",
+        "The persisted line quantity and total reflect the saved edit"
+      ],
+      "assertions": [
+        "Exactly one order exists for the scenario marker",
+        "The same order ID has quantity 2 and the matching total after reload",
+        "No payment or inventory side effects are recorded"
+      ],
+      "signature": "4af9afbe0c094c272362feb2e0f2633ef356327920239ad6bafbfa738fda4326",
+      "status": "pending",
+      "statusReason": null,
+      "missingCapabilities": [],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "action": "edit-draft-reload",
+        "initialQuantity": 1,
+        "savedQuantity": 2,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      }
+    },
+    {
+      "id": "SO-HYB-003",
+      "name": "Draft cancellation",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.draftCancel",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.draftCancel",
+      "domain": "sales-order",
+      "coverage": [
+        "lifecycle",
+        "cancellation",
+        "inventory"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "businessPartners",
+        "products",
+        "storages"
+      ],
+      "prerequisites": [
+        "Verified Hybrid workspace",
+        "Authorized user with Sales Orders management permission",
+        "Run-owned customer and product fixture"
+      ],
+      "dimensions": {
+        "action": "create-cancel-draft",
+        "quantity": 1,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      },
+      "expectedUi": [
+        "Create an unpaid draft",
+        "Cancel it from the Sales Orders list and confirm in the application dialog"
+      ],
+      "expectedEffects": [
+        "The existing order transitions from draft to cancelled",
+        "No payment or stock movement is posted"
+      ],
+      "assertions": [
+        "The order retains its ID and becomes cancelled",
+        "Inventory and payment baselines remain unchanged"
+      ],
+      "signature": "d5a5f27fbf7b66a083de462cf2bab1953bf939ce64acaa65762df571c974cb65",
+      "status": "pending",
+      "statusReason": null,
+      "missingCapabilities": [],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "action": "create-cancel-draft",
+        "quantity": 1,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      }
+    },
+    {
+      "id": "SO-HYB-004",
+      "name": "Repeated save protection",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.repeatedSave",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.repeatedSave",
+      "domain": "sales-order",
+      "coverage": [
+        "failure-recovery",
+        "idempotency",
+        "persistence"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "businessPartners",
+        "products",
+        "storages"
+      ],
+      "prerequisites": [
+        "Verified Hybrid workspace",
+        "Authorized user with Sales Orders access",
+        "Run-owned customer and product fixture"
+      ],
+      "dimensions": {
+        "action": "repeated-save",
+        "quantity": 1,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid",
+        "submissions": 2
+      },
+      "expectedUi": [
+        "Submit the same prepared draft twice through the Save Order control"
+      ],
+      "expectedEffects": [
+        "At most one draft is created for the unique scenario marker"
+      ],
+      "assertions": [
+        "One persisted order exists after repeated UI submission",
+        "No payment or inventory side effects are created"
+      ],
+      "signature": "3fc961818603860dd32e46b09d10f7fa3dcc3aabbbf1c377a0f3ba979d3a5f71",
+      "status": "pending",
+      "statusReason": null,
+      "missingCapabilities": [],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "action": "repeated-save",
+        "quantity": 1,
+        "unitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid",
+        "submissions": 2
+      }
+    },
+    {
+      "id": "SO-HYB-005",
+      "name": "Service-only and mixed line orders",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.serviceOrders",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.serviceOrders",
+      "domain": "sales-order",
+      "coverage": [
+        "relationships",
+        "services",
+        "inventory"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "services",
+        "products",
+        "storages"
+      ],
+      "prerequisites": [
+        "Service feature enabled and exposed by the application workspace snapshot"
+      ],
+      "dimensions": {
+        "actions": [
+          "service-only-draft",
+          "mixed-product-service-draft"
+        ],
+        "serviceQuantity": 1,
+        "serviceUnitPrice": 70,
+        "productQuantity": 2,
+        "productUnitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      },
+      "expectedUi": [
+        "Select a service and, separately, a service plus product through the real order form"
+      ],
+      "expectedEffects": [
+        "Service lines persist without stock movement"
+      ],
+      "assertions": [
+        "Service-only and mixed lines persist with correct totals",
+        "Service-only flow creates no inventory movement"
+      ],
+      "signature": "54f9df6184583c1429815749e5a34077a2bfd7264b9afddf01080c20a25ff5d8",
+      "status": "pending",
+      "statusReason": null,
+      "missingCapabilities": [],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "actions": [
+          "service-only-draft",
+          "mixed-product-service-draft"
+        ],
+        "serviceQuantity": 1,
+        "serviceUnitPrice": 70,
+        "productQuantity": 2,
+        "productUnitPrice": 100,
+        "currency": "workspace-default",
+        "payment": "unpaid"
+      }
+    },
+    {
+      "id": "SO-HYB-006",
+      "name": "Approval request and review",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.approval",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.approval",
+      "domain": "sales-order",
+      "coverage": [
+        "lifecycle",
+        "permissions",
+        "approval"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "authorizedApproverIdentity"
+      ],
+      "prerequisites": [
+        "Separate authorized staff requester and approver credentials in the dedicated test configuration"
+      ],
+      "dimensions": {
+        "actions": [
+          "request",
+          "approve",
+          "reject"
+        ]
+      },
+      "expectedUi": [
+        "Request approval as staff and review using an authorized approver identity"
+      ],
+      "expectedEffects": [
+        "Approval request state and subsequent review are persisted"
+      ],
+      "assertions": [
+        "Only authorized roles can request, approve, or reject"
+      ],
+      "signature": "2553d4263fca5b7b7a76bf3c07fbcf08a756311c50194e2055471cb76cfd9961",
+      "status": "skipped",
+      "statusReason": "devTesting.salesOrderHybrid.reasons.capabilityUnavailable",
+      "missingCapabilities": [
+        "authorizedApproverIdentity"
+      ],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "actions": [
+          "request",
+          "approve",
+          "reject"
+        ]
+      }
+    },
+    {
+      "id": "SO-HYB-007",
+      "name": "Payment, refund, reversal, and financing",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.financial",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.financial",
+      "domain": "sales-order",
+      "coverage": [
+        "payments",
+        "ledger",
+        "payment-accounts",
+        "financing",
+        "returns"
+      ],
+      "requiredCapabilities": [
+        "orders",
+        "payments"
+      ],
+      "prerequisites": [
+        "Discovered payment methods and financing options",
+        "Verified reversals and audit-preserving cleanup plan"
+      ],
+      "dimensions": {
+        "actions": [
+          "paid-on-creation",
+          "partial-payment",
+          "loan",
+          "installments",
+          "return",
+          "refund",
+          "reversal"
+        ]
+      },
+      "expectedUi": [
+        "Use the real payment, financing, return, refund, and reversal dialogs"
+      ],
+      "expectedEffects": [
+        "Payment transactions, ledger entries, account movements, financing records, and counter-entries match each operation"
+      ],
+      "assertions": [
+        "Exact persisted financial effects and no duplicate entries"
+      ],
+      "signature": "bdd00d7bf546f19c89abce8b5c76c81c78fd9062a0b95dc46c34890b668d2c75",
+      "status": "skipped",
+      "statusReason": "devTesting.salesOrderHybrid.reasons.capabilityUnavailable",
+      "missingCapabilities": [
+        "payments"
+      ],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "actions": [
+          "paid-on-creation",
+          "partial-payment",
+          "loan",
+          "installments",
+          "return",
+          "refund",
+          "reversal"
+        ]
+      }
+    },
+    {
+      "id": "SO-HYB-008",
+      "name": "Native Hybrid mirror and restart recovery",
+      "titleKey": "devTesting.salesOrderHybrid.scenarioNames.nativeHybrid",
+      "descriptionKey": "devTesting.salesOrderHybrid.scenarioDescriptions.nativeHybrid",
+      "domain": "sales-order",
+      "coverage": [
+        "hybrid-native",
+        "sqlite",
+        "restart-recovery"
+      ],
+      "requiredCapabilities": [
+        "desktopHybridRuntime"
+      ],
+      "prerequisites": [
+        "Atlas desktop runtime with Hybrid SQLite mirror and restart controls"
+      ],
+      "dimensions": {
+        "actions": [
+          "disconnect",
+          "sync",
+          "restart",
+          "reconcile"
+        ]
+      },
+      "expectedUi": [
+        "Exercise the desktop runtime and reopen the application after a controlled interruption"
+      ],
+      "expectedEffects": [
+        "Native SQLite, Dexie, and Supabase converge after recovery"
+      ],
+      "assertions": [
+        "Native mirror and restart recovery are independently inspected"
+      ],
+      "signature": "5230c54445e568fab257fbdcb45aef26468907aba72f817cfb4b267475cdb69b",
+      "status": "blocked",
+      "statusReason": "devTesting.salesOrderHybrid.reasons.desktopRuntimeUnavailable",
+      "missingCapabilities": [
+        "desktopHybridRuntime"
+      ],
+      "cleanupRequirements": [
+        "Delete run-owned draft orders through the Atlas order service and verify their soft-delete state in Supabase.",
+        "Delete only the run-owned product and customer after dependent orders are cleaned.",
+        "Retire storage only when this run created it, ownership is proven, and no active products depend on it."
+      ],
+      "preparedDimensions": {
+        "actions": [
+          "disconnect",
+          "sync",
+          "restart",
+          "reconcile"
+        ]
+      }
+    }
+  ],
+  "scenarioPlanId": "fe41b867-778d-4a9d-ba96-3eebc6723bd3:013f496ede387e0c",
+  "coverageSummary": {
+    "available": [
+      "SO-HYB-001",
+      "SO-HYB-002",
+      "SO-HYB-003",
+      "SO-HYB-004",
+      "SO-HYB-005"
+    ],
+    "skipped": [
+      {
+        "id": "SO-HYB-006",
+        "reason": "devTesting.salesOrderHybrid.reasons.capabilityUnavailable",
+        "missingCapabilities": [
+          "authorizedApproverIdentity"
+        ]
+      },
+      {
+        "id": "SO-HYB-007",
+        "reason": "devTesting.salesOrderHybrid.reasons.capabilityUnavailable",
+        "missingCapabilities": [
+          "payments"
+        ]
+      }
+    ],
+    "blocked": [
+      {
+        "id": "SO-HYB-008",
+        "reason": "devTesting.salesOrderHybrid.reasons.desktopRuntimeUnavailable"
+      }
+    ],
+    "unverified": [
+      "customer-product-unlink",
+      "completion-fulfillment",
+      "approval-rejection",
+      "quantity-boundaries",
+      "discounts",
+      "payment-account-optional",
+      "payment-reversals",
+      "role-restrictions",
+      "plan-entitlements",
+      "alternate-uom",
+      "currency-conversion",
+      "payment-ledger",
+      "financing",
+      "returns-refunds",
+      "approval-roles",
+      "failed-request-retry",
+      "lost-response-recovery",
+      "native-sqlite",
+      "desktop-restart"
+    ]
+  },
+  "hybridBoundaries": {
+    "browser": "Real Atlas UI in Playwright; authenticated with the configured ordinary live-test account.",
+    "supabase": "Verified directly through an authenticated Supabase client using that ordinary account and workspace RLS.",
+    "dexie": "The application Dexie order cache is read independently in the authenticated browser after save and reload.",
+    "nativeSqlite": "Not exercised by this browser runner; SQLite mirroring is unverified.",
+    "desktopRuntime": "Electron/Tauri desktop runtime and restart recovery are not exercised."
+  },
+  "scenarioSelection": null,
+  "logs": [
+    {
+      "at": "2026-10-17T19:29:14.950Z",
+      "level": "info",
+      "message": "Hybrid mode, dedicated DEV TEST workspace, ordinary user, configured state, and unlocked state verified."
+    },
+    {
+      "at": "2026-10-17T19:29:31.617Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:31.617Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:31.618Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:31.618Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:31.618Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:31.618Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:31.696Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:31.697Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:31.702Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:31.702Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:31.822Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:31.822Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:33.325Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:33.332Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:33.517Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:33.547Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:33.561Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:33.571Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:33.571Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:34.334Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "HEAD",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/marketplace_orders",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:34.334Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "HEAD",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/marketplace_orders",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:34.334Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:34.335Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:34.335Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:34.336Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:34.338Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-EUR/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:34.338Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:34.427Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:34.427Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:34.427Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:34.427Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:35.142Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:35.143Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:35.143Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:35.143Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:35.286Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:35.465Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:35.465Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:35.861Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/USD-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:35.861Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:35.881Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/TRY-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:35.881Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:36.054Z",
+      "level": "info",
+      "message": "http.request-failed",
+      "details": {
+        "method": "POST",
+        "host": "eboispangcayxxheoufy.supabase.co",
+        "pathname": "/rest/v1/rpc/record_workspace_data_transfer",
+        "failure": "net::ERR_ABORTED"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:36.132Z",
+      "level": "info",
+      "message": "http.error",
+      "details": {
+        "status": 404,
+        "method": "GET",
+        "pathname": "/api-forexfy/en/currency/EUR-to-IQD/blackMarket"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:36.132Z",
+      "level": "info",
+      "message": "console.error",
+      "details": {
+        "message": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      }
+    },
+    {
+      "at": "2026-10-17T19:29:36.359Z",
+      "level": "info",
+      "message": "payment-method-discovery.skipped",
+      "details": {
+        "reason": "The Payment Method selector is disabled in the authenticated Atlas UI; no methods were reported as available."
+      }
+    }
+  ],
+  "diagnosticsPath": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\fe41b867-778d-4a9d-ba96-3eebc6723bd3\\report.json",
+  "tracePath": "E:\\ERP System\\Atlas\\.cloud-hybrid-playwright\\artifacts\\sales-order-resilience\\fe41b867-778d-4a9d-ba96-3eebc6723bd3\\plan-trace.zip",
+  "capabilityFingerprint": "013f496ede387e0c74d9a41d0a705502deb326fa8257d445ad3d45db7a37e29c",
+  "scenarioDimensions": {
+    "capabilities": {
+      "workspaceId": "4405a449-7d3e-483f-ba44-b27c115b279a",
+      "dataMode": "hybrid",
+      "isConfigured": true,
+      "isLocked": false,
+      "orders": true,
+      "businessPartners": true,
+      "customers": true,
+      "products": true,
+      "storages": true,
+      "services": true,
+      "loans": true,
+      "installments": false,
+      "multiCurrency": false,
+      "payments": false,
+      "paymentMethodSelectorEnabled": false,
+      "paymentMethods": [],
+      "allowedCurrencies": [],
+      "defaultCurrency": "iqd",
+      "authorizedApproverIdentity": false,
+      "authorizedFinancialCleanup": false,
+      "desktopHybridRuntime": false
+    }
+  }
+}

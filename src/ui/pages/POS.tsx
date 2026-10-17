@@ -6446,9 +6446,10 @@ function MobileHeader({
                     <button
                         className="bg-secondary/80 backdrop-blur-md px-3 min-[380px]:px-5 py-2 min-[380px]:py-2.5 rounded-full flex items-center gap-1.5 min-[380px]:gap-2 shadow-sm border border-border/50 relative active:scale-95 transition-all shrink-0"
                         onClick={() => setMobileView(mobileView === 'grid' ? 'cart' : 'grid')}
+                        aria-label={t(mobileView === 'grid' ? 'pos.mobileTabs.cart' : 'pos.mobileTabs.catalog')}
                     >
                         <ShoppingCart className="w-5 h-5" />
-                        <span className="font-bold text-sm tracking-tight hidden min-[380px]:inline">{mobileView === 'grid' ? 'Cart' : 'Catalog'}</span>
+                        <span className="font-bold text-sm tracking-tight hidden min-[380px]:inline">{t(mobileView === 'grid' ? 'pos.mobileTabs.cart' : 'pos.mobileTabs.catalog')}</span>
                         {totalItems > 0 && (
                             <span className="absolute -top-1.5 -right-1.5 bg-emerald-500 text-white text-[10px] w-5 h-5 flex items-center justify-center rounded-full border-2 border-background font-bold shadow-lg animate-in zoom-in">
                                 {totalItems}

@@ -155,6 +155,7 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
     if (cloudHybridSelected) {
         return <Suspense fallback={null}>
             <CloudHybridPlaywrightDialog
+                suiteId={suiteId === 'pos' ? 'pos' : 'sales-order-resilience'}
                 open={open}
                 onOpenChange={(next) => {
                     if (!next) {
@@ -179,7 +180,7 @@ export default function DeveloperTestDialog({ suiteId, open, onOpenChange }: { s
                     <p className="font-medium">{t('devTesting.environment')} *</p>
                     <div className="flex flex-wrap gap-2">
                         {(['isolated', 'hosted-supabase'] as const).map((option) => <Button key={option} type="button" allowViewer variant={environment === option ? 'default' : 'outline'} disabled={busy || (option === 'hosted-supabase' && !suite?.liveGroups?.length)} onClick={() => selectEnvironment(option)}>{t(`devTesting.adapters.${option}`)}</Button>)}
-                        {suiteId === 'pos' && <Button type="button" allowViewer variant="outline" disabled={busy} onClick={() => setCloudHybridSelected(true)}><Play className="me-2 h-4 w-4" />{t('devTesting.cloudHybrid.label')}</Button>}
+                        {(suiteId === 'pos' || resilience) && <Button type="button" allowViewer variant="outline" disabled={busy} onClick={() => setCloudHybridSelected(true)}><Play className="me-2 h-4 w-4" />{t(suiteId === 'pos' ? 'devTesting.cloudHybrid.label' : 'devTesting.salesOrderHybrid.buttonLabel')}</Button>}
                     </div>
                 </div>
                 <div className={cn('flex gap-3 rounded-xl border p-3 text-sm', environment === 'hosted-supabase' ? 'border-amber-600/30 bg-amber-600/5' : 'border-emerald-600/20 bg-emerald-600/5')}>

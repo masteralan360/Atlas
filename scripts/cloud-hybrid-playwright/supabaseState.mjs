@@ -32,7 +32,7 @@ function createLiveClient(config) {
   })
 }
 
-export async function authenticateAndInspectWorkspace() {
+export async function authenticateAndInspectWorkspace({ allowedModes = ['cloud', 'hybrid'], modeLabel = 'Cloud/Hybrid' } = {}) {
   const config = loadLiveTestConfiguration()
   const supabase = createLiveClient(config)
   const signedIn = await supabase.auth.signInWithPassword({ email: config.email, password: config.password })
@@ -49,8 +49,8 @@ export async function authenticateAndInspectWorkspace() {
   const workspace = requireData(workspaceResult, 'Could not verify the configured workspace')
   const profile = requireData(profileResult, 'Could not inspect the authenticated profile')
   if (!workspace || workspace.deleted_at) throw new Error('The configured live-test workspace is missing or deleted.')
-  if (!['cloud', 'hybrid'].includes(String(workspace.data_mode).toLowerCase())) {
-    throw new Error(`The configured workspace is in ${workspace.data_mode} mode; Cloud/Hybrid mode is required.`)
+  if (!allowedModes.includes(String(workspace.data_mode).toLowerCase())) {
+    throw new Error(`The configured workspace is in ${workspace.data_mode} mode; ${modeLabel} mode is required.`)
   }
   if (profile && profile.workspace_id && profile.workspace_id !== workspace.id
       && profile.current_workspace !== workspace.id) {

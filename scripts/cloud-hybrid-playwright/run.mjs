@@ -42,8 +42,19 @@ import {
   reconcileQuickOrder,
   reconcileQuickOrderNoMutation
 } from './quickOrders.mjs'
-
-let activeRun = null
+import {
+  PLAYWRIGHT_SUITE_IDS,
+  claimSuiteRun,
+  currentSuiteRun,
+  releaseSuiteRun,
+  cancelSuiteRun,
+  normalizePlaywrightSuiteId
+} from './executionState.mjs'
+import {
+  prepareSalesOrderScenarioPlan,
+  runSalesOrderHybridScenarios,
+  salesOrderHybridPreflight
+} from './salesOrderRun.mjs'
 
 function now() { return new Date().toISOString() }
 function updateRun(run, update) { Object.assign(run, update, { updatedAt: now() }) }
@@ -124,13 +135,13 @@ function buildScenarioPlan(scenarios, setup, serviceSource, activityStorage, sto
   }))
 }
 
-export function currentCloudHybridRun() {
-  if (!activeRun) return null
-  const { promise, ...snapshot } = activeRun
-  return structuredClone(snapshot)
+export function currentCloudHybridRun(suiteId = PLAYWRIGHT_SUITE_IDS.POS) {
+  return currentSuiteRun(suiteId)
 }
 
-export async function cloudHybridPreflight() {
+export async function cloudHybridPreflight(suiteId = PLAYWRIGHT_SUITE_IDS.POS) {
+  const owner = normalizePlaywrightSuiteId(suiteId)
+  if (owner === PLAYWRIGHT_SUITE_IDS.SALES_ORDER) return salesOrderHybridPreflight()
   const context = await authenticateAndInspectWorkspace()
   try {
     const storageCheck = await context.supabase.from('storages').select('id', { count: 'exact', head: true })
@@ -143,12 +154,13 @@ export async function cloudHybridPreflight() {
 }
 
 function createCloudHybridRun({ baseUrl, scenarioSelection: requestedScenarioSelection, planOnly = false }) {
-  if (activeRun?.status === 'running') throw new Error('A Cloud/Hybrid Playwright run is already in progress.')
+  const suiteId = PLAYWRIGHT_SUITE_IDS.POS
   const scenarioSelection = planOnly ? { mode: 'all' } : normalizeScenarioSelection(requestedScenarioSelection)
   const runId = randomUUID()
   const artifactsDirectory = resolve(process.cwd(), '.cloud-hybrid-playwright', 'artifacts', runId)
   const run = {
     id: runId,
+    suiteId,
     title: 'Cloud/Hybrid Playwright',
     status: 'running',
     planOnly,
@@ -174,28 +186,34 @@ function createCloudHybridRun({ baseUrl, scenarioSelection: requestedScenarioSel
     artifactsDirectory,
     promise: null
   }
-  activeRun = run
+  claimSuiteRun(suiteId, run)
   run.promise = executeCloudHybridRun(run, baseUrl, scenarioSelection, planOnly)
     .catch((error) => {
       updateRun(run, { status: 'failed', stage: 'failed', finishedAt: now() })
       addLog(run, 'error', error instanceof Error ? error.message : 'Cloud/Hybrid Playwright could not finish.')
     })
+    .finally(() => releaseSuiteRun(suiteId, run.id))
   return currentCloudHybridRun()
 }
 
 export function startCloudHybridRun(args) {
+  const suiteId = normalizePlaywrightSuiteId(args?.suiteId ?? PLAYWRIGHT_SUITE_IDS.POS)
+  if (suiteId === PLAYWRIGHT_SUITE_IDS.SALES_ORDER) return runSalesOrderHybridScenarios(args)
+  if (args?.scenarioSelection?.planId) {
+    throw new Error('Prepared Sales Order scenario plans cannot be executed by the POS suite.')
+  }
   return createCloudHybridRun(args)
 }
 
-export function prepareCloudHybridScenarioPlan({ baseUrl }) {
+export function prepareCloudHybridScenarioPlan({ baseUrl, suiteId = PLAYWRIGHT_SUITE_IDS.POS }) {
+  const owner = normalizePlaywrightSuiteId(suiteId)
+  if (owner === PLAYWRIGHT_SUITE_IDS.SALES_ORDER) return prepareSalesOrderScenarioPlan({ baseUrl })
   return createCloudHybridRun({ baseUrl, planOnly: true })
 }
 
-export function requestCloudHybridCancellation() {
-  if (!activeRun || activeRun.status !== 'running') return currentCloudHybridRun()
-  updateRun(activeRun, { cancelRequested: true })
-  addLog(activeRun, 'warning', 'Cancellation requested. The active scenario will finish cleanup first.')
-  return currentCloudHybridRun()
+export function requestCloudHybridCancellation(suiteId = PLAYWRIGHT_SUITE_IDS.POS, runId) {
+  const owner = normalizePlaywrightSuiteId(suiteId)
+  return cancelSuiteRun(owner, runId, { allowLegacyMissingRunId: owner === PLAYWRIGHT_SUITE_IDS.POS })
 }
 
 async function queryScenarioRows(context, setup, baseline) {
