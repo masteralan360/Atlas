@@ -2001,6 +2001,7 @@
       "allStorages": "جميع المخازن",
       "stockStorage": "المخزون في المخزن",
       "allStockStorages": "أي مخزن",
+      "stockQuantitySelectedStorageOnly": "عرض كمية المخزون للمخزن المحدد فقط",
       "pricingTitle": "السعر والعملة والمخزون",
       "currency": "العملة",
       "all": "الكل",

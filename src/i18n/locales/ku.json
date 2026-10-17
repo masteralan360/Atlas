@@ -2004,6 +2004,7 @@
       "allStorages": "هەموو کۆگاکان",
       "stockStorage": "بەردەستبوون لە کۆگا",
       "allStockStorages": "هەر کۆگایەک",
+      "stockQuantitySelectedStorageOnly": "تەنها بڕی کۆگا بۆ کۆگای هەڵبژێردراو پیشان بدە",
       "pricingTitle": "نرخ، دراو و کۆگا",
       "currency": "دراو",
       "all": "هەموو",

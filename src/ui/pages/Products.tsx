@@ -9,6 +9,7 @@ import {
     createProduct,
     deleteProduct,
     fetchAllProductCatalogMatches,
+    fetchAllProductCatalogMatchesWithInventory,
     useCategories,
     usePriceBookCatalogState,
     useInventory,
@@ -18,6 +19,7 @@ import {
     useWorkspaceProductBarcodes,
     useStorages,
     type CurrencyCode,
+    type Inventory,
     type PriceBook,
     type Product
 } from '@/local-db'
@@ -144,6 +146,7 @@ export interface ProductFilterState {
     category: string[]
     storage: string[]
     stockStorage: string[]
+    stockQuantitySelectedStorageOnly: boolean
     currency: CurrencyCode[]
     minPrice: string
     maxPrice: string
@@ -156,6 +159,7 @@ export const DEFAULT_PRODUCT_FILTERS: ProductFilterState = {
     category: [],
     storage: [],
     stockStorage: [],
+    stockQuantitySelectedStorageOnly: false,
     currency: [],
     minPrice: '',
     maxPrice: '',
@@ -419,6 +423,7 @@ export function Products() {
     const stockRowPointerTypeRef = useRef<string | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     const [isProductsExportOpen, setIsProductsExportOpen] = useState(false)
+    const [catalogActionInventoryRows, setCatalogActionInventoryRows] = useState<Inventory[] | null>(null)
     const [isProductImportOpen, setIsProductImportOpen] = useState(false)
     const [isPreparingProductImport, setIsPreparingProductImport] = useState(false)
     const [productImport, setProductImport] = useState<PreparedProductImport | null>(null)
@@ -488,10 +493,32 @@ export function Products() {
         })
     }, [productCatalogPage.error, t, toast])
     const useRemoteCatalogPage = remoteCatalogPageEnabled && !productCatalogPage.error
+    const draftProductCatalogPreview = useProductCatalogPage({
+        workspaceId,
+        search: deferredSearch,
+        catalogType,
+        categoryIds: draftFilters.category,
+        storageIds: draftFilters.storage,
+        stockStorageIds: draftFilters.stockStorage,
+        currencies: draftFilters.currency,
+        minPrice: draftFilters.minPrice,
+        maxPrice: draftFilters.maxPrice,
+        minStock: draftFilters.minStock,
+        maxStock: draftFilters.maxStock,
+        sort: draftFilters.sort,
+        page: 1,
+        pageSize: 1,
+        enabled: isRemoteCatalogBrowse && isFilterDialogOpen && draftFilters.stockStorage.length > 0
+    })
     const localStockProductIds = useInventoryProductIdsInStorages(
         workspaceId,
         filters.stockStorage,
         !useRemoteCatalogPage && filters.stockStorage.length > 0
+    )
+    const draftLocalStockProductIds = useInventoryProductIdsInStorages(
+        workspaceId,
+        draftFilters.stockStorage,
+        !isRemoteCatalogBrowse && isFilterDialogOpen && draftFilters.stockStorage.length > 0
     )
     const matchedCatalogProductIds = useMemo(
         () => new Set(productCatalogPage.matchedProductIds),
@@ -582,7 +609,9 @@ export function Products() {
         syncRemote: !useRemoteCatalogPage,
         enabled: !useRemoteCatalogPage
     })
-    const inventoryRows = useRemoteCatalogPage ? productCatalogPage.inventoryRows : cachedInventoryRows
+    const inventoryRows = isProductsExportOpen && catalogActionInventoryRows !== null
+        ? catalogActionInventoryRows
+        : useRemoteCatalogPage ? productCatalogPage.inventoryRows : cachedInventoryRows
     const productStorageMap = useMemo(() => {
         const map = new Map<string, { storageId: string; name: string; quantity: number }[]>()
         const temp = new Map<string, Map<string, { name: string; quantity: number }>>()
@@ -619,26 +648,32 @@ export function Products() {
         return map
     }, [catalogProducts, inventoryRows, storageById])
 
+    const buildCatalogQuery = (
+        searchTerm: string,
+        type: 'all' | 'products' | 'services',
+        catalogFilters: ProductFilterState
+    ) => ({
+        workspaceId,
+        search: searchTerm,
+        catalogType: type,
+        categoryIds: catalogFilters.category,
+        storageIds: catalogFilters.storage,
+        stockStorageIds: catalogFilters.stockStorage,
+        currencies: catalogFilters.currency,
+        minPrice: catalogFilters.minPrice,
+        maxPrice: catalogFilters.maxPrice,
+        minStock: catalogFilters.minStock,
+        maxStock: catalogFilters.maxStock,
+        sort: catalogFilters.sort
+    })
+
     const fetchCatalogRows = async (
         searchTerm: string,
         type: 'all' | 'products' | 'services',
         catalogFilters: ProductFilterState
     ) => {
         if (!isRemoteCatalogBrowse) return products
-        return fetchAllProductCatalogMatches({
-            workspaceId,
-            search: searchTerm,
-            catalogType: type,
-            categoryIds: catalogFilters.category,
-            storageIds: catalogFilters.storage,
-            stockStorageIds: catalogFilters.stockStorage,
-            currencies: catalogFilters.currency,
-            minPrice: catalogFilters.minPrice,
-            maxPrice: catalogFilters.maxPrice,
-            minStock: catalogFilters.minStock,
-            maxStock: catalogFilters.maxStock,
-            sort: catalogFilters.sort
-        })
+        return fetchAllProductCatalogMatches(buildCatalogQuery(searchTerm, type, catalogFilters))
     }
 
     const productsScannerTabOptions = useMemo<CameraBarcodeScannerTabOption[]>(() => ([
@@ -853,8 +888,28 @@ export function Products() {
         return storage ? storage.name : ''
     }, [storageById])
 
-    const getDisplayedStockQuantity = (product: Product) =>
+    const getTotalStockQuantity = (product: Product) =>
         stockQuantityOverrides[product.id]?.quantity ?? product.quantity
+
+    const getDisplayedStockQuantity = (product: Product) => {
+        if (
+            !isService(product)
+            && filters.stockQuantitySelectedStorageOnly
+            && filters.stockStorage.length > 0
+        ) {
+            const positionsByStorageId = new Map(
+                (productStorageMap.get(product.id) ?? []).map((entry) => [entry.storageId, entry.quantity] as const)
+            )
+            for (const [storageId, override] of Object.entries(storagePositionOverrides[product.id] ?? {})) {
+                positionsByStorageId.set(storageId, override.quantity)
+            }
+            return filters.stockStorage.reduce(
+                (total, storageId) => total + (positionsByStorageId.get(storageId) ?? 0),
+                0
+            )
+        }
+        return getTotalStockQuantity(product)
+    }
 
     const renderStockQuantity = (product: Product, serviceLabel: string) => {
         if (isService(product)) return serviceLabel
@@ -890,7 +945,11 @@ export function Products() {
                 entriesByStorageId.set(storageId, { storageId, ...override })
             }
         }
-        const entries = Array.from(entriesByStorageId.values())
+        const entries = Array.from(entriesByStorageId.values()).filter((entry) =>
+            !filters.stockQuantitySelectedStorageOnly
+            || filters.stockStorage.length === 0
+            || filters.stockStorage.includes(entry.storageId)
+        )
         if (entries.length === 0) {
             const hasConfirmedEmptyPosition = Object.values(storagePositionOverrides[productId] ?? {})
                 .some((override) => override.quantity <= 0)
@@ -951,8 +1010,12 @@ export function Products() {
     }
 
     const getProductStorageSummary = useCallback((product: Product) => {
-        const entries = productStorageMap.get(product.id)
+        const allEntries = productStorageMap.get(product.id)
+        const entries = filters.stockQuantitySelectedStorageOnly && filters.stockStorage.length > 0
+            ? allEntries?.filter((entry) => filters.stockStorage.includes(entry.storageId))
+            : allEntries
         if (!entries || entries.length === 0) {
+            if (filters.stockQuantitySelectedStorageOnly && filters.stockStorage.length > 0) return ''
             return getStorageName(product.storageId) || t('products.export.noStorage', { defaultValue: 'No Storage' })
         }
         if (entries.length === 1) {
@@ -962,7 +1025,7 @@ export function Products() {
             .sort((a, b) => b.quantity - a.quantity)
             .map((entry) => `${entry.name} (${entry.quantity})`)
             .join(', ')
-    }, [getStorageName, productStorageMap, t])
+    }, [filters.stockQuantitySelectedStorageOnly, filters.stockStorage, getStorageName, productStorageMap, t])
 
     const productBarcodeValuesByProductId = useMemo(() => {
         const barcodeValuesByProductId = new Map<string, string[]>()
@@ -984,6 +1047,75 @@ export function Products() {
         return barcodeValuesByProductId
     }, [catalogProducts, productBarcodes])
 
+    const draftLocalMatchingProducts = useMemo(() => {
+        if (isRemoteCatalogBrowse || !isFilterDialogOpen || draftFilters.stockStorage.length === 0) return []
+
+        const searchTerm = deferredSearch.toLowerCase()
+        let result = products.filter((product) =>
+            (hasFeature('services') || !isService(product))
+            && (catalogType === 'all' || (catalogType === 'services' ? isService(product) : !isService(product)))
+            && (
+                (product.name ?? '').toLowerCase().includes(searchTerm)
+                || (product.sku ?? '').toLowerCase().includes(searchTerm)
+                || getCategoryName(product.categoryId).toLowerCase().includes(searchTerm)
+                || getStorageName(product.storageId).toLowerCase().includes(searchTerm)
+                || productBarcodeValuesByProductId.get(product.id)?.some((barcode) => barcode.toLowerCase().includes(searchTerm))
+            )
+        )
+        if (draftFilters.category.length > 0) {
+            result = result.filter((product) => !!product.categoryId && draftFilters.category.includes(product.categoryId))
+        }
+        if (draftFilters.storage.length > 0) {
+            result = result.filter((product) => !!product.storageId && draftFilters.storage.includes(product.storageId))
+        }
+        result = result.filter((product) => draftLocalStockProductIds.has(product.id))
+        if (draftFilters.currency.length > 0) {
+            result = result.filter((product) => draftFilters.currency.includes(product.currency))
+        }
+        const minPrice = draftFilters.minPrice ? Number(draftFilters.minPrice) : null
+        const maxPrice = draftFilters.maxPrice ? Number(draftFilters.maxPrice) : null
+        const minStock = draftFilters.minStock ? Number(draftFilters.minStock) : null
+        const maxStock = draftFilters.maxStock ? Number(draftFilters.maxStock) : null
+        if (minPrice !== null) result = result.filter((product) => product.price >= minPrice)
+        if (maxPrice !== null) result = result.filter((product) => product.price <= maxPrice)
+        if (minStock !== null) result = result.filter((product) => product.quantity >= minStock)
+        if (maxStock !== null) result = result.filter((product) => product.quantity <= maxStock)
+        return result
+    }, [
+        catalogType,
+        deferredSearch,
+        draftFilters,
+        draftLocalStockProductIds,
+        getCategoryName,
+        getStorageName,
+        hasFeature,
+        isFilterDialogOpen,
+        isRemoteCatalogBrowse,
+        productBarcodeValuesByProductId,
+        products
+    ])
+
+    const draftHasMultiStorageStock = useMemo(() => {
+        if (draftFilters.stockStorage.length === 0 || !isFilterDialogOpen) return false
+        if (isRemoteCatalogBrowse) {
+            return draftProductCatalogPreview.isReady
+                && !draftProductCatalogPreview.error
+                && draftProductCatalogPreview.hasMultiStorageStock
+        }
+        return draftLocalMatchingProducts.some((product) =>
+            (productStorageMap.get(product.id) ?? []).filter((entry) => entry.quantity > 0).length > 1
+        )
+    }, [
+        draftFilters.stockStorage.length,
+        draftLocalMatchingProducts,
+        draftProductCatalogPreview.error,
+        draftProductCatalogPreview.hasMultiStorageStock,
+        draftProductCatalogPreview.isReady,
+        isFilterDialogOpen,
+        isRemoteCatalogBrowse,
+        productStorageMap
+    ])
+
     const filteredProducts = useMemo(() => {
         const searchTerm = deferredSearch.toLowerCase()
         let result = catalogProducts.filter((product) =>
@@ -1004,7 +1136,13 @@ export function Products() {
         if (filters.storage.length > 0) {
             result = result.filter((product) => !!product.storageId && filters.storage.includes(product.storageId))
         }
-        if (filters.stockStorage.length > 0 && !useRemoteCatalogPage) {
+        // The remote catalog query already applies Has Stock in. During an
+        // export, trust that complete server-filtered result instead of
+        // filtering it again against the potentially incomplete local cache.
+        const isRemoteCatalogExport = isProductsExportOpen
+            && isRemoteCatalogBrowse
+            && catalogActionProducts !== null
+        if (filters.stockStorage.length > 0 && !useRemoteCatalogPage && !isRemoteCatalogExport) {
             result = result.filter((product) => localStockProductIds.has(product.id))
         }
         if (filters.currency.length > 0) {
@@ -1044,7 +1182,31 @@ export function Products() {
         })
 
         return result
-    }, [catalogProducts, productBarcodeValuesByProductId, deferredSearch, getCategoryName, getStorageName, filters, catalogType, hasFeature, localStockProductIds, useRemoteCatalogPage])
+    }, [catalogProducts, productBarcodeValuesByProductId, deferredSearch, getCategoryName, getStorageName, filters, catalogType, hasFeature, isProductsExportOpen, isRemoteCatalogBrowse, catalogActionProducts, localStockProductIds, useRemoteCatalogPage])
+
+    useEffect(() => {
+        if (
+            !filters.stockQuantitySelectedStorageOnly
+            || filters.stockStorage.length === 0
+            || isFilterDialogOpen
+            || !useRemoteCatalogPage
+            || !productCatalogPage.isReady
+            || productCatalogPage.error
+            || productCatalogPage.hasMultiStorageStock
+        ) return
+
+        setFilters((current) => current.stockQuantitySelectedStorageOnly
+            ? { ...current, stockQuantitySelectedStorageOnly: false }
+            : current)
+    }, [
+        filters.stockQuantitySelectedStorageOnly,
+        filters.stockStorage.length,
+        isFilterDialogOpen,
+        productCatalogPage.error,
+        productCatalogPage.hasMultiStorageStock,
+        productCatalogPage.isReady,
+        useRemoteCatalogPage
+    ])
 
     const productById = useMemo(
         () => new Map([...products, ...catalogSupportProducts, ...catalogProducts].map((product) => [product.id, product] as const)),
@@ -1278,7 +1440,11 @@ export function Products() {
     const activeFilterCount = countActiveProductFilters(filters)
 
     const handleApplyFilters = () => {
-        setFilters(draftFilters)
+        setFilters({
+            ...draftFilters,
+            stockQuantitySelectedStorageOnly: draftFilters.stockQuantitySelectedStorageOnly
+                && draftHasMultiStorageStock
+        })
         setIsFilterDialogOpen(false)
         setCurrentPage(1)
     }
@@ -1618,8 +1784,16 @@ export function Products() {
         if (totalCount === 0) return
         setIsPreparingCatalogAction(true)
         try {
-            const rows = await fetchCatalogRows(deferredSearch, catalogType, filters)
-            setCatalogActionProducts(rows)
+            if (isRemoteCatalogBrowse) {
+                const snapshot = await fetchAllProductCatalogMatchesWithInventory(
+                    buildCatalogQuery(deferredSearch, catalogType, filters)
+                )
+                setCatalogActionProducts(snapshot.products)
+                setCatalogActionInventoryRows(snapshot.inventoryRows)
+            } else {
+                setCatalogActionProducts(products)
+                setCatalogActionInventoryRows(cachedInventoryRows)
+            }
             setIsProductsExportOpen(true)
         } catch (error) {
             showBranchCloneError(error, t('products.catalogLoadError', {
@@ -1633,6 +1807,7 @@ export function Products() {
     const closeProductsExport = () => {
         setIsProductsExportOpen(false)
         setCatalogActionProducts(null)
+        setCatalogActionInventoryRows(null)
     }
 
     const closeProductImportPreview = () => {
@@ -1843,13 +2018,13 @@ export function Products() {
                 [t('products.table.price', { defaultValue: 'Price' })]: product.price,
                 ...(!hideCosts ? { [t('products.form.cost', { defaultValue: 'Cost Price' })]: product.costPrice } : {}),
                 [t('products.form.currency', { defaultValue: 'Currency' })]: product.currency.toUpperCase(),
-                [t('products.table.stock', { defaultValue: 'Stock' })]: product.quantity,
+                [t('products.table.stock', { defaultValue: 'Stock' })]: getDisplayedStockQuantity(product),
                 [t('products.form.minStock', { defaultValue: 'Min Stock Level' })]: product.minStockLevel,
                 [t('products.form.unit', { defaultValue: 'Unit' })]: t(`products.units.${product.unit}`, product.unit),
                 [t('products.form.description', { defaultValue: 'Description' })]: product.description || '',
                 [t('common.createdAt', { defaultValue: 'Created At' })]: product.createdAt ? new Date(product.createdAt).toLocaleString() : ''
             }))
-    }, [filteredProducts, getCategoryName, getProductStorageSummary, hideCosts, isProductsExportOpen, t])
+    }, [filteredProducts, getCategoryName, getDisplayedStockQuantity, getProductStorageSummary, hideCosts, isProductsExportOpen, t])
 
     if (isProductImportOpen && productImport) {
         return (
@@ -2269,7 +2444,7 @@ export function Products() {
                                                                                 <div className={cn(
                                                                                     'mt-0.5 text-[11px] font-black uppercase tracking-widest',
                                                                                     isLinkedVariant && 'text-[10px]',
-                                                                                    getDisplayedStockQuantity(product) <= product.minStockLevel ? 'text-amber-500' : 'text-muted-foreground/60'
+                                                                                    getTotalStockQuantity(product) <= product.minStockLevel ? 'text-amber-500' : 'text-muted-foreground/60'
                                                                                 )}>
                                                                                     {renderStockQuantity(product, t('services.noInventory', { defaultValue: 'No inventory' }))}
                                                                                 </div>
@@ -2385,9 +2560,9 @@ export function Products() {
                                                                 />
                                                                 {!isService(product) && <div className={cn(
                                                                     'absolute right-2 top-2 rounded-lg px-2 py-1 text-[10px] font-black uppercase tracking-tighter shadow-sm',
-                                                                    product.quantity <= product.minStockLevel ? 'bg-amber-500 text-white' : 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-600'
+                                                                    getTotalStockQuantity(product) <= product.minStockLevel ? 'bg-amber-500 text-white' : 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-600'
                                                                 )}>
-                                                                    {product.quantity <= product.minStockLevel ? (t('products.lowStock') || 'Low Stock') : (t('products.inStock') || 'In Stock')}
+                                                                    {getTotalStockQuantity(product) <= product.minStockLevel ? (t('products.lowStock') || 'Low Stock') : (t('products.inStock') || 'In Stock')}
                                                                 </div>}
                                                                 {hasProductCostWarning(product) && (
                                                                     <TooltipProvider>
@@ -2634,7 +2809,7 @@ export function Products() {
                                                                     {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
                                                                 </TableCell>
                                                                 <TableCell className="text-right">
-                                                                    <span className={getDisplayedStockQuantity(product) <= product.minStockLevel ? 'font-medium text-amber-500' : ''}>
+                                                                    <span className={getTotalStockQuantity(product) <= product.minStockLevel ? 'font-medium text-amber-500' : ''}>
                                                                         {renderStockQuantity(product, '—')}
                                                                     </span>
                                                                 </TableCell>
@@ -2959,9 +3134,30 @@ export function Products() {
                                             ]}
                                             allLabel={t('products.filters.allStockStorages', { defaultValue: 'Any storage' })}
                                             multipleLabel={t('products.filters.selectedCount', { count: draftFilters.stockStorage.length, defaultValue: '{{count}} selected' })}
-                                            onChange={(stockStorage) => setDraftFilters((current) => ({ ...current, stockStorage }))}
+                                            onChange={(stockStorage) => setDraftFilters((current) => ({
+                                                ...current,
+                                                stockStorage,
+                                                stockQuantitySelectedStorageOnly: stockStorage.length > 0
+                                                    ? current.stockQuantitySelectedStorageOnly
+                                                    : false
+                                            }))}
                                         />
                                     </div>
+                                    {draftFilters.stockStorage.length > 0 && draftHasMultiStorageStock && (
+                                        <label className="flex cursor-pointer items-start gap-2 text-sm text-foreground">
+                                            <Checkbox
+                                                checked={draftFilters.stockQuantitySelectedStorageOnly}
+                                                onCheckedChange={(checked) => setDraftFilters((current) => ({
+                                                    ...current,
+                                                    stockQuantitySelectedStorageOnly: checked === true
+                                                }))}
+                                                className="mt-0.5"
+                                            />
+                                            <span>{t('products.filters.stockQuantitySelectedStorageOnly', {
+                                                defaultValue: 'Show stock quantity for selected storage only'
+                                            })}</span>
+                                        </label>
+                                    )}
                                 </div>
 
                                 <div className="space-y-4 p-5 rounded-[1.5rem] border border-border/60 bg-background/80">

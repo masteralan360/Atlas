@@ -54,6 +54,7 @@ export interface ProductCatalogPage {
   inventoryRows: Inventory[]
   matchedProductIds: string[]
   availableCurrencies: CurrencyCode[]
+  hasMultiStorageStock: boolean
   totalCount: number
   familyCount: number
   pageCount: number
@@ -64,6 +65,7 @@ const EMPTY_PAGE: ProductCatalogPage = {
   inventoryRows: [],
   matchedProductIds: [],
   availableCurrencies: [],
+  hasMultiStorageStock: false,
   totalCount: 0,
   familyCount: 0,
   pageCount: 1
@@ -379,6 +381,7 @@ async function readProductCatalogPage(query: ProductCatalogPageQuery): Promise<P
     inventory?: unknown[]
     matched_product_ids?: unknown[]
     available_currencies?: unknown[]
+    has_multi_storage_stock?: unknown
     total_count?: number | string
     family_count?: number | string
     page_count?: number | string
@@ -449,6 +452,7 @@ async function readProductCatalogPage(query: ProductCatalogPageQuery): Promise<P
       ? result.matched_product_ids.filter((id): id is string => typeof id === 'string')
       : [],
     availableCurrencies: normalizeCatalogCurrencies(result.available_currencies),
+    hasMultiStorageStock: result.has_multi_storage_stock === true,
     totalCount: Number(result.total_count) || 0,
     familyCount: Number(result.family_count) || 0,
     pageCount: Math.max(1, Number(result.page_count) || 1)
@@ -479,16 +483,23 @@ export async function fetchProductCatalogPage(query: ProductCatalogPageQuery): P
   }
 }
 
-export async function fetchAllProductCatalogMatches(
-  query: Omit<ProductCatalogPageQuery, 'page' | 'pageSize' | 'enabled'>
+async function fetchAllProductCatalogData(
+  query: Omit<ProductCatalogPageQuery, 'page' | 'pageSize' | 'enabled'>,
+  includeInventory: boolean
 ) {
   const pageSize = 100
   const firstPage = await fetchProductCatalogPage({ ...query, page: 1, pageSize })
   const productsById = new Map<string, Product>()
+  const inventoryById = new Map<string, Inventory>()
   const collectMatches = (result: ProductCatalogPage) => {
     const matchedIds = new Set(result.matchedProductIds)
     for (const product of result.products) {
       if (matchedIds.has(product.id)) productsById.set(product.id, product)
+    }
+    if (includeInventory) {
+      for (const row of result.inventoryRows) {
+        if (matchedIds.has(row.productId)) inventoryById.set(row.id, row)
+      }
     }
   }
 
@@ -497,13 +508,29 @@ export async function fetchAllProductCatalogMatches(
     collectMatches(await fetchProductCatalogPage({ ...query, page, pageSize }))
   }
 
-  return Array.from(productsById.values())
+  return {
+    products: Array.from(productsById.values()),
+    inventoryRows: Array.from(inventoryById.values())
+  }
+}
+
+export async function fetchAllProductCatalogMatches(
+  query: Omit<ProductCatalogPageQuery, 'page' | 'pageSize' | 'enabled'>
+) {
+  return (await fetchAllProductCatalogData(query, false)).products
+}
+
+export async function fetchAllProductCatalogMatchesWithInventory(
+  query: Omit<ProductCatalogPageQuery, 'page' | 'pageSize' | 'enabled'>
+) {
+  return fetchAllProductCatalogData(query, true)
 }
 
 export function useProductCatalogPage(query: ProductCatalogPageQuery) {
   const [page, setPage] = useState<ProductCatalogPage>(EMPTY_PAGE)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<unknown>(null)
+  const [loadedQueryKey, setLoadedQueryKey] = useState('')
   const queryKey = useMemo(() => JSON.stringify(query), [query])
   const request = useMemo(() => JSON.parse(queryKey) as ProductCatalogPageQuery, [queryKey])
 
@@ -519,7 +546,10 @@ export function useProductCatalogPage(query: ProductCatalogPageQuery) {
     setError(null)
     void fetchProductCatalogPage(request)
       .then((result) => {
-        if (!cancelled) setPage(result)
+        if (!cancelled) {
+          setPage(result)
+          setLoadedQueryKey(queryKey)
+        }
       })
       .catch((loadError) => {
         if (!cancelled) setError(loadError)
@@ -534,5 +564,5 @@ export function useProductCatalogPage(query: ProductCatalogPageQuery) {
     // request is stable across renders with the same serialized query.
   }, [queryKey, request])
 
-  return { ...page, isLoading, error }
+  return { ...page, isLoading, error, isReady: loadedQueryKey === queryKey }
 }

@@ -1739,6 +1739,7 @@
       "allStorages": "All Storages",
       "stockStorage": "Has stock in",
       "allStockStorages": "Any storage",
+      "stockQuantitySelectedStorageOnly": "Show stock quantity for selected storage only",
       "pricingTitle": "Price, Currency & Stock",
       "currency": "Currency",
       "all": "All",
