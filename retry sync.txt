@@ -1,10 +1,9 @@
 Profit for Commerce Operations
 Notification when an order is done
 
-
 Sale Order Exchange
 
-Cart and Catalog Localize
+Fix Purchase Order form page and fix purchase order error, order_payment_source_not_found
 
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide 
 
@@ -42,10 +41,7 @@ Maintenence Mode
 
 prompt manager with admin, staff options
 
-Maximize the partner account statement and product movement
-
-purchase order error, order_payment_source_not_found
-
+Maximize the partner account statement and product movement print
 ##
 
 all products button in the order and correspoding to the DateRangeFilter and status tab
