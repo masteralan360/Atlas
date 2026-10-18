@@ -4,6 +4,43 @@
  * while preserving their measured boxes so later pages keep their positions.
  * This operates on the disposable PDF render tree, never the preview editor.
  */
+export function alignPdfPageChunksToPageBoundaries(
+    container: HTMLElement,
+    options: { pageHeightMm: number; pageWidthMm: number }
+) {
+    const spacerSelector = '[data-pdf-page-chunk-spacer]'
+    container.querySelectorAll(spacerSelector).forEach((spacer) => spacer.remove())
+
+    const containerRect = container.getBoundingClientRect()
+    if (containerRect.width <= 0 || options.pageHeightMm <= 0 || options.pageWidthMm <= 0) return
+
+    const pxToMm = options.pageWidthMm / containerRect.width
+    const epsilonMm = 0.05
+
+    for (const chunk of container.querySelectorAll<HTMLElement>('table[data-pdf-page-chunk]')) {
+        const rect = chunk.getBoundingClientRect()
+        const topMm = (rect.top - containerRect.top) * pxToMm
+        const bottomMm = (rect.bottom - containerRect.top) * pxToMm
+        const pageStartMm = Math.floor(Math.max(0, topMm) / options.pageHeightMm) * options.pageHeightMm
+        const pageEndMm = pageStartMm + options.pageHeightMm
+        const heightMm = bottomMm - topMm
+        const crossesPageBoundary = topMm > pageStartMm + epsilonMm
+            && topMm < pageEndMm - epsilonMm
+            && bottomMm > pageEndMm + epsilonMm
+            && heightMm <= options.pageHeightMm + epsilonMm
+
+        if (!crossesPageBoundary) continue
+
+        const spacerMm = pageEndMm - topMm
+        if (spacerMm <= epsilonMm) continue
+
+        const spacer = document.createElement('div')
+        spacer.setAttribute('data-pdf-page-chunk-spacer', '')
+        spacer.style.height = `${spacerMm}mm`
+        chunk.insertAdjacentElement('beforebegin', spacer)
+    }
+}
+
 export function preparePdfPageCapture(container: HTMLElement) {
     const origin = container.getBoundingClientRect().top
     const chunks = Array.from(container.querySelectorAll<HTMLElement>(

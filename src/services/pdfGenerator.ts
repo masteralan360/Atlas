@@ -13,9 +13,10 @@ import {
 import { paginateOrderItemsStatementPages, paginateOrderItemsTables } from '@/lib/orderItemsTablePagination'
 import { settleAtlasStandardOrderLayouts } from '@/lib/useAtlasStandardOrderLayout'
 import { centerTablesOnPages } from '@/lib/centeredTablePagination'
+import { alignTravelBookingSignaturesToPageBottom } from '@/lib/travelBookingSignaturePagination'
 import { reportPdfProgress } from '@/services/pdfProgress'
 import { inlineCaptureableImages, waitForPdfImages } from '@/services/pdfImageCapture'
-import { preparePdfPageCapture } from '@/services/pdfPageCapture'
+import { alignPdfPageChunksToPageBoundaries, preparePdfPageCapture } from '@/services/pdfPageCapture'
 import { resolvePdfPageRenderScale, streamPdfPages } from '@/services/pdfPageStream'
 import {
     DEFAULT_POS_RECEIPT_PRINT_QUALITY,
@@ -270,7 +271,11 @@ async function reflowTemplateTextAfterContent(container: HTMLElement, widthMm: n
     await new Promise(requestAnimationFrame)
 }
 
-function collectA4KeepTogetherBlocks(container: HTMLElement, widthMm: number): A4KeepTogetherBlock[] {
+function collectA4KeepTogetherBlocks(
+    container: HTMLElement,
+    widthMm: number,
+    excludedSelector?: string
+): A4KeepTogetherBlock[] {
     if (widthMm !== A4_WIDTH_MM) return []
 
     const containerRect = container.getBoundingClientRect()
@@ -284,6 +289,8 @@ function collectA4KeepTogetherBlocks(container: HTMLElement, widthMm: number): A
     ])
 
     return Array.from(candidates).flatMap((element) => {
+        if (excludedSelector && element.matches(excludedSelector)) return []
+
         // Statement templates which deliberately chunk their ledgers into
         // page-safe tables must be allowed to flow at their intended page
         // positions. Treating their enclosing table (or any of its rows) as
@@ -372,6 +379,39 @@ async function renderTemplateToPdf(
                 pageWidthMm: widthMm
             })
             await expandContainerToRenderedBounds(container)
+            alignPdfPageChunksToPageBoundaries(container, {
+                pageHeightMm: A4_HEIGHT_MM,
+                pageWidthMm: widthMm
+            })
+            await expandContainerToRenderedBounds(container)
+
+            if (container.querySelector('[data-travel-booking-signatures]')) {
+                const containerRect = container.getBoundingClientRect()
+                const pxToMm = containerRect.width > 0 ? widthMm / containerRect.width : 0
+                const signatureRect = container.querySelector<HTMLElement>('[data-travel-booking-signatures]')
+                    ?.getBoundingClientRect()
+                const signatureTopMm = signatureRect && pxToMm > 0
+                    ? (signatureRect.top - containerRect.top) * pxToMm
+                    : 0
+                const priorBlocks = collectA4KeepTogetherBlocks(
+                    container,
+                    widthMm,
+                    '[data-travel-booking-signatures]'
+                )
+                const contentHeightMm = Math.max(container.scrollHeight, container.offsetHeight, 1) * pxToMm
+                const priorPageStarts = getA4PageStarts(contentHeightMm, priorBlocks, A4_HEIGHT_MM)
+                    .filter((pageStart) => pageStart <= signatureTopMm + 0.05)
+
+                alignTravelBookingSignaturesToPageBottom(container, {
+                    pageHeightMm: A4_HEIGHT_MM,
+                    pageWidthMm: widthMm,
+                    pagePaddingMm: 10,
+                    pageStarts: priorPageStarts
+                })
+                await new Promise(requestAnimationFrame)
+                await expandContainerToRenderedBounds(container)
+            }
+
             reportPdfProgress(0.25, 'print.progressLayingOut')
         }
 
@@ -393,6 +433,11 @@ async function renderTemplateToPdf(
             const pxToMm = widthMm / containerPixelWidth
             const heightMm = containerPixelHeight * pxToMm
             const pageStarts = getA4PageStarts(heightMm, keepTogetherBlocks, A4_HEIGHT_MM)
+            const pixelRoundingToleranceMm = pxToMm * 1.5
+            while (pageStarts.length > 1
+                && heightMm - pageStarts[pageStarts.length - 1] <= pixelRoundingToleranceMm) {
+                pageStarts.pop()
+            }
             const safeRenderScale = Math.min(
                 renderScale,
                 Math.max(1, Math.floor(MAX_CANVAS_DIMENSION_PX / containerPixelWidth))
@@ -408,7 +453,11 @@ async function renderTemplateToPdf(
                     const pageEnd = pageStarts[pageIndex + 1] ?? heightMm
                     const pageOffsetPx = Math.floor(pageOffset / pxToMm)
                     const pageHeightPx = Math.max(1, Math.ceil((pageEnd / pxToMm)) - pageOffsetPx)
-                    return { offsetPx: pageOffsetPx, heightPx: pageHeightPx, heightMm: pageHeightPx * pxToMm }
+                    return {
+                        offsetPx: pageOffsetPx,
+                        heightPx: pageHeightPx,
+                        heightMm: Math.min(pageHeightPx * pxToMm, A4_HEIGHT_MM)
+                    }
                 })
                 const pageRenderScale = resolvePdfPageRenderScale(safeRenderScale, pages.length)
                 const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' })

@@ -25,6 +25,7 @@ import { platformService } from '@/services/platformService'
 import { getMediaUploadErrorCode } from '@/services/mediaUploadService'
 import { paginateOrderItemsStatementPages, paginateOrderItemsTables } from '@/lib/orderItemsTablePagination'
 import { centerTablesOnPages } from '@/lib/centeredTablePagination'
+import { alignTravelBookingSignaturesToPageBottom } from '@/lib/travelBookingSignaturePagination'
 import { EditableField } from '@/ui/components/EditableField'
 import { Button } from '@/ui/components/button'
 import { Input } from '@/ui/components/input'
@@ -983,6 +984,8 @@ export function PrintPreviewEditorPage() {
             .sort((left, right) => left.getBoundingClientRect().top - right.getBoundingClientRect().top)
 
         blocks.forEach((block) => {
+            if (block.matches('[data-travel-booking-signatures]')) return
+
             const rect = block.getBoundingClientRect()
             if (rect.width <= 0 || rect.height <= 0) return
 
@@ -1024,6 +1027,12 @@ export function PrintPreviewEditorPage() {
                 anchor.dataset[PREVIEW_PAGE_BREAK_ORIGINAL_MARGIN] = anchor.style.marginTop
             }
             anchor.style.marginTop = `${pageBreakOffsetMm}mm`
+        })
+
+        alignTravelBookingSignaturesToPageBottom(stage, {
+            pageHeightMm,
+            pageWidthMm: templatePageWidth,
+            pagePaddingMm: 10
         })
 
         measureTemplatePreviewHeight()

@@ -1858,21 +1858,65 @@ function createTravelBookingPreview(options: CustomTemplatePreviewOptions): Temp
         : printLang.startsWith('ku')
             ? 'ku'
             : 'en'
+    const t = i18n.getFixedT(fixedPrintLang)
 
     return {
-        fields: [],
+        fields: [
+            {
+                key: 'travelerSignatureTitle',
+                label: 'travelTransportation.print.travelerSignatureTitleField',
+                value: t('travelTransportation.print.travelerSignatureTitle'),
+                type: 'text' as const
+            },
+            {
+                key: 'agencyRepresentativeSignatureTitle',
+                label: 'travelTransportation.print.agencyRepresentativeSignatureTitleField',
+                value: t('travelTransportation.print.agencyRepresentativeSignatureTitle'),
+                type: 'text' as const
+            },
+            {
+                key: 'signatureNameLabel',
+                label: 'travelTransportation.print.signatureNameLabelField',
+                value: t('travelTransportation.print.signatureNameLabel'),
+                type: 'text' as const
+            },
+            {
+                key: 'signatureDateLabel',
+                label: 'travelTransportation.print.signatureDateLabelField',
+                value: t('travelTransportation.print.signatureDateLabel'),
+                type: 'text' as const
+            }
+        ],
         page: { widthMm: 210, heightMm: 297 },
         fixedPrintLang,
-        createElement: (_data, _effectiveId, printLangOverride) => (
-            <TravelBookingPrintTemplate
-                workspaceName={options.workspaceName}
-                printLang={printLangOverride || fixedPrintLang}
-                booking={travelBookingData.booking}
-                passengers={travelBookingData.passengers}
-                iqdPreference={options.features?.iqd_display_preference || 'IQD'}
-                logoUrl={options.features?.logo_url}
-            />
-        ),
+        createElement: (data, _effectiveId, printLangOverride) => {
+            const renderT = i18n.getFixedT(printLangOverride || fixedPrintLang)
+            const resolveSignatureLabel = (key: string, translationKey: string) => {
+                const value = data[key]
+                const defaultValue = t(translationKey)
+                return value === undefined || value === defaultValue ? renderT(translationKey) : value
+            }
+
+            return (
+                <TravelBookingPrintTemplate
+                    workspaceName={options.workspaceName}
+                    printLang={printLangOverride || fixedPrintLang}
+                    booking={travelBookingData.booking}
+                    passengers={travelBookingData.passengers}
+                    iqdPreference={options.features?.iqd_display_preference || 'IQD'}
+                    logoUrl={options.features?.logo_url}
+                    signatureLabels={{
+                        traveler: resolveSignatureLabel('travelerSignatureTitle', 'travelTransportation.print.travelerSignatureTitle'),
+                        agencyRepresentative: resolveSignatureLabel(
+                            'agencyRepresentativeSignatureTitle',
+                            'travelTransportation.print.agencyRepresentativeSignatureTitle'
+                        ),
+                        name: resolveSignatureLabel('signatureNameLabel', 'travelTransportation.print.signatureNameLabel'),
+                        date: resolveSignatureLabel('signatureDateLabel', 'travelTransportation.print.signatureDateLabel')
+                    }}
+                />
+            )
+        },
         buildPdf: (element, printLangOverride) => generateTemplatePdf({
             element,
             format: 'a4',

@@ -191,7 +191,13 @@ describe('Travel & Transportation passenger phone records and print', () => {
             passengers: [passenger], currency: 'usd', iqdPreference: 'IQD'
         }))
         const print = renderToStaticMarkup(createElement(TravelBookingPrintTemplate, {
-            workspaceName: 'Atlas', printLang: 'en', booking: bookingFixture(), passengers: [passenger], iqdPreference: 'IQD'
+            workspaceName: 'Atlas', printLang: 'en', booking: bookingFixture(), passengers: [passenger], iqdPreference: 'IQD',
+            signatureLabels: {
+                traveler: 'Traveler',
+                agencyRepresentative: 'Travel Agency',
+                name: 'Name',
+                date: 'Date'
+            }
         }))
 
         expect(details).toContain('Phone Number')

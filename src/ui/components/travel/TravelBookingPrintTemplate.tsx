@@ -13,6 +13,12 @@ interface TravelBookingPrintTemplateProps {
     passengers: TravelPassenger[]
     iqdPreference: IQDDisplayPreference
     logoUrl?: string | null
+    signatureLabels: {
+        traveler: string
+        agencyRepresentative: string
+        name: string
+        date: string
+    }
 }
 
 function isRtlLanguage(language: string) {
@@ -50,7 +56,8 @@ export function TravelBookingPrintTemplate({
     booking,
     passengers,
     iqdPreference,
-    logoUrl
+    logoUrl,
+    signatureLabels
 }: TravelBookingPrintTemplateProps) {
     const { i18n } = useTranslation()
     const t = i18n.getFixedT(printLang)
@@ -117,9 +124,15 @@ export function TravelBookingPrintTemplate({
                     <table
                         key={chunkIndex}
                         data-pdf-page-chunk
-                        data-centered-table={chunkIndex > 0 ? '' : undefined}
                         className="w-full table-fixed border-collapse text-[10px]"
                     >
+                        <colgroup>
+                            <col style={{ width: '7%' }} />
+                            <col style={{ width: '25%' }} />
+                            <col style={{ width: '23%' }} />
+                            <col style={{ width: '25%' }} />
+                            <col style={{ width: '20%' }} />
+                        </colgroup>
                         <thead>
                             {chunkIndex > 0 ? <tr className="bg-slate-100"><th className="border border-slate-500 px-2 py-1.5 text-start text-[10px]" colSpan={5}>{t('travelTransportation.print.passengerList')} · {t('travelTransportation.print.continued')}</th></tr> : null}
                             <tr className="bg-slate-900 text-white">
@@ -154,6 +167,37 @@ export function TravelBookingPrintTemplate({
                 </section>
 
                 {booking.notes ? <section className="mt-5 border-t border-slate-300 pt-3 text-[10px]" data-pdf-keep-together><h2 className="font-bold">{t('travelTransportation.notes')}</h2><p className="mt-1 whitespace-pre-wrap text-slate-700">{booking.notes}</p></section> : null}
+
+                <div data-travel-booking-signature-spacer aria-hidden="true" style={{ height: '0mm' }} />
+                <section
+                    className="grid grid-cols-2 gap-x-8 gap-y-3 text-[9px]"
+                    data-pdf-keep-together
+                    data-travel-booking-signatures
+                >
+                    <h2 className="col-span-2 border-b border-slate-300 pb-1.5 text-[11px] font-bold">
+                        {t('travelTransportation.print.signatures')}
+                    </h2>
+                    {[
+                        { key: 'traveler', label: signatureLabels.traveler },
+                        { key: 'agency-representative', label: signatureLabels.agencyRepresentative }
+                    ].map(({ key, label }) => (
+                        <div key={key} className="flex min-w-0 flex-col items-center">
+                            <div
+                                aria-hidden="true"
+                                className="h-[32mm] w-[32mm] shrink-0 border border-slate-600"
+                            />
+                            <p className="mt-1.5 min-h-[1.25em] text-center font-semibold">{label}</p>
+                            <div className="mt-2 w-full space-y-1.5">
+                                {[signatureLabels.name, signatureLabels.date].map((fieldLabel, fieldIndex) => (
+                                    <div key={fieldIndex} className="flex min-h-4 items-end gap-2">
+                                        <span className="shrink-0 text-slate-700">{fieldLabel}</span>
+                                        <span aria-hidden="true" className="min-w-0 flex-1 border-b border-slate-400" />
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ))}
+                </section>
             </section>
         </div>
     )
