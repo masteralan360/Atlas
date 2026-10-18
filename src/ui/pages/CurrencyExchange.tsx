@@ -6,7 +6,7 @@ import type { TFunction } from 'i18next'
 import CountryFlag from 'react-native-country-flag'
 import { ArrowLeft, ArrowRightLeft, CalendarClock, ClipboardList, HelpCircle, History, Lock, Plus, Search, Trash2, Undo2, Unlock, Vault } from 'lucide-react'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { cn, formatCurrency, formatDateTime, formatNumberWithCommas, formatNumericInput, parseFormattedNumber, parseLocalDateTimeValue, sanitizeNumericInput } from '@/lib/utils'
 import { CASH_AND_DIGITAL_PAYMENT_METHODS } from '@/lib/paymentMethods'
 import {
@@ -58,44 +58,44 @@ import {
     type ExchangeFeeRuleTemporalStatus,
     type IQDDisplayPreference
 } from '@/local-db'
+import { Button } from '@/ui/components/button'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    CurrencySelector,
-    DateTimePicker,
-    DeleteConfirmationModal,
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Switch,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    Textarea,
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
-    useToast
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CurrencySelector,
+  DateTimePicker,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Textarea,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+  useToast,
 } from '@/ui/components'
 import { PaymentMethodSelect } from '@/ui/components/payments/PaymentMethodSelect'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useWorkspacePermissions } from '@/permissions'
 
 type FeeRuleFormState = {

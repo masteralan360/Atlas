@@ -19,45 +19,45 @@ import { db } from '@/local-db/database'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import type { TemplatePreview, TemplatePreviewRenderOptions } from '@/lib/printPreviewEditorStore'
 import { DEFAULT_SIMPLE_LOAN_SUMMARY_MODE, getSimpleLoanSummaryMode, saveSimpleLoanSummaryMode } from '@/lib/simpleLoanSummaryPreference'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 import {
-    AppPagination,
-    Button,
-    Card,
-    CardContent,
-    DeleteConfirmationModal,
-    Input,
-    PrintFlow,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    useToast,
-    ContextMenu,
-    ContextMenuTrigger,
-    ContextMenuContent,
-    ContextMenuItem,
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogDescription,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    CurrencySelector,
-    DateTimePicker,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
+  AppPagination,
+  Button,
+  Card,
+  CardContent,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  useToast,
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  CurrencySelector,
+  DateTimePicker,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/ui/components'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { FilterDropdown } from '@/ui/components/FilterDropdown'
 import { WhatsAppNumberInputModal } from '@/ui/components/modals/WhatsAppNumberInputModal'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { CreateSimpleLoanModal } from './CreateSimpleLoanModal'
 import { LoanDetailsPrintTemplate, LoanListPrintTemplate } from './LoanPrintTemplates'

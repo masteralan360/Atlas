@@ -12,8 +12,6 @@ import type {
 import { db } from '@/local-db/database'
 import { hasCurrencyExchangeAccountingData } from '@/local-db/currencyExchange'
 import { addToOfflineMutations } from '@/local-db/hooks'
-import { hydrateLocalModeCacheFromSqlite, clearWorkspaceSqliteData, seedWorkspaceFromDexie } from '@/local-db/localModeSqlite'
-import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
 import { isMobile } from '@/lib/platform'
 import { connectionManager } from '@/lib/connectionManager'
 import {
@@ -630,6 +628,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         // Important: If we are in local/hybrid mode, we MUST keep our local logo_url
         // as the source of truth, even if fetchFeatures later tries to sync from Supabase.
         if (nextFeatures.data_mode === 'local' || nextFeatures.data_mode === 'hybrid') {
+            const { hydrateLocalModeCacheFromSqlite } = await import('@/local-db/localModeSqlite')
             await hydrateLocalModeCacheFromSqlite(db, workspaceId)
         }
     }
@@ -1695,10 +1694,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
             if (newMode === 'hybrid') {
                 // Cloud → Hybrid: seed SQLite from Dexie cache, then hydrate
+                const { seedWorkspaceFromDexie, hydrateLocalModeCacheFromSqlite } = await import('@/local-db/localModeSqlite')
                 await seedWorkspaceFromDexie(db, workspaceId)
                 await hydrateLocalModeCacheFromSqlite(db, workspaceId)
 
                 try {
+                    const { fetchCachedCustomTemplates } = await import('@/lib/cachedCustomTemplates')
                     await fetchCachedCustomTemplates(workspaceId)
                 } catch (customTemplateSeedError) {
                     console.warn(
@@ -1708,6 +1709,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 }
             } else {
                 // Hybrid → Cloud: abandon SQLite data
+                const { clearWorkspaceSqliteData } = await import('@/local-db/localModeSqlite')
                 await clearWorkspaceSqliteData(workspaceId)
             }
 

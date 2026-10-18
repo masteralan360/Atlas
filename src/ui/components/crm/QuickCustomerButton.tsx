@@ -4,7 +4,7 @@ import { Zap } from 'lucide-react'
 
 import { createBusinessPartner, type BusinessPartner } from '@/local-db'
 import { cn } from '@/lib/utils'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { Button, useToast } from '@/ui/components'
 import {
     CompactBusinessPartnerFormDialog,

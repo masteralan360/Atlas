@@ -1,12 +1,18 @@
 import { useState } from 'react'
 import { useLocation } from 'wouter'
-import { Button, Input, Label, LanguageSwitcher, ThemeToggle } from '@/ui/components'
+import { Button } from '@/ui/components/button'
+import { Input } from '@/ui/components/input'
+import {
+  Label,
+  LanguageSwitcher,
+  ThemeToggle,
+} from '@/ui/components'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/components/select'
 import { Loader2, Timer, Briefcase, FileText } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { useFavicon } from '@/hooks/useFavicon'
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import type { CurrencyCode } from '@/local-db/models'
 import {
   DEMO_JOBS,

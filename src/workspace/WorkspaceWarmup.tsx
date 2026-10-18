@@ -5,7 +5,7 @@ import { isSupabaseConfigured } from '@/auth/supabase'
 import { connectionManager } from '@/lib/connectionManager'
 import { LAST_SYNC_KEY } from '@/sync/constants'
 import { runManagedFullSync } from '@/sync/syncCoordinator'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 const WARMUP_VERSION = 1
 const MODULE_PRELOAD_BATCH_SIZE = 4

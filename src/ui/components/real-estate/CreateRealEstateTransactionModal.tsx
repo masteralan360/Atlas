@@ -7,29 +7,29 @@ import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { buildOrderExchangeRatesSnapshot, filterSnapshotByCurrency } from '@/lib/orderCurrency'
 import { formatCurrency, formatLocalDateValue, formatNumberWithCommas, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
 import { createBusinessPartner, createRealEstateTransaction, type BusinessPartner, type CurrencyCode, type InstallmentFrequency, type RealEstatePropertyType, type RealEstateTransactionType } from '@/local-db'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    CurrencySelector,
-    DateTimePicker,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Switch,
-    Textarea,
-    useToast
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CurrencySelector,
+  DateTimePicker,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Textarea,
+  useToast,
 } from '@/ui/components'
 import { AddPartnerButton } from '@/ui/components/crm/AddPartnerButton'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { BusinessPartnerFormDialog, type BusinessPartnerFormPayload } from '@/ui/components/crm/BusinessPartnerFormDialog'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { getInitialRealEstatePartnerRole, getRealEstatePartyLabels } from '@/lib/realEstateParties'
 
 interface CreateRealEstateTransactionPageProps {

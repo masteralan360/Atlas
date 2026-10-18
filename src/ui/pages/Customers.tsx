@@ -14,27 +14,27 @@ import {
     type CurrencyCode
 } from '@/local-db'
 import { cn, formatCurrency } from '@/lib/utils'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    Input,
-    Switch,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    Tabs,
-    TabsContent,
-    TabsList,
-    TabsTrigger,
-    AppPagination,
-    useToast
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Switch,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  AppPagination,
+  useToast,
 } from '@/ui/components'
 import { useWorkspacePermissions } from '@/permissions/WorkspacePermissionsContext'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'

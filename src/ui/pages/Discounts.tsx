@@ -3,7 +3,7 @@ import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useTranslation } from 'react-i18next'
 import { Pencil, Percent, Plus, Shapes, Trash2 } from 'lucide-react'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import {
     createCategoryDiscount,
     createProductDiscount,
@@ -29,40 +29,40 @@ import {
 } from '@/local-db'
 import { buildInventoryTotalsByProduct, computeDiscountPrice, getDiscountStatus, type DiscountLifecycleStatus } from '@/lib/discounts'
 import { cn, formatCurrency, formatDateTime } from '@/lib/utils'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
 import { ProductsViewModal, ProductsViewModalTrigger } from '@/ui/components/ProductsViewModal'
 import { PriceBookName } from '@/ui/components/PriceBookName'
+import { Button } from '@/ui/components/button'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-    Checkbox,
-    DeleteConfirmationModal,
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Switch,
-    Tabs,
-    TabsContent,
-    TabsList,
-    TabsTrigger,
-    NumericInput,
-    DateTimePicker,
-    useToast
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Checkbox,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  NumericInput,
+  DateTimePicker,
+  useToast,
 } from '@/ui/components'
 
 type DiscountTab = 'products' | 'categories'

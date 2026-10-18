@@ -41,7 +41,7 @@ import {
     type ProductImportSubmissionResult,
     type ProductImportValidationContext
 } from '@/lib/productImport'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { useHideCosts } from '@/permissions'
@@ -69,51 +69,51 @@ import { ProductCategoryManagerDialog } from '@/ui/components/products/ProductCa
 import { CameraBarcodeScannerModal, type CameraBarcodeScanMode, type CameraBarcodeScannerTabOption } from '@/ui/components/pos/CameraBarcodeScannerModal'
 import { ProductAvatar } from '@/ui/components/ProductAvatars'
 import { useProductQuantityPresentation } from '@/ui/hooks/useProductQuantityFormatter'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
+import { StockAdjustmentDialog } from '@/ui/components/StockAdjustmentDialog'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    ContextMenu,
-    ContextMenuContent,
-    ContextMenuItem,
-    ContextMenuTrigger,
-    DeleteConfirmationModal,
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Checkbox,
-    ExportPreviewModal,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    DropdownMenu,
-    DropdownMenuCheckboxItem,
-    DropdownMenuContent,
-    DropdownMenuTrigger,
-    CurrencySelector,
-    StockAdjustmentDialog,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
-    AppPagination,
-    PrintFlow,
-    useToast
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Checkbox,
+  ExportPreviewModal,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+  CurrencySelector,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+  AppPagination,
+  useToast,
 } from '@/ui/components'
 
 const DeveloperTestButton = import.meta.env.DEV && __ATLAS_DEV_TESTING__

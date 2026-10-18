@@ -3,10 +3,16 @@ import { Link } from 'wouter'
 import { Search, Store, Users } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { useBusinessPartners } from '@/local-db'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { Card, CardContent, CardHeader, CardTitle, Input } from '@/ui/components'
+import { Input } from '@/ui/components/input'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '@/ui/components'
 import { formatDateTime } from '@/lib/utils'
 
 export function OnlineCustomers() {

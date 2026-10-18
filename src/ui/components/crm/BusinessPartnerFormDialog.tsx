@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 
@@ -22,29 +22,28 @@ import {
     type BusinessPartnerRole,
     type CurrencyCode
 } from '@/local-db'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Checkbox,
-    CurrencySelector,
-    Dialog,
-    DialogBody,
-    DialogContent,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Switch,
-    Textarea,
-    useToast
+  Button,
+  Checkbox,
+  CurrencySelector,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Textarea,
+  useToast,
 } from '@/ui/components'
-import { useWorkspace } from '@/workspace'
-import { PartnerLocationField } from '@/ui/components/crm/PartnerLocationField'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { PriceBookName } from '@/ui/components/PriceBookName'
 import {
     BusinessPartnerDuplicateStatusDescription,
@@ -80,6 +79,9 @@ type BusinessPartnerFormState = {
 }
 
 const DEFAULT_ROLE: BusinessPartnerRole = 'both'
+const PartnerLocationField = lazy(() => import('@/ui/components/crm/PartnerLocationField').then((module) => ({
+    default: module.PartnerLocationField,
+})))
 
 function createEmptyState(defaultCurrency: CurrencyCode, role: BusinessPartnerRole, agentType: AgentType = 'field_agent'): BusinessPartnerFormState {
     return {
@@ -727,11 +729,15 @@ export function BusinessPartnerFormDialog({
                                     onChange={(event) => setFormState((current) => ({ ...current, payableCreditLimit: event.target.value }))}
                                 />
                             </div> : null}
-                            <PartnerLocationField
-                                latitude={formState.latitude}
-                                longitude={formState.longitude}
-                                onChange={(latitude, longitude) => setFormState((current) => ({ ...current, latitude, longitude }))}
-                            />
+                            {isOpen ? (
+                                <Suspense fallback={<div className="h-44 animate-pulse rounded-2xl bg-muted md:col-span-2" />}>
+                                    <PartnerLocationField
+                                        latitude={formState.latitude}
+                                        longitude={formState.longitude}
+                                        onChange={(latitude, longitude) => setFormState((current) => ({ ...current, latitude, longitude }))}
+                                    />
+                                </Suspense>
+                            ) : null}
                             <div className="space-y-2 md:col-span-2">
                                 <Label htmlFor="business-partner-notes">{t('customers.form.notes') || 'Notes'}</Label>
                                 <Textarea

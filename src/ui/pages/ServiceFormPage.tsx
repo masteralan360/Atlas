@@ -21,7 +21,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import {
     createProduct,
     db,
@@ -47,34 +47,34 @@ import { cn, formatCurrency, formatNumericInput, sanitizeNumericInput } from '@/
 import { platformService } from '@/services/platformService'
 import { getMediaUploadErrorCode } from '@/services/mediaUploadService'
 import { generateRandomUpc } from '@/lib/upc'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useHideCosts } from '@/permissions'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { ProductAdditionalImagesModal } from '@/ui/components/ProductAdditionalImagesModal'
 import { BarcodeScannerToggleButton } from '@/ui/components/BarcodeScannerToggleButton'
+import { Button } from '@/ui/components/button'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    CurrencySelector,
-    DeleteConfirmationModal,
-    Dialog,
-    DialogContent,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Switch,
-    Textarea,
-    useToast
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CurrencySelector,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Textarea,
+  useToast,
 } from '@/ui/components'
 
 type ServiceFormMode = 'create' | 'edit'

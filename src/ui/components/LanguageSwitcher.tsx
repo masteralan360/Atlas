@@ -12,8 +12,8 @@ import { getLanguageDirection, parseLangFromHash, getPathWithLang } from '@/lib/
 export function LanguageSwitcher({ className }: { className?: string }) {
     const { i18n } = useTranslation()
 
-    const changeLanguage = (lng: string) => {
-        i18n.changeLanguage(lng)
+    const changeLanguage = async (lng: string) => {
+        await i18n.changeLanguage(lng)
         localStorage.setItem('i18nextLng', lng)
 
         const dir = getLanguageDirection(lng)

@@ -5,17 +5,17 @@ import { MapPin, Phone, Plus, Search, UserRound } from 'lucide-react'
 import { createBusinessPartner, type BusinessPartner, type BusinessPartnerRole, type CurrencyCode, useBusinessPartners } from '@/local-db'
 import type { LoanPartySelection } from '@/lib/loanParties'
 import { cn } from '@/lib/utils'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    useToast
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  useToast,
 } from '@/ui/components'
 import { BusinessPartnerFormDialog, type BusinessPartnerFormPayload } from '@/ui/components/crm/BusinessPartnerFormDialog'
 

@@ -10,23 +10,23 @@ import {
 import { formatNumericInput, generateId, sanitizeNumericInput } from '@/lib/utils'
 import { getAppliedCurrencyConversion } from '@/lib/orderCurrency'
 import type { CurrencyCode, ExchangeRateSnapshot, OrderAdjustment, OrderAdjustmentType } from '@/local-db'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    CurrencySelector,
-    Dialog,
-    DialogContent,
-    DialogBody,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue
+  Button,
+  CurrencySelector,
+  Dialog,
+  DialogContent,
+  DialogBody,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/ui/components'
 
 type EditableAdjustment = OrderAdjustmentDraft & {

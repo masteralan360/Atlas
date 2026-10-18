@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { AlertCircle, CalendarPlus, Clock, CreditCard, Copy, Gauge, HardDrive, Lock, LogOut, Mail, Phone } from 'lucide-react'
 import { Button } from '@/ui/components/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/ui/components/dialog'
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { useLocation } from 'wouter'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { WorkspacePaygLimitDialog } from '@/ui/components/WorkspacePaygLimitDialog'
 import {
     OPEN_WORKSPACE_PAYMENT_DIALOG_EVENT,

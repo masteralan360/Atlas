@@ -13,52 +13,52 @@ import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { isMobile } from '@/lib/platform'
 import { getReportOriginId } from '@/lib/printIdentity'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useOptionalWorkspacePermissions } from '@/permissions/workspacePermissionsState'
 import { useDateRange } from '@/context/DateRangeContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
 import { PartnerAutocompleteInput, type PartnerAutocompleteAdditionalOption } from '@/ui/components/crm/PartnerAutocompleteInput'
+import { Input } from '@/ui/components/input'
+import { SaleDetailsModal } from '@/ui/components/SaleDetailsModal'
+import { TopProductsModal } from '@/ui/components/revenue/TopProductsModal'
+import { ProductSalesSummaryModal } from '@/ui/components/revenue/ProductSalesSummaryModal'
+import { SalesOverviewModal } from '@/ui/components/revenue/SalesOverviewModal'
+import { PeakTradingModal } from '@/ui/components/revenue/PeakTradingModal'
+import { ReturnsAnalysisModal } from '@/ui/components/revenue/ReturnsAnalysisModal'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 import {
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    Tooltip,
-    TooltipTrigger,
-    TooltipContent,
-    TooltipProvider,
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    SaleDetailsModal,
-    MetricDetailModal,
-    TopProductsModal,
-    ProductSalesSummaryModal,
-    SalesOverviewModal,
-    PeakTradingModal,
-    ReturnsAnalysisModal,
-    PrintFlow,
-    AppPagination
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  AppPagination,
 } from '@/ui/components'
 import { MiniHeatmap } from '@/ui/components/revenue/MiniHeatmap'
+import { MetricDetailModal } from '@/ui/components/MetricDetailModal'
 import type { MetricType } from '@/ui/components/MetricDetailModal'
 import {
     Check,

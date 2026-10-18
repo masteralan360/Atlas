@@ -24,7 +24,7 @@ import type {
   ReorderTransferRule,
   StockBatch,
 } from "@/local-db";
-import { useWorkspace } from "@/workspace";
+import { useWorkspace } from "@/workspace/WorkspaceContext";
 import { useAuth } from "@/auth";
 import {
   isRetriableWebRequestError,
@@ -51,6 +51,7 @@ import {
   Trash2,
   Warehouse,
 } from "lucide-react";
+import { Input } from "@/ui/components/input";
 import {
   Card,
   CardContent,
@@ -65,7 +66,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Input,
   Label,
   Select,
   SelectContent,

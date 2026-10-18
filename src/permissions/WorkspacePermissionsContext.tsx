@@ -22,7 +22,6 @@ import {
   readCachedPermissions,
   writeCachedPermissions,
 } from "./workspacePermissionCache";
-import { getLocalModeSqliteConnection } from "@/local-db/localModeSqlite";
 import {
   WorkspacePermissionsContext,
 } from "./workspacePermissionsState";
@@ -61,6 +60,7 @@ export function WorkspacePermissionsProvider({
 
     if (isLocalMode || !isSupabaseConfigured) {
       if (isLocalMode) {
+        const { getLocalModeSqliteConnection } = await import("@/local-db/localModeSqlite");
         const connection = await getLocalModeSqliteConnection()
         const keys: WorkspacePermissionKey[] = []
         if (connection) {

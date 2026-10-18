@@ -13,20 +13,20 @@ import {
 import { formatCurrency } from '@/lib/utils'
 import { isValidPriceBookColor } from '@/lib/priceBookColor'
 import { useHideCosts } from '@/permissions'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
 import {
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogDescription,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    Button,
-    Checkbox,
-    DeleteConfirmationModal,
-    Input,
-    Label,
-    useToast
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Button,
+  Checkbox,
+  Label,
+  useToast,
 } from '@/ui/components'
 import { PriceBookName } from './PriceBookName'
 

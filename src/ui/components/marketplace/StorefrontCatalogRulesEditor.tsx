@@ -6,17 +6,17 @@ import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
 import { type PriceBook } from '@/local-db'
 import type { Storage } from '@/local-db/models'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import {
-    Button,
-    DeleteConfirmationModal,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Switch,
-    useToast
+  Button,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  useToast,
 } from '@/ui/components'
 import { cn } from '@/lib/utils'
 import { PriceBookName } from '@/ui/components/PriceBookName'

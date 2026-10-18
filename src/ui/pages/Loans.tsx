@@ -22,7 +22,7 @@ import {
     type LoanPayment,
     type PaymentTransaction
 } from '@/local-db'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { getDateRangeBounds, isDateInDateRange } from '@/lib/dateRangeFilters'
 import { calculateInstallmentLoanListMetrics } from '@/lib/loanListMetrics'
 import { getLoanLinkedPartySummary } from '@/lib/loanParties'
@@ -55,31 +55,31 @@ import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { isMobile } from '@/lib/platform'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
 import type { TemplatePreview, TemplatePreviewRenderOptions } from '@/lib/printPreviewEditorStore'
+import { Input } from '@/ui/components/input'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    Input,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    AppPagination,
-    DeleteConfirmationModal,
-    PrintFlow,
-    useToast,
-    ContextMenu,
-    ContextMenuTrigger,
-    ContextMenuContent,
-    ContextMenuItem,
-    Tabs,
-    TabsContent,
-    TabsList,
-    TabsTrigger,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  AppPagination,
+  useToast,
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
 } from '@/ui/components'
 import { Search, Plus, ArrowLeft, Printer, Trash2, List, LayoutGrid, MessageCircle, Receipt, CircleDashed, CircleX, Clock3, CreditCard, BadgeCheck, ListFilter, Undo2, Wallet, type LucideIcon } from 'lucide-react'
 import { CreateManualLoanModal } from '@/ui/components/loans/CreateManualLoanModal'

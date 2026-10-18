@@ -14,7 +14,7 @@ import {
   type ModuleLockerActor
 } from '@/local-db/moduleLocker'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import {
   AppDialog,
   AppDialogBody,

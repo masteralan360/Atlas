@@ -19,7 +19,7 @@ import {
 } from 'lucide-react'
 import { useLocation } from 'wouter'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { useDateRange } from '@/context/DateRangeContext'
 import {
   createCashierShiftAssignment,
@@ -47,6 +47,9 @@ import {
 import { isDateInDateRange } from '@/lib/dateRangeFilters'
 import { formatCurrency, formatTime } from '@/lib/utils'
 import { useWorkspacePermissions } from '@/permissions'
+import { Button } from '@/ui/components/button'
+import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { Input } from '@/ui/components/input'
 import {
   AppDialog,
   AppDialogBody,
@@ -55,14 +58,11 @@ import {
   AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
-  Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-  DateRangeFilters,
   DateTimePicker,
-  Input,
   Label,
   Select,
   SelectContent,
@@ -80,12 +80,12 @@ import {
   TabsList,
   TabsTrigger,
   Textarea,
-  useToast
+  useToast,
 } from '@/ui/components'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const
 const DEFAULT_TIME_DATE = new Date(2000, 0, 1, 8, 0, 0, 0)

@@ -39,8 +39,9 @@ import { isMobile } from "@/lib/platform";
 import type { TemplatePreview } from "@/lib/printPreviewEditorStore";
 import { generateTemplatePdf, type PrintFormat } from "@/services/pdfGenerator";
 import { printPdfBlob } from "@/services/pdfPrintService";
-import { useWorkspace } from "@/workspace";
+import { useWorkspace } from "@/workspace/WorkspaceContext";
 import { PaymentReversalDialog, type PaymentReversalDialogInput } from "@/ui/components/payments/PaymentReversalDialog";
+import { PrintFlow } from "@/ui/components/PrintFlow";
 import {
   Badge,
   Button,
@@ -48,7 +49,6 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  PrintFlow,
   Table,
   TableBody,
   TableCell,

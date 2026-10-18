@@ -27,7 +27,7 @@ import {
   type AssistantSpeechAvailability,
 } from "@/lib/atlasAssistant";
 import { useExchangeRate } from "@/context/ExchangeRateContext";
-import { useWorkspace } from "@/workspace";
+import { useWorkspace } from "@/workspace/WorkspaceContext";
 import { useWorkspacePermissions } from "@/permissions";
 import { Button } from "./button";
 

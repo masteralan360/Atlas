@@ -1,7 +1,13 @@
 import { useState } from 'react'
 import { useLocation } from 'wouter'
-import { useAuth } from '@/auth'
-import { Button, Input, Label, LanguageSwitcher, ThemeToggle } from '@/ui/components'
+import { useAuth } from '@/auth/AuthContext'
+import { Button } from '@/ui/components/button'
+import { Input } from '@/ui/components/input'
+import {
+  Label,
+  LanguageSwitcher,
+  ThemeToggle,
+} from '@/ui/components'
 import { Mail, Lock, Loader2, Eye, EyeOff, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { isMobile } from '@/lib/platform'

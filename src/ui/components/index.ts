@@ -185,7 +185,7 @@ export {
     ContextMenuSubTrigger,
     ContextMenuRadioGroup,
 } from './ui/context-menu'
-export * from './map'
+export * from './lazyMap'
 export { BiometricLock } from './BiometricLock'
 export { Popover, PopoverTrigger, PopoverContent, PopoverAnchor } from './ui/popover'
 export { Calendar } from './ui/calendar'

@@ -11,20 +11,20 @@ import {
     type TravelBooking,
     type WorkspacePaymentMethod
 } from '@/local-db'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { Input } from '@/ui/components/input'
 import {
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogDescription,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    Button,
-    Input,
-    Label,
-    Textarea,
-    useToast
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Button,
+  Label,
+  Textarea,
+  useToast,
 } from '@/ui/components'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { PaymentMethodSelect } from '@/ui/components/payments/PaymentMethodSelect'

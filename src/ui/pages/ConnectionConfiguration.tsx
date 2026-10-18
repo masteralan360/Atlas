@@ -1,5 +1,14 @@
 import { useState } from 'react'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Input, Label } from '@/ui/components'
+import { Button } from '@/ui/components/button'
+import { Input } from '@/ui/components/input'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  Label,
+} from '@/ui/components'
 import { setAppSetting } from '@/local-db/settings'
 import { Server, Globe, Shield, RefreshCw, AlertCircle } from 'lucide-react'
 import { relaunch } from '@tauri-apps/plugin-process';

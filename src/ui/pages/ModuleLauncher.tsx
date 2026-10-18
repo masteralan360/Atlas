@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/auth'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useWorkspacePermissions } from '@/permissions'
 import { isDesktop, isMobile } from '@/lib/platform'
 import { Input } from '@/ui/components/input'

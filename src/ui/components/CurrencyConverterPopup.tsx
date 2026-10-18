@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { motion, useDragControls } from 'motion/react'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { Input } from '@/ui/components/input'
 import {
   Button,
-  Input,
   Label,
   Select,
   SelectTrigger,

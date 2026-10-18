@@ -16,7 +16,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/ui/components";
-import { useWorkspace } from "@/workspace";
+import { useWorkspace } from "@/workspace/WorkspaceContext";
 
 export function FleetManagement() {
   const { t } = useTranslation();

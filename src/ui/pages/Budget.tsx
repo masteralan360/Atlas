@@ -21,7 +21,7 @@ import {
     Repeat
 } from 'lucide-react'
 import { useAuth } from '@/auth'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { getReportOriginId } from '@/lib/printIdentity'
 import { getLanguageDirection } from '@/lib/i18nRouting'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
@@ -76,38 +76,38 @@ import {
 import { buildRevenueAnalysisRecords, calculateRevenueAnalysisNetProfitBase } from '@/lib/revenueAnalysis'
 import { convertToStoreBase } from '@/lib/currency'
 import { formatCurrency, formatDate, formatLocalDateTimeValue, formatNumberWithCommas, parseFormattedNumber, cn } from '@/lib/utils'
+import { Input } from '@/ui/components/input'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    Dialog,
-    DialogBody,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Tabs,
-    TabsContent,
-    TabsList,
-    TabsTrigger,
-    useToast,
-    Progress,
-    CurrencySelector,
-    DateTimePicker,
-    DeleteConfirmationModal,
-    SettlementDialog,
-    PrintFlow,
-    SelectionCards
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  useToast,
+  Progress,
+  CurrencySelector,
+  DateTimePicker,
+  SelectionCards,
 } from '@/ui/components'
 import { BudgetSnoozeModal, type BudgetSnoozeOption } from '@/ui/components/budget/BudgetSnoozeModal'
 import { BudgetLockPromptModal } from '@/ui/components/budget/BudgetLockPromptModal'

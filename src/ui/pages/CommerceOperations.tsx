@@ -9,9 +9,9 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
-import { useOptionalAuth } from '@/auth'
+import { useOptionalAuth } from '@/auth/AuthContext'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useWorkspacePermissions } from '@/permissions'
 import { db } from '@/local-db/database'
 import type { Agent, BusinessPartner, CommerceOperationRecord, CommerceOperationRecordType, CurrencyCode, ExchangeRateSnapshot, Product, SalesOrder, SalesOrderItem } from '@/local-db/models'
@@ -27,11 +27,35 @@ import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { DateTimePicker } from '@/ui/components/ui/date-time-picker'
 import { PriceBookName } from '@/ui/components/PriceBookName'
+import { Button } from '@/ui/components/button'
+import { Input } from '@/ui/components/input'
 import {
-  AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle,
-  Badge, Button, Card, CardContent, CardHeader, CardTitle, CurrencySelector, Input, Label,
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table, TableBody, TableCell,
-  TableHead, TableHeader, TableRow, Textarea, useToast,
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Badge,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CurrencySelector,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Textarea,
+  useToast,
 } from '@/ui/components'
 import { calculateOrderTotalWithAdjustments, createOrderAdjustment } from '@/lib/orderAdjustments'
 import { buildOrderExchangeRatesSnapshot, getAppliedCurrencyConversion } from '@/lib/orderCurrency'

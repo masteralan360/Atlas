@@ -19,6 +19,7 @@ import { createPortal } from "react-dom";
 import { X, Minus, Plus, Locate, Maximize, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { MapContext, useMap } from "./mapContext";
 
 const defaultStyles = {
   dark: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
@@ -80,21 +81,6 @@ function useResolvedTheme(themeProp?: "light" | "dark"): Theme {
   }, [themeProp]);
 
   return themeProp ?? detectedTheme;
-}
-
-type MapContextValue = {
-  map: MapLibreGL.Map | null;
-  isLoaded: boolean;
-};
-
-const MapContext = createContext<MapContextValue | null>(null);
-
-function useMap() {
-  const context = useContext(MapContext);
-  if (!context) {
-    throw new Error("useMap must be used within a Map component");
-  }
-  return context;
 }
 
 /** Map viewport state */

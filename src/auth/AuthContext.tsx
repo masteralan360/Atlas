@@ -24,8 +24,6 @@ import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseR
 import { WORKSPACE_USAGE_SKIP_HEADER } from '@/lib/workspaceUsageFetch'
 import { resolveFetchedWorkspaceName } from '@/workspace/workspaceLocalSettings'
 import { db } from '@/local-db/database'
-import { hydrateLocalModeCacheFromSqlite, readLocalProfileWorkspaceState } from '@/local-db/localModeSqlite'
-import { runDailyBackupIfNeeded, runR2BackupIfNeeded } from '@/local-db/sqliteBackup'
 import { clearLocalDemoWorkspaceData, clearStoredDemoWorkspaces } from '@/demo/demoCleanup'
 import { isDemoWorkspace } from '@/demo/demoConfig'
 import { deleteDemoWorkspace } from '@/demo/demoService'
@@ -47,6 +45,7 @@ import {
   startCashierShiftOccurrence
 } from '@/local-db/paymentAccounts'
 import { fetchTableFromSupabase } from '@/local-db/hooks'
+import { AuthRoleContext } from './AuthRoleContext'
 import {
   AppDialog,
   AppDialogBody,
@@ -55,8 +54,8 @@ import {
   AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
-  Button
-} from '@/ui/components'
+} from '@/ui/components/dialog'
+import { Button } from '@/ui/components/button'
 import i18n from '@/i18n/config'
 
 export interface AuthUser {
@@ -186,6 +185,17 @@ async function hydrateAssetProfile(user: AuthUser) {
     profile_url: user.profileUrl ?? localProfile?.profile_url ?? null,
     created_at: localProfile?.created_at || new Date().toISOString()
   })
+}
+
+function startLocalWorkspaceBackups(workspaceId: string) {
+  void import('@/local-db/sqliteBackup')
+    .then(({ runDailyBackupIfNeeded, runR2BackupIfNeeded }) => {
+      void runDailyBackupIfNeeded(workspaceId)
+      void runR2BackupIfNeeded(workspaceId)
+    })
+    .catch((error) => {
+      console.warn('[Auth] Failed to initialize local database backups:', error)
+    })
 }
 
 function clearPreviousWorkspaceArtifacts(previousWorkspaceId?: string | null, nextWorkspaceId?: string | null) {
@@ -475,6 +485,7 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
 
   if (!profileBootstrapCompleted && !canonicalWorkspaceId) {
     try {
+      const { readLocalProfileWorkspaceState } = await import('@/local-db/localModeSqlite')
       const localWorkspaceState = await readLocalProfileWorkspaceState(parsedUser.id)
       if (localWorkspaceState) {
         sourceWorkspaceId = localWorkspaceState.sourceWorkspaceId
@@ -545,9 +556,9 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
         dataMode: parsedUser.workspaceMode
       })
       if (parsedUser.workspaceMode === 'local' || parsedUser.workspaceMode === 'hybrid') {
+        const { hydrateLocalModeCacheFromSqlite } = await import('@/local-db/localModeSqlite')
         await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId)
-        void runDailyBackupIfNeeded(parsedUser.workspaceId)
-        void runR2BackupIfNeeded(parsedUser.workspaceId)
+        startLocalWorkspaceBackups(parsedUser.workspaceId)
       }
       await hydrateAssetProfile(parsedUser)
       return parsedUser
@@ -567,9 +578,9 @@ async function enrichUser(parsedUser: AuthUser): Promise<AuthUser> {
       dataMode: parsedUser.workspaceMode
     })
     if (parsedUser.workspaceMode === 'local' || parsedUser.workspaceMode === 'hybrid') {
+      const { hydrateLocalModeCacheFromSqlite } = await import('@/local-db/localModeSqlite')
       await hydrateLocalModeCacheFromSqlite(db, parsedUser.workspaceId)
-      void runDailyBackupIfNeeded(parsedUser.workspaceId)
-      void runR2BackupIfNeeded(parsedUser.workspaceId)
+      startLocalWorkspaceBackups(parsedUser.workspaceId)
     }
     await hydrateAssetProfile(parsedUser)
   }
@@ -1676,60 +1687,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         switchCloudAccount
       }}
     >
-      {children}
-      <AppDialog open={Boolean(cashierShiftAuthRequest)} onOpenChange={() => undefined}>
-        <AppDialogContent
-          className="max-w-xl"
-          showCloseButton={false}
-          onPointerDownOutside={(event) => event.preventDefault()}
-          onEscapeKeyDown={(event) => event.preventDefault()}
-        >
-          <AppDialogHeader>
-            <AppDialogTitle>
-              {cashierShiftAuthRequest?.kind === 'start'
-                ? i18n.t('paymentAccounts.loginLogoutStartTitle')
-                : i18n.t('paymentAccounts.loginLogoutLogoutTitle')}
-            </AppDialogTitle>
-            <AppDialogDescription>
-              {cashierShiftAuthRequest?.kind === 'start'
-                ? i18n.t('paymentAccounts.loginLogoutStartDescription', {
-                    cashier: cashierShiftAuthRequest.user.name,
-                    drawer: cashierShiftAuthRequest.assignment?.accountNameSnapshot
-                  })
-                : i18n.t('paymentAccounts.loginLogoutLogoutDescription', {
-                    cashier: cashierShiftAuthRequest?.user.name
-                  })}
-            </AppDialogDescription>
-          </AppDialogHeader>
-          <AppDialogBody>
-            {cashierShiftAuthError ? (
-              <p
-                role="alert"
-                className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+      <AuthRoleContext.Provider value={user?.role ?? null}>
+        {children}
+        <AppDialog open={Boolean(cashierShiftAuthRequest)} onOpenChange={() => undefined}>
+          <AppDialogContent
+            className="max-w-xl"
+            showCloseButton={false}
+            onPointerDownOutside={(event) => event.preventDefault()}
+            onEscapeKeyDown={(event) => event.preventDefault()}
+          >
+            <AppDialogHeader>
+              <AppDialogTitle>
+                {cashierShiftAuthRequest?.kind === 'start'
+                  ? i18n.t('paymentAccounts.loginLogoutStartTitle')
+                  : i18n.t('paymentAccounts.loginLogoutLogoutTitle')}
+              </AppDialogTitle>
+              <AppDialogDescription>
+                {cashierShiftAuthRequest?.kind === 'start'
+                  ? i18n.t('paymentAccounts.loginLogoutStartDescription', {
+                      cashier: cashierShiftAuthRequest.user.name,
+                      drawer: cashierShiftAuthRequest.assignment?.accountNameSnapshot
+                    })
+                  : i18n.t('paymentAccounts.loginLogoutLogoutDescription', {
+                      cashier: cashierShiftAuthRequest?.user.name
+                    })}
+              </AppDialogDescription>
+            </AppDialogHeader>
+            <AppDialogBody>
+              {cashierShiftAuthError ? (
+                <p
+                  role="alert"
+                  className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+                >
+                  {cashierShiftAuthError}
+                </p>
+              ) : null}
+            </AppDialogBody>
+            <AppDialogFooter>
+              <Button variant="outline" onClick={cancelCashierShiftAuthRequest} disabled={isCashierShiftAuthProcessing}>
+                {cashierShiftAuthRequest?.kind === 'start'
+                  ? i18n.t('paymentAccounts.cancelLoginAndSignOut')
+                  : i18n.t('common.cancel')}
+              </Button>
+              <Button
+                onClick={() => {
+                  void confirmCashierShiftAuthRequest()
+                }}
+                disabled={isCashierShiftAuthProcessing}
               >
-                {cashierShiftAuthError}
-              </p>
-            ) : null}
-          </AppDialogBody>
-          <AppDialogFooter>
-            <Button variant="outline" onClick={cancelCashierShiftAuthRequest} disabled={isCashierShiftAuthProcessing}>
-              {cashierShiftAuthRequest?.kind === 'start'
-                ? i18n.t('paymentAccounts.cancelLoginAndSignOut')
-                : i18n.t('common.cancel')}
-            </Button>
-            <Button
-              onClick={() => {
-                void confirmCashierShiftAuthRequest()
-              }}
-              disabled={isCashierShiftAuthProcessing}
-            >
-              {cashierShiftAuthRequest?.kind === 'start'
-                ? i18n.t('paymentAccounts.confirmStartShift')
-                : i18n.t('paymentAccounts.confirmLogoutAndCompleteShift')}
-            </Button>
-          </AppDialogFooter>
-        </AppDialogContent>
-      </AppDialog>
+                {cashierShiftAuthRequest?.kind === 'start'
+                  ? i18n.t('paymentAccounts.confirmStartShift')
+                  : i18n.t('paymentAccounts.confirmLogoutAndCompleteShift')}
+              </Button>
+            </AppDialogFooter>
+          </AppDialogContent>
+        </AppDialog>
+      </AuthRoleContext.Provider>
     </AuthContext.Provider>
   )
 }

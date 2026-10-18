@@ -13,14 +13,14 @@ import {
 import { isService } from '@/lib/catalogItem'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { formatCurrency } from '@/lib/utils'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Card,
-    CardContent,
-    DeleteConfirmationModal,
-    Input,
-    useToast
+  Button,
+  Card,
+  CardContent,
+  useToast,
 } from '@/ui/components'
 
 export function Services() {

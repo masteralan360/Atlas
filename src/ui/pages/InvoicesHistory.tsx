@@ -6,33 +6,33 @@ import { formatCurrency, formatDateTime, formatDate, formatOriginLabel } from '@
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { platformService } from '@/services/platformService'
 import { getStoredLocalInvoicePdfPath } from '@/services/localInvoiceStorage'
+import { Input } from '@/ui/components/input'
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    Input,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    Button,
-    Tabs,
-    TabsList,
-    TabsTrigger,
-    TabsContent,
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Button,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
 } from '@/ui/components'
 import { FileText, Search, Eye, Upload, RefreshCw, Share2, History } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useDateRange } from '@/context/DateRangeContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'

@@ -1,9 +1,7 @@
-import '@/lib/consoleErrorCapture'
 import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
-import i18n from '@/i18n/config'
-import { requestPersistentStorage } from '@/local-db/storagePersist'
-import { isOpfsSupported } from '@/local-db/pwaSqlite'
+import i18n, { i18nReady } from '@/i18n/config'
+import { isPwaDesktop } from '@/lib/pwaDesktop'
 import { initDesktopZoomPersistence } from '@/lib/tauriZoomPersistence'
 import { removeDeploymentRefreshParam } from '@/lib/deploymentRefresh'
 import {
@@ -41,8 +39,14 @@ if (typeof window !== 'undefined') {
 }
 
 const initPwaLocalMode = async () => {
-    if (import.meta.env.PROD && isOpfsSupported()) {
+    const isOpfsSupported =
+        typeof window !== 'undefined'
+        && 'storage' in navigator
+        && typeof (navigator.storage as { getDirectory?: () => unknown }).getDirectory === 'function'
+
+    if (import.meta.env.PROD && isOpfsSupported) {
         try {
+            const { requestPersistentStorage } = await import('@/local-db/storagePersist')
             await requestPersistentStorage()
         } catch (error) {
             console.error('Failed to request persistent storage:', error)
@@ -258,6 +262,12 @@ const init = async () => {
 const PWA_RELOAD_GUARD_KEY = 'atlas_pwa_startup_reload_build'
 
 const runStartup = async () => {
+    await i18nReady
+
+    if (isTauriRuntime || isPwaDesktop()) {
+        await import('@/lib/consoleErrorCapture')
+    }
+
     const shouldCheckPwaRelease = import.meta.env.PROD
         && !isMarketplaceHost
         && !isTauriRuntime

@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Tabs, TabsList, TabsTrigger } from '@/ui/components/tabs'
 import { formatCurrency, cn } from '@/lib/utils'
 import { useUnifiedSnooze, type SnoozedItem } from '@/context/UnifiedSnoozeContext'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 export function UnifiedSnoozedRemindersBell() {
     const { items } = useUnifiedSnooze()

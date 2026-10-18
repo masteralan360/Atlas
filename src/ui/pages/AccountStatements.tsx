@@ -4,7 +4,8 @@ import { Link, useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 import type { i18n as I18n } from 'i18next'
 
-import { isSupabaseConfigured, supabase, useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
+import { isSupabaseConfigured, supabase } from '@/auth'
 import {
     PARTNER_ACCOUNT_STATEMENT_TEMPLATE_KEY,
     buildCustomTemplateLayoutPdf,
@@ -63,32 +64,32 @@ import {
 } from '@/local-db'
 import type { DateRangeType } from '@/context/DateRangeContext'
 import type { PrintFormat } from '@/services/pdfGenerator'
+import { Button } from '@/ui/components/button'
+import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    ContextMenu,
-    ContextMenuContent,
-    ContextMenuItem,
-    ContextMenuTrigger,
-    DateRangeFilters,
-    PrintFlow,
-    Progress,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+  Progress,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from '@/ui/components'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { PartnerAccountStatementTemplateDialog } from '@/ui/components/crm/PartnerAccountStatementTemplateDialog'
 import type { PartnerAccountStatementPrintData } from '@/ui/components/crm/PartnerAccountStatementPrintTemplate'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 const ACCOUNT_STATEMENT_PATH = '/business-partners/account-statement'
 

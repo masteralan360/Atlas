@@ -217,6 +217,7 @@ export default defineConfig(({ mode, command, isPreview }) => {
             }
         },
         define: {
+            __ATLAS_TAURI_BUILD__: JSON.stringify(isTauriBuild),
             __ATLAS_DEV_TESTING__: JSON.stringify(devTestingEnabled),
             __ATLAS_GIT_COMMIT_MESSAGE__: JSON.stringify(git.message),
             __ATLAS_GIT_COMMIT_HASH__: JSON.stringify(git.hash),
@@ -249,6 +250,10 @@ export default defineConfig(({ mode, command, isPreview }) => {
 
                         if (!normalizedId.includes('/node_modules/')) {
                             return undefined
+                        }
+
+                        if (isPackage('recharts')) {
+                            return 'vendor-recharts'
                         }
 
                         if (isPackage('@supabase/supabase-js') || normalizedId.includes('/node_modules/@supabase/')) {

@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 /// <reference types="vite-plugin-pwa/client" />
 declare const __ATLAS_DEV_TESTING__: boolean
+declare const __ATLAS_TAURI_BUILD__: boolean
 
 
 

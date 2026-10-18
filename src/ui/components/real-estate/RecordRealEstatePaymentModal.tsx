@@ -5,20 +5,20 @@ import { useAuth } from '@/auth'
 import { formatCurrency, formatNumericInput, parseFormattedNumber, sanitizeNumericInput } from '@/lib/utils'
 import { STANDARD_PAYMENT_METHODS } from '@/lib/paymentMethods'
 import { recordRealEstatePayment, type PaymentAccount, type RealEstateInstallment, type RealEstateTransaction, type WorkspacePaymentMethod } from '@/local-db'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Textarea,
-    useToast
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Textarea,
+  useToast,
 } from '@/ui/components'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { PaymentMethodSelect } from '@/ui/components/payments/PaymentMethodSelect'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 

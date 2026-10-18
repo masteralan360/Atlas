@@ -4,8 +4,36 @@ import { useTranslation } from 'react-i18next'
 import { formatLocalDateValue, formatNumericInput, generateId, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
 
 import { createAgentCommissionPlan, deleteAgentCommissionPlan, setAgentCommissionMembership, updateAgentCommissionPlan, type AgentCommissionPlan, type CommissionCalculationBasis, type CommissionPlanLevel, type CommissionPlanType, type CurrencyCode, type SalesAgentCommissionSheetType } from '@/local-db'
-import { AppDialog, AppDialogBody, AppDialogContent, AppDialogDescription, AppDialogFooter, AppDialogHeader, AppDialogTitle, Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, CurrencySelector, DateTimePicker, DeleteConfirmationModal, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Textarea, useToast } from '@/ui/components'
-import { useWorkspace } from '@/workspace'
+import { Button } from '@/ui/components/button'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
+import {
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Badge,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  CurrencySelector,
+  DateTimePicker,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Textarea,
+  useToast,
+} from '@/ui/components'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { getCurrentCommissionPlanRevision } from './agentCommissionPresentation'
 import { useCommissionAgentDirectory } from './useCommissionAgentDirectory'
 

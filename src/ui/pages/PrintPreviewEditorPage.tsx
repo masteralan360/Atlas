@@ -26,25 +26,25 @@ import { getMediaUploadErrorCode } from '@/services/mediaUploadService'
 import { paginateOrderItemsStatementPages, paginateOrderItemsTables } from '@/lib/orderItemsTablePagination'
 import { centerTablesOnPages } from '@/lib/centeredTablePagination'
 import { EditableField } from '@/ui/components/EditableField'
+import { Button } from '@/ui/components/button'
+import { Input } from '@/ui/components/input'
 import {
-    A4InvoiceTemplate,
-    Button,
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    ModernA4InvoiceTemplate,
-    ProfessionalA4InvoiceTemplate,
-    RefundA4InvoiceTemplate,
-    RefundPrimaryA4InvoiceTemplate,
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger
+  A4InvoiceTemplate,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  ModernA4InvoiceTemplate,
+  ProfessionalA4InvoiceTemplate,
+  RefundA4InvoiceTemplate,
+  RefundPrimaryA4InvoiceTemplate,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from '@/ui/components'
 import { SaleReceiptBase } from '@/ui/components/SaleReceipt'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'

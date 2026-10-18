@@ -1,6 +1,6 @@
 import { useRoute } from 'wouter'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { LegacyPartnerDetailsView } from '@/ui/components/crm/LegacyPartnerDetailsView'
 
 export function SupplierDetails() {

@@ -24,6 +24,9 @@ import {
   type PartnerProductMovementsTemplateConfiguration,
   PARTNER_PRODUCT_MOVEMENTS_COLUMN_IDS
 } from '@/lib/partnerProductMovementsTemplates'
+import { Button } from '@/ui/components/button'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
 import {
   AppDialog,
   AppDialogBody,
@@ -31,16 +34,13 @@ import {
   AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
-  Button,
-  DeleteConfirmationModal,
-  Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
   Switch,
-  useToast
+  useToast,
 } from '@/ui/components'
 
 type TemplateSaveInput = {

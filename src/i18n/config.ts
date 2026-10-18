@@ -1,8 +1,7 @@
 import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
+import type { BackendModule, ResourceKey } from 'i18next'
 import en from './locales/en.json'
-import ar from './locales/ar.json'
-import ku from './locales/ku.json'
 import { getLanguageDirection, parseLangFromHash } from '@/lib/i18nRouting'
 
 // Utility modules also use localized formatters in server-side tooling and
@@ -22,16 +21,49 @@ if (typeof document !== 'undefined') {
     document.documentElement.dir = direction
 }
 
-i18n
+const localeBackend: BackendModule = {
+    type: 'backend',
+    init() {},
+    read(language, namespace, callback) {
+        if (namespace !== 'translation') {
+            callback(null, {})
+            return
+        }
+
+        const languageCode = language.toLowerCase().split('-')[0]
+        const loader = languageCode === 'ar'
+            ? () => import('./locales/ar.json')
+            : languageCode === 'ku'
+                ? () => import('./locales/ku.json')
+                : null
+
+        if (!loader) {
+            callback(null, {})
+            return
+        }
+
+        void loader()
+            .then(({ default: translations }) => callback(null, translations as ResourceKey))
+            .catch((error: unknown) => callback(error instanceof Error ? error : String(error), false))
+    }
+}
+
+export const i18nReady = i18n
+    .use(localeBackend)
     .use(initReactI18next)
     .init({
         resources: {
-            en: { translation: en },
-            ar: { translation: ar },
-            ku: { translation: ku }
+            en: { translation: en }
         },
         lng: savedLanguage,
         fallbackLng: 'en',
+        supportedLngs: ['en', 'ar', 'ku'],
+        load: 'languageOnly',
+        // English is bundled with the app; Arabic and Kurdish come from the
+        // lazy backend. Keep backend loading active alongside inline resources.
+        partialBundledLanguages: true,
+        ns: ['translation'],
+        defaultNS: 'translation',
         interpolation: {
             escapeValue: false
         },

@@ -23,24 +23,24 @@ import {
     type OfflineReadinessSnapshot
 } from '@/lib/offlinePreparation'
 import { useSyncProgress } from '@/sync/syncProgress'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { Button } from '@/ui/components/button'
 import {
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogDescription,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    Badge,
-    Button,
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-    Progress,
-    useToast
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Badge,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Progress,
+  useToast,
 } from '@/ui/components'
 import { cn } from '@/lib/utils'
 

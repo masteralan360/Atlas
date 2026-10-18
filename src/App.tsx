@@ -1,9 +1,14 @@
 import { Redirect, Route, Switch, Router, Link } from "wouter";
 import { useHashLocation } from "@/hooks/useHashLocation";
-import { AuthProvider, ProtectedRoute, GuestRoute, useAuth } from "@/auth";
-import { WorkspaceProvider } from "@/workspace";
+import { AuthProvider, useAuth } from "@/auth/AuthContext";
+import { ProtectedRoute, GuestRoute } from "@/auth/ProtectedRoute";
+import { WorkspaceProvider, useWorkspace } from "@/workspace/WorkspaceContext";
 import { WorkspaceWarmup } from "@/workspace/WorkspaceWarmup";
-import { Layout, Toaster, TitleBar, PatchNoteModal, Progress } from "@/ui/components";
+import { Layout } from "@/ui/components/Layout";
+import { Toaster } from "@/ui/components/toaster";
+import { TitleBar } from "@/ui/components/TitleBar";
+import { PatchNoteModal } from "@/ui/components/modals/PatchNoteModal";
+import { Progress } from "@/ui/components/ui/progress";
 import { DeviceTokenBootstrap } from "@/ui/components/DeviceTokenBootstrap";
 import { SubscriptionExpiryWarningModal } from "@/ui/components/SubscriptionExpiryWarningModal";
 import { WorkspacePaymentController, WorkspacePaymentStatusDialog } from "@/ui/components/WorkspacePaymentDialog";
@@ -14,7 +19,6 @@ import { usePatchNotes } from "@/hooks/usePatchNotes";
 import { Clock3, Download, LoaderCircle, RotateCw, Upload } from "lucide-react";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { useTranslation } from "react-i18next";
-import { useWorkspace } from "@/workspace";
 import { NavigationRailDisplayProvider } from "@/ui/navigation/NavigationRailDisplayContext";
 import { ExchangeRateProvider } from "@/context/ExchangeRateContext";
 import { DateRangeProvider } from "@/context/DateRangeContext";
@@ -39,7 +43,6 @@ import { useKdsStream } from "@/hooks/useKdsStream";
 import { UsbBackupWarningModal } from "@/ui/components/UsbBackupWarningModal";
 import { PwaUpdateReadyBanner } from "@/ui/components/PwaUpdateReadyBanner";
 import { WorkspaceLocationPrompt } from "@/ui/components/WorkspaceLocationPrompt";
-import { validateUsbBackupOnStartup, pickUsbBackupDestination, copyDbToUsb } from "@/local-db/usbBackup";
 import { clearUsbBackupSettings } from "@/local-db/usbBackupSettings";
 import { useClinicalRegistryType } from "@/local-db/clinicalPresets";
 import { supportsClinicalPatientsAndServicePresets } from "@/i18n/clinicalRegistry";
@@ -47,7 +50,6 @@ import {
   areApplicationUpdatesDisabled,
   UPDATE_PREFERENCE_CHANGED_EVENT,
 } from "@/lib/updatePreference";
-import { createUpdateSafetyBackupIfNeeded } from "@/local-db/sqliteBackup";
 import { checkForTauriUpdate } from "@/lib/tauriUpdater";
 
 // @ts-ignore
@@ -66,15 +68,15 @@ import { Sales as SalesEager } from "@/ui/pages/Sales";
 import { DashboardSkeleton } from "@/ui/components/skeletons/DashboardSkeleton";
 
 // For web/mobile, wrap eager components in a lazy-like wrapper for consistency
-const Dashboard = isTauri
+const Dashboard = __ATLAS_TAURI_BUILD__
   ? DashboardEager
   : lazy(() =>
       import("@/ui/pages/Dashboard").then((m) => ({ default: m.Dashboard })),
     );
-const POS = isTauri
+const POS = __ATLAS_TAURI_BUILD__
   ? POSEager
   : lazy(() => import("@/ui/pages/POS").then((m) => ({ default: m.POS })));
-const Products = isTauri
+const Products = __ATLAS_TAURI_BUILD__
   ? ProductsEager
   : lazy(() =>
       import("@/ui/pages/Products").then((m) => ({ default: m.Products })),
@@ -85,28 +87,28 @@ const Services = lazy(() =>
 const ServiceFormPage = lazy(() =>
   import("@/ui/pages/ServiceFormPage").then((m) => ({ default: m.ServiceFormPage })),
 );
-const ProductCreatePage = isTauri
+const ProductCreatePage = __ATLAS_TAURI_BUILD__
   ? ProductCreatePageEager
   : lazy(() =>
       import("@/ui/pages/ProductFormPage").then((m) => ({
         default: m.ProductCreatePage,
       })),
     );
-const ProductEditPage = isTauri
+const ProductEditPage = __ATLAS_TAURI_BUILD__
   ? ProductEditPageEager
   : lazy(() =>
       import("@/ui/pages/ProductFormPage").then((m) => ({
         default: m.ProductEditPage,
       })),
     );
-const ProductClonePage = isTauri
+const ProductClonePage = __ATLAS_TAURI_BUILD__
   ? ProductClonePageEager
   : lazy(() =>
       import("@/ui/pages/ProductFormPage").then((m) => ({
         default: m.ProductClonePage,
       })),
     );
-const Sales = isTauri
+const Sales = __ATLAS_TAURI_BUILD__
   ? SalesEager
   : lazy(() => import("@/ui/pages/Sales").then((m) => ({ default: m.Sales })));
 
@@ -658,6 +660,7 @@ function UpdateHandler() {
           }
         });
 
+        const { createUpdateSafetyBackupIfNeeded } = await import("@/local-db/sqliteBackup");
         await createUpdateSafetyBackupIfNeeded(user?.workspaceId);
         await update.install();
 
@@ -1336,6 +1339,7 @@ function UsbBackupStartupValidator() {
     let cancelled = false;
 
     const check = async () => {
+      const { validateUsbBackupOnStartup } = await import("@/local-db/usbBackup");
       const result = await validateUsbBackupOnStartup();
       if (cancelled) return;
       if (!result.valid && result.destination) {
@@ -1350,6 +1354,7 @@ function UsbBackupStartupValidator() {
 
   const handleRetry = async () => {
     setIsRetrying(true);
+    const { validateUsbBackupOnStartup } = await import("@/local-db/usbBackup");
     const result = await validateUsbBackupOnStartup();
     setIsRetrying(false);
     if (result.valid) {
@@ -1359,6 +1364,7 @@ function UsbBackupStartupValidator() {
   };
 
   const handleChangeDestination = async () => {
+    const { pickUsbBackupDestination, copyDbToUsb } = await import("@/local-db/usbBackup");
     const path = await pickUsbBackupDestination();
     if (path) {
       await copyDbToUsb(path);

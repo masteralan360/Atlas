@@ -4,7 +4,18 @@ import { useTranslation } from 'react-i18next'
 
 import type { CommissionPlanType, CurrencyCode, IQDDisplayPreference, ProductCommissionRecipientScope } from '@/local-db'
 import { cn, formatNumericInput, sanitizeNumericInput } from '@/lib/utils'
-import { Button, CurrencySelector, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@/ui/components'
+import { Input } from '@/ui/components/input'
+import {
+  Button,
+  CurrencySelector,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+} from '@/ui/components'
 import { useCommissionAgentDirectory } from './useCommissionAgentDirectory'
 
 export type ProductCommissionRuleDraft = {

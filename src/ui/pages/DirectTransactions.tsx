@@ -20,25 +20,25 @@ import {
 } from '@/local-db'
 import { isDateInDateRange } from '@/lib/dateRangeFilters'
 import { cn, formatCurrency, formatDateTime } from '@/lib/utils'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    Input,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    useToast
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  useToast,
 } from '@/ui/components'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
@@ -51,7 +51,7 @@ import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { generateTemplatePdf } from '@/services/pdfGenerator'
 import { printPdfBlob } from '@/services/pdfPrintService'
 import { saveDirectTransactionVoucherPdf } from '@/services/directTransactionVoucherSave'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 type DirectionFilter = 'all' | 'incoming' | 'outgoing'
 

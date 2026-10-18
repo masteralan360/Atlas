@@ -15,28 +15,28 @@ import {
     type CurrencyCode,
     type TravelBooking
 } from '@/local-db'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { Input } from '@/ui/components/input'
 import {
-    Badge,
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    DateRangeFilters,
-    Input,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from '@/ui/components'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { TravelBookingDetailsView } from '@/ui/components/travel/TravelBookingDetailsView'

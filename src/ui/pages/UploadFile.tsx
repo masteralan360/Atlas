@@ -8,26 +8,26 @@ import { generateId, formatDateTime } from '@/lib/utils'
 import { r2Service } from '@/services/r2Service'
 import { compressImage, ImageCompressionError, isImageUploadCandidate, type CompressedImageArtifact } from '@/lib/imageCompression'
 import { mediaUploadService, MediaUploadError } from '@/services/mediaUploadService'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useViewOwnRecordScope } from '@/permissions'
+import { Input } from '@/ui/components/input'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import {
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    Input,
-    Label,
-    Button,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    Progress,
-    Switch,
-    useToast,
-    DeleteConfirmationModal,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Label,
+  Button,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Progress,
+  Switch,
+  useToast,
 } from '@/ui/components'
 
 function getFileMimeType(file: File) {

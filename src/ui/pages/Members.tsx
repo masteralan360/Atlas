@@ -37,7 +37,7 @@ import { platformService } from '@/services/platformService'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { invokeWorkspaceAccess } from '@/lib/workspaceAccess'
 import { useToast } from '@/ui/components'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import {
     WORKSPACE_PERMISSION_DEFINITIONS,
     getWorkspacePermissionModule,

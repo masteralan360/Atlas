@@ -17,33 +17,33 @@ import {
 } from '@/local-db'
 import { cn, formatCurrency } from '@/lib/utils'
 import { platformService } from '@/services/platformService'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useWorkspacePermissions } from '@/permissions/WorkspacePermissionsContext'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    AppPagination,
-    Input,
-    Map as AtlasMap,
-    MapControls,
-    MapMarker,
-    MarkerContent,
-    MarkerPopup,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    Tabs,
-    TabsContent,
-    TabsList,
-    TabsTrigger,
-    useMap,
-    useToast
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  AppPagination,
+  Map as AtlasMap,
+  MapControls,
+  MapMarker,
+  MarkerContent,
+  MarkerPopup,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  useMap,
+  useToast,
 } from '@/ui/components'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { BusinessPartnerFormDialog, type BusinessPartnerFormPayload } from '@/ui/components/crm/BusinessPartnerFormDialog'

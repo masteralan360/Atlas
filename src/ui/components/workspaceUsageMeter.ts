@@ -17,7 +17,7 @@ import type {
     WorkspaceUsageMeterSegment
 } from './WorkspaceUsageModal'
 import type { WorkspacePaygSummary } from '@/lib/workspacePayments'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 const WORKSPACE_USAGE_UPDATED_EVENT = 'workspace-usage-updated'
 const WORKSPACE_USAGE_REFRESH_DELAY_MS = 1500

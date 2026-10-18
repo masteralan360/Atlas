@@ -33,7 +33,7 @@ import { runManagedFullSync } from '@/sync/syncCoordinator'
 import { LAST_SYNC_KEY } from '@/sync/constants'
 import { connectionManager } from '@/lib/connectionManager'
 import { cn } from '@/lib/utils'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 
 interface ManualSyncModalProps {

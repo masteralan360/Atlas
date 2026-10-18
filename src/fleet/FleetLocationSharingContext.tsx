@@ -24,7 +24,7 @@ import {
   requestCurrentLocation,
 } from "@/lib/geolocation";
 import { toCamelCase } from "@/lib/utils";
-import { useWorkspace } from "@/workspace";
+import { useWorkspace } from "@/workspace/WorkspaceContext";
 
 type SharingStatus = "idle" | "starting" | "sharing" | "error";
 

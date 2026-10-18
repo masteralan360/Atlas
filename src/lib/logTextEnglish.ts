@@ -1,6 +1,5 @@
-import ar from '@/i18n/locales/ar.json'
 import en from '@/i18n/locales/en.json'
-import ku from '@/i18n/locales/ku.json'
+import i18n from '@/i18n/config'
 
 const INTERPOLATION_TOKEN = /\{\{\s*-?([\w.]+)(?:\s*,[^}]*)?\s*\}\}/g
 
@@ -59,31 +58,34 @@ function createParameterizedTranslation(localizedTemplate: string, englishTempla
 
 let exactTranslations: Map<string, string> | undefined
 let parameterizedTranslations: ParameterizedTranslation[] | undefined
+let cachedLanguage: string | undefined
 
 function getTranslations() {
-    if (exactTranslations && parameterizedTranslations) {
+    const language = (i18n.resolvedLanguage || i18n.language || 'en').toLowerCase().split('-')[0]
+    if (exactTranslations && parameterizedTranslations && cachedLanguage === language) {
         return { exactTranslations, parameterizedTranslations }
     }
 
     const englishStrings = collectTranslationStrings(en)
     const localizedEnglishCandidates = new Map<string, Set<string>>()
     const nextParameterizedTranslations: ParameterizedTranslation[] = []
+    const localizedResource = language === 'en'
+        ? en
+        : i18n.getResourceBundle(language, 'translation')
 
-    for (const locale of [ar, ku]) {
-        for (const [key, localizedText] of collectTranslationStrings(locale)) {
-            const englishText = englishStrings.get(key)
-            if (!englishText || localizedText === englishText) continue
+    for (const [key, localizedText] of collectTranslationStrings(localizedResource)) {
+        const englishText = englishStrings.get(key)
+        if (!englishText || localizedText === englishText) continue
 
-            const parameterizedTranslation = createParameterizedTranslation(localizedText, englishText)
-            if (parameterizedTranslation) {
-                nextParameterizedTranslations.push(parameterizedTranslation)
-                continue
-            }
-
-            const candidates = localizedEnglishCandidates.get(localizedText) ?? new Set<string>()
-            candidates.add(englishText)
-            localizedEnglishCandidates.set(localizedText, candidates)
+        const parameterizedTranslation = createParameterizedTranslation(localizedText, englishText)
+        if (parameterizedTranslation) {
+            nextParameterizedTranslations.push(parameterizedTranslation)
+            continue
         }
+
+        const candidates = localizedEnglishCandidates.get(localizedText) ?? new Set<string>()
+        candidates.add(englishText)
+        localizedEnglishCandidates.set(localizedText, candidates)
     }
 
     exactTranslations = new Map(
@@ -92,6 +94,7 @@ function getTranslations() {
             .map(([localizedText, candidates]) => [localizedText, Array.from(candidates)[0] as string]),
     )
     parameterizedTranslations = nextParameterizedTranslations
+    cachedLanguage = language
 
     return { exactTranslations, parameterizedTranslations }
 }

@@ -13,7 +13,7 @@ import {
   UsersRound
 } from 'lucide-react'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import {
   buildCapitalPoolBreakdown,
   deleteCapitalPool,
@@ -27,7 +27,9 @@ import {
 } from '@/local-db'
 import { cn, formatCurrency } from '@/lib/utils'
 import { useWorkspacePermissions } from '@/permissions'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { Button } from '@/ui/components/button'
+import { Input } from '@/ui/components/input'
 import {
   AppDialog,
   AppDialogBody,
@@ -36,15 +38,13 @@ import {
   AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
-  Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   Checkbox,
-  Input,
   Label,
-  useToast
+  useToast,
 } from '@/ui/components'
 import { CurrencySelector } from '@/ui/components/CurrencySelector'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'

@@ -87,7 +87,7 @@ import { roundQuantity } from '@/lib/quantity'
 import { cn, formatCurrency } from '@/lib/utils'
 import { getInventoryRowsForProduct } from '@/local-db/inventory'
 import { platformService } from '@/services/platformService'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useHideCosts } from '@/permissions'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { shouldShowMinimumSellingPriceField } from '@/lib/minimumSellingPrice'
@@ -112,41 +112,41 @@ import {
     emptyProductCommissionRuleDraft,
     type ProductCommissionRuleDraft
 } from '@/ui/components/commissions/ProductCommissionRuleEditor'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
 import {
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    CurrencySelector,
-    DeleteConfirmationModal,
-    Dialog,
-    DialogContent,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    HoverHintVideo,
-    Input,
-    Label,
-    NumericInput,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Switch,
-    Textarea,
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
-    useToast
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CurrencySelector,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  HoverHintVideo,
+  Label,
+  NumericInput,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Textarea,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+  useToast,
 } from '@/ui/components'
 import { getProductSkuFromCameraCapture } from '@/lib/productSkuCameraScan'
 

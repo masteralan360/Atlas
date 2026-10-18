@@ -6,7 +6,7 @@ import { searchRentalVehicleAutocompleteSuggestions } from "@/local-db/carRental
 import type { RentalVehicle, RentalVehicleStatus } from "@/local-db/models";
 import { getRentalVehicleDisplayLabel } from "@/lib/carRentalPresentation";
 import { cn } from "@/lib/utils";
-import { Input } from "@/ui/components";
+import { Input } from "@/ui/components/input";
 import { AutocompletePopover } from "@/ui/components/AutocompletePopover";
 import { useDebouncedAutocompleteSearch } from "@/ui/components/useDebouncedAutocompleteSearch";
 

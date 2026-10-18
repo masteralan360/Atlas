@@ -29,6 +29,9 @@ import {
   PARTNER_ACCOUNT_STATEMENT_COLUMN_IDS
 } from '@/lib/partnerAccountStatementTemplates'
 import { getPartnerAccountStatementTemplateSaveFailure } from '@/lib/partnerAccountStatementTemplatePersistence'
+import { Button } from '@/ui/components/button'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
 import {
   AppDialog,
   AppDialogBody,
@@ -36,16 +39,13 @@ import {
   AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
-  Button,
-  DeleteConfirmationModal,
-  Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
   Switch,
-  useToast
+  useToast,
 } from '@/ui/components'
 
 type TemplateSaveInput = {

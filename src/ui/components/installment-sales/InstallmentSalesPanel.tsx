@@ -49,12 +49,13 @@ import {
   type PaymentAccount,
   type WorkspacePaymentMethod,
 } from "@/local-db";
-import { useWorkspace } from "@/workspace";
+import { useWorkspace } from "@/workspace/WorkspaceContext";
 import { PartnerAutocompleteInput } from "@/ui/components/crm/PartnerAutocompleteInput";
 import { QuickCustomerButton } from "@/ui/components/crm/QuickCustomerButton";
 import { DateRangeFilters } from "@/ui/components/DateRangeFilters";
 import { PaymentAccountSelector } from "@/ui/components/payments/PaymentAccountSelector";
 import { PaymentMethodSelector } from "@/ui/components/PaymentMethodSelector";
+import { Input } from "@/ui/components/input";
 import {
   AppDialog,
   AppDialogBody,
@@ -70,7 +71,6 @@ import {
   CardTitle,
   CurrencySelector,
   DateTimePicker,
-  Input,
   Label,
   PrintFlow,
   Select,

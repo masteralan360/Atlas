@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { MapPin, Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import {
     formatCoordinates,
     isGeolocationSupported,

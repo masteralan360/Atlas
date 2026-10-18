@@ -5,20 +5,20 @@ import { useProductSelectionAccess, type Product, type Storage } from '@/local-d
 import { useOptionalAuth } from '@/auth'
 import { cn } from '@/lib/utils'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/ui/components'
 
 export interface ProductsViewModalLabels {

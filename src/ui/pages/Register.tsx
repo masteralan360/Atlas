@@ -1,7 +1,20 @@
 import { useState } from 'react'
 import { useLocation } from 'wouter'
-import { useAuth } from '@/auth'
-import { Button, Input, Label, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, LanguageSwitcher, ThemeToggle, RegisterWorkspaceContactsModal, type AdminContact } from '@/ui/components'
+import { useAuth } from '@/auth/AuthContext'
+import { Button } from '@/ui/components/button'
+import { RegisterWorkspaceContactsModal } from '@/ui/components/modals/RegisterWorkspaceContactsModal'
+import { Input } from '@/ui/components/input'
+import {
+  Label,
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+  LanguageSwitcher,
+  ThemeToggle,
+  type AdminContact,
+} from '@/ui/components'
 import { Mail, Lock, User, Loader2, Key, Contact, Sparkles, Eye, EyeOff, LayoutDashboard, Users, ShieldCheck } from 'lucide-react'
 import type { UserRole } from '@/local-db/models'
 import { useTranslation } from 'react-i18next'

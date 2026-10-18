@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, BarChart3, DollarSign, Landmark, Loader2, LockKeyhole, Package, Plus, RotateCcw, Search, ShieldAlert, SlidersHorizontal, TrendingDown, TrendingUp, Trash2, UserRound, UsersRound, Wallet, WalletCards, X } from 'lucide-react'
 import { Area, AreaChart, ResponsiveContainer } from 'recharts'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { useDateRange } from '@/context/DateRangeContext'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { UiAccessGate } from '@/context/UiAccessContext'
@@ -48,6 +48,9 @@ import {
 } from '@/local-db'
 import { cn, formatCurrency, formatDateTime, formatNumericInput, generateId, parseFormattedNumber, sanitizeNumericInput } from '@/lib/utils'
 import { getDateRangeBounds, isDateInDateRange } from '@/lib/dateRangeFilters'
+import { Button } from '@/ui/components/button'
+import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { Input } from '@/ui/components/input'
 import {
   AppDialog,
   AppDialogBody,
@@ -56,15 +59,12 @@ import {
   AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
-  Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-  DateRangeFilters,
   DateTimePicker,
   Checkbox,
-  Input,
   Label,
   Select,
   SelectContent,
@@ -96,7 +96,7 @@ import { CurrencySelector } from '@/ui/components/CurrencySelector.tsx'
 import { CapitalPoolsPanel } from '@/ui/components/payments/CapitalPoolsPanel'
 import { defaultPaymentAccountIcon, PAYMENT_ACCOUNT_ICON_OPTIONS, PaymentAccountIcon } from '@/ui/components/payments/PaymentAccountIcon'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 const ACCOUNT_TYPES: PaymentAccountType[] = ['cash_drawer', 'bank_account', 'digital_wallet', 'other']
 const CURRENCIES: CurrencyCode[] = ['iqd', 'usd', 'eur', 'try']

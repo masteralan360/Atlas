@@ -17,6 +17,8 @@ import {
   type InventoryTransferBatchHistoryItem,
 } from '@/local-db'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
+import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { Input } from '@/ui/components/input'
 import {
   AppDialog,
   AppDialogBody,
@@ -29,8 +31,6 @@ import {
   Button,
   Card,
   CardContent,
-  DateRangeFilters,
-  Input,
   Table,
   TableBody,
   TableCell,
@@ -59,7 +59,8 @@ import type { PrintFormat } from '@/services/pdfGenerator'
 import { printPdfBlob } from '@/services/pdfPrintService'
 import { formatDateTime, parseLocalDateValue } from '@/lib/utils'
 import { getProductUnitLabel } from '@/lib/productUnitPresentation'
-import { useWorkspace, type WorkspaceFeatures } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { type WorkspaceFeatures } from '@/workspace'
 import type { PrintSelectionTemplateOption } from '@/ui/components/PrintSelectionModal'
 import { areTransferBatchWorkspacesSame, type InventoryTransferBatchPrintData } from './InventoryTransferBatchPrintTemplate'
 

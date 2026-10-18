@@ -9,10 +9,27 @@ import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { db } from '@/local-db/database'
 import type { CurrencyCode, PaymentAccount, UnitRef } from '@/local-db/models'
 import { appendPaymentTransaction, cacheConfirmedPaymentTransaction } from '@/local-db/payments'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { formatCompactDateTime, formatCurrency, generateId, cn, stylizeText } from '@/lib/utils'
 import { readInstantPosProductsPerRow, saveInstantPosProductsPerRow } from '@/lib/instantPosLayout'
-import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle, Button, Input, useToast, Textarea, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, StorageSelector } from '@/ui/components'
+import { Input } from '@/ui/components/input'
+import {
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Button,
+  useToast,
+  Textarea,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  StorageSelector,
+} from '@/ui/components'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { AlertCircle, CheckCircle2, ChefHat, ChevronDown, ChevronRight, ChevronUp, Loader2, Menu, Minus, Package, Plus, Receipt, Search, ShoppingCart, StickyNote, Table2, Trash2, Wallet, X } from 'lucide-react'
 import { UiAccessGate } from '@/context/UiAccessContext'

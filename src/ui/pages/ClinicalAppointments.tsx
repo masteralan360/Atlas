@@ -3,7 +3,7 @@ import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { db } from '@/local-db/database'
 import { createClinicalAppointment, createClinicalPatient, searchClinicalPatients, useClinicalAppointments, useClinicalAppointment, updateClinicalAppointment, deleteClinicalAppointment, calculateAge } from '@/local-db/clinicalAppointments'
 import {
@@ -21,7 +21,33 @@ import {
 import type { ClinicalAppointment, ClinicalAppointmentStatus, ClinicalAppointmentType, ClinicalAppointmentPriority, ClinicalConfirmationMethod } from '@/local-db/clinicalAppointments'
 import { useClinicalPresetsByCategory, useClinicalRegistryType } from '@/local-db/clinicalPresets'
 import { isBeautyClinicalRegistryType } from '@/local-db/clinicalRegistryPreset'
-import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Textarea, Label, Card, CardContent, CardHeader, CardTitle, DateTimePicker, SettlementDialog, useToast, DeleteConfirmationModal, Dialog, DialogContent } from '@/ui/components'
+import { Button } from '@/ui/components/button'
+import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Textarea,
+  Label,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  DateTimePicker,
+  useToast,
+  Dialog,
+  DialogContent,
+} from '@/ui/components'
 import { Plus, Search, Upload, Trash2, FileText, ArrowLeft, CalendarClock, Edit, Check, ChevronDown, LayoutGrid, List, HandCoins, UserPlus, Phone, X } from 'lucide-react'
 import { generateId, formatCurrency, formatLocalDateValue, formatNumberWithCommas, formatTime, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
 import { filterBeautyCenterAppointments } from '@/lib/clinicalAppointmentFilters'
@@ -34,7 +60,7 @@ import { useDateRange } from '@/context/DateRangeContext'
 import { r2Service } from '@/services/r2Service'
 import { platformService } from '@/services/platformService'
 import { useLocation, useRoute } from 'wouter'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { isDemoWorkspaceMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { isImageUploadCandidate } from '@/lib/imageCompression'
 import { mediaUploadService } from '@/services/mediaUploadService'

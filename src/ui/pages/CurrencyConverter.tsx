@@ -3,16 +3,16 @@ import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { Button } from '@/ui/components/button'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Input,
-    Label,
-    Select,
-    SelectTrigger,
-    SelectValue,
-    SelectContent,
-    SelectItem,
+  Label,
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
 } from '@/ui/components'
 import {
     ArrowLeft,

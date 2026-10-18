@@ -10,7 +10,7 @@ import {
     DialogHeader,
     DialogTitle
 } from '@/ui/components/dialog'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useAuth } from '@/auth'
 import { useSubscriptionExpiryWarning } from '@/hooks/useSubscriptionExpiryWarning'
 import { getSubscriptionExpiryWarningSeenKey } from '@/lib/subscriptionExpiryWarning'

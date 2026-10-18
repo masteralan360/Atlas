@@ -33,30 +33,30 @@ import {
     type SerializedConsoleValue,
 } from '@/lib/errorLogger'
 import { formatDateTime } from '@/lib/utils'
+import { Button } from '@/ui/components/button'
+import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { Input } from '@/ui/components/input'
 import {
-    AppPagination,
-    Button,
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-    DateRangeFilters,
-    Input,
-    SmallDialog,
-    SmallDialogBody,
-    SmallDialogContent,
-    SmallDialogDescription,
-    SmallDialogFooter,
-    SmallDialogHeader,
-    SmallDialogTitle,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    useToast,
+  AppPagination,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  SmallDialog,
+  SmallDialogBody,
+  SmallDialogContent,
+  SmallDialogDescription,
+  SmallDialogFooter,
+  SmallDialogHeader,
+  SmallDialogTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  useToast,
 } from '@/ui/components'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { getLogsPageSize } from './logsPagination'

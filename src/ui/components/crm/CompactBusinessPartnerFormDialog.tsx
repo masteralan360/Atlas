@@ -3,16 +3,16 @@ import { useTranslation } from 'react-i18next'
 import { Loader2 } from 'lucide-react'
 
 import type { BusinessPartnerRole, CurrencyCode } from '@/local-db'
+import { Input } from '@/ui/components/input'
 import {
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    Button,
-    Input,
-    Label
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Button,
+  Label,
 } from '@/ui/components'
 import {
     BusinessPartnerDuplicateStatusDescription,

@@ -1,11 +1,11 @@
 import { useEffect } from 'react'
 import { useRoute } from 'wouter'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { synchronizeWorkspaceSalesAccountCommissionAssignments } from '@/local-db'
 import { PartnerDetailsView } from '@/ui/components/crm/PartnerDetailsView'
 import { CommissionFeatureBoundary } from '@/ui/components/commissions/useCommissionAgentDirectory'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
 
 export function AgentDetails() {

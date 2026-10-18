@@ -10,18 +10,18 @@ import {
     useExpenseCategories
 } from '@/local-db'
 import type { ExpenseCategory } from '@/local-db/models'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
 import {
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    Button,
-    DeleteConfirmationModal,
-    Input,
-    Label,
-    useToast
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Button,
+  Label,
+  useToast,
 } from '@/ui/components'
 
 interface ExpenseCategoryManagerDialogProps {

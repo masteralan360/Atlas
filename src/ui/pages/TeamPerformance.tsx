@@ -12,29 +12,29 @@ import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
 import { salesExchangeRowsToSnapshots } from '@/lib/salesExchange'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useViewOwnRecordScope } from '@/permissions'
 import { useDateRange } from '@/context/DateRangeContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
+import { PrintFlow } from '@/ui/components/PrintFlow'
+import { Input } from '@/ui/components/input'
 import {
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    PrintFlow,
-    Button,
-    Input,
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Button,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
 } from '@/ui/components'
 import {
     BarChart3,

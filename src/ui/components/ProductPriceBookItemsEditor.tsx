@@ -4,17 +4,17 @@ import { useTranslation } from 'react-i18next'
 
 import type { CurrencyCode, IQDDisplayPreference, PriceBook } from '@/local-db'
 import { cn, formatNumericInput, sanitizeNumericInput } from '@/lib/utils'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    CurrencySelector,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Switch
+  Button,
+  CurrencySelector,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
 } from '@/ui/components'
 import { PriceBookName } from '@/ui/components/PriceBookName'
 

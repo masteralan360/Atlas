@@ -16,7 +16,7 @@ import type { PartnerAccountStatementPeriod } from '@/lib/partnerAccountStatemen
 import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import type { PrintFormat } from '@/services/pdfGenerator'
 import type { WorkspaceFeatures } from '@/workspace'
-import { PrintFlow } from '@/ui/components'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 import { LoanAccountStatementPaymentPickerDialog } from './LoanAccountStatementPaymentPickerDialog'
 
 const ALL_TIME_PERIOD: PartnerAccountStatementPeriod = { type: 'allTime' }

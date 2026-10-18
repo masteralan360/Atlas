@@ -8,7 +8,7 @@ import {
     subscribeToMarketplaceOrderChanges,
     type MarketplaceOrderRefreshDetail
 } from '@/services/marketplaceOrderRealtime'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useWorkspacePermissions } from '@/permissions'
 
 const REALTIME_CHANGE_DEBOUNCE_MS = 250

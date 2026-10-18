@@ -12,8 +12,8 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { useAuth } from "@/auth";
-import { useWorkspace } from "@/workspace";
+import { useAuth } from "@/auth/AuthContext";
+import { useWorkspace } from "@/workspace/WorkspaceContext";
 import {
   createStockBatch,
   deleteStockBatch,
@@ -44,37 +44,37 @@ import {
 } from "@/lib/utils";
 import { isPositiveQuantity } from "@/lib/quantity";
 import { isService } from "@/lib/catalogItem";
+import { Button } from "@/ui/components/button";
+import { DeleteConfirmationModal } from "@/ui/components/DeleteConfirmationModal";
+import { StockAdjustmentDialog } from "@/ui/components/StockAdjustmentDialog";
+import { Input } from "@/ui/components/input";
 import {
-    Button,
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-    CurrencySelector,
-    DateTimePicker,
-    DeleteConfirmationModal,
-    Dialog,
-    DialogBody,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    StockAdjustmentDialog,
-    Tabs,
-    TabsContent,
-    TabsList,
-    TabsTrigger,
-    Textarea,
-    useToast,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  CurrencySelector,
+  DateTimePicker,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  Textarea,
+  useToast,
 } from "@/ui/components";
 import { ProductAutocompleteInput } from "@/ui/components/orders/ProductAutocompleteInput";
 import { ProductsViewModal, ProductsViewModalTrigger } from "@/ui/components/ProductsViewModal";

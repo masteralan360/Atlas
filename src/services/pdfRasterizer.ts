@@ -1,4 +1,3 @@
-import * as pdfjsLib from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'
 import { findBottomContentRow } from './pdfRasterizerUtils'
 
@@ -11,7 +10,7 @@ interface PdfPageImageOptions {
 
 let isPdfWorkerConfigured = false
 
-function ensurePdfWorkerConfigured() {
+function ensurePdfWorkerConfigured(pdfjsLib: typeof import('pdfjs-dist')) {
     if (isPdfWorkerConfigured) return
 
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
@@ -64,7 +63,8 @@ export async function renderPdfPageToPngDataUrl(
         bottomPaddingPx = 24
     }: PdfPageImageOptions
 ): Promise<string> {
-    ensurePdfWorkerConfigured()
+    const pdfjsLib = await import('pdfjs-dist')
+    ensurePdfWorkerConfigured(pdfjsLib)
 
     const pdfData = new Uint8Array(await pdfBlob.arrayBuffer())
     const loadingTask = pdfjsLib.getDocument({ data: pdfData })

@@ -4,22 +4,32 @@ import { useAuth } from '@/auth'
 import { useTranslation } from 'react-i18next'
 import { Plus, Search, Mail, Phone, Trash2, Edit, AlertTriangle, Loader2, MessageCircle, UserRoundPlus } from 'lucide-react'
 import { useLocation } from 'wouter'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useEmployees, createEmployee, updateEmployee, deleteEmployee, useWorkspaceUsers } from '@/local-db'
 import type { CurrencyCode, Employee } from '@/local-db'
 import { platformService } from '@/services/platformService'
 import { whatsappManager } from '@/lib/whatsappWebviewManager'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Input,
-    Card, CardContent,
-    AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle,
-    Label,
-    Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-    Switch,
-    CurrencySelector,
-    DateTimePicker,
-    useToast
+  Button,
+  Card,
+  CardContent,
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  CurrencySelector,
+  DateTimePicker,
+  useToast,
 } from '@/ui/components'
 import { formatDate, formatCurrency, cn, formatNumericInput, parseFormattedNumber, sanitizeNumericInput } from '@/lib/utils'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'

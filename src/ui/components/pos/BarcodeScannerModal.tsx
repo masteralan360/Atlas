@@ -15,21 +15,21 @@ import {
     normalizeBarcodeDigits,
     normalizeBarcodeScannerText
 } from '@/lib/barcodeScanner'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Dialog,
-    DialogContent,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Switch,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue
+  Button,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Switch,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/ui/components'
 import { Camera, Settings as SettingsIcon } from 'lucide-react'
 import { CameraBarcodeScanner } from '@/ui/components/pos/CameraBarcodeScanner'

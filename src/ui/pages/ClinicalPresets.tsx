@@ -1,13 +1,32 @@
 import { useState, useMemo } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useTranslation } from 'react-i18next'
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { createClinicalPreset, updateClinicalPreset, deleteClinicalPreset, useClinicalPresets } from '@/local-db/clinicalPresets'
 import type { ClinicalPresetCategory } from '@/local-db/models'
-import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Label, Card, CardContent, CardHeader, CardTitle } from '@/ui/components'
+import { Button } from '@/ui/components/button'
+import { Input } from '@/ui/components/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Label,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '@/ui/components'
 import { Plus, Pencil, Trash2, X, Check, ChevronUp, ChevronDown } from 'lucide-react'
 import { formatNumberWithCommas } from '@/lib/utils'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 const APPOINTMENT_TYPE_OPTIONS = ['consultation', 'follow_up', 'emergency', 'checkup', 'procedure', 'treatment']
 

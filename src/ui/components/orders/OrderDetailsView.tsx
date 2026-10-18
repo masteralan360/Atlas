@@ -82,36 +82,36 @@ import {
     type SalesOrderReturnLineInput,
     type WorkspacePaymentMethod
 } from '@/local-db'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { canReturnSalesOrder, hasEffectiveSalesAgentCommissionPermission, useHideCosts, useViewOwnRecordScope, useWorkspacePermissions } from '@/permissions'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { PrintFlow } from '@/ui/components/PrintFlow'
+import { ReturnConfirmationModal } from '@/ui/components/ReturnConfirmationModal'
+import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    DeleteConfirmationModal,
-    Dialog,
-    DialogContent,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    PrintFlow,
-    ReturnConfirmationModal,
-    SettlementDialog,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    useToast
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  useToast,
 } from '@/ui/components'
 
 import { useLiveQuery } from 'dexie-react-hooks'

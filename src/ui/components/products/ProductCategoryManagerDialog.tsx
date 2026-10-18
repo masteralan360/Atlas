@@ -3,19 +3,19 @@ import { useTranslation } from 'react-i18next'
 import { FolderCog, Loader2, Pencil, Plus, Tags, Trash2 } from 'lucide-react'
 import { createCategory, deleteCategory, updateCategory, useCategories } from '@/local-db'
 import type { Category } from '@/local-db/models'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
 import {
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    Button,
-    DeleteConfirmationModal,
-    Input,
-    Label,
-    Textarea,
-    useToast
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Button,
+  Label,
+  Textarea,
+  useToast,
 } from '@/ui/components'
 
 interface ProductCategoryManagerDialogProps {

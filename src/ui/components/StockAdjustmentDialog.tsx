@@ -16,24 +16,24 @@ import { cn, formatNumericInput, parseFormattedNumber, sanitizeNumericInput } fr
 import { getProductImageDisplayUrl } from "@/lib/productImageStorage";
 import { ProductAutocompleteInput } from "@/ui/components/orders/ProductAutocompleteInput";
 import { ProductsViewModal, ProductsViewModalTrigger } from "@/ui/components/ProductsViewModal";
+import { Input } from "@/ui/components/input";
 import {
-    Button,
-    Dialog,
-    DialogBody,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Textarea,
-    useToast,
+  Button,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Textarea,
+  useToast,
 } from "@/ui/components";
 
 type AdjustmentFormState = {

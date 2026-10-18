@@ -4,7 +4,6 @@ import type {
     ToastActionElement,
     ToastProps,
 } from "@/ui/components/toast"
-import { recordErrorToast } from '@/lib/errorLogger'
 
 const TOAST_LIMIT = 3
 const TOAST_DEFAULT_DURATION = 5000
@@ -219,7 +218,9 @@ function toast({ ...props }: Toast) {
     const id = genId()
 
     if (props.variant === 'destructive') {
-        recordErrorToast({ title: props.title, description: props.description })
+        void import('@/lib/errorLogger')
+            .then(({ recordErrorToast }) => recordErrorToast({ title: props.title, description: props.description }))
+            .catch(() => undefined)
     }
 
     const update = (props: ToastRecord) => {

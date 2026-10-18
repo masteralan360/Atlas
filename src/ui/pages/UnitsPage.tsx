@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Edit, Package, Plus, Search, Sparkles, Trash2 } from 'lucide-react'
 
 import { useAuth } from '@/auth'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { createUnit, deleteUnit, updateUnit, useUnits, UnitInUseError, UnitReservedCodeError, type Unit } from '@/local-db'
 import { DEFAULT_UNITS } from '@/local-db/models'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'

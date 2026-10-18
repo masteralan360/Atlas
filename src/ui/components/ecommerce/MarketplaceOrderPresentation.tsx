@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { MarketplaceOrderDisplayStatus } from '@/lib/marketplaceOrderPresentation'
 import { formatCurrency } from '@/lib/utils'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 export function EcommerceStatusBadge({ status }: { status: MarketplaceOrderDisplayStatus }) {
     const { t } = useTranslation()

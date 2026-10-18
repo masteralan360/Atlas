@@ -15,7 +15,7 @@ import {
     UploadCloud,
 } from 'lucide-react'
 import type { DateRangeType } from '@/context/DateRangeContext'
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { db } from '@/local-db'
 import type { MutationStatus, OfflineMutation } from '@/local-db/models'
 import {
@@ -25,35 +25,35 @@ import {
 import { formatDateTime } from '@/lib/utils'
 import { useSyncStatus } from '@/sync'
 import { isBusinessPartnerAccessChangedError } from '@/sync/syncErrors'
+import { Button } from '@/ui/components/button'
+import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-    DateRangeFilters,
-    DeleteConfirmationModal,
-    Input,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    SmallDialog,
-    SmallDialogBody,
-    SmallDialogContent,
-    SmallDialogDescription,
-    SmallDialogFooter,
-    SmallDialogHeader,
-    SmallDialogTitle,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    useToast,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  SmallDialog,
+  SmallDialogBody,
+  SmallDialogContent,
+  SmallDialogDescription,
+  SmallDialogFooter,
+  SmallDialogHeader,
+  SmallDialogTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  useToast,
 } from '@/ui/components'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import {

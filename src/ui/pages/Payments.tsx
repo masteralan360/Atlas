@@ -35,30 +35,30 @@ import {
 } from '@/local-db'
 import { isDateInDateRange } from '@/lib/dateRangeFilters'
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    AppPagination,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    Input,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    Tabs,
-    TabsContent,
-    TabsList,
-    TabsTrigger,
-    useToast
+  Button,
+  AppPagination,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  useToast,
 } from '@/ui/components'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
@@ -76,7 +76,7 @@ import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { getPaymentTransactionReversalState } from '@/lib/paymentReversals'
 import { generateTemplatePdf } from '@/services/pdfGenerator'
 import { printPdfBlob } from '@/services/pdfPrintService'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
 
 type PaymentsTab = 'open-items' | 'payable' | 'collectable' | 'transactions'

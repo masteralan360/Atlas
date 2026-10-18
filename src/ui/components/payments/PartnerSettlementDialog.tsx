@@ -24,23 +24,23 @@ import {
     parseLocalDateTimeValue,
     sanitizeNumericInput
 } from '@/lib/utils'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    DateTimePicker,
-    Dialog,
-    DialogBody,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Textarea
+  Button,
+  DateTimePicker,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Textarea,
 } from '@/ui/components'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { PaymentMethodSelector } from '@/ui/components/PaymentMethodSelector'
 import { PaymentAccountSelector } from './PaymentAccountSelector'
 import { PartnerSettlementReconciliationAuditDialog } from './PartnerSettlementReconciliationAuditDialog'

@@ -6,18 +6,18 @@ import { formatCurrency, formatNumericInput, sanitizeNumericInput } from '@/lib/
 import type { CurrencyCode, ExchangeRateSnapshot, ManualSalesAgentCommissionType } from '@/local-db'
 import type { CommissionAgentDirectoryEntry } from './useCommissionAgentDirectory'
 import { formatCommissionPlanTerms } from './agentCommissionPresentation'
+import { Input } from '@/ui/components/input'
 import {
-    Badge,
-    Button,
-    CurrencySelector,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Textarea
+  Badge,
+  Button,
+  CurrencySelector,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Textarea,
 } from '@/ui/components'
 
 const UNASSIGNED_VALUE = '__unassigned__'

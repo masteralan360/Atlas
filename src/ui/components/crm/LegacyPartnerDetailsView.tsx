@@ -14,21 +14,21 @@ import {
     type PurchaseOrder,
     type SalesOrder
 } from '@/local-db'
+import { Button } from '@/ui/components/button'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from '@/ui/components'
 import { OrderStatusBadge } from '@/ui/components/orders/OrderStatusBadge'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 type PartnerKind = 'customer' | 'supplier'
 type RelatedProductOrder = SalesOrder | PurchaseOrder

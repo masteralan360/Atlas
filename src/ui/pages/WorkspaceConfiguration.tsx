@@ -1,24 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { supabase } from '@/auth/supabase'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { cn } from '@/lib/utils'
+import { Button } from '@/ui/components/button'
 import {
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    CardDescription,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Button,
-    useToast
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  useToast,
 } from '@/ui/components'
 import {
     Loader2,

@@ -1,7 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Button, Input, Label, Textarea } from '@/ui/components'
+import { Input } from '@/ui/components/input'
+import {
+  Button,
+  Label,
+  Textarea,
+} from '@/ui/components'
 import { cn } from '@/lib/utils'
 import type { MarketplaceOrderCustomer } from '../lib/marketplaceApi'
 

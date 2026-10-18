@@ -24,31 +24,31 @@ import {
     useWorkspaceContacts,
 } from '@/local-db'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    DeleteConfirmationModal,
-    Input,
-    PrintFlow,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    Tabs,
-    TabsContent,
-    TabsList,
-    TabsTrigger,
-    useToast
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  useToast,
 } from '@/ui/components'
 import { CreateRealEstateTransactionPage } from '@/ui/components/real-estate/CreateRealEstateTransactionModal'
 import { RecordRealEstatePaymentModal } from '@/ui/components/real-estate/RecordRealEstatePaymentModal'
 import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import {
     buildCustomTemplateLayoutPdf,
     createCustomTemplatePreview,

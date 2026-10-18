@@ -1,7 +1,18 @@
 import { useState } from 'react'
 import { useLocation } from 'wouter'
-import { useAuth } from '@/auth'
-import { Button, Input, Label, Card, CardContent, CardHeader, CardTitle, CardDescription, LanguageSwitcher, ThemeToggle } from '@/ui/components'
+import { useAuth } from '@/auth/AuthContext'
+import { Button } from '@/ui/components/button'
+import { Input } from '@/ui/components/input'
+import {
+  Label,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  LanguageSwitcher,
+  ThemeToggle,
+} from '@/ui/components'
 import { Boxes, Key, Loader2, LogOut } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError } from '@/lib/supabaseRequest'

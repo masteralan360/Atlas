@@ -7,6 +7,7 @@ import {
   type FleetVehicle,
   type FleetVehicleStatus,
 } from "@/local-db";
+import { Input } from "@/ui/components/input";
 import {
   Button,
   Dialog,
@@ -15,7 +16,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Input,
   Label,
   Select,
   SelectContent,

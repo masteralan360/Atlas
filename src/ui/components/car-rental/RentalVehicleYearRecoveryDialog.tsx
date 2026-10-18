@@ -11,6 +11,7 @@ import {
 } from "@/local-db/carRental";
 import { db } from "@/local-db/database";
 import { sanitizeNumericInput } from "@/lib/utils";
+import { Input } from "@/ui/components/input";
 import {
   AppDialog,
   AppDialogBody,
@@ -19,7 +20,6 @@ import {
   AppDialogHeader,
   AppDialogTitle,
   Button,
-  Input,
   Label,
   useToast,
 } from "@/ui/components";

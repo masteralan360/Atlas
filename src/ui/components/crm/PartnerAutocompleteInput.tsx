@@ -6,7 +6,7 @@ import { cacheBusinessPartnerAutocompleteSelection, searchBusinessPartnerAutocom
 import type { BusinessPartner, BusinessPartnerRole } from '@/local-db/models'
 import { useAuth } from '@/auth/AuthContext'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
-import { Input } from '@/ui/components'
+import { Input } from '@/ui/components/input'
 import { cn } from '@/lib/utils'
 import { AutocompletePopover } from '@/ui/components/AutocompletePopover'
 import { useDebouncedAutocompleteSearch } from '@/ui/components/useDebouncedAutocompleteSearch'

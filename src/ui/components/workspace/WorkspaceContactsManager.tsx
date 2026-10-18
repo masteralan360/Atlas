@@ -1,15 +1,15 @@
 import { useState } from 'react'
 import { Plus, Trash2, Phone, Star, StarOff, Mail, MapPin } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue
+  Button,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/ui/components'
 import { useWorkspaceContacts, createWorkspaceContact, updateWorkspaceContact, deleteWorkspaceContact } from '@/local-db/hooks'
 import type { WorkspaceContact } from '@/local-db/models'

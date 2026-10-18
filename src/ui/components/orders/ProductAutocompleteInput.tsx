@@ -6,7 +6,13 @@ import { useProductSelectionAccess } from '@/local-db/businessPartners'
 import { searchProductAutocompleteSuggestions, type ProductAutocompleteSuggestion } from '@/local-db/productCatalog'
 import type { Product } from '@/local-db/models'
 import { useOptionalAuth } from '@/auth'
-import { Input, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/components'
+import { Input } from '@/ui/components/input'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/ui/components'
 import { cn } from '@/lib/utils'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { AutocompletePopover } from '@/ui/components/AutocompletePopover'

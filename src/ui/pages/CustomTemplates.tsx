@@ -52,7 +52,7 @@ import {
 import { setPrintPreviewEditorSource, type CustomTemplateLayout } from '@/lib/printPreviewEditorStore'
 import { formatDateTime } from '@/lib/utils'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useWorkspaceContacts } from '@/local-db/hooks'
 import { r2Service } from '@/services/r2Service'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'

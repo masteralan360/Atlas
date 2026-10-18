@@ -33,8 +33,9 @@ import { setPendingSaleDetailsId } from "@/lib/saleNavigation";
 import { formatDateTime } from "@/lib/utils";
 import { ProductAutocompleteInput } from "@/ui/components/orders/ProductAutocompleteInput";
 import { ExportPreviewModal } from "@/ui/components/ExportPreviewModal";
+import { Button } from "@/ui/components/button";
+import { DateRangeFilters } from "@/ui/components/DateRangeFilters";
 import {
-  Button,
   Card,
   CardContent,
   CardDescription,
@@ -44,7 +45,6 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
-  DateRangeFilters,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -70,7 +70,7 @@ import {
 } from "@/ui/components";
 import { DateRangeBadge } from "@/ui/components/DateRangeBadge";
 import { useDateRange } from "@/context/DateRangeContext";
-import { useWorkspace } from "@/workspace";
+import { useWorkspace } from "@/workspace/WorkspaceContext";
 
 type InventoryActivityRecord =
   | {

@@ -1,5 +1,6 @@
-import initSqlJs, { type Database as SqlJsDatabase, type SqlJsStatic } from "sql.js";
+import type { Database as SqlJsDatabase, SqlJsStatic } from "sql.js";
 import type { SqliteConnection } from "./localModeSqlite";
+export { isOpfsSupported } from "./pwaSqliteSupport";
 
 const DB_FILENAME = "atlas-local-mode.db";
 
@@ -8,14 +9,6 @@ let dbInstance: SqlJsDatabase | null = null;
 let dbPromise: Promise<SqlJsDatabase | null> | null = null;
 let transactionDepth = 0;
 let transactionDirty = false;
-
-export function isOpfsSupported(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    "storage" in navigator &&
-    typeof (navigator.storage as { getDirectory?: () => unknown }).getDirectory === "function"
-  );
-}
 
 async function getOpfsRoot(): Promise<FileSystemDirectoryHandle | null> {
   try {
@@ -56,6 +49,7 @@ async function saveCurrentDatabase(): Promise<void> {
 
 async function getSqlJs(): Promise<SqlJsStatic> {
   if (!sqlJsModule) {
+    const { default: initSqlJs } = await import("sql.js");
     sqlJsModule = await initSqlJs({
       locateFile: () => `/sql-wasm.wasm`,
     });

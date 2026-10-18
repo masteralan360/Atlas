@@ -17,9 +17,10 @@ import {
   parseFormattedNumber,
   sanitizeNumericInput,
 } from "@/lib/utils";
-import { useWorkspace } from "@/workspace";
+import { useWorkspace } from "@/workspace/WorkspaceContext";
 import { PaymentMethodSelector } from "@/ui/components/PaymentMethodSelector";
 import { PaymentAccountSelector } from "@/ui/components/payments/PaymentAccountSelector";
+import { Input } from "@/ui/components/input";
 import {
   AppDialog,
   AppDialogBody,
@@ -29,7 +30,6 @@ import {
   AppDialogTitle,
   Button,
   DateTimePicker,
-  Input,
   Label,
   Textarea,
   useToast,

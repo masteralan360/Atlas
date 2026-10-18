@@ -1,6 +1,15 @@
 import { useTranslation } from 'react-i18next'
 import { useClinicalPatient, useClinicalAppointmentsByPatient, calculateAge } from '@/local-db/clinicalAppointments'
-import { Badge, Button, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/components'
+import { Button } from '@/ui/components/button'
+import {
+  Badge,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/ui/components'
 import { ArrowLeft } from 'lucide-react'
 import { useRoute, useLocation } from 'wouter'
 

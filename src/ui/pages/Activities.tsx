@@ -6,7 +6,7 @@ import { useLocation } from 'wouter'
 import { Activity, CheckCircle2, ClipboardList, Edit3, ImagePlus, Infinity as InfinityIcon, Loader2, Plus, Printer, Receipt, RotateCcw, Search, Trash2, XCircle } from 'lucide-react'
 
 import { useAuth } from '@/auth'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useWorkspacePermissions } from '@/permissions'
 import { UiAccessGate } from '@/context/UiAccessContext'
 import { useDateRange } from '@/context/DateRangeContext'
@@ -36,35 +36,35 @@ import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { PaymentMethodSelect } from '@/ui/components/payments/PaymentMethodSelect'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 import {
-    Badge,
-    Button,
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
-    DateTimePicker,
-    DeleteConfirmationModal,
-    Dialog,
-    DialogBody,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    NumericInput,
-    PrintFlow,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Switch,
-    Textarea,
-    useToast
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  DateTimePicker,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  NumericInput,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Textarea,
+  useToast,
 } from '@/ui/components'
 
 type DraftLine = {

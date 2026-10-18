@@ -3,17 +3,17 @@ import { Link } from 'wouter'
 import { Banknote, Grid2X2, Minus, Search, Sparkles, Store } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Card,
-    CardContent,
-    Input,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    useToast
+  Button,
+  Card,
+  CardContent,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  useToast,
 } from '@/ui/components'
 import { cn, formatCurrency } from '@/lib/utils'
 

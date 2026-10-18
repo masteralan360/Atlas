@@ -17,7 +17,7 @@ import {
     Switch,
     useToast
 } from '@/ui/components'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 export function SalesAgentCommissionModeDialog({
     open,

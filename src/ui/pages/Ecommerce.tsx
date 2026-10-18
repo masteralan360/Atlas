@@ -22,7 +22,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { supabase } from '@/auth/supabase'
 import { useDateRange, type DateRangeType } from '@/context/DateRangeContext'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
@@ -57,7 +57,7 @@ import {
     type SalesOrder,
     type WorkspacePaymentMethod
 } from '@/local-db'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import {
     cancelWorkspaceDataHydration,
     completeWorkspaceDataHydration,
@@ -92,26 +92,26 @@ import type {
     MarketplaceOrderRecord,
     MarketplaceOrderStatus
 } from '@/ui/components/ecommerce/MarketplaceOrderTypes'
+import { Button } from '@/ui/components/button'
+import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    DateRangeFilters,
-    Input,
-    SettlementDialog,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
-    useToast
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+  useToast,
 } from '@/ui/components'
 import { FilterDropdown } from '@/ui/components/FilterDropdown'
 

@@ -48,7 +48,6 @@ import {
 
 import { db } from './database'
 import { useLiveCollection } from './liveCollection'
-import { persistLocalDirectTransactionWithVoucher } from './localModeSqlite'
 import {
   getSalesOrderCommissionMode,
   isPayableCommissionEntry,
@@ -1958,6 +1957,7 @@ export async function appendPaymentTransaction(
   if (!shouldUseCloudBusinessData(workspaceId)) {
     await assertPaymentAccountTransactionCanBeAppliedLocally(transaction)
     if (transaction.sourceType === 'direct_transaction') {
+      const { persistLocalDirectTransactionWithVoucher } = await import('./localModeSqlite')
       const sqliteNumber = await persistLocalDirectTransactionWithVoucher(db, transaction)
       if (sqliteNumber === null) {
         // Preserve the existing Dexie path where no Local SQLite runtime exists.

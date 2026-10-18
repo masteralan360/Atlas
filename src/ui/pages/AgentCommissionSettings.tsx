@@ -2,12 +2,12 @@ import { ArrowLeft, BadgePercent } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
-import { Button } from '@/ui/components'
+import { Button } from '@/ui/components/button'
 import { AgentCommissionSettingsForm } from '@/ui/components/commissions/AgentCommissionSettingsDialog'
 import { CommissionFeatureBoundary } from '@/ui/components/commissions/useCommissionAgentDirectory'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 export function AgentCommissionSettings() {
     const { t } = useTranslation()

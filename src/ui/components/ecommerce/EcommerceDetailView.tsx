@@ -22,7 +22,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import {
     getMarketplaceDeliveryActorName,
     getMarketplaceInventoryDisplayStatus,
@@ -38,7 +38,7 @@ import { setPDFPreviewSource } from '@/lib/pdfPreviewStore'
 import { printPdfBlob } from '@/services/pdfPrintService'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { PdfJsViewer } from '@/ui/components/PdfJsViewer'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { EditMarketplaceOrderItemsDialog, type EditableMarketplaceOrderItem } from '@/ui/components/ecommerce/EditMarketplaceOrderItemsDialog'
 import {
     EcommerceStatusBadge,
@@ -50,30 +50,30 @@ import {
     getNextMarketplaceOrderStatus
 } from './MarketplaceOrderWorkflow'
 import type { MarketplaceOrderRecord, MarketplaceOrderStatus } from './MarketplaceOrderTypes'
+import { Button } from '@/ui/components/button'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    ContextMenu,
-    ContextMenuContent,
-    ContextMenuItem,
-    ContextMenuLabel,
-    ContextMenuSeparator,
-    ContextMenuTrigger,
-    Dialog,
-    DialogContent,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    Textarea
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Textarea,
 } from '@/ui/components'
 
 function transitionActionLabel(t: (key: string, options?: Record<string, unknown>) => string, nextStatus: MarketplaceOrderStatus | null) {

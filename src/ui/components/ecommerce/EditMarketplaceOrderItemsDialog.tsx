@@ -4,16 +4,16 @@ import { useTranslation } from 'react-i18next'
 import { cn, formatCurrency } from '@/lib/utils'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { getMarketplaceProductImageUrl, type MarketplaceProductImageUrls } from '@/lib/marketplaceProductImages'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { Button } from '@/ui/components/button'
 import {
-    Button,
-    Dialog,
-    DialogBody,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from '@/ui/components'
 
 export interface EditableMarketplaceOrderItem {

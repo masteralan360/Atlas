@@ -47,7 +47,7 @@ import {
     type PurchaseOrderStatus,
     type UnitRef
 } from '@/local-db'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useOrderEditorLiveData } from '@/hooks/useOrderEditorLiveData'
 import { isOrderReadOnly } from '@/lib/orderEditability'
 import { isRemoteOrderSaveConfirmationError, type OrderSaveProgress } from '@/lib/orderSaveProgress'
@@ -61,25 +61,25 @@ import {
     type ProductUomOrderOption
 } from '@/lib/productUoms'
 import { isOrderUnitConfigurationError } from '@/lib/orderUnitErrors'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Badge,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    CurrencySelector,
-    DateTimePicker,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Switch,
-    Textarea,
-    useToast
+  Button,
+  Badge,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CurrencySelector,
+  DateTimePicker,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Textarea,
+  useToast,
 } from '@/ui/components'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { PartnerBalanceSummary } from '@/ui/components/crm/PartnerBalanceSummary'

@@ -3,7 +3,8 @@ import { ArrowLeft, CircleAlert, FileText, Loader2, Printer, RefreshCw, Settings
 import { Link, useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 
-import { isSupabaseConfigured, useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
+import { isSupabaseConfigured } from '@/auth'
 import {
     PARTNER_PRODUCT_MOVEMENTS_TEMPLATE_KEY,
     buildCustomTemplateLayoutPdf,
@@ -39,20 +40,20 @@ import {
 } from '@/local-db'
 import type { DateRangeType } from '@/context/DateRangeContext'
 import type { PrintFormat } from '@/services/pdfGenerator'
+import { Button } from '@/ui/components/button'
+import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 import {
-    Button,
-    Card,
-    CardContent,
-    DateRangeFilters,
-    PrintFlow,
-    Progress,
+  Card,
+  CardContent,
+  Progress,
 } from '@/ui/components'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { PartnerProductMovementsTemplateDialog } from '@/ui/components/crm/PartnerProductMovementsTemplateDialog'
 import type { PartnerProductMovementsPrintData } from '@/ui/components/crm/PartnerProductMovementsPrintTemplate'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 const PRODUCT_MOVEMENTS_PATH = '/business-partners/product-movements-statement'
 

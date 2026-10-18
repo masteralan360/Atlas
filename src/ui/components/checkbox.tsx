@@ -1,12 +1,11 @@
 import * as React from "react"
 import { Check } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { useOptionalAuth } from "@/auth"
+import { useAuthRole } from "@/auth/AuthRoleContext"
 
 const Checkbox = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { checked?: boolean, onCheckedChange?: (checked: boolean) => void, allowViewer?: boolean }>(
     ({ className, checked, onCheckedChange, allowViewer = false, disabled, ...props }, ref) => {
-        const user = useOptionalAuth()?.user
-        const isViewer = user?.role === 'viewer'
+        const isViewer = useAuthRole() === 'viewer'
         const effectiveDisabled = disabled || (isViewer && !allowViewer)
 
         return (

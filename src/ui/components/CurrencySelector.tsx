@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select'
 import { Label } from './label'
 import type { CurrencyCode } from '@/local-db/models'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { ChevronDown } from 'lucide-react'
 import { Button } from './button'
 import {

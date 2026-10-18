@@ -63,7 +63,7 @@ import {
     type WorkspacePaymentMethod,
     type StockBatch
 } from '@/local-db'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useOrderEditorLiveData } from '@/hooks/useOrderEditorLiveData'
 import { isOrderReadOnly } from '@/lib/orderEditability'
 import { resolvePartnerPriceBookUnitPrice } from '@/lib/priceBooks'
@@ -80,35 +80,35 @@ import {
     type ProductUomOrderOption
 } from '@/lib/productUoms'
 import { isOrderUnitConfigurationError } from '@/lib/orderUnitErrors'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Badge,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    CurrencySelector,
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    DateTimePicker,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Switch,
-    Textarea,
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
-    useToast
+  Button,
+  Badge,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CurrencySelector,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DateTimePicker,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Textarea,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+  useToast,
 } from '@/ui/components'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { PartnerBalanceSummary } from '@/ui/components/crm/PartnerBalanceSummary'

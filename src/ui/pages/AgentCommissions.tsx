@@ -12,7 +12,7 @@ import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
 import { Button, useToast } from '@/ui/components'
 import { CommissionFeatureBoundary } from '@/ui/components/commissions/useCommissionAgentDirectory'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 // Keep this scoped to the commission page's own views. The generic table
 // hydrators report their start, progress, completion, cancellation, and

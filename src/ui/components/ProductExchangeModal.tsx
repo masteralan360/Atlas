@@ -7,22 +7,22 @@ import type { PaymentAccount, Product, Storage } from '@/local-db'
 import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { ProductsViewModal, ProductsViewModalTrigger } from '@/ui/components/ProductsViewModal'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Dialog,
-    DialogBody,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
+  Button,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/ui/components'
 
 export type ProductExchangeSettlementMethod = 'cash' | 'fib' | 'qicard' | 'zaincash' | 'fastpay' | 'bank_transfer'

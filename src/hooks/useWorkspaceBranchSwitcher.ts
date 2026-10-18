@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
 import { normalizeWorkspaceDataMode } from '@/workspace/workspaceMode'
 import { supabase } from '@/auth/supabase'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useToast } from '@/ui/components'
 import {
     getRetriableActionToast,

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { usePendingSyncMutations } from '@/local-db/hooks'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { ManualSyncModal } from './ManualSyncModal'
 import { cn } from '@/lib/utils'
 import { CloudOff, Check, AlertCircle, Loader2 } from 'lucide-react'

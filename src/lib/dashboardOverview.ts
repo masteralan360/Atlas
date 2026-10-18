@@ -1,4 +1,4 @@
-import type { CurrencyCode, SalesOrder } from '@/local-db'
+import type { CurrencyCode, SalesOrder } from '@/local-db/models'
 import type { RevenueAnalysisRecord } from '@/lib/revenueAnalysis'
 import { getRevenueAnalysisTotals, toRevenueRecordFromSalesOrder } from '@/lib/revenueAnalysis'
 import type { LedgerCashMovementEntry } from '@/lib/ledgerCashMovementEntries'

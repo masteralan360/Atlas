@@ -14,6 +14,7 @@ import {
   type BusinessPartnerGroup,
   type BusinessPartnerGroupAccessType,
 } from '@/local-db'
+import { Input } from '@/ui/components/input'
 import {
   AppDialog,
   AppDialogBody,
@@ -25,7 +26,6 @@ import {
   Card,
   CardContent,
   Checkbox,
-  Input,
   Label,
   Select,
   SelectContent,

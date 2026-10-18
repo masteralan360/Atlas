@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react"
-import MapLibreGL from "maplibre-gl"
+import type * as MapLibreGL from "maplibre-gl"
 import { Loader2, MapPin, Search } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
+import { Input } from "@/ui/components/input"
 import {
-    Button,
-    Dialog,
-    DialogContent,
-    Input,
-    Label,
-    Map,
-    MapControls,
-    MapMarker,
-    MarkerContent,
-    useMap
+  Button,
+  Dialog,
+  DialogContent,
+  Label,
+  Map,
+  MapControls,
+  MapMarker,
+  MarkerContent,
+  useMap,
 } from "@/ui/components"
 import { cn } from "@/lib/utils"
 

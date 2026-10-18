@@ -31,30 +31,30 @@ import {
     type TravelBooking,
     type TravelPassenger
 } from '@/local-db'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { PrintFlow } from '@/ui/components/PrintFlow'
 import {
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogDescription,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    Badge,
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    DeleteConfirmationModal,
-    PrintFlow,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    useToast
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  useToast,
 } from '@/ui/components'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { RecordTravelBookingPaymentDialog } from './RecordTravelBookingPaymentDialog'

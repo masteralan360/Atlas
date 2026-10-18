@@ -2,9 +2,9 @@ import { type CSSProperties, type ReactNode, Suspense, type UIEvent, useEffect, 
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useLocation } from 'wouter'
 import { cn } from '@/lib/utils'
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
+import { db } from '@/local-db/database'
 import {
-  db,
   completeCashierShiftOccurrence,
   getCashierShiftListRows,
   getCashierShiftCompletionEligibility,
@@ -13,16 +13,15 @@ import {
   requestCashierShiftEarlyFinish,
   summarizeCashierShiftTransactions,
   startCashierShiftOccurrence,
-  type CashierShiftAssignment,
-  type CashierShiftOccurrence,
   useCashierShiftAssignments,
-  useCashierShiftOccurrences,
-  usePaymentTransactions,
-  useReorderTransferRules
-} from '@/local-db'
+  useCashierShiftOccurrences
+} from '@/local-db/paymentAccounts'
+import type { CashierShiftAssignment, CashierShiftOccurrence } from '@/local-db/models'
+import { usePaymentTransactions } from '@/local-db/payments'
+import { useReorderTransferRules } from '@/local-db/reorderTransferRules'
 import { formatCurrency } from '@/lib/utils'
 import { getLanguageDirection } from '@/lib/i18nRouting'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { isDemoWorkspace } from '@/demo'
 import { useWorkspacePermissions } from '@/permissions'
 import { SyncStatusIndicator } from './SyncStatusIndicator'
@@ -31,7 +30,6 @@ import { GlobalSearch } from './GlobalSearch'
 import { PageFind } from './PageFind'
 import { P2PSyncIndicator } from './P2PSyncStatus'
 import { assetManager } from '@/lib/assetManager'
-import { startR2BackupInterval, stopR2BackupInterval } from '@/local-db/sqliteBackup'
 import { platformService } from '@/services/platformService'
 import { whatsappManager } from '@/lib/whatsappWebviewManager'
 import { recordTauriStartupVersion } from '@/lib/tauriVersionReporting'
@@ -601,11 +599,6 @@ export function Layout({ children }: LayoutProps) {
       assetManager.initialize(user.workspaceId, features.data_mode)
     }
 
-    // Start R2 database backup interval for local mode
-    if (user?.workspaceId) {
-      startR2BackupInterval(user.workspaceId)
-    }
-
     // Fetch App Version
     // @ts-ignore
     if (window.__TAURI_INTERNALS__) {
@@ -652,7 +645,6 @@ export function Layout({ children }: LayoutProps) {
       window.removeEventListener('open-mobile-sidebar', handleOpen)
       window.removeEventListener('profile-updated', fetchMembers)
       window.removeEventListener('whatsapp-status-change', handleWhatsAppStatusChange)
-      stopR2BackupInterval()
     }
   }, [
     features.data_mode,
@@ -663,6 +655,23 @@ export function Layout({ children }: LayoutProps) {
     user?.id,
     user?.workspaceId
   ])
+
+  useEffect(() => {
+    const workspaceId = user?.workspaceId
+    if (!workspaceId) return
+
+    let isActive = true
+    void import('@/local-db/sqliteBackup').then(({ startR2BackupInterval }) => {
+      if (isActive) startR2BackupInterval(workspaceId)
+    })
+
+    return () => {
+      isActive = false
+      void import('@/local-db/sqliteBackup').then(({ stopR2BackupInterval }) => {
+        stopR2BackupInterval()
+      })
+    }
+  }, [user?.workspaceId])
 
   useEffect(() => {
     if (

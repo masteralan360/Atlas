@@ -22,7 +22,7 @@ import {
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
   XAxis,
-  YAxis
+  YAxis,
 } from 'recharts'
 
 import { useDateRange } from '@/context/DateRangeContext'

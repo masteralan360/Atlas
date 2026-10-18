@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { Input } from '@/ui/components'
+import { Input } from '@/ui/components/input'
 import { isDemoOptionalModuleCode } from './demoConfig'
 
 interface OptionalModuleCodesInputProps {

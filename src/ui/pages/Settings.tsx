@@ -1,13 +1,50 @@
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { isBackendConfigurationRequired, supabase } from '@/auth/supabase'
 import { useSyncStatus, clearQueue } from '@/sync'
 import { db, hasCurrencyExchangeAccountingData, listLocalCustomTemplates, saveRestaurantTableSettings, usePriceBookCatalogState, useRestaurantPosTickets, useRestaurantTableSettings, useStorages } from '@/local-db'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button, Label, LanguageSwitcher, Input, CurrencySelector, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsList, TabsTrigger, TabsContent, Switch, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, AppDialog, AppDialogBody, AppDialogContent, AppDialogDescription, AppDialogFooter, AppDialogHeader, AppDialogTitle, Textarea, useToast, RegisterWorkspaceContactsModal } from '@/ui/components'
+import { Button } from '@/ui/components/button'
+import { RegisterWorkspaceContactsModal } from '@/ui/components/modals/RegisterWorkspaceContactsModal'
+import { Input } from '@/ui/components/input'
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  Label,
+  LanguageSwitcher,
+  CurrencySelector,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+  Switch,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Textarea,
+  useToast,
+} from '@/ui/components'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'wouter'
 import { AdditionalStorefrontsManager } from '@/ui/components/marketplace/AdditionalStorefrontsManager'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { Coins } from 'lucide-react'
 import type { IQDDisplayPreference, CurrencyCode } from '@/local-db/models'
 import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, Upload, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink, Usb, Bluetooth, CalendarClock, Menu, Table2, Crown, Loader2, PanelLeftOpen, PanelRightOpen, PanelLeftClose, CircleOff } from 'lucide-react'

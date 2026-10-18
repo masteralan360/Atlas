@@ -14,7 +14,7 @@ import {
     XCircle
 } from 'lucide-react'
 import { useAuth } from '@/auth'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { Button } from '@/ui/components/button'
 import { Label } from '@/ui/components/label'
 import { PaymentAccountHolderNameAutocomplete } from '@/ui/components/PaymentAccountHolderNameAutocomplete'

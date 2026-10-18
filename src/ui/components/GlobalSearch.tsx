@@ -5,7 +5,7 @@ import { useHashLocation } from '@/hooks/useHashLocation'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/ui/components/theme-provider'
 import { useAuth } from '@/auth'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useWorkspacePermissions } from '@/permissions'
 
 interface GlobalSearchProps {

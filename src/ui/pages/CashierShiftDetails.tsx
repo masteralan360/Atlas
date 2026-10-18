@@ -21,7 +21,7 @@ import {
   X
 } from 'lucide-react'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import {
   getPaymentAccountTransactionDelta,
   pauseCashierShiftOccurrence,
@@ -40,6 +40,8 @@ import {
 } from '@/local-db'
 import { formatCurrency } from '@/lib/utils'
 import { useWorkspacePermissions } from '@/permissions'
+import { Button } from '@/ui/components/button'
+import { Input } from '@/ui/components/input'
 import {
   AppDialog,
   AppDialogBody,
@@ -47,13 +49,11 @@ import {
   AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
-  Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   DateTimePicker,
-  Input,
   Label,
   Table,
   TableBody,
@@ -62,10 +62,10 @@ import {
   TableHeader,
   TableRow,
   Textarea,
-  useToast
+  useToast,
 } from '@/ui/components'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 function humanizeIdentifier(value: string | null | undefined) {
   if (!value) return '—'

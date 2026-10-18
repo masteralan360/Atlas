@@ -22,69 +22,69 @@ import { persistSaleReturnLedger, commitLocalSaleReturn, calculateSaleReturnAmou
 import { persistLoanAggregateRpcResult } from '@/local-db/loanTransactions'
 import { hydrateInventoryTransactionsForReferences } from '@/local-db/inventoryTransactions'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { isMobile } from '@/lib/platform'
 import { whatsappManager } from '@/lib/whatsappWebviewManager'
 import { useDateRange } from '@/context/DateRangeContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { useTheme } from '@/ui/components/theme-provider'
+import { SaleDetailsModal } from '@/ui/components/SaleDetailsModal'
+import { SaleReturnActionDialog } from '@/ui/components/SaleReturnActionDialog'
+import { ProductExchangeModal } from '@/ui/components/ProductExchangeModal'
+import { ProfileCardModal } from '@/ui/components/ProfileCardModal'
+import { ReturnConfirmationModal } from '@/ui/components/ReturnConfirmationModal'
+import { ReturnDeclineModal } from '@/ui/components/ReturnDeclineModal'
+import { ReturnRulesDisplayModal } from '@/ui/components/ReturnRulesDisplayModal'
+import { PrintFlow } from '@/ui/components/PrintFlow'
+import { SalesNoteModal } from '@/ui/components/SalesNoteModal'
+import { Input } from '@/ui/components/input'
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    Button,
-    SaleDetailsModal,
-    SaleReturnActionDialog,
-    ProductExchangeModal,
-    ProfileCardModal,
-    ReturnConfirmationModal,
-    ReturnDeclineModal,
-    ReturnRulesDisplayModal,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    PrintFlow,
-    SalesNoteModal,
-    ExportPreviewModal,
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
-    useToast,
-    AppPagination,
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-    Input,
-    Label,
-    ContextMenu,
-    ContextMenuTrigger,
-    ContextMenuContent,
-    ContextMenuItem,
-    ContextMenuLabel,
-    ContextMenuSeparator,
-    type ProductExchangeDraft,
-    type ProductExchangeReplacementProduct,
-    type ProductExchangeSaleItem,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Button,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  ExportPreviewModal,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+  useToast,
+  AppPagination,
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  Label,
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  type ProductExchangeDraft,
+  type ProductExchangeReplacementProduct,
+  type ProductExchangeSaleItem,
 } from '@/ui/components'
 import { LoanDetailsPrintTemplate, LoanReceiptPrintTemplate } from '@/ui/components/loans/LoanPrintTemplates'
 import { WhatsAppNumberInputModal } from '@/ui/components/modals/WhatsAppNumberInputModal'

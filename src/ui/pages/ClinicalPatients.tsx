@@ -1,11 +1,19 @@
 import { useState, useMemo } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useTranslation } from 'react-i18next'
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { useClinicalPatients } from '@/local-db/clinicalAppointments'
 import { calculateAge } from '@/local-db/clinicalAppointments'
 import { useLocation } from 'wouter'
-import { Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/components'
+import { Input } from '@/ui/components/input'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/ui/components'
 import { Search } from 'lucide-react'
 
 export function ClinicalPatients() {

@@ -32,7 +32,7 @@ import {
     YAxis,
 } from 'recharts'
 import { useAuth } from '@/auth'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { isActiveSale } from '@/lib/saleArchiving'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { db } from '@/local-db/database'

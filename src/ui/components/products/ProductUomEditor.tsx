@@ -6,7 +6,18 @@ import type { CurrencyCode, IQDDisplayPreference } from '@/local-db/models'
 import { formatCurrency, formatNumericInput, sanitizeNumericInput } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { ProductUnitIcon } from '@/ui/components/ProductUnitIcon'
-import { Button, DeleteConfirmationModal, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@/ui/components'
+import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
+import {
+  Button,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+} from '@/ui/components'
 
 export type ProductUomDraft = {
   unitRef: string

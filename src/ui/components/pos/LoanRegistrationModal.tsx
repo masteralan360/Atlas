@@ -4,24 +4,24 @@ import { Users, X } from 'lucide-react'
 import { type CurrencyCode, type InstallmentFrequency } from '@/local-db'
 import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
 import { formatCurrency, formatLocalDateValue, parseLocalDateValue } from '@/lib/utils'
+import { Input } from '@/ui/components/input'
 import {
-    Dialog,
-    DialogBody,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-    DialogFooter,
-    Input,
-    Label,
-    Button,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    DateTimePicker,
-    Textarea
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  Label,
+  Button,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  DateTimePicker,
+  Textarea,
 } from '@/ui/components'
 import { LoanPartyPickerDialog } from '@/ui/components/loans/LoanPartyPickerDialog'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'

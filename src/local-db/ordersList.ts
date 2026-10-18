@@ -21,7 +21,7 @@ import {
   getSalesOrderIdsAssignedToLinkedFieldAgent
 } from './orders'
 import { getAppliedCurrencyConversion } from '@/lib/orderCurrency'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import type {
   Agent,
   ProductCommissionRule,

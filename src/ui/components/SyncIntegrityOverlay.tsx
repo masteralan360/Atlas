@@ -16,7 +16,7 @@ import {
     isBusinessPartnerAccessChangedError,
     isSyncIntegrityError
 } from '@/sync/syncErrors'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { Button } from '@/ui/components/button'
 
 import { ManualSyncModal } from './ManualSyncModal'

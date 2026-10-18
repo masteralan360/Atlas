@@ -9,7 +9,16 @@ import {
     parseLocalDateValue,
     sanitizeNumericInput
 } from '@/lib/utils'
-import { DateTimePicker, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/components'
+import { Input } from '@/ui/components/input'
+import {
+  DateTimePicker,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/ui/components'
 
 export type OrderFinancingTermsMode = 'loan' | 'installments'
 

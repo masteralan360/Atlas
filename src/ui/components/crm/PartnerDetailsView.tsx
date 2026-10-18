@@ -4,7 +4,8 @@ import { Activity, ArrowLeft, ArrowLeftRight, Building2, CalendarDays, Car, Cred
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'wouter'
 
-import { isSupabaseConfigured, useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
+import { isSupabaseConfigured } from '@/auth'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { buildConversionRates } from '@/lib/budget'
 import { convertToStoreBase } from '@/lib/currency'
@@ -72,7 +73,7 @@ import {
     TableHeader,
     TableRow
 } from '@/ui/components/table'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
 import { useDateRange } from '@/context/DateRangeContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'

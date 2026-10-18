@@ -2,6 +2,7 @@
  * Platform detection and abstraction for Tauri (Desktop) and Capacitor (Mobile/Android)
  */
 import type { ImageUploadSource } from '@/lib/imageUploadProfiles';
+export { isPwaDesktop } from './pwaDesktop'
 
 export const isTauri = () =>
     typeof window !== 'undefined'
@@ -31,19 +32,6 @@ export const isIosPwa = () => {
 /** Android native app shell, including the Tauri WebView. */
 export const isTauriAndroid = () => isAndroid() && isTauri();
 export const isDesktop = () => isTauri() && !isMobile();
-export const isPwaDesktop = () => {
-    if (isTauri() || isMobile()) return false;
-
-    const pwaNavigator = navigator as Navigator & { standalone?: boolean };
-    if (pwaNavigator.standalone === true) return true;
-
-    try {
-        return window.matchMedia('(display-mode: standalone)').matches
-            || window.matchMedia('(display-mode: window-controls-overlay)').matches;
-    } catch {
-        return false;
-    }
-};
 export const isWeb = () => !isTauri();
 
 export type Platform = 'desktop' | 'mobile' | 'web';

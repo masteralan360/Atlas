@@ -7,27 +7,27 @@ import { createManualLoan, type CurrencyCode, type InstallmentFrequency, type Lo
 import { buildOrderExchangeRatesSnapshot } from '@/lib/orderCurrency'
 import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
 import { formatCurrency, formatLocalDateValue, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
+import { Input } from '@/ui/components/input'
 import {
-    CurrencySelector,
-    Dialog,
-    DialogBody,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogFooter,
-    Input,
-    Label,
-    Button,
-    DateTimePicker,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Textarea,
-    useToast
+  CurrencySelector,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  Label,
+  Button,
+  DateTimePicker,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Textarea,
+  useToast,
 } from '@/ui/components'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { LoanPartyPickerDialog } from './LoanPartyPickerDialog'
 import { SaveBorrowerAsPartnerDialog, usePendingSavePartnerPrompt } from './SaveBorrowerAsPartnerDialog'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'

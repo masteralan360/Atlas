@@ -12,7 +12,7 @@ import {
   Unlink,
 } from "lucide-react";
 
-import { useAuth } from "@/auth";
+import { useAuth } from "@/auth/AuthContext";
 import { useDateRange } from "@/context/DateRangeContext";
 import { isDateInDateRange } from "@/lib/dateRangeFilters";
 import { getRentalVehicleDisplayLabel } from "@/lib/carRentalPresentation";
@@ -60,13 +60,15 @@ import {
   type WorkspacePaymentMethod,
 } from "@/local-db";
 import { useWorkspacePermissions } from "@/permissions";
-import { useWorkspace } from "@/workspace";
+import { useWorkspace } from "@/workspace/WorkspaceContext";
 import { PartnerAutocompleteInput } from "@/ui/components/crm/PartnerAutocompleteInput";
 import { VehicleAutocompleteInput } from "@/ui/components/crm/VehicleAutocompleteInput";
 import { DateRangeFilters } from "@/ui/components/DateRangeFilters";
 import { DateRangeBadge } from "@/ui/components/DateRangeBadge";
 import { ModulePageFreshness } from "@/ui/components/ModulePageFreshness";
 import { PaymentAccountSelector } from "@/ui/components/payments/PaymentAccountSelector";
+import { Button } from "@/ui/components/button";
+import { Input } from "@/ui/components/input";
 import {
   AppDialog,
   AppDialogBody,
@@ -75,14 +77,12 @@ import {
   AppDialogHeader,
   AppDialogTitle,
   Badge,
-  Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   CurrencySelector,
   DateTimePicker,
-  Input,
   Label,
   PaymentMethodSelector,
   Select,

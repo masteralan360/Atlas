@@ -2,7 +2,8 @@ import { useDeferredValue, useEffect, useState } from 'react'
 import { Search, Store } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { Card, CardContent, Input } from '@/ui/components'
+import { Input } from '@/ui/components/input'
+import { Card, CardContent } from '@/ui/components'
 import { Button } from '@/ui/components/button'
 
 import { MarketplaceLayout } from '../components/MarketplaceLayout'

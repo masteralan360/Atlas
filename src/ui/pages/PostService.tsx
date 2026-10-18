@@ -5,7 +5,7 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Banknote, CheckCircle2, ChevronDown, CircleDollarSign, ClipboardList, Clock, FilePenLine, HandCoins, History, Inbox, LayoutGrid, List, ListFilter, Loader2, PackageCheck, Pencil, Play, Plus, Route, Search, Send, Store, Trash2, Truck, Undo2, Users, WalletCards, X, XCircle, type LucideIcon } from "lucide-react";
 
-import { useAuth } from "@/auth";
+import { useAuth } from "@/auth/AuthContext";
 import {
   adminEditAndRedispatchDeliveryShipment, adminEditReceivedDeliveryShipment, closeDeliveryRun, correctDeliveredDeliveryShipmentCod, correctDeliveredDeliveryShipmentRecipientPayout, createAndDispatchDeliveryShipment, createBusinessPartner, createDeliveryMerchantProfile, createDeliveryRun, createDeliveryShipment, hardDeleteDeliveryMerchantProfile, payDeliveryCourierReimbursement, payDeliveryMerchant, receiveDeliveryMerchantRepayment, receiveReturnedDeliveryShipment,
   refreshPostServiceTab, requestDeliveryShipmentCodAdjustment, requestDeliveryShipmentRecipientPayoutAdjustment, reviewDeliveryShipmentCodAdjustment, reviewDeliveryShipmentRecipientPayoutAdjustment, settleDeliveryCourier, summarizeDeliveryBalanceMetrics, updateBusinessPartner, updateDeliveryMerchantProfile, updateDeliveryShipmentStatus, useAgents, useBusinessPartners, useCourierDeliveryBalances,
@@ -29,15 +29,57 @@ import { AddPartnerButton } from "@/ui/components/crm/AddPartnerButton";
 import { PartnerAutocompleteInput } from "@/ui/components/crm/PartnerAutocompleteInput";
 import { BusinessPartnerFormDialog, type BusinessPartnerFormPayload } from "@/ui/components/crm/BusinessPartnerFormDialog";
 import { DeleteConfirmationModal } from "@/ui/components/DeleteConfirmationModal";
+import { Button } from "@/ui/components/button";
+import { Input } from "@/ui/components/input";
 import {
-  AppDialog, AppDialogBody, AppDialogContent, AppDialogDescription, AppDialogFooter, AppDialogHeader, AppDialogTitle,
-  Badge, Button, Card, CardContent, CardHeader, CardTitle, Checkbox, CurrencySelector, Dialog, DialogBody, DialogContent, DialogDescription,
-  DialogFooter, DialogHeader, DialogTitle, Input, Label, Select, SelectContent, SelectItem, SelectTrigger,
-  SelectValue, Switch, Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow, Tabs, TabsContent, TabsList,
-  TabsTrigger, Textarea, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useToast,
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Badge,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Checkbox,
+  CurrencySelector,
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Switch,
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+  Textarea,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+  useToast,
 } from "@/ui/components";
 import { PaymentMethodSelector } from "@/ui/components/PaymentMethodSelector";
-import { useWorkspace } from "@/workspace";
+import { useWorkspace } from "@/workspace/WorkspaceContext";
 import { DeliveryVoicePlaybackDialog } from "@/ui/components/post-service/DeliveryVoicePlaybackDialog";
 import { PaymentAccountSelector } from "@/ui/components/payments/PaymentAccountSelector";
 

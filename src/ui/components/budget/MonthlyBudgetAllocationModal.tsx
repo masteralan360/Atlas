@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react'
 import { TrendingUp } from 'lucide-react'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue
+  Button,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/ui/components'
 import { cn, formatNumberWithCommas, parseFormattedNumber } from '@/lib/utils'
 import type { CurrencyCode, IQDDisplayPreference } from '@/local-db/models'

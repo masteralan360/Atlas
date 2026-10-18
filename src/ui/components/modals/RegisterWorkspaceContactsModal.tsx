@@ -1,18 +1,18 @@
 import { useState, useEffect } from 'react'
+import { Input } from '@/ui/components/input'
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    Button,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  Button,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/ui/components'
 import { Plus, Trash2, CheckCircle2, AlertCircle, Phone, Mail, MapPin, Contact } from 'lucide-react'
 import { useTranslation } from 'react-i18next'

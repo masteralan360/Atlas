@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 
+import { Button } from "@/ui/components/button";
 import {
   AppDialog,
   AppDialogBody,
@@ -8,7 +9,6 @@ import {
   AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
-  Button,
 } from "@/ui/components";
 import { FlacAudioPlayer } from "./FlacAudioPlayer";
 

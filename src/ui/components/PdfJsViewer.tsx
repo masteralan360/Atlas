@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import * as pdfjsLib from 'pdfjs-dist'
+import type * as pdfjsTypes from 'pdfjs-dist'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url'
 import { Loader2, Printer, ZoomIn, ZoomOut } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -9,7 +9,7 @@ import { printPdfBlob } from '@/services/pdfPrintService'
 
 let isPdfWorkerConfigured = false
 
-function ensurePdfWorkerConfigured() {
+function ensurePdfWorkerConfigured(pdfjsLib: typeof import('pdfjs-dist')) {
     if (isPdfWorkerConfigured) return
 
     pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
@@ -47,7 +47,7 @@ export function PdfJsViewer({
 
     useEffect(() => {
         let cancelled = false
-        let loadingTask: pdfjsLib.PDFDocumentLoadingTask | null = null
+        let loadingTask: pdfjsTypes.PDFDocumentLoadingTask | null = null
 
         setStatus('loading')
         setPdfBytes(null)
@@ -56,7 +56,9 @@ export function PdfJsViewer({
 
         const render = async () => {
             try {
-                ensurePdfWorkerConfigured()
+                const pdfjsLib = await import('pdfjs-dist')
+                if (cancelled) return
+                ensurePdfWorkerConfigured(pdfjsLib)
                 const bytes = suppliedBytes ? suppliedBytes.slice() : url ? await resolvePdfBytes(url) : null
                 if (!bytes) throw new Error('No PDF source was provided.')
                 if (cancelled) return

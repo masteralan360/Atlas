@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation } from 'wouter'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
@@ -17,26 +17,16 @@ import {
 import { useAuth } from '@/auth'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useWorkspacePermissions } from '@/permissions'
-import {
-    applySalesOrderReturnQuantities,
-    useActivityTransactionLinesForWorkspace,
-    useActivityTransactions,
-    useAgents,
-    useBusinessPartners,
-    useClinicalAppointments,
-    useDeliveryMerchantProfiles,
-    useDeliveryShipments,
-    useExchangeTransactions,
-    useLoans,
-    usePaymentTransactions,
-    useRentalContracts,
-    useRentalVehicles,
-    useSales,
-    useSalesOrderReturnItemsForWorkspace,
-    useSalesOrders,
-    useWorkspaceUsers,
-} from '@/local-db'
-import type { CurrencyCode, IQDDisplayPreference } from '@/local-db'
+import { applySalesOrderReturnQuantities, useSalesOrderReturnItemsForWorkspace, useSalesOrders } from '@/local-db/orders'
+import { useActivityTransactionLinesForWorkspace, useActivityTransactions } from '@/local-db/activities'
+import { useAgents, useBusinessPartners } from '@/local-db/businessPartners'
+import { useClinicalAppointments } from '@/local-db/clinicalAppointments'
+import { useDeliveryMerchantProfiles, useDeliveryShipments } from '@/local-db/postService'
+import { useExchangeTransactions } from '@/local-db/currencyExchange'
+import { useLoans, useSales, useWorkspaceUsers } from '@/local-db/hooks'
+import { usePaymentTransactions } from '@/local-db/payments'
+import { useRentalContracts, useRentalVehicles } from '@/local-db/carRental'
+import type { CurrencyCode, IQDDisplayPreference } from '@/local-db/models'
 import type { Sale } from '@/types'
 import { getLedgerCashMovementEntries } from '@/lib/ledgerCashMovementEntries'
 import { getLedgerPaymentTransactions } from '@/lib/ledgerPaymentTransactions'
@@ -54,21 +44,24 @@ import {
 } from '@/lib/dashboardOverview'
 import { cn, formatCurrency, formatDateTime } from '@/lib/utils'
 import {
-    Button,
-    Card,
-    CardContent,
-    CardHeader,
-    CardTitle,
-    SaleDetailsModal,
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from '@/ui/components'
 import { CurrencySelector } from '@/ui/components/CurrencySelector'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
+
+const SaleDetailsModal = lazy(() => import('@/ui/components/SaleDetailsModal').then((module) => ({
+    default: module.SaleDetailsModal,
+})))
 
 const PERIODS: DashboardPeriod[] = ['today', 'thisWeek', 'lastMonth', 'thisMonth']
 const DASHBOARD_PANEL_CLASS = 'overflow-hidden rounded-[2.5rem] border-border/40 bg-card shadow-sm'
@@ -869,7 +862,11 @@ export function Dashboard() {
                     </CardContent>
                 </Card>
             )}
-            <SaleDetailsModal sale={selectedSale} isOpen={!!selectedSale} onClose={() => setSelectedSale(null)} />
+            {selectedSale ? (
+                <Suspense fallback={null}>
+                    <SaleDetailsModal sale={selectedSale} isOpen onClose={() => setSelectedSale(null)} />
+                </Suspense>
+            ) : null}
         </div>
     )
 }

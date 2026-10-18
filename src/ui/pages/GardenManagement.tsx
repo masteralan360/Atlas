@@ -19,7 +19,7 @@ import {
   Unlink,
 } from 'lucide-react'
 
-import { useAuth } from '@/auth'
+import { useAuth } from '@/auth/AuthContext'
 import { isDateInDateRange } from '@/lib/dateRangeFilters'
 import { formatNumberWithCommas, formatNumericInput, sanitizeNumericInput } from '@/lib/utils'
 import {
@@ -46,6 +46,8 @@ import {
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
+import { Button } from '@/ui/components/button'
+import { Input } from '@/ui/components/input'
 import {
   AppDialog,
   AppDialogBody,
@@ -54,14 +56,12 @@ import {
   AppDialogHeader,
   AppDialogTitle,
   Badge,
-  Button,
   Card,
   CardContent,
   CardHeader,
   CardTitle,
   CurrencySelector,
   DateTimePicker,
-  Input,
   Label,
   Select,
   SelectContent,
@@ -71,7 +71,7 @@ import {
   Textarea,
   useToast,
 } from '@/ui/components'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 type GardenTab = 'overview' | 'projects' | 'contracts' | 'schedule' | 'myJobs'
 type JobForm = {

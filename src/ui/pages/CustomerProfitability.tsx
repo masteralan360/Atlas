@@ -42,10 +42,11 @@ import type {
 } from '@/local-db'
 import { useOptionalWorkspacePermissions } from '@/permissions/workspacePermissionsState'
 import type { WorkspacePermissionKey } from '@/permissions/workspacePermissionDefinitions'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Input } from '@/ui/components/input'
 import {
   AppDialog,
   AppDialogBody,
@@ -59,7 +60,6 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  Input,
   Label,
   Select,
   SelectContent,

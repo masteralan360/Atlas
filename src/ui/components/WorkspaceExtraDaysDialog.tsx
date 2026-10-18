@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertCircle, CalendarPlus, CheckCircle2, LoaderCircle } from 'lucide-react'
 import { useAuth } from '@/auth'
-import { useWorkspace } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { Button } from '@/ui/components/button'
 import {
     Dialog,

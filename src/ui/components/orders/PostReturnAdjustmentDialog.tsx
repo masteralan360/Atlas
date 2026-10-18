@@ -9,23 +9,23 @@ import {
 import { getAppliedCurrencyConversion } from '@/lib/orderCurrency'
 import { formatNumericInput, generateId, sanitizeNumericInput } from '@/lib/utils'
 import type { CurrencyCode, ExchangeRateSnapshot, OrderAdjustmentType, OrderReturn } from '@/local-db'
+import { Input } from '@/ui/components/input'
 import {
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    Button,
-    CurrencySelector,
-    Input,
-    Label,
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-    Textarea
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  Button,
+  CurrencySelector,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Textarea,
 } from '@/ui/components'
 
 type PostReturnAdjustmentDialogProps = {

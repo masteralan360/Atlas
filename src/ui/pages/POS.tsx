@@ -66,7 +66,8 @@ import { PosCheckoutAttempt, PosCheckoutPendingError } from '@/lib/posCheckoutAt
 import { formatCurrency, generateId, cn } from '@/lib/utils'
 import { roundOrderValue } from '@/lib/orderPrecision'
 import { CartItem } from '@/types'
-import { useWorkspace, type WorkspaceFeatures } from '@/workspace'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { type WorkspaceFeatures } from '@/workspace'
 import { useHideCosts, useWorkspacePermissions } from '@/permissions'
 import { getMissingProductCostMessage, hasValidProductCost } from '@/lib/productCost'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
@@ -96,31 +97,31 @@ import { buildCheckoutRatesSnapshot, buildExchangeRateSnapshot, getPrimaryChecko
 import { buildOrderExchangeRatesSnapshot } from '@/lib/orderCurrency'
 import { exchangeSnapshotsToPayloads } from '@/lib/salesExchange'
 import type { ResolvedActiveDiscount } from '@/lib/discounts'
+import { Input } from '@/ui/components/input'
 import {
-    Button,
-    AppDialog,
-    AppDialogBody,
-    AppDialogContent,
-    AppDialogFooter,
-    AppDialogHeader,
-    AppDialogTitle,
-    CurrencySelector,
-    Input,
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter,
-    DialogTrigger,
-    DialogClose,
-    useToast,
-    Label,
-    Textarea,
-    Switch,
-    Popover,
-    PopoverTrigger,
-    PopoverContent,
+  Button,
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+  CurrencySelector,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogTrigger,
+  DialogClose,
+  useToast,
+  Label,
+  Textarea,
+  Switch,
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
 } from '@/ui/components'
 import { UiAccessGate } from '@/context/UiAccessContext'
 import {
@@ -160,7 +161,13 @@ import {
 import { isDesktop, isMobile } from '@/lib/platform'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { ExchangeRateList } from '@/ui/components'
-import { CheckoutSuccessModal, HeldSalesModal, type HeldSale, StorageSelector, CrossStorageWarningModal } from '@/ui/components'
+import { CheckoutSuccessModal } from '@/ui/components/pos/CheckoutSuccessModal'
+import {
+  HeldSalesModal,
+  type HeldSale,
+  StorageSelector,
+  CrossStorageWarningModal,
+} from '@/ui/components'
 import { BarcodeScannerModal } from '@/ui/components/pos/BarcodeScannerModal'
 import { CameraBarcodeScannerModal } from '@/ui/components/pos/CameraBarcodeScannerModal'
 import { PosAdjust } from '@/ui/components/pos/PosAdjust'
