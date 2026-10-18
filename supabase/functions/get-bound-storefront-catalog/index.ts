@@ -31,10 +31,22 @@ type ProductImageRow = {
     position: number
 }
 
+const PRODUCT_IMAGE_QUERY_BATCH_SIZE = 50
+const PRODUCT_IMAGE_QUERY_CONCURRENCY = 4
+
 function privateJsonResponse(payload: unknown, init: ResponseInit = {}) {
     const headers = new Headers(init.headers)
     headers.set('Cache-Control', 'private, no-store')
     return jsonResponse(payload, { ...init, headers })
+}
+
+function safeErrorMessage(error: unknown) {
+    const message = error instanceof Error
+        ? error.message
+        : typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+            ? error.message
+            : 'Unexpected error'
+    return message.replace(/https?:\/\/\S+/g, '[request URL]').slice(0, 500)
 }
 
 Deno.serve(async (req) => {
@@ -133,24 +145,49 @@ Deno.serve(async (req) => {
         const productIds = visibleProducts.productRows.map((product) => product.id)
         const additionalImageUrlsByProductId = new Map<string, string[]>()
         if (productIds.length > 0) {
-            const { data: additionalImages, error: additionalImagesError } = await adminClient
-                .from('product_images')
-                .select('product_id, image_url, position')
-                .eq('workspace_id', context.workspace.id)
-                .in('product_id', productIds)
-                .order('product_id', { ascending: true })
-                .order('position', { ascending: true })
-
-            if (additionalImagesError) {
-                return errorResponse(additionalImagesError.message, 500)
+            const productIdBatches: string[][] = []
+            for (let index = 0; index < productIds.length; index += PRODUCT_IMAGE_QUERY_BATCH_SIZE) {
+                productIdBatches.push(productIds.slice(index, index + PRODUCT_IMAGE_QUERY_BATCH_SIZE))
             }
 
-            for (const image of (additionalImages ?? []) as ProductImageRow[]) {
-                const imageUrl = resolvePublicAssetUrl(image.image_url)
-                if (!imageUrl) continue
-                const productImages = additionalImageUrlsByProductId.get(image.product_id) ?? []
-                productImages.push(imageUrl)
-                additionalImageUrlsByProductId.set(image.product_id, productImages)
+            for (let index = 0; index < productIdBatches.length; index += PRODUCT_IMAGE_QUERY_CONCURRENCY) {
+                const imageBatches = await Promise.all(productIdBatches
+                    .slice(index, index + PRODUCT_IMAGE_QUERY_CONCURRENCY)
+                    .map(async (productIdBatch) => {
+                        try {
+                            const { data, error } = await adminClient
+                                .from('product_images')
+                                .select('product_id, image_url, position')
+                                .eq('workspace_id', context.workspace.id)
+                                .in('product_id', productIdBatch)
+                                .order('product_id', { ascending: true })
+                                .order('position', { ascending: true })
+
+                            if (error) {
+                                console.warn('[get-bound-storefront-catalog] Additional product images unavailable', {
+                                    productCount: productIdBatch.length,
+                                    error: safeErrorMessage(error)
+                                })
+                                return []
+                            }
+
+                            return (data ?? []) as ProductImageRow[]
+                        } catch (error) {
+                            console.warn('[get-bound-storefront-catalog] Additional product images unavailable', {
+                                productCount: productIdBatch.length,
+                                error: safeErrorMessage(error)
+                            })
+                            return []
+                        }
+                    }))
+
+                for (const image of imageBatches.flat()) {
+                    const imageUrl = resolvePublicAssetUrl(image.image_url)
+                    if (!imageUrl) continue
+                    const productImages = additionalImageUrlsByProductId.get(image.product_id) ?? []
+                    productImages.push(imageUrl)
+                    additionalImageUrlsByProductId.set(image.product_id, productImages)
+                }
             }
         }
 
