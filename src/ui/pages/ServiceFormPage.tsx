@@ -8,9 +8,11 @@ import {
     ChevronRight,
     DollarSign,
     FileText,
+    FolderKey,
     Images,
     ImagePlus,
     Info,
+    Loader2,
     Save,
     Settings,
     Shuffle,
@@ -32,6 +34,10 @@ import {
     updateProduct,
     useCategories,
     useProduct,
+    getServiceAccessSettings,
+    listServiceAccessCategories,
+    setServiceAccessCategories,
+    type ServiceAccessCategorySummary,
     type Product
 } from '@/local-db'
 import type { CurrencyCode } from '@/local-db/models'
@@ -66,6 +72,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+    Checkbox,
   Label,
   Select,
   SelectContent,
@@ -117,6 +124,7 @@ type ServiceFormData = {
     imageUrl: string
     canBeReturned: boolean
     returnRules: string
+    accessCategoryIds: string[]
 }
 
 const emptyServiceFormData: ServiceFormData = {
@@ -129,7 +137,8 @@ const emptyServiceFormData: ServiceFormData = {
     currency: 'usd',
     imageUrl: '',
     canBeReturned: true,
-    returnRules: ''
+    returnRules: '',
+    accessCategoryIds: []
 }
 
 function getCurrencySymbol(currency: string, iqdPreference: string) {
@@ -154,7 +163,7 @@ function createInitialFormData(defaultCurrency: CurrencyCode): ServiceFormData {
     }
 }
 
-function mapServiceToFormData(product: Product, hideCosts = false): ServiceFormData {
+function mapServiceToFormData(product: Product, hideCosts = false, accessCategoryIds: string[] = []): ServiceFormData {
     return {
         sku: product.sku || '',
         name: product.name,
@@ -167,7 +176,8 @@ function mapServiceToFormData(product: Product, hideCosts = false): ServiceFormD
         currency: product.currency,
         imageUrl: product.imageUrl || '',
         canBeReturned: product.canBeReturned ?? true,
-        returnRules: product.returnRules || ''
+        returnRules: product.returnRules || '',
+        accessCategoryIds
     }
 }
 
@@ -185,6 +195,8 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
     const isEditing = mode === 'edit'
     const isReadOnly = isEditing && !canEdit
+    const localWorkspaceMode = isLocalWorkspaceMode(workspaceId)
+    const canManageServiceAccess = user?.role === 'admin' && Boolean(workspaceId)
     const isDesktopShell = isTauri()
     const persistedServiceId = isEditing ? service?.id : undefined
 
@@ -202,6 +214,10 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
     const [serviceHydrationResolved, setServiceHydrationResolved] = useState(false)
     const [deleteServiceOpen, setDeleteServiceOpen] = useState(false)
     const [isDeletingService, setIsDeletingService] = useState(false)
+    const [serviceAccessCategories, setServiceAccessCategoriesState] = useState<ServiceAccessCategorySummary[]>([])
+    const [serviceAccessSettingsLoaded, setServiceAccessSettingsLoaded] = useState(!canManageServiceAccess || !isEditing)
+    const [serviceAccessLoading, setServiceAccessLoading] = useState(false)
+    const [serviceAccessLoadFailed, setServiceAccessLoadFailed] = useState(false)
     const imageUploadInputRef = useRef<HTMLInputElement>(null)
     const cameraInputRef = useRef<HTMLInputElement>(null)
     const skuInputRef = useRef<HTMLInputElement>(null)
@@ -352,6 +368,61 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
         initialFormSnapshotRef.current = JSON.stringify(nextFormData)
         initializedKeyRef.current = nextKey
     }, [features.default_currency, hideCosts, mode, service])
+
+    useEffect(() => {
+        let cancelled = false
+        setServiceAccessCategoriesState([])
+        setServiceAccessLoadFailed(false)
+        if (!canManageServiceAccess || !workspaceId) {
+            setServiceAccessSettingsLoaded(true)
+            setServiceAccessLoading(false)
+            return
+        }
+
+        if (!localWorkspaceMode && !isOnline) {
+            setServiceAccessSettingsLoaded(true)
+            setServiceAccessLoading(false)
+            return
+        }
+
+        setServiceAccessLoading(true)
+        setServiceAccessSettingsLoaded(!isEditing)
+        const loadServiceAccess = async () => {
+            try {
+                if (isEditing && service) {
+                    const [accessCategories, settings] = await Promise.all([
+                        listServiceAccessCategories(workspaceId),
+                        getServiceAccessSettings(service.id)
+                    ])
+                    if (cancelled) return
+                    setServiceAccessCategoriesState(accessCategories)
+                    setFormData((current) => ({ ...current, accessCategoryIds: settings.categoryIds }))
+                    initialFormSnapshotRef.current = JSON.stringify(
+                        mapServiceToFormData(service, hideCosts, settings.categoryIds)
+                    )
+                    setServiceAccessSettingsLoaded(true)
+                } else if (!isEditing) {
+                    const accessCategories = await listServiceAccessCategories(workspaceId)
+                    if (cancelled) return
+                    setServiceAccessCategoriesState(accessCategories)
+                    setServiceAccessSettingsLoaded(true)
+                }
+            } catch (error) {
+                if (!cancelled) {
+                    console.error('[ServiceForm] Failed to load service access settings:', error)
+                    setServiceAccessLoadFailed(true)
+                    setServiceAccessSettingsLoaded(true)
+                }
+            } finally {
+                if (!cancelled) setServiceAccessLoading(false)
+            }
+        }
+        void loadServiceAccess()
+
+        return () => {
+            cancelled = true
+        }
+    }, [canManageServiceAccess, hideCosts, isEditing, isOnline, localWorkspaceMode, service, workspaceId])
 
     if (!canEdit && mode !== 'edit') {
         return null
@@ -528,6 +599,7 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
         }
 
         setIsSaving(true)
+        let accessAssignmentFailed = false
 
         try {
             const categoryName = formData.categoryId
@@ -555,6 +627,7 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
                 createdBy: user?.id || null
             }
 
+            let savedServiceId: string
             if (isEditing && service) {
                 if (service.imageUrl && service.imageUrl !== formData.imageUrl) {
                     assetManager.deleteAsset(service.imageUrl).catch((error) =>
@@ -563,8 +636,10 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
                 }
 
                 await updateProduct(service.id, dataToSave)
+                savedServiceId = service.id
             } else if (createdServiceIdRef.current) {
                 await updateProduct(createdServiceIdRef.current, dataToSave)
+                savedServiceId = createdServiceIdRef.current
             } else {
                 // Creation always persists the (possibly null) submitted cost;
                 // only a restricted edit is allowed to omit the property.
@@ -573,6 +648,18 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
                     costPrice: enteredCost
                 })
                 createdServiceIdRef.current = createdService.id
+                savedServiceId = createdService.id
+            }
+
+            if (canManageServiceAccess && (localWorkspaceMode || isOnline) && serviceAccessSettingsLoaded && !serviceAccessLoadFailed) {
+                const availableCategoryIds = new Set(serviceAccessCategories.map((category) => category.id))
+                if (formData.accessCategoryIds.some((categoryId) => !availableCategoryIds.has(categoryId))) {
+                    accessAssignmentFailed = true
+                    throw new Error(t('services.access.unavailableCategoryError'))
+                }
+                accessAssignmentFailed = true
+                await setServiceAccessCategories(savedServiceId, formData.accessCategoryIds)
+                accessAssignmentFailed = false
             }
 
             initialFormSnapshotRef.current = JSON.stringify(formData)
@@ -586,7 +673,9 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
             console.error('Error saving service:', error)
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: error instanceof DuplicateProductSkuError
+                description: accessAssignmentFailed
+                    ? t('services.access.saveAssignmentError')
+                    : error instanceof DuplicateProductSkuError
                     ? t('products.messages.skuDuplicate', { defaultValue: 'A product with this SKU already exists in this workspace.' })
                     : error instanceof Error ? error.message : t('services.messages.saveError', {
                         defaultValue: 'Failed to save the service'
@@ -662,7 +751,7 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
     }
 
     return (
-        <div className="mx-auto w-full max-w-[1600px] space-y-3 pb-8">
+        <div className="w-full space-y-3 pb-8">
             <header className="flex flex-col gap-3 border-b border-border/60 px-1 pb-3 pt-1 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 items-center gap-2 sm:gap-4">
                     <Button variant="ghost" className="h-10 shrink-0 gap-2 px-2 sm:px-3" allowViewer={true} onClick={goToServices}>
@@ -788,7 +877,7 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
                             <div className="space-y-2">
                                 <Label htmlFor="service-name" className="flex items-center gap-2 font-bold">
                                     <Type className="h-4 w-4 text-primary/60" />
-                                    {t('products.table.name')}
+                                    {t('products.table.name')} <span className="text-destructive">*</span>
                                 </Label>
                                 <Input
                                     id="service-name"
@@ -888,6 +977,75 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
                                     </SelectContent>
                                 </Select>
                             </div>
+                            {canManageServiceAccess && (
+                                <section className="space-y-3 rounded-xl border border-primary/20 bg-primary/[0.025] p-4 md:col-span-2 sm:p-5">
+                                    <div className="flex items-start gap-3">
+                                        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                            <FolderKey className="h-4 w-4" />
+                                        </span>
+                                        <div className="min-w-0 flex-1">
+                                            <h3 className="font-bold">{t('services.access.serviceCategories')}</h3>
+                                            <p className="mt-1 text-sm leading-5 text-muted-foreground">{t('services.access.serviceCategoriesDescription')}</p>
+                                        </div>
+                                    </div>
+                                    {!localWorkspaceMode && !isOnline && (
+                                        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+                                            {t('services.access.offlineAssignmentsUnavailable')}
+                                        </div>
+                                    )}
+                                    {serviceAccessLoadFailed ? (
+                                        <p className="text-sm text-destructive">{t('services.access.loadError')}</p>
+                                    ) : serviceAccessLoading ? (
+                                        <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+                                            <Loader2 className="h-4 w-4 animate-spin" />{t('services.access.loadingCategories')}
+                                        </div>
+                                    ) : (
+                                        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                            {formData.accessCategoryIds
+                                                .filter((id) => !serviceAccessCategories.some((category) => category.id === id))
+                                                .map((id) => (
+                                                    <div key={id} className="flex min-w-0 items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+                                                        <span className="min-w-0 flex-1 truncate text-sm">{t('services.access.unavailableCategory')}</span>
+                                                        <Button
+                                                            type="button"
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            className="h-7 shrink-0 px-2"
+                                                            onClick={() => setFormData((current) => ({
+                                                                ...current,
+                                                                accessCategoryIds: current.accessCategoryIds.filter((categoryId) => categoryId !== id)
+                                                            }))}
+                                                            disabled={isReadOnly || (!localWorkspaceMode && !isOnline) || !serviceAccessSettingsLoaded}
+                                                        >
+                                                            {t('common.remove')}
+                                                        </Button>
+                                                    </div>
+                                                ))}
+                                            {serviceAccessCategories.map((category) => {
+                                                const checked = formData.accessCategoryIds.includes(category.id)
+                                                return (
+                                                    <Label key={category.id} className="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-border/70 bg-background px-3 py-3 text-sm font-medium hover:bg-muted/40">
+                                                        <Checkbox
+                                                            checked={checked}
+                                                            onCheckedChange={(value) => setFormData((current) => ({
+                                                                ...current,
+                                                                accessCategoryIds: value === true
+                                                                    ? [...new Set([...current.accessCategoryIds, category.id])].sort()
+                                                                    : current.accessCategoryIds.filter((categoryId) => categoryId !== category.id)
+                                                            }))}
+                                                            disabled={isReadOnly || (!localWorkspaceMode && !isOnline) || !serviceAccessSettingsLoaded || serviceAccessLoadFailed}
+                                                        />
+                                                        <span className="min-w-0 flex-1 truncate">{category.name}</span>
+                                                    </Label>
+                                                )
+                                            })}
+                                            {serviceAccessCategories.length === 0 && formData.accessCategoryIds.length === 0 && (
+                                                <p className="text-sm text-muted-foreground sm:col-span-2 lg:col-span-3">{t('services.access.noCategories')}</p>
+                                            )}
+                                        </div>
+                                    )}
+                                </section>
+                            )}
                             <div className="space-y-2 md:col-span-2">
                                 <Label htmlFor="service-description" className="flex items-center gap-2 font-bold">
                                     <FileText className="h-4 w-4 text-primary/60" />
@@ -920,7 +1078,7 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
                                 <div className="space-y-2">
                                     <Label htmlFor="service-price" className="flex items-center gap-2 font-bold">
                                         <DollarSign className="h-4 w-4 text-primary/60" />
-                                        {t('products.form.price')}
+                                        {t('products.form.price')} <span className="text-destructive">*</span>
                                     </Label>
                                     <div className="relative">
                                         <Input
@@ -932,7 +1090,7 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
                                                 const raw = sanitizeNumericInput(event.target.value, { maxFractionDigits: 4 })
                                                 return { ...current, price: raw }
                                             })}
-                                            placeholder="0.000"
+                                            placeholder="0"
                                             readOnly={isReadOnly}
                                             required
                                             className="h-12 rounded-xl border-border/80 bg-background/80 pr-16 text-lg font-black text-primary shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50"
@@ -944,7 +1102,7 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
                                 </div>
                                 <div className="space-y-2">
                                     <CurrencySelector
-                                        label={t('products.form.currency') || 'Currency'}
+                                        label={`${t('products.form.currency') || 'Currency'} *`}
                                         value={formData.currency}
                                         onChange={(value) => setFormData((current) => ({ ...current, currency: value }))}
                                         iqdDisplayPreference={features.iqd_display_preference}
@@ -970,7 +1128,7 @@ function ServiceEditor({ mode, serviceId }: { mode: ServiceFormMode; serviceId?:
                                                         costPrice: raw
                                                     }
                                                 })}
-                                                placeholder="0.000"
+                                                placeholder="0"
                                                 readOnly={isReadOnly}
                                                 className="h-12 rounded-xl border-border/80 bg-background/80 pr-16 font-bold shadow-sm shadow-black/[0.03] transition-all hover:border-primary/45 hover:bg-background focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/20 dark:bg-background/50"
                                             />

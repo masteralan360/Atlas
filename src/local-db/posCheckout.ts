@@ -23,6 +23,7 @@ import { commitStockBatchAllocations, refreshStockBatchesFromSupabase } from './
 import { applyOfflinePosStockEffects } from './offlinePosStock'
 import { hydrateInventoryTransactionsForReferences } from './inventoryTransactions'
 import { persistLoanAggregateRpcResult } from './loanTransactions'
+import { getLocalAccessibleServiceIdsInCurrentTransaction } from './serviceAccess'
 
 export interface PosCheckoutItem {
     product_id: string
@@ -186,6 +187,7 @@ async function saveLocal(input: PosCheckoutInput, loanDependencies?: LoanBusines
             const loan = await db.loans.where('saleId').equals(p.id).first()
             return { sequenceId: existing.sequenceId, loanId: loan?.id ?? null }
         }
+        const accessibleServiceIds = await getLocalAccessibleServiceIdsInCurrentTransaction(p.workspace_id)
         const sequenceId = await generateLocalSaleSequenceId(p.workspace_id)
         for (const item of p.items) {
             const product = await db.products.get(item.product_id)
@@ -194,6 +196,9 @@ async function saveLocal(input: PosCheckoutInput, loanDependencies?: LoanBusines
                 throw new Error(i18n.t('pos.stockMismatch'))
             }
             if (isService(product)) {
+                if (accessibleServiceIds !== null && !accessibleServiceIds.has(product.id)) {
+                    throw new Error(i18n.t('services.access.serviceUnavailable'))
+                }
                 if ((item.unit_factor ?? 1) !== 1
                     || Math.abs((item.inventory_quantity ?? item.quantity) - item.quantity) > 0.000001) {
                     throw new Error(i18n.t('pos.stockMismatch'))

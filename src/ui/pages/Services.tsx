@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useState } from 'react'
 import { useLocation } from 'wouter'
-import { BriefcaseBusiness, Loader2, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { BriefcaseBusiness, FolderKey, Loader2, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { useAuth } from '@/auth'
@@ -16,6 +16,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { ServiceAccessCategoriesDialog } from '@/ui/components/services/ServiceAccessCategoriesDialog'
 import { Input } from '@/ui/components/input'
 import {
     AppPagination,
@@ -45,6 +46,8 @@ export function Services() {
     const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
     const [isDeleting, setIsDeleting] = useState(false)
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
+    const canManageAccess = user?.role === 'admin' && Boolean(workspaceId)
+    const [accessCategoriesOpen, setAccessCategoriesOpen] = useState(false)
 
     const servicesPage = useServicesCatalogPage({
         workspaceId,
@@ -87,7 +90,10 @@ export function Services() {
                     <h1 className="flex items-center gap-2 text-2xl font-bold"><BriefcaseBusiness className="h-6 w-6 text-primary" />{t('services.title')}</h1>
                     <p className="text-muted-foreground">{t('services.subtitle')}</p>
                 </div>
-                {canEdit && <Button onClick={() => navigate('/services/new')}><Plus className="h-4 w-4" />{t('services.addService')}</Button>}
+                <div className="flex flex-wrap items-center gap-2">
+                    {canManageAccess && <Button variant="outline" onClick={() => setAccessCategoriesOpen(true)}><FolderKey className="h-4 w-4" />{t('services.access.manage')}</Button>}
+                    {canEdit && <Button onClick={() => navigate('/services/new')}><Plus className="h-4 w-4" />{t('services.addService')}</Button>}
+                </div>
             </div>
 
             <div className="relative max-w-md">
@@ -170,6 +176,13 @@ export function Services() {
                 isLoading={isDeleting}
                 onConfirm={() => void handleDelete()}
             />
+            {canManageAccess && workspaceId && (
+                <ServiceAccessCategoriesDialog
+                    open={accessCategoriesOpen}
+                    onOpenChange={setAccessCategoriesOpen}
+                    workspaceId={workspaceId}
+                />
+            )}
         </div>
     )
 }

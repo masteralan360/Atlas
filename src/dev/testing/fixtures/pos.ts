@@ -4,6 +4,7 @@ import type { PosCheckoutInput } from '@/local-db/posCheckout'
 import { CASH_AND_DIGITAL_PAYMENT_METHODS } from '@/lib/paymentMethods'
 
 export const POS_WORKSPACE = 'a7200000-0000-4000-8000-000000000001'
+export const POS_USER = 'a7200000-0000-4000-8000-000000000006'
 export const POS_PRODUCT = 'a7200000-0000-4000-8000-000000000002'
 export const POS_BASE_UOM = 'a7200000-0000-4000-8000-000000000017'
 export const POS_STORAGE = 'a7200000-0000-4000-8000-000000000003'
@@ -58,7 +59,7 @@ export function posCheckoutInput({ currency = 'usd', method = 'cash', service = 
                     batch_id: POS_BATCH, batch_number: 'POS-1', quantity, price: 100, cost_price: 40, currency,
                     expiry_date: null, manufacturing_date: null
                 }] }] },
-        user: { id: 'a7200000-0000-4000-8000-000000000006', name: 'POS test cashier' },
+        user: { id: POS_USER, name: 'POS test cashier' },
         timestamp: POS_TIME, exchangeRates: null, primaryRate: null, maxDiscountPercent: 100,
         batchPlans: service ? [] : [{ productId: POS_PRODUCT, storageId: POS_STORAGE, allocations: [allocation] }],
         atomicLoanPayload: null, account: null

@@ -2202,6 +2202,10 @@ export function SalesOrderFormPage({
                                                                     : t('orders.form.selectProduct', { defaultValue: 'Select Product' })}
                                                             hasSelection={!!item.productId}
                                                             showLinkedIndicator={false}
+                                                            storageScopeId={item.storageId}
+                                                            requirePositiveStock={item.storageId !== SERVICES_VIRTUAL_STORAGE_ID}
+                                                            isProductAvailable={(product) => getSalesProductOptions(item.storageId, item.productId)
+                                                                .some((candidate) => candidate.id === product.id)}
                                                             storageMissing={!item.storageId}
                                                             storageMissingLabel={t('orders.form.selectStorage', { defaultValue: 'Select Storage' })}
                                                             onStorageMissingClick={() => handleStorageMissing(index)}

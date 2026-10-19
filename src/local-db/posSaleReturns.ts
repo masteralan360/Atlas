@@ -5,6 +5,8 @@ import { db } from './database'
 import { appendPaymentTransaction } from './payments'
 import { getPaymentTransactionReversalState } from '@/lib/paymentReversals'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { isService } from '@/lib/catalogItem'
+import { assertLocalServiceAccessInCurrentTransaction } from './serviceAccess'
 
 /** A converted price of zero remains zero, including after currency rounding. */
 export function calculateSaleReturnAmount(items: ReadonlyArray<{ converted_unit_price?: number | null; unit_price?: number | null }>, quantities: number[]) {
@@ -56,6 +58,15 @@ export async function persistSaleReturnLedger(input: {
 }) {
     if (!Number.isFinite(input.refundAmount) || input.refundAmount < 0 || !input.linePayloads.length) throw new Error(i18n.t('sales.return.failed'))
     const persist = async () => {
+        if (isLocalWorkspaceMode(input.sale.workspace_id)) {
+            const saleProductIds = input.sale.items?.length
+                ? input.sale.items.map((item) => item.product_id).filter(Boolean)
+                : (await db.sale_items.where('saleId').equals(input.sale.id).toArray()).map((item) => item.productId)
+            const products = await db.products.bulkGet(saleProductIds)
+            await assertLocalServiceAccessInCurrentTransaction(input.sale.workspace_id, products
+                .filter((product) => isService(product))
+                .map((product) => product!.id))
+        }
         const existingReturn = await db.sale_returns.get(input.returnId)
         if (existingReturn && (existingReturn.workspaceId !== input.sale.workspace_id || existingReturn.saleId !== input.sale.id
             || Math.abs(existingReturn.refundAmount - input.refundAmount) > 0.001)) throw new Error(i18n.t('sales.return.failed'))

@@ -86,6 +86,7 @@ import {
 import { DuplicateProductSkuError, normalizeProductSku, trimProductSku } from './productSku'
 import { replaceProductPriceBookItems } from './priceBooks'
 import { isService } from '@/lib/catalogItem'
+import { fetchAccessibleServiceIds, useServiceAccessIds } from './serviceAccess'
 import { getPosServiceDisplayName } from '@/lib/posServiceName'
 import { generateId, toSnakeCase, toCamelCase } from '@/lib/utils'
 import { supabase } from '@/auth/supabase'
@@ -743,23 +744,27 @@ export function useProducts(workspaceId: string | undefined, options: UseProduct
     const enabled = options.enabled ?? true
     const syncRemote = options.syncRemote ?? true
     const syncBarcodeCache = options.syncBarcodeCache ?? true
+    const serviceAccess = useServiceAccessIds(workspaceId, enabled)
 
     const products = useLiveQuery(
         async () => {
             if (!enabled || !workspaceId) return []
 
             const rows = await db.products.where('workspaceId').equals(workspaceId).and(p => !p.isDeleted).toArray()
+            const accessFilteredRows = serviceAccess.ids === null
+                ? rows
+                : rows.filter((product) => !isService(product) || serviceAccess.ids?.has(product.id) === true)
             if (storageAccess.isReady !== false
-                && (storageAccess.isAdmin || storageAccess.excludedStorageIds.size === 0)) return rows
+                && (storageAccess.isAdmin || storageAccess.excludedStorageIds.size === 0)) return accessFilteredRows
 
             const inventoryRows = await db.inventory
                 .where('workspaceId')
                 .equals(workspaceId)
                 .and((row) => !row.isDeleted)
                 .toArray()
-            return filterProductsByStorageAccess(rows, inventoryRows, storageAccess)
+            return filterProductsByStorageAccess(accessFilteredRows, inventoryRows, storageAccess)
         },
-        [enabled, storageAccess.signature, workspaceId]
+        [enabled, serviceAccess.ids, storageAccess.signature, workspaceId]
     )
 
     useEffect(() => {
@@ -783,6 +788,7 @@ export function useProducts(workspaceId: string | undefined, options: UseProduct
 export function useProductsByIds(workspaceId: string | undefined, productIds: string[]) {
     const productIdKey = productIds.join('|')
     const storageAccess = useStorageAccess(workspaceId)
+    const serviceAccess = useServiceAccessIds(workspaceId)
 
     const products = useLiveQuery(
         async () => {
@@ -793,17 +799,20 @@ export function useProductsByIds(workspaceId: string | undefined, productIds: st
             const rows = (await db.products.bulkGet(productIds)).filter((product): product is Product =>
                 !!product && product.workspaceId === workspaceId && !product.isDeleted
             )
+            const accessFilteredRows = serviceAccess.ids === null
+                ? rows
+                : rows.filter((product) => !isService(product) || serviceAccess.ids?.has(product.id) === true)
             if (storageAccess.isReady !== false
-                && (storageAccess.isAdmin || storageAccess.excludedStorageIds.size === 0)) return rows
+                && (storageAccess.isAdmin || storageAccess.excludedStorageIds.size === 0)) return accessFilteredRows
 
             const inventoryRows = await db.inventory
                 .where('workspaceId')
                 .equals(workspaceId)
                 .and((row) => !row.isDeleted)
                 .toArray()
-            return filterProductsByStorageAccess(rows, inventoryRows, storageAccess)
+            return filterProductsByStorageAccess(accessFilteredRows, inventoryRows, storageAccess)
         },
-        [workspaceId, productIdKey, storageAccess.signature]
+        [workspaceId, productIdKey, serviceAccess.ids, storageAccess.signature]
     )
 
     return products ?? []
@@ -811,12 +820,14 @@ export function useProductsByIds(workspaceId: string | undefined, productIds: st
 
 export function useProduct(id: string | undefined) {
     const storageAccess = useStorageAccess(undefined)
+    const serviceAccess = useServiceAccessIds(undefined)
     const product = useLiveQuery(
         async () => {
             if (!id) return undefined
 
             const row = await db.products.get(id)
             if (!row || row.isDeleted) return undefined
+            if (isService(row) && serviceAccess.ids !== null && !serviceAccess.ids.has(row.id)) return undefined
             const inventoryRows = await db.inventory
                 .where('productId')
                 .equals(id)
@@ -824,7 +835,7 @@ export function useProduct(id: string | undefined) {
                 .toArray()
             return filterProductsByStorageAccess([row], inventoryRows, storageAccess)[0]
         },
-        [id, storageAccess.signature]
+        [id, serviceAccess.ids, storageAccess.signature]
     )
     return product
 }
@@ -968,6 +979,7 @@ export async function createProduct(workspaceId: string, data: Omit<Product, 'id
     const product: Product = {
         ...data,
         isService: service,
+        serviceLegacyWorkspaceAccess: service ? false : data.serviceLegacyWorkspaceAccess,
         sku,
         skuKey: normalizeProductSku(sku),
         // The initial quantity is written as inventory below.  Keeping the
@@ -2513,7 +2525,7 @@ export async function enrichSalesForUiRows(workspaceId: string, sales: Sale[]) {
             .map((sale) => sale.cashierId)
             .filter((cashierId): cashierId is string => typeof cashierId === 'string' && cashierId.length > 0)
     ))
-    const [localItems, localExchangeRows, localReturns, localProductExchanges, cashierUsers, profileRows] = await Promise.all([
+    const [cachedItems, localExchangeRows, localReturns, localProductExchanges, cashierUsers, profileRows] = await Promise.all([
         db.sale_items.where('saleId').anyOf(saleIds).toArray(),
         db.sales_exchange.where('saleId').anyOf(saleIds).toArray(),
         db.sale_returns.where('saleId').anyOf(saleIds).toArray(),
@@ -2524,7 +2536,7 @@ export async function enrichSalesForUiRows(workspaceId: string, sales: Sale[]) {
     const returnIds = localReturns.map((saleReturn) => saleReturn.id)
 
     const productIds = Array.from(new Set(
-        localItems
+        cachedItems
             .map((item) => item.productId)
             .filter((productId): productId is string => typeof productId === 'string' && productId.length > 0)
     ))
@@ -2537,6 +2549,34 @@ export async function enrichSalesForUiRows(workspaceId: string, sales: Sale[]) {
         availableProducts
             .map((product) => [product.id, product] as const)
     )
+
+    let accessibleServiceIds: ReadonlySet<string> | null = null
+    try {
+        accessibleServiceIds = await fetchAccessibleServiceIds(workspaceId)
+    } catch (error) {
+        console.error('[Sales] Failed to refresh service permissions for historical records:', error)
+        accessibleServiceIds = new Set<string>()
+    }
+    const restrictedSaleIds = new Set<string>()
+    const isRestrictedServiceItem = (item: Record<string, any>) => {
+        if (accessibleServiceIds === null) return false
+        const productId = String(item.productId ?? item.product_id ?? item.product?.id ?? '')
+        const cachedProduct = productById.get(productId)
+        const serviceLine = cachedProduct?.isService === true
+            || item.product?.isService === true
+            || item.product?.is_service === true
+            || item.isService === true
+            || item.is_service === true
+        return serviceLine && !accessibleServiceIds.has(productId)
+    }
+    for (const item of cachedItems) {
+        if (isRestrictedServiceItem(item as unknown as Record<string, any>)) restrictedSaleIds.add(item.saleId)
+    }
+    for (const sale of sales) {
+        const embeddedItems = (sale as Sale & { _enrichedItems?: Record<string, any>[] })._enrichedItems
+        if (embeddedItems?.some(isRestrictedServiceItem)) restrictedSaleIds.add(sale.id)
+    }
+    const localItems = cachedItems.filter((item) => !isRestrictedServiceItem(item as unknown as Record<string, any>))
 
     const categoryIds = Array.from(new Set(
         availableProducts
@@ -2683,7 +2723,7 @@ export async function enrichSalesForUiRows(workspaceId: string, sales: Sale[]) {
         returnsBySaleId.set(saleReturn.saleId, existing)
     }
 
-    return sales.map((sale) => {
+    return sales.filter((sale) => !restrictedSaleIds.has(sale.id)).map((sale) => {
         const existingItems = Array.isArray((sale as Sale & { _enrichedItems?: unknown[] })._enrichedItems)
             ? ((sale as Sale & { _enrichedItems?: Record<string, unknown>[] })._enrichedItems ?? [])
             : []
@@ -3109,6 +3149,7 @@ export function useSales(
     const syncRemote = options.syncRemote ?? true
     const viewOwnScope = useViewOwnRecordScope('sales.view_own')
     const storageAccess = useStorageAccess(workspaceId)
+    const serviceAccess = useServiceAccessIds(workspaceId)
 
     const sales = useLiveQuery(
         async () => {
@@ -3136,7 +3177,7 @@ export function useSales(
                 .map((sale) => redactSaleForStorageAccess(sale as any, storageAccess))
                 .filter((sale): sale is NonNullable<typeof sale> => !!sale)
         },
-        [workspaceId, startDate, endDate, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId]
+        [workspaceId, startDate, endDate, serviceAccess.ids, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId]
     )
 
     useEffect(() => {
@@ -3161,6 +3202,7 @@ export function useSales(
 export function useArchivedSales(workspaceId: string | undefined, enabled: boolean) {
     const viewOwnScope = useViewOwnRecordScope('sales.view_own')
     const storageAccess = useStorageAccess(workspaceId)
+    const serviceAccess = useServiceAccessIds(workspaceId)
     const sales = useLiveQuery(
         async () => {
             if (!workspaceId || !enabled) return []
@@ -3176,7 +3218,7 @@ export function useArchivedSales(workspaceId: string | undefined, enabled: boole
                 .map((sale) => redactSaleForStorageAccess(sale as any, storageAccess))
                 .filter((sale): sale is NonNullable<typeof sale> => !!sale)
         },
-        [workspaceId, enabled, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId]
+        [workspaceId, enabled, serviceAccess.ids, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId]
     )
     return sales
 }

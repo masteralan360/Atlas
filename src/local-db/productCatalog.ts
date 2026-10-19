@@ -7,8 +7,9 @@ import { toCamelCase } from '@/lib/utils'
 import { runSupabaseAction, normalizeSupabaseActionError } from '@/lib/supabaseRequest'
 import { generateId } from '@/lib/utils'
 import { isOnline } from '@/lib/network'
-import { isService } from '@/lib/catalogItem'
+import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { fetchAccessibleServiceIds, useServiceAccessIds } from './serviceAccess'
 import {
   completeWorkspaceDataHydration,
   failWorkspaceDataHydration,
@@ -43,6 +44,68 @@ const EMPTY_SERVICES_PAGE: ServicesCatalogPage = {
 }
 
 export type ProductAutocompleteSuggestion = Product
+
+const PRODUCT_AUTOCOMPLETE_STORAGE_SCAN_SIZE = 64
+
+async function filterLocalAutocompleteProductsByStorage(
+  products: readonly Product[],
+  workspaceId: string,
+  storageId: string,
+  requirePositiveStock: boolean,
+): Promise<Product[]> {
+  if (storageId === SERVICES_VIRTUAL_STORAGE_ID) return products.filter(isService)
+
+  const physicalProducts = products.filter((product) => !isService(product))
+  if (physicalProducts.length === 0) return []
+
+  const inventoryRows = await db.inventory
+    .where('[workspaceId+storageId+productId]')
+    .anyOf(physicalProducts.map((product) => [workspaceId, storageId, product.id]))
+    .and((row) => !row.isDeleted && (!requirePositiveStock || Number(row.quantity) > 0))
+    .toArray()
+  const stockedProductIds = new Set(inventoryRows.map((row) => row.productId))
+
+  return physicalProducts.filter((product) => (
+    stockedProductIds.has(product.id)
+    || (!requirePositiveStock && product.storageId === storageId)
+  ))
+}
+
+async function readLocalStorageScopedMatches(
+  loadPage: (offset: number, pageSize: number) => Promise<Product[]>,
+  matchesSearch: (product: Product) => boolean,
+  workspaceId: string,
+  storageId: string,
+  limit: number,
+  requirePositiveStock: boolean,
+): Promise<Product[]> {
+  const matches = new Map<string, Product>()
+  for (let offset = 0; matches.size < limit; offset += PRODUCT_AUTOCOMPLETE_STORAGE_SCAN_SIZE) {
+    const page = await loadPage(offset, PRODUCT_AUTOCOMPLETE_STORAGE_SCAN_SIZE)
+    if (page.length === 0) break
+
+    if (storageId === SERVICES_VIRTUAL_STORAGE_ID) {
+      for (const product of page) {
+        if (matchesSearch(product) && isService(product)) matches.set(product.id, product)
+      }
+    } else {
+      const candidates = page.filter((product) => matchesSearch(product) && !isService(product))
+      const scopedCandidates = await filterLocalAutocompleteProductsByStorage(
+        candidates,
+        workspaceId,
+        storageId,
+        requirePositiveStock,
+      )
+      for (const product of scopedCandidates) matches.set(product.id, product)
+    }
+
+    if (page.length < PRODUCT_AUTOCOMPLETE_STORAGE_SCAN_SIZE) break
+  }
+
+  return [...matches.values()].sort((left, right) => (
+    left.name.localeCompare(right.name) || left.id.localeCompare(right.id)
+  )).slice(0, limit)
+}
 
 export type ProductCatalogSort =
   | 'name_asc'
@@ -148,7 +211,8 @@ function normalizeServicesPageQuery(query: ServicesCatalogPageQuery) {
 
 async function readLocalServicesPage(
   query: ServicesCatalogPageQuery,
-  categoryNameById: ReadonlyMap<string, string>
+  categoryNameById: ReadonlyMap<string, string>,
+  accessibleServiceIds: ReadonlySet<string> | null
 ): Promise<ServicesCatalogPage> {
   const workspaceId = query.workspaceId
   if (!workspaceId) return EMPTY_SERVICES_PAGE
@@ -157,6 +221,7 @@ async function readLocalServicesPage(
   const search = normalized.search.toLocaleLowerCase()
   const matches = (product: Product) => {
     if (product.isDeleted || !isService(product)) return false
+    if (accessibleServiceIds !== null && !accessibleServiceIds.has(product.id)) return false
     if (!search) return true
 
     return String(product.name ?? '').toLocaleLowerCase().includes(search)
@@ -264,50 +329,69 @@ async function readLocalProductAutocompleteSuggestions(
   excludedCategoryIds: readonly string[],
   limit: number,
   pendingOnly = false,
+  storageId?: string,
+  requirePositiveStock = false,
 ): Promise<ProductAutocompleteSuggestion[]> {
   const excludedCategories = new Set(excludedCategoryIds)
   const matchesSearch = (product: Product) => !product.isDeleted
     && (!pendingOnly || product.syncStatus === 'pending' || product.syncStatus === 'conflict')
     && !excludedCategories.has(product.categoryId || '')
-  const nameMatchesPromise = pendingOnly
+  const loadPage = (field: 'name' | 'sku') => (offset: number, pageSize: number) => pendingOnly
     ? db.products
       .where('syncStatus')
       .anyOf(['pending', 'conflict'])
-      .filter((product) => product.workspaceId === workspaceId
-        && matchesSearch(product)
-        && String(product.name ?? '').toLocaleLowerCase().includes(normalizedSearch))
-      .limit(limit)
+      .offset(offset)
+      .limit(pageSize)
       .toArray()
     : db.products
-      .where('[workspaceId+name+id]')
+      .where(field === 'name' ? '[workspaceId+name+id]' : '[workspaceId+sku+id]')
       .between([workspaceId, '', ''], [workspaceId, '\uffff', '\uffff'])
-      .filter((product) => matchesSearch(product)
-        && String(product.name ?? '').toLocaleLowerCase().includes(normalizedSearch))
-      .limit(limit)
+      .offset(offset)
+      .limit(pageSize)
       .toArray()
-  const skuMatchesPromise = pendingOnly
-    ? db.products
-      .where('syncStatus')
-      .anyOf(['pending', 'conflict'])
-      .filter((product) => product.workspaceId === workspaceId
-        && matchesSearch(product)
-        && String(product.sku ?? '').toLocaleLowerCase().includes(normalizedSearch))
-      .limit(limit)
-      .toArray()
-    : db.products
-      .where('[workspaceId+sku+id]')
-      .between([workspaceId, '', ''], [workspaceId, '\uffff', '\uffff'])
-      .filter((product) => matchesSearch(product)
-        && String(product.sku ?? '').toLocaleLowerCase().includes(normalizedSearch))
-      .limit(limit)
-      .toArray()
+  const matchesName = (product: Product) => product.workspaceId === workspaceId
+    && matchesSearch(product)
+    && String(product.name ?? '').toLocaleLowerCase().includes(normalizedSearch)
+  const matchesSku = (product: Product) => product.workspaceId === workspaceId
+    && matchesSearch(product)
+    && String(product.sku ?? '').toLocaleLowerCase().includes(normalizedSearch)
+  const nameMatchesPromise = storageId
+    ? readLocalStorageScopedMatches(loadPage('name'), matchesName, workspaceId, storageId, limit, requirePositiveStock)
+    : pendingOnly
+      ? db.products
+        .where('syncStatus')
+        .anyOf(['pending', 'conflict'])
+        .filter(matchesName)
+        .limit(limit)
+        .toArray()
+      : db.products
+        .where('[workspaceId+name+id]')
+        .between([workspaceId, '', ''], [workspaceId, '\uffff', '\uffff'])
+        .filter(matchesName)
+        .limit(limit)
+        .toArray()
+  const skuMatchesPromise = storageId
+    ? readLocalStorageScopedMatches(loadPage('sku'), matchesSku, workspaceId, storageId, limit, requirePositiveStock)
+    : pendingOnly
+      ? db.products
+        .where('syncStatus')
+        .anyOf(['pending', 'conflict'])
+        .filter(matchesSku)
+        .limit(limit)
+        .toArray()
+      : db.products
+        .where('[workspaceId+sku+id]')
+        .between([workspaceId, '', ''], [workspaceId, '\uffff', '\uffff'])
+        .filter(matchesSku)
+        .limit(limit)
+        .toArray()
   const [nameMatches, skuMatches] = await Promise.all([nameMatchesPromise, skuMatchesPromise])
   const productsById = new Map([...nameMatches, ...skuMatches].map((product) => [product.id, product]))
   const products = [...productsById.values()]
     .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
     .slice(0, limit)
   const familyIds = [...new Set(products.map((product) => product.parentProductId || product.id))]
-  const [parentRows, familyChildren] = await Promise.all([
+  const [rawParentRows, rawFamilyChildren] = await Promise.all([
     familyIds.length ? db.products.bulkGet(familyIds) : Promise.resolve([]),
     familyIds.length
       ? db.products
@@ -320,6 +404,14 @@ async function readLocalProductAutocompleteSuggestions(
         .toArray()
       : Promise.resolve([]),
   ])
+  const parentCandidates: Product[] = rawParentRows.flatMap((product) => product ? [product] : [])
+  const familyChildCandidates: Product[] = rawFamilyChildren.flatMap((product) => product ? [product] : [])
+  const [parentRows, familyChildren] = storageId
+    ? await Promise.all([
+      filterLocalAutocompleteProductsByStorage(parentCandidates, workspaceId, storageId, requirePositiveStock),
+      filterLocalAutocompleteProductsByStorage(familyChildCandidates, workspaceId, storageId, requirePositiveStock),
+    ])
+    : [parentCandidates, familyChildCandidates]
   const parentById = new Map<string, Product>()
   for (const product of parentRows) {
     if (!product
@@ -372,20 +464,32 @@ export async function searchProductAutocompleteSuggestions(
   excludedStorageIds: readonly string[],
   publishPartialResults?: (items: ProductAutocompleteSuggestion[], complete?: boolean) => void,
   waitForInventoryCache = false,
+  storageScope?: { storageId: string; requirePositiveStock?: boolean },
 ): Promise<ProductAutocompleteSuggestion[]> {
   const normalizedSearch = search.trim().toLocaleLowerCase()
+  const storageId = storageScope?.storageId.trim()
+  const requirePositiveStock = storageScope?.requirePositiveStock === true
   if (!workspaceId || normalizedSearch.length < 2) return []
 
   if (isOnline(workspaceId) && !isLocalWorkspaceMode(workspaceId)) {
-    const response = await runSupabaseAction('products.autocompleteSearch', () =>
-      getSupabaseClientForTable('products').rpc('search_products_for_autocomplete', {
+    const supabase = getSupabaseClientForTable('products')
+    const response = await runSupabaseAction('products.autocompleteSearch', () => storageId
+      ? supabase.rpc('search_products_for_autocomplete_in_storage', {
+        p_workspace_id: workspaceId,
+        p_search: search.trim(),
+        p_storage_id: storageId,
+        p_require_positive_stock: requirePositiveStock,
+        p_excluded_category_ids: [...excludedCategoryIds],
+        p_excluded_storage_ids: [...excludedStorageIds],
+        p_limit: 8,
+      })
+      : supabase.rpc('search_products_for_autocomplete', {
         p_workspace_id: workspaceId,
         p_search: search.trim(),
         p_excluded_category_ids: [...excludedCategoryIds],
         p_excluded_storage_ids: [...excludedStorageIds],
         p_limit: 8,
-      })
-    )
+      }))
     if (response.error) throw normalizeSupabaseActionError(response.error)
     const result = response.data as { products?: unknown[]; inventory?: unknown[] } | null
     if (!result || !Array.isArray(result.products)) {
@@ -425,7 +529,9 @@ export async function searchProductAutocompleteSuggestions(
       excludedCategoryIds,
       8,
       true,
-    )
+      storageId,
+      requirePositiveStock,
+    ).then((suggestions) => suggestions.filter((product) => !isService(product)))
     const remoteProducts = products.filter((product) => (
       familySupportIds.has(product.id)
       || String(product.name ?? '').toLocaleLowerCase().includes(normalizedSearch)
@@ -485,7 +591,19 @@ export async function searchProductAutocompleteSuggestions(
     return mergedProducts.slice(0, 16)
   }
 
-  return readLocalProductAutocompleteSuggestions(workspaceId, normalizedSearch, excludedCategoryIds, 8)
+  const suggestions = await readLocalProductAutocompleteSuggestions(
+    workspaceId,
+    normalizedSearch,
+    excludedCategoryIds,
+    8,
+    false,
+    storageId,
+    requirePositiveStock,
+  )
+  const accessibleServiceIds = await fetchAccessibleServiceIds(workspaceId)
+  return accessibleServiceIds === null
+    ? suggestions
+    : suggestions.filter((product) => !isService(product) || accessibleServiceIds.has(product.id))
 }
 
 async function readProductCatalogPage(query: ProductCatalogPageQuery): Promise<ProductCatalogPage> {
@@ -713,6 +831,7 @@ export function useServicesCatalogPage(
   const [settledQueryKey, setSettledQueryKey] = useState('')
   const queryKey = useMemo(() => JSON.stringify(query), [query])
   const request = useMemo(() => JSON.parse(queryKey) as ServicesCatalogPageQuery, [queryKey])
+  const serviceAccess = useServiceAccessIds(request.workspaceId)
   const categoryKey = useMemo(
     () => JSON.stringify(categories.map(({ id, name }) => [id, name])),
     [categories]
@@ -723,10 +842,10 @@ export function useServicesCatalogPage(
   )
 
   const localPage = useLiveQuery(
-    () => request.enabled
+    () => request.enabled || !serviceAccess.isReady
       ? undefined
-      : readLocalServicesPage(request, categoryNameById),
-    [queryKey, categoryKey]
+      : readLocalServicesPage(request, categoryNameById, serviceAccess.ids),
+    [queryKey, categoryKey, serviceAccess.ids, serviceAccess.isReady]
   )
 
   useEffect(() => {

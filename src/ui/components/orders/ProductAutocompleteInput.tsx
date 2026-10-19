@@ -31,6 +31,8 @@ interface ProductAutocompleteInputProps {
     linkedTooltip?: string
     showLinkedIndicator?: boolean
     storageId?: string
+    storageScopeId?: string
+    requirePositiveStock?: boolean
     isProductAvailable?: (product: Product) => boolean
     skuLabel?: string
     storageMissing?: boolean
@@ -79,6 +81,8 @@ export function ProductAutocompleteInput({
     linkedTooltip,
     showLinkedIndicator = true,
     storageId,
+    storageScopeId,
+    requirePositiveStock = false,
     isProductAvailable,
     skuLabel = 'SKU',
     storageMissing,
@@ -124,16 +128,24 @@ export function ProductAutocompleteInput({
                 publishPartialResults?.(items, complete)
             },
             waitForInventoryCache,
+            storageScopeId ? { storageId: storageScopeId, requirePositiveStock } : undefined,
         )
         if (latestQueryRef.current === search) {
             setCandidateProductIds(matches.map((product) => product.id))
         }
         return matches
-    }, [excludedCategoryIds, excludedStorageIds, user?.workspaceId, waitForInventoryCache])
+    }, [excludedCategoryIds, excludedStorageIds, requirePositiveStock, storageScopeId, user?.workspaceId, waitForInventoryCache])
+    const storageScopeKey = `${storageScopeId || ''}:${requirePositiveStock ? 'positive' : 'any'}`
+    useEffect(() => {
+        setCandidateProductIds([])
+    }, [storageScopeKey])
     const remoteSearch = useDebouncedAutocompleteSearch(
         query,
         isFocused && !justSelected && Boolean(user?.workspaceId) && selectionAccess.storageAccess.isReady !== false,
         searchProducts,
+        150,
+        2,
+        storageScopeKey,
     )
     const isSearchLoading = remoteSearch.isLoading
         || (isFocused && normalizedQuery.length >= 2 && selectionAccess.storageAccess.isReady === false)

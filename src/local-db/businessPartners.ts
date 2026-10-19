@@ -33,6 +33,8 @@ import { getOrderBalanceAmount } from './orderInstallments'
 import { isDirectTransactionPartnerAccountEffect } from './payments'
 import { endActiveFleetAssignmentsForAgent, ensureDriverFleetAssignment } from './fleet'
 import { filterProductsByStorageAccess, useStorageAccess } from './storagePermissions'
+import { useServiceAccessIds } from './serviceAccess'
+import { isService } from '@/lib/catalogItem'
 import type {
   Agent,
   AgentExcludedCategory,
@@ -751,6 +753,7 @@ export function useProductSelectionAccess(
 ) {
   const online = useNetworkStatus()
   const storageAccess = useStorageAccess(workspaceId, userId)
+  const serviceAccess = useServiceAccessIds(workspaceId)
   const needsInventoryRows = storageAccess.isReady !== false
     && !storageAccess.isAdmin
     && storageAccess.excludedStorageIds.size > 0
@@ -810,19 +813,30 @@ export function useProductSelectionAccess(
   )
   const canSelectProduct = useCallback(
     (product: Product) => (
+      (serviceAccess.ids === null || !isService(product) || serviceAccess.ids.has(product.id))
+      &&
       canSelectProductForExcludedCategories(product, excludedCategoryIds)
       && filterProductsByStorageAccess([product], inventoryRows ?? [], storageAccess).length > 0
     ),
-    [excludedCategoryIds, inventoryRows, storageAccess]
+    [excludedCategoryIds, inventoryRows, serviceAccess.ids, storageAccess]
   )
   const filterProducts = useCallback(
     <T extends Product>(products: readonly T[]) =>
       filterProductsByStorageAccess(
-        filterSelectableProducts(products, excludedCategoryIds),
+        filterSelectableProducts(
+          serviceAccess.ids === null
+            ? products
+            : products.filter((product) => !isService(product) || serviceAccess.ids?.has(product.id) === true),
+          excludedCategoryIds
+        ),
         inventoryRows ?? [],
         storageAccess
       ),
-    [excludedCategoryIds, inventoryRows, storageAccess]
+    [excludedCategoryIds, inventoryRows, serviceAccess.ids, storageAccess]
+  )
+  const canSelectServiceId = useCallback(
+    (serviceId: string) => serviceAccess.ids === null || (serviceAccess.isReady && serviceAccess.ids.has(serviceId)),
+    [serviceAccess.ids, serviceAccess.isReady]
   )
 
   const inventoryLoading = needsInventoryRows
@@ -833,9 +847,11 @@ export function useProductSelectionAccess(
     excludedCategoryIds,
     storageAccess,
     canSelectProduct,
+    canSelectServiceId,
+    serviceAccessReady: serviceAccess.isReady,
     filterProducts,
     inventoryLoading,
-  }), [canSelectProduct, excludedCategoryIds, filterProducts, inventoryLoading, storageAccess])
+  }), [canSelectProduct, canSelectServiceId, excludedCategoryIds, filterProducts, inventoryLoading, serviceAccess.isReady, storageAccess])
 }
 
 export async function replaceAgentExcludedCategories(

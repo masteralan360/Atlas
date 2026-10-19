@@ -50,6 +50,8 @@ export interface ProductBarcode extends BaseEntity {
 export interface Product extends BaseEntity {
   /** Services are sellable catalog items but never inventory-backed. */
   isService?: boolean
+  /** Retained for rollout compatibility; category assignments now determine restrictions. */
+  serviceLegacyWorkspaceAccess?: boolean
   sku: string
   /** Local-only normalized SKU key used by indexed catalog lookups. */
   skuKey?: string
@@ -80,6 +82,22 @@ export interface Product extends BaseEntity {
   canBeReturned: boolean
   returnRules?: string
   createdBy?: string | null
+}
+
+export interface ServiceAccessCategory extends BaseEntity {
+  name: string
+  /** Trimmed, case-folded workspace-unique key used by the local index. */
+  nameKey: string
+}
+
+export interface ServiceAccessCategoryMember extends BaseEntity {
+  categoryId: string
+  userId: string
+}
+
+export interface ServiceAccessCategoryService extends BaseEntity {
+  categoryId: string
+  serviceId: string
 }
 
 /**

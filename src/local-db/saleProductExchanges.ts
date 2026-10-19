@@ -3,8 +3,10 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { QUANTITY_EPSILON, roundQuantity } from '@/lib/quantity'
 import { generateId } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { isService } from '@/lib/catalogItem'
 
 import { db } from './database'
+import { assertLocalServiceAccessInCurrentTransaction } from './serviceAccess'
 import { assertInventoryMutationConnectivity, getInventoryQuantityForProductStorage, putInventoryQuantity, syncProductStockSnapshot } from './inventory'
 import { fetchTableFromSupabase, syncSalesFromSupabase } from './hooks'
 import { buildInventoryMovementTransactionId, createInventoryTransaction } from './inventoryTransactions'
@@ -182,6 +184,7 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
     const replacementUnitAmount = normalizeAmount(input.replacementUnitAmount, 'Replacement unit amount')
     const sale = await db.sales.get(input.saleId)
     const returnItem = await db.sale_items.get(input.returnSaleItemId)
+    const returnProduct = returnItem ? await db.products.get(returnItem.productId) : undefined
     const replacementProduct = await db.products.get(input.replacementProductId)
     if (!sale || sale.workspaceId !== input.workspaceId || sale.isDeleted) throw new Error('Sale not found')
     if (sale.origin.trim().toLowerCase() !== 'pos') throw new Error('Product exchange is available only for POS sales')
@@ -262,7 +265,12 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
         db.sale_product_exchanges, db.inventory, db.inventory_transactions, db.products, db.stock_batches,
         db.storages, db.loans, db.loan_installments, db.loan_payments, db.payment_transactions,
         db.payment_accounts, db.payment_account_movements, db.payment_account_balances,
+        db.users, db.profiles, db.service_access_category_members, db.service_access_category_services,
     ], async () => {
+        await assertLocalServiceAccessInCurrentTransaction(input.workspaceId, [
+            ...(isService(returnProduct) ? [returnProduct!.id] : []),
+            ...(isService(replacementProduct) ? [replacementProduct.id] : []),
+        ])
         const existingExchange = await db.sale_product_exchanges.get(ids.exchangeId)
         if (existingExchange) {
             result = {

@@ -622,7 +622,7 @@ export function POS() {
             : isActivitiesStorage
                 ? undefined
                 : null
-    const { canSelectProduct, filterProducts: filterSelectableProducts } = useProductSelectionAccess(
+    const { canSelectProduct, canSelectServiceId, serviceAccessReady, filterProducts: filterSelectableProducts } = useProductSelectionAccess(
         user?.workspaceId,
         user?.id,
         { storageId: productAccessStorageId }
@@ -869,30 +869,37 @@ export function POS() {
         () => [...selectableInventoryProducts, ...serviceProducts, ...activityProducts],
         [activityProducts, selectableInventoryProducts, serviceProducts]
     )
+    const unavailableServiceCartItem = cart.find((item) => (
+        (item.is_service || item.storageId === SERVICES_VIRTUAL_STORAGE_ID)
+        && (!serviceAccessReady || !canSelectServiceId(item.product_id))
+    ))
 
     useEffect(() => {
+        if (!serviceAccessReady) return
         const excludedProductIds = new Set(
             products
                 .filter((product) => !canSelectProduct(product))
                 .map((product) => product.id)
         )
-
-        if (excludedProductIds.size === 0) {
-            return
-        }
-
-        setCart((current) => {
-            const next = current.filter((item) => !excludedProductIds.has(item.product_id))
-            if (next.length !== current.length) {
-                toast({
-                    variant: 'destructive',
-                    title: t('messages.error'),
-                    description: t('businessPartners.agent.excludedProductsRemoved', { defaultValue: 'Products from excluded categories were removed from the cart.' })
-                })
+        const nextCart = cart.filter((item) => {
+            if (item.is_service || item.storageId === SERVICES_VIRTUAL_STORAGE_ID) {
+                return canSelectServiceId(item.product_id)
             }
-            return next.length === current.length ? current : next
+            return !excludedProductIds.has(item.product_id)
         })
-    }, [canSelectProduct, products, t, toast])
+        if (nextCart.length === cart.length) return
+
+        const restrictedServiceRemoved = cart.some((item) => (item.is_service || item.storageId === SERVICES_VIRTUAL_STORAGE_ID)
+            && !canSelectServiceId(item.product_id))
+        setCart(nextCart)
+        toast({
+            variant: 'destructive',
+            title: t('messages.error'),
+            description: restrictedServiceRemoved
+                ? t('services.access.restrictedCartRemoved')
+                : t('businessPartners.agent.excludedProductsRemoved', { defaultValue: 'Products from excluded categories were removed from the cart.' })
+        })
+    }, [canSelectProduct, canSelectServiceId, cart, products, serviceAccessReady, t, toast])
 
     useEffect(() => {
         // Keep an explicitly selected Activities storage while workspace features
@@ -1425,21 +1432,24 @@ export function POS() {
     }, [heldSales])
 
     useEffect(() => {
+        if (!serviceAccessReady) return
         const excludedProductIds = new Set(
             products
                 .filter((product) => !canSelectProduct(product))
                 .map((product) => product.id)
         )
 
-        if (excludedProductIds.size === 0) {
-            return
-        }
-
-        setHeldSales((current) => current.map((sale) => {
-            const items = sale.items.filter((item) => !excludedProductIds.has(item.product_id))
+        const nextHeldSales = heldSales.map((sale) => {
+            const items = sale.items.filter((item) => {
+                if (item.is_service || item.storageId === SERVICES_VIRTUAL_STORAGE_ID) {
+                    return canSelectServiceId(item.product_id)
+                }
+                return !excludedProductIds.has(item.product_id)
+            })
             return items.length === sale.items.length ? sale : { ...sale, items }
-        }))
-    }, [canSelectProduct, products])
+        })
+        if (nextHeldSales.some((sale, index) => sale !== heldSales[index])) setHeldSales(nextHeldSales)
+    }, [canSelectProduct, canSelectServiceId, heldSales, products, serviceAccessReady])
 
     // Cart resizing state
     const [cartWidth, setCartWidth] = useState<number>(() => {
@@ -3406,6 +3416,15 @@ export function POS() {
         try {
         if (cart.length === 0 || !user) return
 
+        if (unavailableServiceCartItem) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('services.access.serviceUnavailable')
+            })
+            return
+        }
+
         const checkoutRoute = getPosCheckoutRoute(paymentType, { isActivitiesStorage: isActivitiesCheckout, isServicesStorage, quickOrderEnabled })
         if (checkoutRoute === 'blocked') { setPaymentType('cash'); return }
         if (checkoutRoute === 'quick-order') {
@@ -3879,6 +3898,10 @@ export function POS() {
         }
         if (hasFreeOrderBonus && !canUseOrderFreeBonus) {
             throw new Error(t('pos.freeBonusPermissionRequired'))
+        }
+
+        if (unavailableServiceCartItem) {
+            throw new Error(t('services.access.serviceUnavailable'))
         }
 
         const restrictedCartItem = cart.find((item) => {

@@ -211,4 +211,19 @@ describe('sale product exchanges', () => {
         })).rejects.toThrow('Replacement unit amount must match the current product price')
         expect(await db.sale_product_exchanges.count()).toBe(0)
     })
+
+    it('blocks Local exchanges when the returned service is inaccessible', async () => {
+        await db.products.update(RETURNED_PRODUCT_ID, { isService: true, serviceLegacyWorkspaceAccess: false })
+
+        await expect(processSaleProductExchange({
+            workspaceId: WORKSPACE_ID, saleId: SALE_ID, returnSaleItemId: SALE_ITEM_ID, returnQuantity: 1,
+            replacementProductId: REPLACEMENT_PRODUCT_ID, replacementStorageId: STORAGE_ID, replacementQuantity: 1,
+            replacementUnitAmount: 15, settlementMethod: 'cash', createdBy: 'cashier',
+        })).rejects.toThrow()
+        expect(await db.sale_product_exchanges.count()).toBe(0)
+        expect(await db.sale_returns.count()).toBe(0)
+        expect(await db.payment_transactions.count()).toBe(0)
+        expect(await db.inventory.where('[productId+storageId]').equals([REPLACEMENT_PRODUCT_ID, STORAGE_ID]).first())
+            .toMatchObject({ quantity: 3 })
+    })
 })

@@ -1274,6 +1274,7 @@ export function PurchaseOrderFormPage({
                                                                         ? t('priceBooks.loadingErrorShort', { defaultValue: 'Price Books unavailable - retrying...' })
                                                                         : t('orders.form.selectProduct', { defaultValue: 'Select Product' })}
                                                                 hasSelection={!!item.productId}
+                                                                storageScopeId={item.storageId}
                                                                 storageMissing={!item.storageId}
                                                                 storageMissingLabel={t('orders.form.selectStorage', { defaultValue: 'Select Storage' })}
                                                                 onStorageMissingClick={() => handleStorageMissing(index)}

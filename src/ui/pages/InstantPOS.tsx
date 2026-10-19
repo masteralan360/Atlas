@@ -919,7 +919,7 @@ export function InstantPOS() {
     const productUoms = useProductUoms(user?.workspaceId)
     const customUnits = useUnits(user?.workspaceId)
     const uomDescriptors = useMemo(() => getUomDescriptors(customUnits), [customUnits])
-    const { canSelectProduct, filterProducts: filterSelectableProducts } = useProductSelectionAccess(
+    const { canSelectProduct, canSelectServiceId, serviceAccessReady, filterProducts: filterSelectableProducts } = useProductSelectionAccess(
         user?.workspaceId,
         user?.id,
         { storageId: selectedStorageId && !isServicesStorage ? selectedStorageId : null }
@@ -1319,6 +1319,7 @@ export function InstantPOS() {
     }, [catalogGridColumns, filteredProducts])
 
     useEffect(() => {
+        if (!serviceAccessReady) return
         const excludedProductIds = new Set(
             ticketProducts
                 .filter((product) => !canSelectProduct(product))
@@ -1330,7 +1331,11 @@ export function InstantPOS() {
         }
 
         const removeExcludedItems = (current: InstantPosTicket[]) => current.map((ticket) => {
-            const items = ticket.items.filter((item) => !excludedProductIds.has(item.productId))
+            const items = ticket.items.filter((item) => (
+                item.storageId === SERVICES_VIRTUAL_STORAGE_ID
+                    ? canSelectServiceId(item.productId)
+                    : !excludedProductIds.has(item.productId)
+            ))
             return items.length === ticket.items.length ? ticket : { ...ticket, items }
         })
         if (restaurantMode) {
@@ -1341,7 +1346,7 @@ export function InstantPOS() {
             return
         }
         setLocalTickets(removeExcludedItems)
-    }, [canSelectProduct, persistRestaurantTickets, restaurantMode, restaurantTickets, ticketProducts])
+    }, [canSelectProduct, canSelectServiceId, persistRestaurantTickets, restaurantMode, restaurantTickets, serviceAccessReady, ticketProducts])
 
     const activeTicketTotals = useMemo(() => {
         if (!activeTicket) {
@@ -1941,6 +1946,20 @@ export function InstantPOS() {
                 setIsCheckoutLoading(false)
                 return
             }
+        }
+
+        const restrictedServiceItem = activeTicket.items.find((item) => (
+            item.storageId === SERVICES_VIRTUAL_STORAGE_ID
+            && (!serviceAccessReady || !canSelectServiceId(item.productId))
+        ))
+        if (restrictedServiceItem) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: t('services.access.serviceUnavailable'),
+                variant: 'destructive'
+            })
+            setIsCheckoutLoading(false)
+            return
         }
 
         const restrictedItem = activeTicket.items.find((item) => {

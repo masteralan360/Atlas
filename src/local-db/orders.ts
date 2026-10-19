@@ -124,6 +124,7 @@ import type {
 import { buildInventoryMovementTransactionId, createInventoryTransaction, hydrateInventoryTransactionsForReferences } from './inventoryTransactions'
 import { appendPaymentTransaction, synchronizeOrderPaymentReferences } from './payments'
 import { mirrorPaymentAccountTransactionLocally } from './paymentAccounts'
+import { fetchAccessibleServiceIds, useServiceAccessIds } from './serviceAccess'
 
 export function isOrderFinancingMethod(method?: OrderPaymentMethod | null): method is 'loan' | 'installments' {
     return method === 'loan' || method === 'installments'
@@ -1182,10 +1183,28 @@ async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: str
     }
 }
 
+async function assertSalesOrderServiceAccess(order: SalesOrder, products?: Array<Product | undefined>) {
+    const productRows = products ?? await db.products.bulkGet(Array.from(new Set(order.items.map((item) => item.productId))))
+    const productMap = new Map(productRows.filter((product): product is Product => !!product).map((product) => [product.id, product]))
+    const serviceIds = Array.from(new Set(order.items
+        .map((item) => productMap.get(item.productId))
+        .filter((product): product is Product => !!product && isService(product))
+        .map((product) => product.id)))
+    // Online Cloud/Hybrid writes are validated atomically by the database
+    // trigger. Local and offline writes must validate against the local policy.
+    if (serviceIds.length > 0 && (isLocalWorkspaceMode(order.workspaceId) || !isOnline(order.workspaceId))) {
+        const accessibleServiceIds = await fetchAccessibleServiceIds(order.workspaceId, true)
+        if (accessibleServiceIds !== null && serviceIds.some((serviceId) => !accessibleServiceIds.has(serviceId))) {
+            throw new Error(i18n.t('services.access.serviceUnavailable'))
+        }
+    }
+}
+
 async function assertSalesProductsHaveCosts(order: SalesOrder) {
     const productIds = Array.from(new Set(order.items.map((item) => item.productId)))
-    const products = await db.products.where('id').anyOf(productIds).toArray()
-    const productMap = new Map(products.map((product) => [product.id, product]))
+    const products = await db.products.bulkGet(productIds)
+    const productMap = new Map(products.filter((product): product is Product => !!product).map((product) => [product.id, product]))
+    await assertSalesOrderServiceAccess(order, products)
 
     for (const item of order.items) {
         const product = productMap.get(item.productId)
@@ -2407,10 +2426,11 @@ export function useSalesOrders(workspaceId: string | undefined, startDate?: stri
         permissions?.permissionKeys
     )
     const storageAccess = useStorageAccess(workspaceId)
+    const serviceAccess = useServiceAccessIds(workspaceId, enabled)
 
     const orders = useLiveQuery(
         async () => {
-            if (!workspaceId || !enabled) return []
+            if (!workspaceId || !enabled || !serviceAccess.isReady) return []
 
             const assignedOrderIds = await getSalesOrderIdsAssignedToLinkedFieldAgent(
                 workspaceId,
@@ -2453,7 +2473,8 @@ export function useSalesOrders(workspaceId: string | undefined, startDate?: stri
                     'customer'
                 )
             ])
-            return rows
+            const serviceAuthorizedRows = await filterSalesOrdersByServiceAccess(rows, serviceAccess.ids)
+            return serviceAuthorizedRows
                 .filter((order) => order.businessPartnerId
                     ? accessiblePartnerIds.has(order.businessPartnerId)
                     : !order.customerId || accessibleCustomerIds.has(order.customerId))
@@ -2461,7 +2482,7 @@ export function useSalesOrders(workspaceId: string | undefined, startDate?: stri
                 .filter((order): order is SalesOrder => !!order)
                 .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
         },
-        [workspaceId, startDate, endDate, enabled, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess, agentSalesAccountsFeatureEnabled]
+        [workspaceId, startDate, endDate, enabled, serviceAccess.ids, serviceAccess.isReady, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess, agentSalesAccountsFeatureEnabled]
     )
 
     useEffect(() => {
@@ -2488,10 +2509,11 @@ export function useArchivedSalesOrders(workspaceId: string | undefined, enabled 
         permissions?.permissionKeys
     )
     const storageAccess = useStorageAccess(workspaceId)
+    const serviceAccess = useServiceAccessIds(workspaceId, enabled)
 
     const orders = useLiveQuery(
         async () => {
-            if (!workspaceId || !enabled) return []
+            if (!workspaceId || !enabled || !serviceAccess.isReady) return []
 
             const assignedOrderIds = await getSalesOrderIdsAssignedToLinkedFieldAgent(
                 workspaceId,
@@ -2527,7 +2549,8 @@ export function useArchivedSalesOrders(workspaceId: string | undefined, enabled 
                     'customer'
                 )
             ])
-            return rows
+            const serviceAuthorizedRows = await filterSalesOrdersByServiceAccess(rows, serviceAccess.ids)
+            return serviceAuthorizedRows
                 .filter((order) => order.businessPartnerId
                     ? accessiblePartnerIds.has(order.businessPartnerId)
                     : !order.customerId || accessibleCustomerIds.has(order.customerId))
@@ -2535,7 +2558,7 @@ export function useArchivedSalesOrders(workspaceId: string | undefined, enabled 
                 .filter((order): order is SalesOrder => !!order)
                 .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
         },
-        [workspaceId, enabled, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess, agentSalesAccountsFeatureEnabled]
+        [workspaceId, enabled, serviceAccess.ids, serviceAccess.isReady, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess, agentSalesAccountsFeatureEnabled]
     )
 
     return orders ?? []
@@ -2663,17 +2686,47 @@ export type OrderRecordLookup<T> =
     | { status: 'not-found' }
     | { status: 'error' }
 
+async function filterSalesOrdersByServiceAccess(
+    orders: SalesOrder[],
+    accessibleServiceIds: ReadonlySet<string> | null
+): Promise<SalesOrder[]> {
+    if (orders.length === 0 || accessibleServiceIds === null) return orders
+
+    const productIds = Array.from(new Set(orders.flatMap((order) => order.items.map((item) => item.productId))))
+    if (productIds.length === 0) return orders
+    const products = await db.products.bulkGet(productIds)
+    const serviceIds = new Set(
+        products
+            .filter((product): product is Product => !!product && isService(product))
+            .map((product) => product.id)
+    )
+    return orders.filter((order) => !order.items.some((item) => (
+        serviceIds.has(item.productId) && !accessibleServiceIds.has(item.productId)
+    )))
+}
+
+async function canReadSalesOrderServices(
+    order: SalesOrder,
+    accessibleServiceIds: ReadonlySet<string> | null
+): Promise<boolean> {
+    const [filteredOrder] = await filterSalesOrdersByServiceAccess([order], accessibleServiceIds)
+    return Boolean(filteredOrder)
+}
+
 export function useSalesOrderLookup(orderId: string | undefined, refreshKey = 0): OrderRecordLookup<SalesOrder> {
     const viewOwnScope = useViewOwnRecordScope('orders.view_own')
     const permissions = useOptionalWorkspacePermissions()
     const { features, activeWorkspace } = useWorkspace()
     const permissionKeys = permissions?.permissionKeys
     const storageAccess = useStorageAccess(undefined)
+    const serviceAccess = useServiceAccessIds(undefined)
     const lookup = useLiveQuery<OrderRecordLookup<SalesOrder>>(async () => {
         try {
+            if (!serviceAccess.isReady) return { status: 'loading' }
             if (!orderId) return { status: 'not-found' }
             const order = await db.sales_orders.get(orderId)
             if (!order) return { status: 'not-found' }
+            if (!await canReadSalesOrderServices(order, serviceAccess.ids)) return { status: 'not-found' }
 
             const visible = order.businessPartnerId
                 ? await canAccessBusinessPartnerInLocalCache(order.workspaceId, order.businessPartnerId, 'customer')
@@ -2708,7 +2761,7 @@ export function useSalesOrderLookup(orderId: string | undefined, refreshKey = 0)
             console.error('[Orders] Failed to resolve sales order from the local cache:', error)
             return { status: 'error' }
         }
-    }, [orderId, refreshKey, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, permissionKeys, features.agent_sales_accounts, activeWorkspace?.id])
+    }, [orderId, refreshKey, serviceAccess.ids, serviceAccess.isReady, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, permissionKeys, features.agent_sales_accounts, activeWorkspace?.id])
 
     return lookup ?? { status: 'loading' }
 }
@@ -2720,17 +2773,18 @@ export function useSalesOrder(orderId: string | undefined) {
 
 export function useSalesOrderReturns(orderId: string | undefined, workspaceId?: string) {
     const online = useNetworkStatus()
-    const returns = useLiveQuery<OrderReturn[]>(
-        () => orderId
-            ? db.order_returns
-                .where('orderId')
-                .equals(orderId)
-                .and((item) => !item.isDeleted && item.status === 'posted')
-                .toArray()
-                .then((rows) => rows.sort((left, right) => right.returnedAt.localeCompare(left.returnedAt)))
-            : Promise.resolve([] as OrderReturn[]),
-        [orderId]
-    )
+    const serviceAccess = useServiceAccessIds(workspaceId)
+    const returns = useLiveQuery<OrderReturn[]>(async () => {
+        if (!orderId || !serviceAccess.isReady) return []
+        const rows = await db.order_returns
+            .where('orderId')
+            .equals(orderId)
+            .and((item) => !item.isDeleted && item.status === 'posted')
+            .toArray()
+        const order = await db.sales_orders.get(orderId)
+        if (!order || !(await canReadSalesOrderServices(order, serviceAccess.ids))) return []
+        return rows.sort((left, right) => right.returnedAt.localeCompare(left.returnedAt))
+    }, [orderId, serviceAccess.ids, serviceAccess.isReady])
 
     useEffect(() => {
         if (online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
@@ -2745,16 +2799,19 @@ export function useSalesOrderReturns(orderId: string | undefined, workspaceId?: 
 /** Loads posted returns across a workspace for derived account statements. */
 export function useSalesOrderReturnsForWorkspace(workspaceId: string | undefined) {
     const online = useNetworkStatus()
-    const returns = useLiveQuery<OrderReturn[]>(
-        () => workspaceId
-            ? db.order_returns
-                .where('workspaceId')
-                .equals(workspaceId)
-                .and((item) => !item.isDeleted && item.status === 'posted')
-                .toArray()
-            : Promise.resolve([] as OrderReturn[]),
-        [workspaceId]
-    )
+    const serviceAccess = useServiceAccessIds(workspaceId)
+    const returns = useLiveQuery<OrderReturn[]>(async () => {
+        if (!workspaceId || !serviceAccess.isReady) return []
+        const [rows, orders] = await Promise.all([
+            db.order_returns.where('workspaceId').equals(workspaceId)
+                .and((item) => !item.isDeleted && item.status === 'posted').toArray(),
+            db.sales_orders.where('workspaceId').equals(workspaceId)
+                .and((order) => !order.isDeleted).toArray(),
+        ])
+        const accessibleOrders = await filterSalesOrdersByServiceAccess(orders, serviceAccess.ids)
+        const accessibleOrderIds = new Set(accessibleOrders.map((order) => order.id))
+        return rows.filter((item) => accessibleOrderIds.has(item.orderId))
+    }, [workspaceId, serviceAccess.ids, serviceAccess.isReady])
 
     useEffect(() => {
         if (online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
@@ -2768,16 +2825,16 @@ export function useSalesOrderReturnsForWorkspace(workspaceId: string | undefined
 
 export function useSalesOrderReturnItems(orderId: string | undefined, workspaceId?: string) {
     const online = useNetworkStatus()
-    const items = useLiveQuery<OrderReturnItem[]>(
-        () => orderId
-            ? db.order_return_items
-                .where('orderId')
-                .equals(orderId)
-                .and((item) => !item.isDeleted)
-                .toArray()
-            : Promise.resolve([] as OrderReturnItem[]),
-        [orderId]
-    )
+    const serviceAccess = useServiceAccessIds(workspaceId)
+    const items = useLiveQuery<OrderReturnItem[]>(async () => {
+        if (!orderId || !serviceAccess.isReady) return []
+        const [rows, order] = await Promise.all([
+            db.order_return_items.where('orderId').equals(orderId).and((item) => !item.isDeleted).toArray(),
+            db.sales_orders.get(orderId),
+        ])
+        if (!order || !(await canReadSalesOrderServices(order, serviceAccess.ids))) return []
+        return rows
+    }, [orderId, serviceAccess.ids, serviceAccess.isReady])
 
     useEffect(() => {
         if (online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
@@ -2795,16 +2852,17 @@ export function useSalesOrderReturnItems(orderId: string | undefined, workspaceI
  */
 export function useSalesOrderReturnItemsForWorkspace(workspaceId?: string) {
     const online = useNetworkStatus()
-    const items = useLiveQuery<OrderReturnItem[]>(
-        () => workspaceId
-            ? db.order_return_items
-                .where('workspaceId')
-                .equals(workspaceId)
-                .and((item) => !item.isDeleted)
-                .toArray()
-            : Promise.resolve([] as OrderReturnItem[]),
-        [workspaceId]
-    )
+    const serviceAccess = useServiceAccessIds(workspaceId)
+    const items = useLiveQuery<OrderReturnItem[]>(async () => {
+        if (!workspaceId || !serviceAccess.isReady) return []
+        const [rows, orders] = await Promise.all([
+            db.order_return_items.where('workspaceId').equals(workspaceId).and((item) => !item.isDeleted).toArray(),
+            db.sales_orders.where('workspaceId').equals(workspaceId).and((order) => !order.isDeleted).toArray(),
+        ])
+        const accessibleOrders = await filterSalesOrdersByServiceAccess(orders, serviceAccess.ids)
+        const accessibleOrderIds = new Set(accessibleOrders.map((order) => order.id))
+        return rows.filter((item) => accessibleOrderIds.has(item.orderId))
+    }, [workspaceId, serviceAccess.ids, serviceAccess.isReady])
 
     useEffect(() => {
         if (online && workspaceId && shouldUseCloudBusinessData(workspaceId)) {
@@ -3679,6 +3737,7 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>, op
     if (!existing || existing.isDeleted) {
         throw new Error('Sales order not found')
     }
+
     await assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id)
 
     if (existing.status !== 'draft') {
@@ -4036,6 +4095,10 @@ async function updateSalesOrderStatusOnce(
         throw new Error('Sales order not found')
     }
 
+    if (status === 'cancelled') {
+        await assertSalesOrderServiceAccess(existing)
+    }
+
     if (isOrderApprovalRequested(existing)) {
         throw new Error('order_request_requires_approval')
     }
@@ -4166,6 +4229,7 @@ export async function approveSalesOrderRequest(id: string, reviewedBy?: string |
         ...buildApprovalReviewPatch(existing, reviewedBy)
     }
 
+    await assertSalesProductsHaveCosts(updated)
     await appendInitialOrderPaymentTransaction('sales', updated)
     await db.sales_orders.put(updated)
     await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
@@ -5343,6 +5407,7 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
     if (cloudBacked) {
         order = await readFreshSalesOrderFromSupabase(order.id, order.workspaceId)
     }
+    await assertSalesOrderServiceAccess(order)
     if (!canReturnSalesOrder({
         actorRole: input.actorRole,
         actorId: input.returnedBy,

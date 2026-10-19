@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 interface SearchState<T> {
   query: string
+  scopeKey: string
   items: T[]
   isLoading: boolean
   error: unknown
@@ -14,10 +15,12 @@ export function useDebouncedAutocompleteSearch<T>(
   search: (query: string, publishPartialResults?: (items: T[], complete?: boolean) => void) => Promise<T[]>,
   delay = 150,
   minQueryLength = 2,
+  scopeKey = '',
 ) {
   const normalizedQuery = query.trim()
   const [state, setState] = useState<SearchState<T>>({
     query: '',
+    scopeKey: '',
     items: [],
     isLoading: false,
     error: null,
@@ -26,23 +29,23 @@ export function useDebouncedAutocompleteSearch<T>(
   useEffect(() => {
     let active = true
     if (!enabled || normalizedQuery.length < minQueryLength) {
-      setState({ query: normalizedQuery, items: [], isLoading: false, error: null })
+      setState({ query: normalizedQuery, scopeKey, items: [], isLoading: false, error: null })
       return () => { active = false }
     }
 
-    setState({ query: normalizedQuery, items: [], isLoading: true, error: null })
+    setState({ query: normalizedQuery, scopeKey, items: [], isLoading: true, error: null })
     const timeout = window.setTimeout(() => {
       const publishPartialResults = (items: T[], complete = false) => {
         if (active) {
-          setState({ query: normalizedQuery, items, isLoading: !complete, error: null })
+          setState({ query: normalizedQuery, scopeKey, items, isLoading: !complete, error: null })
         }
       }
       void search(normalizedQuery, publishPartialResults)
         .then((items) => {
-          if (active) setState({ query: normalizedQuery, items, isLoading: false, error: null })
+          if (active) setState({ query: normalizedQuery, scopeKey, items, isLoading: false, error: null })
         })
         .catch((error: unknown) => {
-          if (active) setState({ query: normalizedQuery, items: [], isLoading: false, error })
+          if (active) setState({ query: normalizedQuery, scopeKey, items: [], isLoading: false, error })
         })
     }, delay)
 
@@ -50,9 +53,9 @@ export function useDebouncedAutocompleteSearch<T>(
       active = false
       window.clearTimeout(timeout)
     }
-  }, [delay, enabled, minQueryLength, normalizedQuery, search])
+  }, [delay, enabled, minQueryLength, normalizedQuery, scopeKey, search])
 
-  const hasCurrentResults = state.query === normalizedQuery
+  const hasCurrentResults = state.query === normalizedQuery && state.scopeKey === scopeKey
   return {
     items: hasCurrentResults ? state.items : [],
     isLoading: enabled && normalizedQuery.length >= minQueryLength

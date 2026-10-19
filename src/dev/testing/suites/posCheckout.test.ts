@@ -1,10 +1,11 @@
 import 'fake-indexeddb/auto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { db } from '@/local-db/database'
+import { setActiveBusinessUser, setActiveBusinessWorkspace } from '@/lib/network'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 import { installTestBrowser } from '../fixtures/browser'
 import { assertNoPosCommit, assertPosPayment } from '../assertions/pos'
-import { POS_BATCH, POS_CURRENCIES, POS_INVENTORY, POS_METHODS, POS_PRODUCT, POS_STORAGE, POS_WORKSPACE,
+import { POS_BATCH, POS_CURRENCIES, POS_INVENTORY, POS_METHODS, POS_PRODUCT, POS_STORAGE, POS_USER, POS_WORKSPACE,
     posCheckoutInput, seededPosCases, seedPosStock } from '../fixtures/pos'
 import { createPosServiceNameMetadata } from '@/lib/posServiceName'
 
@@ -25,8 +26,24 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
     beforeEach(async () => {
         await db.delete(); await db.open()
         writeWorkspaceModeSnapshot({ workspaceId: POS_WORKSPACE, dataMode: 'local' })
+        const now = new Date().toISOString()
+        await db.users.put({
+            id: POS_USER, workspaceId: POS_WORKSPACE, email: 'cashier@example.test', name: 'POS test cashier', role: 'admin',
+            createdAt: now, updatedAt: now, syncStatus: 'synced', lastSyncedAt: now, version: 1, isDeleted: false
+        })
+        await db.profiles.put({
+            id: POS_USER, workspaceId: POS_WORKSPACE, currentWorkspaceId: POS_WORKSPACE,
+            name: 'POS test cashier', role: 'admin'
+        })
+        setActiveBusinessWorkspace(POS_WORKSPACE)
+        setActiveBusinessUser(POS_USER, 'admin', POS_WORKSPACE)
     })
-    afterEach(() => { vi.restoreAllMocks(); clearWorkspaceModeSnapshot(POS_WORKSPACE) })
+    afterEach(() => {
+        vi.restoreAllMocks()
+        clearWorkspaceModeSnapshot(POS_WORKSPACE)
+        setActiveBusinessUser(null)
+        setActiveBusinessWorkspace(null)
+    })
     afterAll(async () => { await db.delete() })
 
     for (const method of POS_METHODS) for (const currency of POS_CURRENCIES) for (const selectedAccount of [false, true]) {

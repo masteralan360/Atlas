@@ -17,6 +17,9 @@ import type {
   Unit,
   UnitRelationship,
   ProductUnitConversion,
+  ServiceAccessCategory,
+  ServiceAccessCategoryMember,
+  ServiceAccessCategoryService,
   PriceBookUnitPrice,
   Invoice,
   InvoiceVersion,
@@ -423,6 +426,9 @@ function normalizeStockAdjustmentInventoryTransactionRecord(
 // Atlas Database using Dexie.js for IndexedDB
 export class AtlasDatabase extends Dexie {
   products!: EntityTable<Product, 'id'>
+  service_access_categories!: EntityTable<ServiceAccessCategory, 'id'>
+  service_access_category_members!: EntityTable<ServiceAccessCategoryMember, 'id'>
+  service_access_category_services!: EntityTable<ServiceAccessCategoryService, 'id'>
   product_barcodes!: EntityTable<ProductBarcode, 'id'>
   product_uoms!: EntityTable<ProductUom, 'id'>
   price_books!: EntityTable<PriceBook, 'id'>
@@ -3806,6 +3812,15 @@ export class AtlasDatabase extends Dexie {
         normalizeQueuedPayloads('offline_mutations', 'payload'),
         normalizeQueuedPayloads('syncQueue', 'data')
       ])
+    })
+
+    this.version(154).stores({
+      service_access_categories:
+        'id, workspaceId, nameKey, createdAt, updatedAt, &[workspaceId+nameKey]',
+      service_access_category_members:
+        'id, workspaceId, categoryId, userId, [workspaceId+categoryId], [workspaceId+userId], &[workspaceId+categoryId+userId]',
+      service_access_category_services:
+        'id, workspaceId, categoryId, serviceId, [workspaceId+categoryId], [workspaceId+serviceId], &[workspaceId+categoryId+serviceId]'
     })
 
     this.registerIndexedDbDiagnostics()

@@ -3,9 +3,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { Sale } from '@/types'
 import { db } from '@/local-db/database'
 import { getLedgerPaymentTransactionEffect, getLedgerPaymentTransactions } from '@/lib/ledgerPaymentTransactions'
+import { setActiveBusinessUser, setActiveBusinessWorkspace } from '@/lib/network'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 import { installTestBrowser } from '../fixtures/browser'
-import { POS_INVENTORY, POS_PRODUCT, POS_STORAGE, POS_TIME, POS_WORKSPACE, financePosInput, posCheckoutInput, seedPosStock } from '../fixtures/pos'
+import { POS_INVENTORY, POS_PRODUCT, POS_STORAGE, POS_TIME, POS_USER, POS_WORKSPACE, financePosInput, posCheckoutInput, seedPosStock } from '../fixtures/pos'
 
 vi.mock('@/auth/supabase', () => {
     const unexpected = () => { throw new Error('Unexpected remote request in Local POS refund') }
@@ -52,8 +53,22 @@ describe('POS return records and refund audit entries used by Sales', () => {
         installTestBrowser(); checkout = await import('@/local-db/posCheckout')
         returns = await import('@/local-db/posSaleReturns'); accounts = await import('@/local-db/paymentAccounts')
     }, 30_000)
-    beforeEach(async () => { await db.delete(); await db.open(); writeWorkspaceModeSnapshot({ workspaceId: POS_WORKSPACE, dataMode: 'local' }) })
-    afterEach(() => { vi.restoreAllMocks(); clearWorkspaceModeSnapshot(POS_WORKSPACE) })
+    beforeEach(async () => {
+        await db.delete(); await db.open()
+        writeWorkspaceModeSnapshot({ workspaceId: POS_WORKSPACE, dataMode: 'local' })
+        const now = new Date().toISOString()
+        await db.users.put({ id: POS_USER, workspaceId: POS_WORKSPACE, email: 'cashier@example.test', name: 'POS test cashier', role: 'admin',
+            createdAt: now, updatedAt: now, syncStatus: 'synced', lastSyncedAt: now, version: 1, isDeleted: false })
+        await db.profiles.put({ id: POS_USER, workspaceId: POS_WORKSPACE, currentWorkspaceId: POS_WORKSPACE, name: 'POS test cashier', role: 'admin' })
+        setActiveBusinessWorkspace(POS_WORKSPACE)
+        setActiveBusinessUser(POS_USER, 'admin', POS_WORKSPACE)
+    })
+    afterEach(() => {
+        vi.restoreAllMocks()
+        clearWorkspaceModeSnapshot(POS_WORKSPACE)
+        setActiveBusinessUser(null)
+        setActiveBusinessWorkspace(null)
+    })
     afterAll(async () => { await db.delete() })
 
     it('partial then full refunds retain the original payment and exact linked counter-entries', async () => {
@@ -95,6 +110,19 @@ describe('POS return records and refund audit entries used by Sales', () => {
             expect(await db.sale_returns.get(invalid.returnId)).toBeUndefined()
         }
         await assertRefundLedger(input.payload.id, [200], 200)
+    })
+
+    it('blocks Local refunds when the sale contains a service the cashier can no longer access', async () => {
+        const { sale, refund } = await arrange()
+        await db.users.update(POS_USER, { role: 'staff' })
+        await db.profiles.update(POS_USER, { role: 'staff' })
+        setActiveBusinessUser(POS_USER, 'staff', POS_WORKSPACE)
+        await db.products.update(POS_PRODUCT, { isService: true, serviceLegacyWorkspaceAccess: false })
+
+        await expect(returns.persistSaleReturnLedger(refund(200, 2))).rejects.toThrow()
+        expect(await db.sale_returns.count()).toBe(0)
+        expect(await db.sale_return_items.count()).toBe(0)
+        await expect(db.payment_transactions.where('sourceRecordId').equals(sale.id).count()).resolves.toBe(1)
     })
 
     it('financed return records do not create a cash refund; loan handling remains independent', async () => {

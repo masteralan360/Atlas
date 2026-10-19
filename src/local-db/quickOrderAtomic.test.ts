@@ -130,7 +130,7 @@ vi.mock('@/lib/supabaseRequest', () => ({
     runSupabaseAction: async (_label: string, action: () => PromiseLike<unknown>) => action()
 }))
 
-import { setNetworkStatus } from '@/lib/network'
+import { setActiveBusinessUser, setActiveBusinessWorkspace, setNetworkStatus } from '@/lib/network'
 import { SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { toSnakeCase } from '@/lib/utils'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
@@ -434,8 +434,18 @@ describe('atomic POS Quick Order completion', () => {
         clearWorkspaceModeSnapshot(WORKSPACE_ID)
         writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
         setNetworkStatus(true)
+        setActiveBusinessWorkspace(WORKSPACE_ID)
+        setActiveBusinessUser(USER_ID, 'admin', WORKSPACE_ID)
         vi.clearAllMocks()
         supabaseMock.rpc.mockReset().mockImplementation(async (name, args) => successfulInitialOrderResponse(name, args))
+
+        await db.users.put({
+            ...baseEntity(USER_ID), email: 'quick-order@example.test', name: 'Quick Order test admin', role: 'admin'
+        })
+        await db.profiles.put({
+            id: USER_ID, workspaceId: WORKSPACE_ID, currentWorkspaceId: WORKSPACE_ID,
+            name: 'Quick Order test admin', role: 'admin'
+        })
 
         await db.business_partners.put({
             ...baseEntity(PARTNER_ID),
