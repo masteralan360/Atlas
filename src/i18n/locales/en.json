@@ -2195,6 +2195,11 @@
     "addService": "Add Service",
     "searchPlaceholder": "Search services",
     "empty": "No services yet.",
+    "noMatching": "No services match your search.",
+    "catalogLoadError": "Could not load services. Check your connection and try again.",
+    "pagination": {
+      "total": "Services: {{count}}"
+    },
     "badge": "Service",
     "backToList": "Back to Services",
     "notFoundTitle": "Service not found",
@@ -2207,7 +2212,8 @@
     "deleteDescription": "This removes the service from the catalog. Existing sale history is kept.",
     "messages": {
       "saveError": "Failed to save the service",
-      "deleteError": "Failed to delete the service"
+      "deleteError": "Failed to delete the service",
+      "deleteErrorDescription": "The service could not be deleted. Please try again."
     },
     "form": {
       "serviceDetailsTitle": "Service Details",

@@ -1,3 +1,5 @@
+import Dexie from 'dexie'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useMemo, useState } from 'react'
 
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
@@ -5,6 +7,7 @@ import { toCamelCase } from '@/lib/utils'
 import { runSupabaseAction, normalizeSupabaseActionError } from '@/lib/supabaseRequest'
 import { generateId } from '@/lib/utils'
 import { isOnline } from '@/lib/network'
+import { isService } from '@/lib/catalogItem'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import {
   completeWorkspaceDataHydration,
@@ -15,7 +18,29 @@ import {
 } from '@/workspace/workspaceDataFreshness'
 
 import { db } from './database'
-import type { CurrencyCode, Inventory, Product } from './models'
+import type { Category, CurrencyCode, Inventory, Product } from './models'
+
+export interface ServicesCatalogPageQuery {
+  workspaceId?: string
+  search: string
+  page: number
+  pageSize: number
+  enabled?: boolean
+  /** Changes when a mutation requires a fresh remote page. */
+  refreshKey?: number
+}
+
+export interface ServicesCatalogPage {
+  services: Product[]
+  totalCount: number
+  pageCount: number
+}
+
+const EMPTY_SERVICES_PAGE: ServicesCatalogPage = {
+  services: [],
+  totalCount: 0,
+  pageCount: 1
+}
 
 export type ProductAutocompleteSuggestion = Product
 
@@ -110,6 +135,117 @@ function normalizeRemoteProduct(value: unknown, workspaceId: string, syncedAt: s
     : []
   delete (product as Product & { autocompleteIsSupport?: boolean }).autocompleteIsSupport
   return product
+}
+
+function normalizeServicesPageQuery(query: ServicesCatalogPageQuery) {
+  return {
+    ...query,
+    search: query.search.trim(),
+    page: Math.max(1, Math.floor(query.page) || 1),
+    pageSize: Math.min(100, Math.max(1, Math.floor(query.pageSize) || 20))
+  }
+}
+
+async function readLocalServicesPage(
+  query: ServicesCatalogPageQuery,
+  categoryNameById: ReadonlyMap<string, string>
+): Promise<ServicesCatalogPage> {
+  const workspaceId = query.workspaceId
+  if (!workspaceId) return EMPTY_SERVICES_PAGE
+
+  const normalized = normalizeServicesPageQuery(query)
+  const search = normalized.search.toLocaleLowerCase()
+  const matches = (product: Product) => {
+    if (product.isDeleted || !isService(product)) return false
+    if (!search) return true
+
+    return String(product.name ?? '').toLocaleLowerCase().includes(search)
+      || String(product.sku ?? '').toLocaleLowerCase().includes(search)
+      || String(product.description ?? '').toLocaleLowerCase().includes(search)
+      || String(categoryNameById.get(product.categoryId || '') ?? '').toLocaleLowerCase().includes(search)
+  }
+  const orderedMatches = db.products
+    .where('[workspaceId+name+id]')
+    .between(
+      [workspaceId, Dexie.minKey, Dexie.minKey],
+      [workspaceId, Dexie.maxKey, Dexie.maxKey]
+    )
+    .filter(matches)
+  const offset = (normalized.page - 1) * normalized.pageSize
+  const [totalCount, services] = await Promise.all([
+    orderedMatches.count(),
+    orderedMatches.offset(offset).limit(normalized.pageSize).toArray()
+  ])
+
+  return {
+    services,
+    totalCount,
+    pageCount: Math.max(1, Math.ceil(totalCount / normalized.pageSize))
+  }
+}
+
+async function fetchRemoteServicesPage(query: ServicesCatalogPageQuery): Promise<ServicesCatalogPage> {
+  const workspaceId = query.workspaceId
+  if (!workspaceId) return EMPTY_SERVICES_PAGE
+
+  const normalized = normalizeServicesPageQuery(query)
+  const fetchStartedAt = new Date().toISOString()
+  const operationId = generateId()
+  startWorkspaceDataHydration(workspaceId, 'supabase', 'products', operationId)
+  try {
+    const response = await runSupabaseAction('products.servicesPage', () =>
+      getSupabaseClientForTable('products').rpc('get_services_catalog_page', {
+        p_search: normalized.search,
+        p_page: normalized.page,
+        p_page_size: normalized.pageSize
+      })
+    )
+    if (response.error) throw normalizeSupabaseActionError(response.error)
+
+    const result = response.data as {
+      services?: unknown[]
+      total_count?: number | string
+      page_count?: number | string
+    } | null
+    if (!result || !Array.isArray(result.services)) {
+      throw new Error('The services catalog page response was invalid.')
+    }
+
+    const syncedAt = new Date().toISOString()
+    const services = result.services.map((row) => normalizeRemoteProduct(row, workspaceId, syncedAt))
+    if (services.some((service) => service.workspaceId !== workspaceId || !service.id || !isService(service))) {
+      throw new Error('The services catalog page returned an invalid service.')
+    }
+
+    if (services.length > 0) {
+      const existingRows = await db.products.bulkGet(services.map((service) => service.id))
+      const rowsToCache = services.filter((service, index) => {
+        const existing = existingRows[index]
+        if (!existing || existing.syncStatus !== 'synced') return !existing
+
+        const localUpdatedAt = Date.parse(existing.updatedAt || '')
+        const remoteUpdatedAt = Date.parse(service.updatedAt || '')
+        const localChangedDuringFetch = Number.isFinite(localUpdatedAt)
+          && localUpdatedAt > Date.parse(fetchStartedAt)
+        const localIsNewer = Number.isFinite(localUpdatedAt)
+          && Number.isFinite(remoteUpdatedAt)
+          && localUpdatedAt > remoteUpdatedAt
+        return !localChangedDuringFetch && !localIsNewer
+      })
+      if (rowsToCache.length > 0) await db.products.bulkPut(rowsToCache)
+    }
+
+    const totalCount = Number(result.total_count) || 0
+    const pageCount = Math.max(1, Number(result.page_count) || 1)
+    updateWorkspaceDataHydrationProgress(workspaceId, 'supabase', 'products', services.length, operationId)
+    const completedAt = new Date().toISOString()
+    recordWorkspaceDataFetch(workspaceId, 'supabase', completedAt, 'products')
+    completeWorkspaceDataHydration(workspaceId, 'supabase', 'products', completedAt, operationId)
+    return { services, totalCount, pageCount }
+  } catch (error) {
+    failWorkspaceDataHydration(workspaceId, 'supabase', 'products', undefined, operationId)
+    throw error
+  }
 }
 
 function normalizeAutocompleteInventory(value: unknown, workspaceId: string, syncedAt: string): Inventory {
@@ -565,4 +701,84 @@ export function useProductCatalogPage(query: ProductCatalogPageQuery) {
   }, [queryKey, request])
 
   return { ...page, isLoading, error, isReady: loadedQueryKey === queryKey }
+}
+
+export function useServicesCatalogPage(
+  query: ServicesCatalogPageQuery,
+  categories: readonly Pick<Category, 'id' | 'name'>[] = []
+) {
+  const [remotePage, setRemotePage] = useState<ServicesCatalogPage>(EMPTY_SERVICES_PAGE)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<unknown>(null)
+  const [settledQueryKey, setSettledQueryKey] = useState('')
+  const queryKey = useMemo(() => JSON.stringify(query), [query])
+  const request = useMemo(() => JSON.parse(queryKey) as ServicesCatalogPageQuery, [queryKey])
+  const categoryKey = useMemo(
+    () => JSON.stringify(categories.map(({ id, name }) => [id, name])),
+    [categories]
+  )
+  const categoryNameById = useMemo(
+    () => new Map<string, string>(JSON.parse(categoryKey) as Array<[string, string]>),
+    [categoryKey]
+  )
+
+  const localPage = useLiveQuery(
+    () => request.enabled
+      ? undefined
+      : readLocalServicesPage(request, categoryNameById),
+    [queryKey, categoryKey]
+  )
+
+  useEffect(() => {
+    if (!request.enabled || !request.workspaceId) {
+      setIsLoading(false)
+      setError(null)
+      return
+    }
+
+    let cancelled = false
+    setIsLoading(true)
+    setError(null)
+    void fetchRemoteServicesPage(request)
+      .then((result) => {
+        if (!cancelled) {
+          setRemotePage(result)
+          setSettledQueryKey(queryKey)
+        }
+      })
+      .catch((loadError) => {
+        if (!cancelled) {
+          setError(loadError)
+          setSettledQueryKey(queryKey)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [queryKey, request])
+
+  const remoteIsReady = settledQueryKey === queryKey
+  if (request.enabled) {
+    return {
+      services: remoteIsReady && !error ? remotePage.services : [],
+      totalCount: remoteIsReady && !error ? remotePage.totalCount : 0,
+      pageCount: remoteIsReady && !error ? remotePage.pageCount : 1,
+      isLoading: Boolean(request.workspaceId && (isLoading || !remoteIsReady)),
+      error: remoteIsReady ? error : null,
+      isReady: !request.workspaceId || remoteIsReady
+    }
+  }
+
+  return {
+    services: localPage?.services ?? [],
+    totalCount: localPage?.totalCount ?? 0,
+    pageCount: localPage?.pageCount ?? 1,
+    isLoading: Boolean(request.workspaceId && localPage === undefined),
+    error: null,
+    isReady: !request.workspaceId || localPage !== undefined
+  }
 }

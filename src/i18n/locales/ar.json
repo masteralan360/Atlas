@@ -2153,6 +2153,11 @@
     "addService": "إضافة خدمة",
     "searchPlaceholder": "ابحث عن الخدمات",
     "empty": "لا توجد خدمات بعد.",
+    "noMatching": "لا توجد خدمات تطابق بحثك.",
+    "catalogLoadError": "تعذر تحميل الخدمات. تحقق من اتصالك وحاول مرة أخرى.",
+    "pagination": {
+      "total": "عدد الخدمات: {{count}}"
+    },
     "badge": "خدمة",
     "backToList": "العودة إلى الخدمات",
     "notFoundTitle": "لم يتم العثور على الخدمة",
@@ -2165,7 +2170,8 @@
     "deleteDescription": "تؤدي هذه العملية إلى إزالة الخدمة من الكتالوج. يحتفظ النظام بسجل المبيعات الحالي.",
     "messages": {
       "saveError": "تعذر حفظ الخدمة",
-      "deleteError": "تعذر حذف الخدمة"
+      "deleteError": "تعذر حذف الخدمة",
+      "deleteErrorDescription": "تعذر حذف الخدمة. حاول مرة أخرى."
     },
     "form": {
       "serviceDetailsTitle": "تفاصيل الخدمة",

@@ -1,26 +1,30 @@
-import { useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useState } from 'react'
 import { useLocation } from 'wouter'
-import { BriefcaseBusiness, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { BriefcaseBusiness, Loader2, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { useAuth } from '@/auth'
 import {
     deleteProduct,
     useCategories,
-    useProducts,
+    useServicesCatalogPage,
     type Product
 } from '@/local-db'
-import { isService } from '@/lib/catalogItem'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { formatCurrency } from '@/lib/utils'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { Input } from '@/ui/components/input'
 import {
-  Button,
-  Card,
-  CardContent,
-  useToast,
+    AppPagination,
+    Button,
+    Card,
+    CardContent,
+    CardHeader,
+    CardTitle,
+    useToast,
 } from '@/ui/components'
 
 export function Services() {
@@ -29,23 +33,52 @@ export function Services() {
     const { features } = useWorkspace()
     const [, navigate] = useLocation()
     const { toast } = useToast()
-    const products = useProducts(user?.workspaceId, { syncBarcodeCache: false })
     const categories = useCategories(user?.workspaceId)
+    const isOnline = useNetworkStatus()
+    const workspaceId = user?.workspaceId
+    const isRemoteBrowse = Boolean(workspaceId && isOnline && !isLocalWorkspaceMode(workspaceId))
     const [search, setSearch] = useState('')
+    const deferredSearch = useDeferredValue(search)
+    const [currentPage, setCurrentPage] = useState(1)
+    const [pageSize, setPageSize] = useState(20)
+    const [refreshKey, setRefreshKey] = useState(0)
     const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
+    const [isDeleting, setIsDeleting] = useState(false)
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
 
-    const services = useMemo(() => products
-        .filter(isService)
-        .filter((service) => {
-            const query = search.trim().toLocaleLowerCase()
-            return !query
-                || service.name.toLocaleLowerCase().includes(query)
-                || service.sku?.toLocaleLowerCase().includes(query)
-                || service.description?.toLocaleLowerCase().includes(query)
-                || categories.find((category) => category.id === service.categoryId)?.name.toLocaleLowerCase().includes(query)
-        })
-        .sort((left, right) => left.name.localeCompare(right.name)), [categories, products, search])
+    const servicesPage = useServicesCatalogPage({
+        workspaceId,
+        search: deferredSearch,
+        page: currentPage,
+        pageSize,
+        enabled: isRemoteBrowse,
+        refreshKey
+    }, categories)
+
+    useEffect(() => setCurrentPage(1), [search, pageSize])
+    useEffect(() => {
+        if (servicesPage.isLoading) return
+        setCurrentPage((page) => Math.min(page, servicesPage.pageCount))
+    }, [servicesPage.isLoading, servicesPage.pageCount])
+
+    const handleDelete = async () => {
+        if (!deleteTarget || isDeleting) return
+        setIsDeleting(true)
+        try {
+            await deleteProduct(deleteTarget.id)
+            setDeleteTarget(null)
+            setRefreshKey((key) => key + 1)
+        } catch (error) {
+            toast({
+                variant: 'destructive',
+                title: t('services.messages.deleteError'),
+                description: t('services.messages.deleteErrorDescription')
+            })
+            console.error('[Services] Failed to delete a service:', error)
+        } finally {
+            setIsDeleting(false)
+        }
+    }
 
     return (
         <div className="space-y-6">
@@ -57,13 +90,54 @@ export function Services() {
                 {canEdit && <Button onClick={() => navigate('/services/new')}><Plus className="h-4 w-4" />{t('services.addService')}</Button>}
             </div>
 
-            <div className="relative max-w-md"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" placeholder={t('services.searchPlaceholder')} /></div>
+            <div className="relative max-w-md">
+                <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    className="pl-9"
+                    placeholder={t('services.searchPlaceholder')}
+                />
+            </div>
 
             <Card>
+                <CardHeader className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                    <div className="space-y-1">
+                        <CardTitle>{t('services.title')}</CardTitle>
+                        <p className="text-xs text-muted-foreground">
+                            {t('services.pagination.total', { count: servicesPage.totalCount })}
+                        </p>
+                    </div>
+                    <AppPagination
+                        currentPage={currentPage}
+                        totalCount={servicesPage.totalCount}
+                        pageCount={servicesPage.pageCount}
+                        pageSize={pageSize}
+                        onPageChange={setCurrentPage}
+                        onPageSizeChange={(nextPageSize) => {
+                            setPageSize(nextPageSize)
+                            setCurrentPage(1)
+                        }}
+                        className="mx-0 w-auto justify-start"
+                    />
+                </CardHeader>
                 <CardContent className="p-0">
-                    {services.length === 0 ? <div className="py-14 text-center text-muted-foreground">{t('services.empty')}</div> : (
+                    {servicesPage.isLoading ? (
+                        <div className="flex min-h-60 items-center justify-center gap-2 py-8 text-center text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            {t('common.loading', { defaultValue: 'Loading...' })}
+                        </div>
+                    ) : servicesPage.error ? (
+                        <div className="flex min-h-60 items-center justify-center px-4 py-8 text-center text-muted-foreground">
+                            {t('services.catalogLoadError')}
+                        </div>
+                    ) : servicesPage.services.length === 0 ? (
+                        <div className="py-14 text-center text-muted-foreground">
+                            {search.trim() ? t('services.noMatching') : t('services.empty')}
+                        </div>
+                    ) : (
                         <div className="divide-y">
-                            {services.map((service) => (
+                            {servicesPage.services.map((service) => (
                                 <div key={service.id} className="flex items-center gap-4 p-4">
                                     <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-primary/10 text-primary">
                                         {service.imageUrl ? <img src={getProductImageDisplayUrl(service.imageUrl)} alt="" className="h-full w-full object-cover" /> : <BriefcaseBusiness className="h-5 w-5" />}
@@ -87,14 +161,14 @@ export function Services() {
 
             <DeleteConfirmationModal
                 isOpen={!!deleteTarget}
-                onClose={() => setDeleteTarget(null)}
+                onClose={() => {
+                    if (!isDeleting) setDeleteTarget(null)
+                }}
                 title={t('services.confirmDelete')}
                 description={t('services.deleteDescription')}
                 itemName={deleteTarget?.name || ''}
-                onConfirm={() => {
-                    if (!deleteTarget) return
-                    void deleteProduct(deleteTarget.id).then(() => setDeleteTarget(null)).catch((error) => toast({ variant: 'destructive', title: t('services.messages.deleteError'), description: String(error) }))
-                }}
+                isLoading={isDeleting}
+                onConfirm={() => void handleDelete()}
             />
         </div>
     )
