@@ -1,6 +1,6 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, ArrowLeft, BadgeDollarSign, CalendarDays, Check, CreditCard, NotebookPen, Plus, ShoppingCart, Star, Trash2, Truck, Users, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, BadgeDollarSign, CalendarDays, Check, CreditCard, Link2, NotebookPen, Plus, ShoppingCart, Star, Trash2, Truck, Unlink, Users } from 'lucide-react'
 
 import { useAuth } from '@/auth'
 import { useUiAccess } from '@/context/UiAccessContext'
@@ -434,6 +434,7 @@ export function SalesOrderFormPage({
     const [productsViewItemIndex, setProductsViewItemIndex] = useState<number | null>(null)
     const [customerId, setCustomerId] = useState(editingOrder?.businessPartnerId || editingOrder?.customerId || '')
     const [customerSearch, setCustomerSearch] = useState(editingOrder?.customerName || '')
+    const [selectedCustomerSnapshot, setSelectedCustomerSnapshot] = useState<BusinessPartner | null>(null)
     const [salesAccountAgentId, setSalesAccountAgentId] = useState(editingOrder?.salesAccountAgentId || '')
     const [isCustomerPickerOpen, setIsCustomerPickerOpen] = useState(false)
     const [sourceStorageId, setSourceStorageId] = useState(editingOrder?.sourceStorageId || defaultStorageId)
@@ -657,6 +658,7 @@ export function SalesOrderFormPage({
     }, [inventory])
 
     const selectedCustomerFromPicker = customerPartners.find((entry) => entry.id === customerId)
+        ?? (selectedCustomerSnapshot?.id === customerId ? selectedCustomerSnapshot : undefined)
     const selectedSalesAccount = useMemo(() => {
         const agent = agents.find((candidate) => (
             candidate.id === salesAccountAgentId
@@ -1073,9 +1075,13 @@ export function SalesOrderFormPage({
             && sellingPrice < selectedConvertedCostPrice
     }, [getItemCostDetails])
 
-    const selectCustomerPartner = useCallback((partner: Pick<BusinessPartner, 'id' | 'partnerName' | 'defaultCurrency' | 'priceBookId'>) => {
+    const selectCustomerPartner = useCallback((
+        partner: Pick<BusinessPartner, 'id' | 'partnerName' | 'defaultCurrency' | 'priceBookId'>,
+        selectedPartner?: BusinessPartner
+    ) => {
         setSalesAccountAgentId('')
         const nextCurrency = partner.defaultCurrency || currency
+        setSelectedCustomerSnapshot(selectedPartner ?? null)
         setCustomerSearch(partner.partnerName)
         setCustomerId(partner.id)
         changeOrderCurrency(nextCurrency)
@@ -1090,6 +1096,7 @@ export function SalesOrderFormPage({
             setSalesAccountAgentId('')
             setCustomerId('')
             setCustomerSearch('')
+            setSelectedCustomerSnapshot(null)
             return
         }
         const agent = agents.find((candidate) => (
@@ -1102,6 +1109,7 @@ export function SalesOrderFormPage({
         if (!agent || !partner) return
 
         setSalesAccountAgentId(agent.id)
+        setSelectedCustomerSnapshot(null)
         const nextCurrency = partner.defaultCurrency || currency
         setCustomerSearch(partner.partnerName)
         setCustomerId(partner.id)
@@ -1928,9 +1936,10 @@ export function SalesOrderFormPage({
                                                     onChange={(value) => {
                                                         setCustomerSearch(value)
                                                         setCustomerId('')
+                                                        setSelectedCustomerSnapshot(null)
                                                     }}
                                                     onSelectPartner={(partner: BusinessPartner) => {
-                                                        selectCustomerPartner(partner)
+                                                        selectCustomerPartner(partner, partner)
                                                     }}
                                                     workspaceId={workspaceId}
                                                     roles={['customer']}
@@ -1940,7 +1949,7 @@ export function SalesOrderFormPage({
                                                 <QuickCustomerButton
                                                     workspaceId={workspaceId}
                                                     className="w-full shrink-0 md:w-auto"
-                                                    onCreated={selectCustomerPartner}
+                                                    onCreated={(partner) => selectCustomerPartner(partner, partner)}
                                                 />
                                                 <Button
                                                     type="button"
@@ -1964,6 +1973,10 @@ export function SalesOrderFormPage({
                                                         </div>
                                                         <div className="flex flex-wrap items-center gap-2">
                                                             <div className="text-sm font-semibold">{selectedCustomer.partnerName}</div>
+                                                            <Badge variant="secondary" className="gap-1">
+                                                                <Link2 className="h-3 w-3" />
+                                                                {t('businessPartners.linked')}
+                                                            </Badge>
                                                             <PartnerBalanceSummary
                                                                 compact
                                                                 partner={selectedCustomer}
@@ -1980,9 +1993,10 @@ export function SalesOrderFormPage({
                                                             onClick={() => {
                                                                 setCustomerId('')
                                                                 setCustomerSearch('')
+                                                                setSelectedCustomerSnapshot(null)
                                                             }}
                                                         >
-                                                            <X className="h-4 w-4" />
+                                                            <Unlink className="h-4 w-4" />
                                                             {t('loans.clearParty', { defaultValue: 'Clear Link' })}
                                                         </Button>
                                                     ) : null}
@@ -2062,7 +2076,7 @@ export function SalesOrderFormPage({
                                 if (selection.linkedPartyId) {
                                     const partner = customerPartners.find((entry) => entry.id === selection.linkedPartyId)
                                     if (partner) {
-                                        selectCustomerPartner(partner)
+                                        selectCustomerPartner(partner, partner)
                                     } else {
                                         selectCustomerPartner({
                                             id: selection.linkedPartyId,

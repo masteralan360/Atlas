@@ -1426,14 +1426,14 @@ export function AtlasStandardOrderInvoiceTemplate({
         : partnerBalanceStatus === 'loading'
         ? partnerBalanceLoadingLabel
         : (partnerBalanceStatus === 'error' || formattedPartnerBalanceBeforeOrder === '-')
-            ? t('common.error')
+            ? '-'
             : formattedPartnerBalanceBeforeOrder
     const partnerBalanceAfterOrder = !shouldShowPartnerBalanceAfter
         ? '-'
         : partnerBalanceStatus === 'loading'
         ? partnerBalanceLoadingLabel
         : (partnerBalanceStatus === 'error' || formattedPartnerBalanceAfterOrder === '-')
-            ? t('common.error')
+            ? '-'
             : formattedPartnerBalanceAfterOrder
     const partnerBalanceLabels = {
         before: t('orders.print.partnerBalanceBefore'),

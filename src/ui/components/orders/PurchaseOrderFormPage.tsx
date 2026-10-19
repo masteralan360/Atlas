@@ -1,6 +1,6 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, CalendarDays, CreditCard, NotebookPen, PackagePlus, Plus, ShoppingCart, Star, Trash2, Users, Warehouse, X } from 'lucide-react'
+import { ArrowLeft, CalendarDays, CreditCard, Link2, NotebookPen, PackagePlus, Plus, ShoppingCart, Star, Trash2, Unlink, Users, Warehouse } from 'lucide-react'
 
 import { useAuth } from '@/auth'
 import { useUiAccess } from '@/context/UiAccessContext'
@@ -310,6 +310,7 @@ export function PurchaseOrderFormPage({
     const [productsViewItemIndex, setProductsViewItemIndex] = useState<number | null>(null)
     const [supplierId, setSupplierId] = useState(editingOrder?.businessPartnerId || editingOrder?.supplierId || '')
     const [supplierSearch, setSupplierSearch] = useState(editingOrder?.supplierName || '')
+    const [selectedSupplierSnapshot, setSelectedSupplierSnapshot] = useState<BusinessPartner | null>(null)
     const [isSupplierPickerOpen, setIsSupplierPickerOpen] = useState(false)
     const [destinationStorageId, setDestinationStorageId] = useState(editingOrder?.destinationStorageId || defaultStorageId)
     const [currency, setCurrency] = useState<CurrencyCode>(editingOrder?.currency || features.default_currency)
@@ -491,6 +492,7 @@ export function PurchaseOrderFormPage({
     const adjustmentExchangeRates = useMemo(() => buildOrderExchangeRatesSnapshot(liveRates), [liveRates])
 
     const selectedSupplier = supplierPartners.find((entry) => entry.id === supplierId)
+        ?? (selectedSupplierSnapshot?.id === supplierId ? selectedSupplierSnapshot : undefined)
     const isSupplierSelectionRequired = !editingOrderId && !selectedSupplier
 
     const getPriceBookItemForPartner = useCallback((partner: Pick<BusinessPartner, 'priceBookId'> | null | undefined, productId: string) =>
@@ -618,8 +620,12 @@ export function PurchaseOrderFormPage({
         }
     }, [getPriceBookItemForPartner, getProductUnitOptions, liveRates, productUnitContexts, products])
 
-    const selectSupplierPartner = useCallback((partner: Pick<BusinessPartner, 'id' | 'partnerName' | 'defaultCurrency' | 'priceBookId'>) => {
+    const selectSupplierPartner = useCallback((
+        partner: Pick<BusinessPartner, 'id' | 'partnerName' | 'defaultCurrency' | 'priceBookId'>,
+        selectedPartner?: BusinessPartner
+    ) => {
         const nextCurrency = partner.defaultCurrency || currency
+        setSelectedSupplierSnapshot(selectedPartner ?? null)
         setSupplierSearch(partner.partnerName)
         setSupplierId(partner.id)
         changeOrderCurrency(nextCurrency)
@@ -767,7 +773,7 @@ export function PurchaseOrderFormPage({
         if (priceBooksEnabled && !isPriceBookCatalogReady) return
         if (!user?.workspaceId || isSaving) return
 
-        const supplier = supplierPartners.find((entry) => entry.id === supplierId)
+        const supplier = selectedSupplier
         if (!supplier) {
             toast({
                 title: t('common.error') || 'Error',
@@ -1058,9 +1064,10 @@ export function PurchaseOrderFormPage({
                                                         onChange={(value) => {
                                                             setSupplierSearch(value)
                                                             setSupplierId('')
+                                                            setSelectedSupplierSnapshot(null)
                                                         }}
                                                         onSelectPartner={(partner: BusinessPartner) => {
-                                                            selectSupplierPartner(partner)
+                                                            selectSupplierPartner(partner, partner)
                                                         }}
                                                         workspaceId={workspaceId}
                                                         roles={['supplier']}
@@ -1086,6 +1093,10 @@ export function PurchaseOrderFormPage({
                                                                 </div>
                                                                 <div className="flex flex-wrap items-center gap-2">
                                                                     <div className="text-sm font-semibold">{selectedSupplier.partnerName}</div>
+                                                                    <Badge variant="secondary" className="gap-1">
+                                                                        <Link2 className="h-3 w-3" />
+                                                                        {t('businessPartners.linked')}
+                                                                    </Badge>
                                                                     <PartnerBalanceSummary
                                                                         compact
                                                                         partner={selectedSupplier}
@@ -1101,9 +1112,10 @@ export function PurchaseOrderFormPage({
                                                                 onClick={() => {
                                                                     setSupplierId('')
                                                                     setSupplierSearch('')
+                                                                    setSelectedSupplierSnapshot(null)
                                                                 }}
                                                             >
-                                                                <X className="h-4 w-4" />
+                                                                <Unlink className="h-4 w-4" />
                                                                 {t('loans.clearParty', { defaultValue: 'Clear Link' })}
                                                             </Button>
                                                         </div>
@@ -1149,7 +1161,7 @@ export function PurchaseOrderFormPage({
                                         if (selection.linkedPartyId) {
                                             const partner = supplierPartners.find((entry) => entry.id === selection.linkedPartyId)
                                             if (partner) {
-                                                selectSupplierPartner(partner)
+                                                selectSupplierPartner(partner, partner)
                                             } else {
                                                 selectSupplierPartner({
                                                     id: selection.linkedPartyId,
