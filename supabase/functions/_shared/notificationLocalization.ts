@@ -121,6 +121,60 @@ export function localizeNotification(input: NotificationLocalizationInput, reque
   const fallbackBody = readString(input.body)
   const fallbackActionLabel = readString(input.actionLabel) || (language === 'ar' ? '\u0641\u062a\u062d' : language === 'ku' ? '\u06a9\u0631\u062f\u0646\u06d5\u0648\u06d5' : 'Open')
 
+  if (notificationType === 'commerce_order_created') {
+    const orderSequence = readString(payload.order_sequence)
+    const buyerName = readString(payload.buyer_name)
+    const currency = readString(payload.currency)
+    const totalText = formatAmount(readNumber(payload.total), currency, language)
+    const grossProfitText = formatAmount(readNumber(payload.gross_profit), currency, language)
+
+    if (language === 'ar') {
+      return {
+        language,
+        title: '\u0637\u0644\u0628 \u062a\u062c\u0627\u0631\u064a \u062c\u062f\u064a\u062f',
+        body: joinParts([
+          orderSequence,
+          buyerName,
+          totalText ? `\u0627\u0644\u0625\u062c\u0645\u0627\u0644\u064a: ${totalText}` : '',
+          grossProfitText ? `\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u0631\u0628\u062d: ${grossProfitText}` : '',
+        ]) || fallbackBody,
+        actionLabel: '\u0641\u062a\u062d \u0627\u0644\u0637\u0644\u0628',
+        actionUrl,
+        typeLabel: '\u0627\u0644\u0637\u0644\u0628\u0627\u062a \u0627\u0644\u062a\u062c\u0627\u0631\u064a\u0629',
+      }
+    }
+
+    if (language === 'ku') {
+      return {
+        language,
+        title: '\u062f\u0627\u0648\u0627\u06a9\u0627\u0631\u06cc\u06cc \u0628\u0627\u0632\u0631\u06af\u0627\u0646\u06cc\u06cc \u0646\u0648\u06ce',
+        body: joinParts([
+          orderSequence,
+          buyerName,
+          totalText ? `\u06a9\u06c6\u06cc \u06af\u0634\u062a\u06cc: ${totalText}` : '',
+          grossProfitText ? `\u0642\u0627\u0632\u0627\u0646\u062c\u06cc \u06af\u0634\u062a\u06cc: ${grossProfitText}` : '',
+        ]) || fallbackBody,
+        actionLabel: '\u06a9\u0631\u062f\u0646\u06d5\u0648\u06d5\u06cc \u062f\u0627\u0648\u0627\u06a9\u0627\u0631\u06cc',
+        actionUrl,
+        typeLabel: '\u062f\u0627\u0648\u0627\u06a9\u0627\u0631\u06cc\u06cc\u06d5 \u0628\u0627\u0632\u0631\u06af\u0627\u0646\u06cc\u06cc\u06d5\u06a9\u0627\u0646',
+      }
+    }
+
+    return {
+      language,
+      title: 'New commerce order',
+      body: joinParts([
+        orderSequence,
+        buyerName,
+        totalText ? `Total: ${totalText}` : '',
+        grossProfitText ? `Gross profit: ${grossProfitText}` : '',
+      ]) || fallbackBody,
+      actionLabel: 'Open order',
+      actionUrl,
+      typeLabel: 'Commerce Orders',
+    }
+  }
+
   if (notificationType === 'marketplace_order_pending') {
     const orderNumber = readString(payload.order_number)
     const customerName = readString(payload.customer_name)
