@@ -72,6 +72,39 @@ export type VisibleModeProducts = {
     marketplaceAddedAtByProductId: Map<string, string | null>
 }
 
+const ID_QUERY_BATCH_SIZE = 50
+const ID_QUERY_BATCH_CONCURRENCY = 4
+
+type BatchedRowsResult<Row> = {
+    data: Row[] | null
+    error: unknown
+}
+
+export async function loadRowsInBatches<Row>(
+    ids: string[],
+    loadBatch: (batchIds: string[]) => Promise<BatchedRowsResult<Row>>
+): Promise<Row[]> {
+    const uniqueIds = Array.from(new Set(ids.filter(Boolean)))
+    const rows: Row[] = []
+    const batchWindowSize = ID_QUERY_BATCH_SIZE * ID_QUERY_BATCH_CONCURRENCY
+
+    for (let offset = 0; offset < uniqueIds.length; offset += batchWindowSize) {
+        const window = uniqueIds.slice(offset, offset + batchWindowSize)
+        const batches: string[][] = []
+        for (let batchOffset = 0; batchOffset < window.length; batchOffset += ID_QUERY_BATCH_SIZE) {
+            batches.push(window.slice(batchOffset, batchOffset + ID_QUERY_BATCH_SIZE))
+        }
+
+        const results = await Promise.all(batches.map(loadBatch))
+        for (const result of results) {
+            if (result.error) throw result.error
+            rows.push(...(result.data ?? []))
+        }
+    }
+
+    return rows
+}
+
 function normalizeDomain(value: string | null | undefined) {
     return (value ?? '')
         .trim()
@@ -296,19 +329,17 @@ export async function loadVisibleModeProducts(
 
     let priceBookRows: WebsitePriceBookItem[] = []
     if (mode === 'wholesale') {
-        const { data, error } = await adminClient
-            .from('price_book_items')
-            .select('product_id, price, cost_price, currency')
-            .eq('workspace_id', context.workspace.id)
-            .eq('price_book_id', context.config.wholesale_price_book_id)
-            .eq('is_deleted', false)
-            .in('product_id', inventoryProductIds)
+        priceBookRows = await loadRowsInBatches<WebsitePriceBookItem>(inventoryProductIds, async (batchIds) => {
+            const { data, error } = await adminClient
+                .from('price_book_items')
+                .select('product_id, price, cost_price, currency')
+                .eq('workspace_id', context.workspace.id)
+                .eq('price_book_id', context.config.wholesale_price_book_id)
+                .eq('is_deleted', false)
+                .in('product_id', batchIds)
 
-        if (error) {
-            throw error
-        }
-
-        priceBookRows = (data ?? []) as WebsitePriceBookItem[]
+            return { data: data as WebsitePriceBookItem[] | null, error }
+        })
     }
 
     const resolvedPriceBookItems = new Map<string, WebsitePriceBookItem>()
@@ -340,20 +371,19 @@ export async function loadVisibleModeProducts(
         }
     }
 
-    const { data: products, error: productsError } = await adminClient
-        .from('products')
-        .select('id, parent_product_id, name, sku, description, price, cost_price, currency, unit, category_id, image_url, created_at')
-        .eq('workspace_id', context.workspace.id)
-        .eq('is_deleted', false)
-        .eq('is_service', false)
-        .in('id', visibleProductIds)
-        .order('name', { ascending: true })
+    const visibleProducts = await loadRowsInBatches<MarketplaceProductRow>(visibleProductIds, async (batchIds) => {
+        const { data, error } = await adminClient
+            .from('products')
+            .select('id, parent_product_id, name, sku, description, price, cost_price, currency, unit, category_id, image_url, created_at')
+            .eq('workspace_id', context.workspace.id)
+            .eq('is_deleted', false)
+            .eq('is_service', false)
+            .in('id', batchIds)
+            .order('name', { ascending: true })
 
-    if (productsError) {
-        throw productsError
-    }
-
-    const visibleProducts = (products ?? []) as MarketplaceProductRow[]
+        return { data: data as MarketplaceProductRow[] | null, error }
+    })
+    visibleProducts.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
     let productRows = visibleProducts
 
     if (options?.includeVariantParents) {
@@ -365,21 +395,21 @@ export async function loadVisibleModeProducts(
         ))
 
         if (missingParentIds.length > 0) {
-            const { data: parentProducts, error: parentProductsError } = await adminClient
-                .from('products')
-                .select('id, parent_product_id, name, sku, description, price, cost_price, currency, unit, category_id, image_url, created_at')
-                .eq('workspace_id', context.workspace.id)
-                .eq('is_deleted', false)
-                .eq('is_service', false)
-                .in('id', missingParentIds)
-                .order('name', { ascending: true })
+            const parentProducts = await loadRowsInBatches<MarketplaceProductRow>(missingParentIds, async (batchIds) => {
+                const { data, error } = await adminClient
+                    .from('products')
+                    .select('id, parent_product_id, name, sku, description, price, cost_price, currency, unit, category_id, image_url, created_at')
+                    .eq('workspace_id', context.workspace.id)
+                    .eq('is_deleted', false)
+                    .eq('is_service', false)
+                    .in('id', batchIds)
+                    .order('name', { ascending: true })
 
-            if (parentProductsError) {
-                throw parentProductsError
-            }
+                return { data: data as MarketplaceProductRow[] | null, error }
+            })
 
-            productRows = [...visibleProducts, ...(parentProducts ?? []) as MarketplaceProductRow[]]
-                .sort((left, right) => left.name.localeCompare(right.name))
+            productRows = [...visibleProducts, ...parentProducts]
+                .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
         }
     }
 

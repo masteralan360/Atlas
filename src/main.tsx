@@ -1,5 +1,7 @@
 import { StrictMode, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { queryClient } from '@/query/queryClient'
 import i18n, { i18nReady } from '@/i18n/config'
 import { isPwaDesktop } from '@/lib/pwaDesktop'
 import { initDesktopZoomPersistence } from '@/lib/tauriZoomPersistence'
@@ -124,7 +126,9 @@ const renderRoot = (content: ReactNode) => {
     dismissShellRecovery()
     root.render(
         <StrictMode>
-            {content}
+            <QueryClientProvider client={queryClient}>
+                {content}
+            </QueryClientProvider>
         </StrictMode>,
     )
 }

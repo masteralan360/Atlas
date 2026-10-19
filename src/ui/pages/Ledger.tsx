@@ -1,5 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import {
     ArrowDownLeft,
     ArrowLeftRight,
@@ -2079,14 +2080,14 @@ export function Ledger() {
     const [historyEntryId, setHistoryEntryId] = useState<string | null>(null)
     const [pendingScrollEntryId, setPendingScrollEntryId] = useState<string | null>(null)
 
-    const [currentPage, setCurrentPage] = useState(1)
-    const [pageSize, setPageSize] = useState(() => {
-        return Number(localStorage.getItem('ledger_page_size')) || 50
+    const pagination = usePaginationState({
+        resetOn: [dateRange, customDates.start, customDates.end, filters, summaryDrilldown],
+        initialPageSize: Number(localStorage.getItem('ledger_page_size')) || 50,
     })
 
     useEffect(() => {
-        localStorage.setItem('ledger_page_size', String(pageSize))
-    }, [pageSize])
+        localStorage.setItem('ledger_page_size', String(pagination.pageSize))
+    }, [pagination.pageSize])
 
     useEffect(() => {
         if (summaryMode === 'legacy_flow') {
@@ -2396,9 +2397,16 @@ export function Ledger() {
             [t('ledger.table.transactionId') || 'Transaction ID']: entry.transactionId,
         }))
     }, [filteredEntries, t])
+    const ledgerPagination = usePaginationBounds({
+        currentPage: pagination.currentPage,
+        setCurrentPage: pagination.setCurrentPage,
+        totalCount: filteredEntries.length,
+        pageSize: pagination.pageSize,
+        isLoading: isLoading || isDateLoading,
+    })
     const visibleEntries = useMemo(
-        () => filteredEntries.slice((currentPage - 1) * pageSize, currentPage * pageSize),
-        [currentPage, filteredEntries, pageSize],
+        () => filteredEntries.slice((ledgerPagination.currentPage - 1) * pagination.pageSize, ledgerPagination.currentPage * pagination.pageSize),
+        [filteredEntries, ledgerPagination.currentPage, pagination.pageSize],
     )
     const visibleIncomingEntries = useMemo(() => visibleEntries.filter((entry) => entry.direction === 'incoming'), [visibleEntries])
     const visibleOutgoingEntries = useMemo(() => visibleEntries.filter((entry) => entry.direction === 'outgoing'), [visibleEntries])
@@ -2584,18 +2592,14 @@ export function Ledger() {
     }, [customDates.end, customDates.start, dateRange, dateScopedEntries, i18n.language, t])
 
     useEffect(() => {
-        setCurrentPage(1)
-    }, [dateRange, customDates, filters, pageSize, summaryDrilldown])
-
-    useEffect(() => {
         if (!pendingScrollEntryId) return
 
         const targetIndex = filteredEntries.findIndex((entry) => entry.id === pendingScrollEntryId)
         if (targetIndex === -1) return
 
-        const targetPage = Math.floor(targetIndex / pageSize) + 1
-        if (currentPage !== targetPage) {
-            setCurrentPage(targetPage)
+        const targetPage = Math.floor(targetIndex / pagination.pageSize) + 1
+        if (pagination.currentPage !== targetPage) {
+            pagination.setCurrentPage(targetPage)
             return
         }
 
@@ -2604,7 +2608,7 @@ export function Ledger() {
             setPendingScrollEntryId(null)
         }, 50)
         return () => window.clearTimeout(timer)
-    }, [currentPage, filteredEntries, pageSize, pendingScrollEntryId])
+    }, [filteredEntries, pagination.currentPage, pagination.pageSize, pagination.setCurrentPage, pendingScrollEntryId])
 
     const goToLedgerMovement = (entryId: string) => {
         const entryIndex = allTimeFilteredEntryIndexById.get(entryId)
@@ -2758,13 +2762,11 @@ export function Ledger() {
         if (isDraftAmountRangeInvalid) return
         setFilters(normalizeLedgerFiltersForCurrency(draftFilters))
         setIsFilterDialogOpen(false)
-        setCurrentPage(1)
     }
 
     const handleSummaryDrilldown = (drilldownId: LedgerCashDrilldownId) => {
         const isClearingActiveDrilldown = summaryDrilldown === drilldownId
         setSummaryDrilldown(isClearingActiveDrilldown ? null : drilldownId)
-        setCurrentPage(1)
         if (!isClearingActiveDrilldown) {
             window.setTimeout(() => document.getElementById('ledger-entries')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
         }
@@ -4217,14 +4219,12 @@ export function Ledger() {
                                   })}
                         </Button>
                         <AppPagination
-                            currentPage={currentPage}
+                            currentPage={ledgerPagination.currentPage}
                             totalCount={filteredEntries.length}
-                            pageSize={pageSize}
-                            onPageChange={setCurrentPage}
-                            onPageSizeChange={(newSize) => {
-                                setPageSize(newSize)
-                                setCurrentPage(1)
-                            }}
+                            pageCount={ledgerPagination.pageCount}
+                            pageSize={pagination.pageSize}
+                            onPageChange={pagination.setCurrentPage}
+                            onPageSizeChange={pagination.setPageSize}
                             className="w-auto"
                         />
                     </div>

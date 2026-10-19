@@ -5,6 +5,7 @@ import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 
 import { useAuth } from '@/auth'
+import { clampPaginationPage, usePaginationPageMap } from '@/hooks/usePaginationState'
 import { useDateRange } from '@/context/DateRangeContext'
 import { UiAccessGate } from '@/context/UiAccessContext'
 import {
@@ -282,16 +283,19 @@ export function Payments() {
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.pay')
 
     const [activeTab, setActiveTab] = useState<PaymentsTab>('open-items')
-    const [currentPages, setCurrentPages] = useState<Record<PaymentsTab, number>>(INITIAL_PAYMENT_PAGES)
-    const [pageSize, setPageSize] = useState(() => {
-        const savedPageSize = Number(localStorage.getItem(PAYMENT_PAGE_SIZE_STORAGE_KEY))
-        return [5, 10, 20, 50, 100].includes(savedPageSize) ? savedPageSize : 20
-    })
     const [search, setSearch] = useState('')
     const deferredSearch = useDeferredValue(search)
     const [directionFilter, setDirectionFilter] = useState<DirectionFilter>('all')
     const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all')
     const [statusFilter, setStatusFilter] = useState<OpenStatusFilter>('all')
+    const pagination = usePaginationPageMap({
+        initialPages: INITIAL_PAYMENT_PAGES,
+        initialPageSize: (() => {
+            const savedPageSize = Number(localStorage.getItem(PAYMENT_PAGE_SIZE_STORAGE_KEY))
+            return [5, 10, 20, 50, 100].includes(savedPageSize) ? savedPageSize : 20
+        })(),
+        resetOn: [search, directionFilter, sourceFilter, statusFilter, dateRange, customDates],
+    })
     const [selectedObligation, setSelectedObligation] = useState<PaymentObligation | null>(null)
     const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false)
     const [reversingTransactionId, setReversingTransactionId] = useState<string | null>(null)
@@ -303,17 +307,8 @@ export function Payments() {
     const [isPartnerSettlementOpen, setIsPartnerSettlementOpen] = useState(false)
 
     useEffect(() => {
-        localStorage.setItem(PAYMENT_PAGE_SIZE_STORAGE_KEY, String(pageSize))
-    }, [pageSize])
-
-    useEffect(() => {
-        setCurrentPages(INITIAL_PAYMENT_PAGES)
-    }, [search, directionFilter, sourceFilter, statusFilter, dateRange, customDates])
-
-    const handlePageSizeChange = (nextPageSize: number) => {
-        setPageSize(nextPageSize)
-        setCurrentPages(INITIAL_PAYMENT_PAGES)
-    }
+        localStorage.setItem(PAYMENT_PAGE_SIZE_STORAGE_KEY, String(pagination.pageSize))
+    }, [pagination.pageSize])
     const workspaceContacts = useWorkspaceContacts(workspaceId)
     const printLang = features.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
     const printT = useMemo(() => i18n.getFixedT(printLang), [i18n, printLang])
@@ -410,11 +405,11 @@ export function Payments() {
         ),
         [customDates, dateRange, filteredTransactions, latestUnreversedBySource]
     )
-    const transactionsPageCount = Math.max(1, Math.ceil(visibleTransactions.length / pageSize))
-    const transactionsCurrentPage = Math.min(currentPages.transactions, transactionsPageCount)
+    const transactionsPageCount = Math.max(1, Math.ceil(visibleTransactions.length / pagination.pageSize))
+    const transactionsCurrentPage = clampPaginationPage(pagination.pages.transactions, transactionsPageCount)
     const paginatedTransactions = visibleTransactions.slice(
-        (transactionsCurrentPage - 1) * pageSize,
-        transactionsCurrentPage * pageSize
+        (transactionsCurrentPage - 1) * pagination.pageSize,
+        transactionsCurrentPage * pagination.pageSize
     )
     const voidTransactionChain = useMemo(() => {
         if (!transactionToVoid) return []
@@ -773,9 +768,9 @@ export function Payments() {
 
                 {(() => {
                     const renderOpenItemsTable = (title: string, tab: ObligationTab, rows: PaymentObligation[]) => {
-                        const pageCount = Math.max(1, Math.ceil(rows.length / pageSize))
-                        const currentPage = Math.min(currentPages[tab], pageCount)
-                        const paginatedRows = rows.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+                        const pageCount = Math.max(1, Math.ceil(rows.length / pagination.pageSize))
+                        const currentPage = clampPaginationPage(pagination.pages[tab], pageCount)
+                        const paginatedRows = rows.slice((currentPage - 1) * pagination.pageSize, currentPage * pagination.pageSize)
 
                         return (
                         <Card>
@@ -784,9 +779,10 @@ export function Payments() {
                                 <AppPagination
                                     currentPage={currentPage}
                                     totalCount={rows.length}
-                                    pageSize={pageSize}
-                                    onPageChange={(page) => setCurrentPages((current) => ({ ...current, [tab]: page }))}
-                                    onPageSizeChange={handlePageSizeChange}
+                                    pageCount={pageCount}
+                                    pageSize={pagination.pageSize}
+                                    onPageChange={(page) => pagination.setPage(tab, page)}
+                                    onPageSizeChange={pagination.setPageSize}
                                     className="ms-auto w-fit justify-end"
                                 />
                             </CardHeader>
@@ -913,9 +909,10 @@ export function Payments() {
                                 <AppPagination
                                     currentPage={transactionsCurrentPage}
                                     totalCount={visibleTransactions.length}
-                                    pageSize={pageSize}
-                                    onPageChange={(page) => setCurrentPages((current) => ({ ...current, transactions: page }))}
-                                    onPageSizeChange={handlePageSizeChange}
+                                    pageCount={transactionsPageCount}
+                                    pageSize={pagination.pageSize}
+                                    onPageChange={(page) => pagination.setPage('transactions', page)}
+                                    onPageSizeChange={pagination.setPageSize}
                                     className="w-fit justify-end"
                                 />
                                 {user?.role === 'admin' ? (

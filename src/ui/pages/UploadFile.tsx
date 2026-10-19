@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Search, Eye, Trash2, FileUp, ShieldAlert, Layers } from 'lucide-react'
+import { useEffect, useState, type FormEvent } from 'react'
+import Dexie from 'dexie'
+import { Search, Eye, Trash2, FileUp, ShieldAlert, Layers, LoaderCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getReadableFileSize, FileUpload } from '@/components/application/file-upload/file-upload-base'
 import { useAuth } from '@/auth'
-import { createInvoice, deleteInvoice, db, type Invoice } from '@/local-db'
+import { createInvoice, deleteInvoice, db, type Invoice, type InvoiceHistoryPage } from '@/local-db'
 import { generateId, formatDateTime } from '@/lib/utils'
 import { r2Service } from '@/services/r2Service'
 import { compressImage, ImageCompressionError, isImageUploadCandidate, type CompressedImageArtifact } from '@/lib/imageCompression'
@@ -27,6 +28,7 @@ import {
   TableRow,
   Progress,
   Switch,
+  AppPagination,
   useToast,
 } from '@/ui/components'
 
@@ -72,11 +74,28 @@ function sanitizeStorageSegment(value: string) {
 }
 
 interface UploadFilesTabProps {
-    invoices: Invoice[]
+    page: InvoiceHistoryPage & { isLoading: boolean; error: unknown }
+    search: string
+    onSearchChange: (value: string) => void
+    currentPage: number
+    pageCount: number
+    pageSize: number
+    onPageChange: (page: number) => void
+    onPageSizeChange: (pageSize: number) => void
     onPreview: (invoice: Invoice) => void
 }
 
-export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
+export function UploadFilesTab({
+    page,
+    search,
+    onSearchChange,
+    currentPage,
+    pageCount,
+    pageSize,
+    onPageChange,
+    onPageSizeChange,
+    onPreview,
+}: UploadFilesTabProps) {
     const { t } = useTranslation()
     const { toast } = useToast()
     const { user } = useAuth()
@@ -86,23 +105,13 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
     const [selectedFile, setSelectedFile] = useState<File | null>(null)
     const [uploadProgress, setUploadProgress] = useState(0)
     const [isUploading, setIsUploading] = useState(false)
-    const [search, setSearch] = useState('')
     const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null)
     const [isDeleting, setIsDeleting] = useState(false)
     const [useBranchTotal, setUseBranchTotal] = useState(false)
     const [branchTotalUsedBytes, setBranchTotalUsedBytes] = useState(0)
 
-    const uploadRecords = useMemo(
-        () => invoices
-            .filter((invoice) => invoice.origin === 'upload' && !invoice.isDeleted)
-            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
-        [invoices],
-    )
-
-    const totalUsedBytes = useMemo(
-        () => uploadRecords.reduce((sum, inv) => sum + (inv.fileSize ?? 0), 0),
-        [uploadRecords]
-    )
+    const uploadRecords = page.invoices
+    const totalUsedBytes = page.totalUploadSize
 
     const allowedUploadMimeTypes = planCapabilities.limits.allowedUploadMimeTypes
     const limitMb = features.upload_limit_mb
@@ -113,27 +122,36 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
             setBranchTotalUsedBytes(totalUsedBytes)
             return
         }
+        let cancelled = false
         const workspaceIds: string[] = [activeWorkspace.id]
         if (branchInfo?.isBranch && branchInfo.sourceWorkspaceId) {
             workspaceIds.push(branchInfo.sourceWorkspaceId)
         }
-        db.invoices
-            .where('workspaceId')
-            .anyOf(workspaceIds)
-            .filter((invoice) => invoice.origin === 'upload' && !invoice.isDeleted && (
-                !invoiceViewOwnScope.isRestricted
-                || invoice.createdBy === invoiceViewOwnScope.userId
-                || invoice.userId === invoiceViewOwnScope.userId
-            ))
-            .toArray()
-            .then(results => {
-                setBranchTotalUsedBytes(results.reduce((sum, inv) => sum + (inv.fileSize ?? 0), 0))
-            })
+        let total = 0
+        void (async () => {
+            for (const workspaceId of workspaceIds) {
+                await db.invoices
+                    .where('[workspaceId+origin+createdAt+id]')
+                    .between(
+                        [workspaceId, 'upload', Dexie.minKey, Dexie.minKey],
+                        [workspaceId, 'upload', Dexie.maxKey, Dexie.maxKey],
+                    )
+                    .each((invoice) => {
+                        if (invoice.origin !== 'upload' || invoice.isDeleted) return
+                        if (invoiceViewOwnScope.isRestricted
+                            && invoice.createdBy !== invoiceViewOwnScope.userId
+                            && invoice.userId !== invoiceViewOwnScope.userId) return
+                        total += Number(invoice.fileSize) || 0
+                    })
+            }
+            if (!cancelled) setBranchTotalUsedBytes(total)
+        })()
+        return () => { cancelled = true }
     }, [
         useBranchTotal,
         activeWorkspace?.id,
         branchInfo,
-        invoices,
+        page.totalUploadSize,
         invoiceViewOwnScope.isRestricted,
         invoiceViewOwnScope.userId,
     ])
@@ -150,19 +168,6 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
             limit: getReadableFileSize(effectiveLimitBytes)
         })
         : t('uploadFile.uploadUnavailable', { defaultValue: 'Workspace uploads are not included in this plan.' })
-
-    const filteredUploadRecords = useMemo(() => {
-        const normalizedSearch = search.trim().toLowerCase()
-        if (!normalizedSearch) return uploadRecords
-
-        return uploadRecords.filter((invoice) => {
-            const createdBy = invoice.createdByName || invoice.createdBy || ''
-            return (
-                invoice.invoiceid.toLowerCase().includes(normalizedSearch)
-                || createdBy.toLowerCase().includes(normalizedSearch)
-            )
-        })
-    }, [search, uploadRecords])
 
     const canDelete = user?.role === 'admin'
 
@@ -533,7 +538,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                         <div>
                             <CardTitle className="text-lg font-black">{t('uploadFile.uploadedFiles', { defaultValue: 'Uploaded Files' })}</CardTitle>
                             <p className="mt-1 text-sm text-muted-foreground">
-                                {t('uploadFile.filesCount', { count: uploadRecords.length, defaultValue: '{{count}} file stored in workspace uploads.' })}
+                                {t('uploadFile.filesCount', { count: page.totalUploadCount, defaultValue: '{{count}} file stored in workspace uploads.' })}
                             </p>
                         </div>
 
@@ -542,7 +547,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                             <Input
                                 allowViewer={true}
                                 value={search}
-                                onChange={(event) => setSearch(event.target.value)}
+                                onChange={(event) => onSearchChange(event.target.value)}
                                 placeholder={t('uploadFile.searchPlaceholder', { defaultValue: 'Search uploaded files' })}
                                 className="pl-10"
                             />
@@ -578,14 +583,33 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                             indicatorClassName={exceededLimit ? 'bg-destructive' : undefined}
                         />
                     </div>
+                    <AppPagination
+                        currentPage={currentPage}
+                        totalCount={page.totalCount}
+                        pageCount={pageCount}
+                        pageSize={pageSize}
+                        pageSizeOptions={[10, 20, 50, 100]}
+                        onPageChange={onPageChange}
+                        onPageSizeChange={onPageSizeChange}
+                        className="mt-4 w-auto"
+                    />
                 </CardHeader>
                 <CardContent className="p-0">
-                    {filteredUploadRecords.length === 0 ? (
+                    {page.isLoading ? (
+                        <div className="flex min-h-44 items-center justify-center gap-3 text-sm text-muted-foreground" role="status">
+                            <LoaderCircle className="h-5 w-5 animate-spin text-primary" />
+                            {t('common.loading')}
+                        </div>
+                    ) : page.error ? (
+                        <div className="py-12 text-center text-sm text-destructive" role="alert">
+                            {t('uploadFile.loadError')}
+                        </div>
+                    ) : uploadRecords.length === 0 ? (
                         <div className="flex flex-col items-center justify-center gap-3 py-14 text-center text-muted-foreground">
                             <FileUp className="h-12 w-12 opacity-20" />
                             <div>
                                 <p className="font-semibold text-foreground">
-                                    {uploadRecords.length === 0 
+                                    {page.totalUploadCount === 0
                                         ? t('uploadFile.noFiles', { defaultValue: 'No uploaded files yet' }) 
                                         : t('uploadFile.noMatch', { defaultValue: 'No files match your search' })}
                                 </p>
@@ -606,7 +630,7 @@ export function UploadFilesTab({ invoices, onPreview }: UploadFilesTabProps) {
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {filteredUploadRecords.map((invoice) => (
+                                {uploadRecords.map((invoice) => (
                                     <TableRow key={invoice.id} className="group transition-colors hover:bg-muted/30">
                                         <TableCell className="text-xs font-medium text-muted-foreground">
                                             {formatDateTime(invoice.createdAt)}

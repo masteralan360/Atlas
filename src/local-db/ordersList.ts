@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Dexie, { type Table } from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
 
@@ -22,6 +23,7 @@ import {
 } from './orders'
 import { getAppliedCurrencyConversion } from '@/lib/orderCurrency'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { queryKeys } from '@/query/queryKeys'
 import type {
   Agent,
   ProductCommissionRule,
@@ -452,15 +454,17 @@ async function summarizeLocalProductCommissions(
 export async function fetchOrdersListPage(
   query: OrdersListPageQuery,
   localContext?: LocalOrdersListContext,
-  commissionPreview?: OrdersProductCommissionPreviewContext
+  commissionPreview?: OrdersProductCommissionPreviewContext,
+  signal?: AbortSignal,
 ): Promise<OrdersListPage> {
   const workspaceId = query.workspaceId
   if (!workspaceId || query.enabled === false) return EMPTY_ORDERS_PAGE
 
   if (isOnline(workspaceId) && !isLocalWorkspaceMode(workspaceId)) {
-    const response = await runSupabaseAction('orders.listPage', () => getSupabaseClientForTable(
-      query.orderType === 'sales' ? 'sales_orders' : 'purchase_orders'
-    ).rpc('get_orders_list_page_optimized', {
+    const response = await runSupabaseAction('orders.listPage', () => {
+      const request = getSupabaseClientForTable(
+        query.orderType === 'sales' ? 'sales_orders' : 'purchase_orders'
+      ).rpc('get_orders_list_page_optimized', {
       p_workspace_id: workspaceId,
       p_order_type: query.orderType,
       p_created_from: query.createdFrom ?? null,
@@ -476,7 +480,9 @@ export async function fetchOrdersListPage(
       p_page: query.page,
       p_page_size: query.pageSize,
       p_include_product_commission_preview: false
-    }))
+      })
+      return signal ? request.abortSignal(signal) : request
+    })
 
     if (response.error) throw normalizeSupabaseActionError(response.error)
     const payload = response.data as Record<string, unknown> | null
@@ -591,6 +597,7 @@ async function getLocalStorageAccessSnapshot(workspaceId: string): Promise<Order
 
 export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?: OrdersProductCommissionPreviewContext) {
   const online = useNetworkStatus()
+  const queryClient = useQueryClient()
   const { features, activeWorkspace } = useWorkspace()
   const queryKey = useMemo(() => JSON.stringify(query), [query])
   const request = useMemo(() => JSON.parse(queryKey) as OrdersListPageQuery, [queryKey])
@@ -659,71 +666,36 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
     ],
     []
   )
-  const [remoteState, setRemoteState] = useState<{ key: string; page: OrdersListPage; loading: boolean; error: unknown }>({
-    key: '',
-    page: EMPTY_ORDERS_PAGE,
-    loading: false,
-    error: null
+  const remotePageQuery = useQuery({
+    queryKey: queryKeys.orders.page(request, viewOwn),
+    queryFn: ({ signal }) => fetchOrdersListPage(request, undefined, undefined, signal),
+    enabled: request.enabled !== false && Boolean(workspaceId) && usesRemote,
   })
-  const [remoteCommissionPreviewState, setRemoteCommissionPreviewState] = useState<{
-    key: string
-    totals: OrdersListPage['productCommissionPreviewByCurrency']
-    loading: boolean
-    error: unknown | null
-  }>({ key: '', totals: [], loading: false, error: null })
+  const remoteCommissionPreviewQuery = useQuery({
+    queryKey: queryKeys.orders.commissionPreview(commissionSummaryRequest, viewOwn),
+    queryFn: () => fetchRemoteProductCommissionPreview(commissionSummaryRequest),
+    enabled: request.enabled !== false
+      && Boolean(workspaceId)
+      && usesRemote
+      && request.orderType === 'sales'
+      && Boolean(commissionPreview),
+  })
+  const previousRefreshToken = useRef(request.refreshToken)
+
+  useEffect(() => {
+    if (previousRefreshToken.current === request.refreshToken) return
+    previousRefreshToken.current = request.refreshToken
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.orders.all(workspaceId, request.orderType),
+    })
+  }, [queryClient, request.orderType, request.refreshToken, workspaceId])
+
   const fetchAllMatches = () => fetchAllOrdersListMatches(request, {
     storageAccess,
     viewOwn,
     permissionKeys: permissions?.permissionKeys,
     agentSalesAccountsFeatureEnabled
   })
-
-  useEffect(() => {
-    if (!request.enabled || !workspaceId || !usesRemote) {
-      setRemoteState((current) => current.key === queryKey && !current.loading
-        ? current
-        : { key: queryKey, page: EMPTY_ORDERS_PAGE, loading: false, error: null })
-      return
-    }
-
-    let cancelled = false
-    setRemoteState((current) => ({ ...current, key: queryKey, loading: true, error: null }))
-    void fetchOrdersListPage(request, undefined, commissionPreview)
-      .then((page) => {
-        if (!cancelled) setRemoteState({ key: queryKey, page, loading: false, error: null })
-      })
-      .catch((error) => {
-        if (!cancelled) setRemoteState({ key: queryKey, page: EMPTY_ORDERS_PAGE, loading: false, error })
-      })
-
-    return () => { cancelled = true }
-  }, [queryKey, request, usesRemote, workspaceId, agentSalesAccountsFeatureEnabled])
-
-  useEffect(() => {
-    if (!request.enabled || !workspaceId || !usesRemote || request.orderType !== 'sales' || !commissionPreview) {
-      setRemoteCommissionPreviewState((current) => current.key === commissionSummaryQueryKey && !current.loading
-        ? current
-        : { key: commissionSummaryQueryKey, totals: [], loading: false, error: null })
-      return
-    }
-
-    let cancelled = false
-    setRemoteCommissionPreviewState((current) => ({
-      key: commissionSummaryQueryKey,
-      totals: current.key === commissionSummaryQueryKey ? current.totals : [],
-      loading: true,
-      error: null
-    }))
-    void fetchRemoteProductCommissionPreview(commissionSummaryRequest)
-      .then((totals) => {
-        if (!cancelled) setRemoteCommissionPreviewState({ key: commissionSummaryQueryKey, totals, loading: false, error: null })
-      })
-      .catch((error) => {
-        if (!cancelled) setRemoteCommissionPreviewState({ key: commissionSummaryQueryKey, totals: [], loading: false, error })
-      })
-
-    return () => { cancelled = true }
-  }, [commissionPreview, commissionSummaryQueryKey, commissionSummaryRequest, request.enabled, request.orderType, usesRemote, workspaceId])
 
   if (request.enabled === false) return {
     ...EMPTY_ORDERS_PAGE,
@@ -734,16 +706,15 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
     fetchAllMatches
   }
   if (usesRemote) {
-    const current = remoteState.key === queryKey
-    const currentCommissionPreview = remoteCommissionPreviewState.key === commissionSummaryQueryKey
+    const page = remotePageQuery.data ?? EMPTY_ORDERS_PAGE
     return {
-      ...remoteState.page,
-      productCommissionPreviewByCurrency: currentCommissionPreview ? remoteCommissionPreviewState.totals : [],
+      ...page,
+      productCommissionPreviewByCurrency: remoteCommissionPreviewQuery.data ?? [],
       productCommissionPreviewIsLoading: Boolean(commissionPreview)
-        && (!currentCommissionPreview || remoteCommissionPreviewState.loading),
-      productCommissionPreviewError: currentCommissionPreview ? remoteCommissionPreviewState.error : null,
-      isLoading: !current || remoteState.loading,
-      error: current ? remoteState.error : null,
+        && remoteCommissionPreviewQuery.isPending,
+      productCommissionPreviewError: remoteCommissionPreviewQuery.error,
+      isLoading: remotePageQuery.isPending,
+      error: remotePageQuery.error,
       fetchAllMatches
     }
   }

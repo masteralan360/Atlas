@@ -1,7 +1,14 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import {
+    flexRender,
+    getCoreRowModel,
+    useReactTable,
+    type ColumnDef,
+    type SortingState,
+} from '@tanstack/react-table'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useLocation } from 'wouter'
-import { useInvoices, type Invoice, type InvoiceVersion } from '@/local-db'
+import { useInvoiceHistoryPage, useInvoices, type Invoice, type InvoiceVersion } from '@/local-db'
 import { formatCurrency, formatDateTime, formatDate, formatOriginLabel } from '@/lib/utils'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { platformService } from '@/services/platformService'
@@ -29,11 +36,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/ui/components'
-import { FileText, Search, Eye, Upload, RefreshCw, Share2, History } from 'lucide-react'
+import { FileText, Search, Eye, Upload, RefreshCw, Share2, History, LoaderCircle, ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '@/auth'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useDateRange } from '@/context/DateRangeContext'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { r2Service } from '@/services/r2Service'
@@ -42,23 +50,81 @@ import { setPDFPreviewSource } from '@/lib/pdfPreviewStore'
 import { loadInvoiceVersions } from '@/services/invoiceVersionService'
 import { getReadableFileSize } from '@/components/application/file-upload/file-upload-base'
 import { getWorkspaceUsageLimitMessage, isWorkspaceUsageLimitError } from '@/lib/workspaceUsage'
-import { isDateInDateRange } from '@/lib/dateRangeFilters'
+import { getDateRangeBounds } from '@/lib/dateRangeFilters'
+import { AppPagination } from '@/ui/components/AppPagination'
 
 const UPLOAD_FILES_ROUTE = '/invoices-history/upload-files'
 
 export function InvoicesHistory() {
     const [location, setLocation] = useLocation()
     const { user } = useAuth()
-    const { invoices, refreshInvoices } = useInvoices(user?.workspaceId)
+    const activeTab = location === UPLOAD_FILES_ROUTE ? 'uploads' : 'history'
+    const { refreshInvoices } = useInvoices(user?.workspaceId, {
+        includeAll: false,
+        syncRemote: activeTab === 'uploads',
+    })
     const { features } = useWorkspace()
     const { t, i18n } = useTranslation()
     const { dateRange, customDates } = useDateRange()
     const [search, setSearch] = useState('')
+    const deferredSearch = useDeferredValue(search)
+    const [uploadSearch, setUploadSearch] = useState('')
+    const deferredUploadSearch = useDeferredValue(uploadSearch)
+    const [sorting, setSorting] = useState<SortingState>([{ id: 'createdAt', desc: true }])
     const [isLoadingPdf, setIsLoadingPdf] = useState(false)
     const [downloadError, setDownloadError] = useState<string | null>(null)
     const [versionsTarget, setVersionsTarget] = useState<Invoice | null>(null)
     const [versions, setVersions] = useState<InvoiceVersion[]>([])
     const [isLoadingVersions, setIsLoadingVersions] = useState(false)
+    const dateBounds = getDateRangeBounds(dateRange, customDates)
+    const historyPagination = usePaginationState({
+        resetOn: [dateBounds.start?.getTime(), dateBounds.end?.getTime(), deferredSearch, sorting[0]?.desc],
+        initialPageSize: 20,
+    })
+    const uploadPagination = usePaginationState({
+        resetOn: [dateBounds.start?.getTime(), dateBounds.end?.getTime(), deferredUploadSearch],
+        initialPageSize: 20,
+    })
+    const historyPage = useInvoiceHistoryPage({
+        workspaceId: user?.workspaceId,
+        createdFrom: dateBounds.start?.toISOString(),
+        createdTo: dateBounds.end?.toISOString(),
+        search: deferredSearch,
+        page: historyPagination.currentPage,
+        pageSize: historyPagination.pageSize,
+        sortDirection: sorting[0]?.desc === false ? 'asc' : 'desc',
+        origin: 'history',
+        enabled: activeTab === 'history',
+    })
+    const uploadPage = useInvoiceHistoryPage({
+        workspaceId: user?.workspaceId,
+        createdFrom: dateBounds.start?.toISOString(),
+        createdTo: dateBounds.end?.toISOString(),
+        search: deferredUploadSearch,
+        page: uploadPagination.currentPage,
+        pageSize: uploadPagination.pageSize,
+        sortDirection: 'desc',
+        origin: 'upload',
+        enabled: activeTab === 'uploads',
+    })
+    const historyInvoices = historyPage.invoices
+    const uploadedFilesCount = uploadPage.totalUploadCount
+    const historyPageState = usePaginationBounds({
+        currentPage: historyPagination.currentPage,
+        setCurrentPage: historyPagination.setCurrentPage,
+        totalCount: historyPage.totalCount,
+        pageSize: historyPagination.pageSize,
+        isLoading: historyPage.isLoading,
+        error: historyPage.error,
+    })
+    const uploadPageState = usePaginationBounds({
+        currentPage: uploadPagination.currentPage,
+        setCurrentPage: uploadPagination.setCurrentPage,
+        totalCount: uploadPage.totalCount,
+        pageSize: uploadPagination.pageSize,
+        isLoading: uploadPage.isLoading,
+        error: uploadPage.error,
+    })
 
     useEffect(() => {
         if (!versionsTarget) {
@@ -85,29 +151,6 @@ export function InvoicesHistory() {
         }
     }, [t, versionsTarget])
 
-    const activeTab = location === UPLOAD_FILES_ROUTE ? 'uploads' : 'history'
-    const historyInvoices = useMemo(
-        () => invoices.filter((invoice) => invoice.origin !== 'upload'),
-        [invoices],
-    )
-    const uploadedFilesCount = invoices.length - historyInvoices.length
-
-    const filteredInvoices = useMemo(() => {
-        const now = new Date()
-        return historyInvoices
-            .filter((invoice) => {
-                const normalizedSearch = search.trim().toLowerCase()
-                const matchesSearch = !normalizedSearch || [
-                    invoice.invoiceid,
-                    invoice.sourceId,
-                    invoice.origin,
-                    invoice.createdByName,
-                ].some((value) => value?.toLowerCase().includes(normalizedSearch))
-                return matchesSearch && isDateInDateRange(invoice.createdAt, dateRange, customDates, now)
-            })
-            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    }, [customDates, dateRange, historyInvoices, search])
-
     const getDateDisplay = () => {
         if (dateRange === 'today') {
             return formatDate(new Date())
@@ -129,10 +172,9 @@ export function InvoicesHistory() {
         }
 
         if (dateRange === 'custom') {
-            if (filteredInvoices.length > 0) {
-                const dates = filteredInvoices.map((invoice) => new Date(invoice.createdAt).getTime())
-                const minDate = new Date(Math.min(...dates))
-                const maxDate = new Date(Math.max(...dates))
+            if (historyPage.minCreatedAt && historyPage.maxCreatedAt) {
+                const minDate = new Date(historyPage.minCreatedAt)
+                const maxDate = new Date(historyPage.maxCreatedAt)
                 return `${t('performance.filters.from') || 'From'} ${formatDate(minDate)} ${t('performance.filters.to') || 'To'} ${formatDate(maxDate)}`
             }
 
@@ -145,10 +187,9 @@ export function InvoicesHistory() {
         }
 
         if (dateRange === 'allTime') {
-            if (historyInvoices.length > 0) {
-                const dates = historyInvoices.map((invoice) => new Date(invoice.createdAt).getTime())
-                const minDate = new Date(Math.min(...dates))
-                const maxDate = new Date(Math.max(...dates))
+            if (historyPage.minCreatedAt && historyPage.maxCreatedAt) {
+                const minDate = new Date(historyPage.minCreatedAt)
+                const maxDate = new Date(historyPage.maxCreatedAt)
                 return `${t('performance.filters.from') || 'From'} ${formatDate(minDate)} ${t('performance.filters.to') || 'To'} ${formatDate(maxDate)}`
             }
 
@@ -354,6 +395,149 @@ export function InvoicesHistory() {
         }
     }
 
+    const tableColumns = useMemo<ColumnDef<Invoice>[]>(() => [
+        {
+            id: 'createdAt',
+            accessorKey: 'createdAt',
+            enableSorting: true,
+            header: ({ column }) => {
+                const direction = column.getIsSorted()
+                return (
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="-ms-3 gap-2 font-bold"
+                        onClick={column.getToggleSortingHandler()}
+                        aria-label={t('invoices.table.created')}
+                    >
+                        {t('invoices.table.created')}
+                        {direction === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : direction === 'desc' ? <ArrowDown className="h-3.5 w-3.5" /> : <ArrowUpDown className="h-3.5 w-3.5" />}
+                    </Button>
+                )
+            },
+            cell: ({ getValue }) => formatDateTime(String(getValue() || '')),
+        },
+        {
+            id: 'invoiceid',
+            accessorKey: 'invoiceid',
+            enableSorting: false,
+            header: t('invoices.table.invoiceid'),
+            cell: ({ row }) => row.original.sequenceId
+                ? `#${String(row.original.sequenceId).padStart(5, '0')}`
+                : row.original.invoiceid,
+        },
+        {
+            id: 'createdBy',
+            accessorFn: (invoice) => invoice.createdByName || invoice.createdBy || 'Unknown',
+            enableSorting: false,
+            header: t('invoices.table.createdBy', { defaultValue: 'Created By' }),
+        },
+        {
+            id: 'origin',
+            accessorKey: 'origin',
+            enableSorting: false,
+            header: t('invoices.table.origin', { defaultValue: 'Origin' }),
+            cell: ({ row }) => (
+                <span className="rounded-lg bg-secondary/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-secondary-foreground">
+                    {row.original.origin === 'direct_transaction' ? t('directTransactions.title') : formatOriginLabel(row.original.origin)}
+                </span>
+            ),
+        },
+        {
+            id: 'totalAmount',
+            accessorKey: 'totalAmount',
+            enableSorting: false,
+            header: t('invoices.table.total'),
+            cell: ({ row }) => formatCurrency(
+                row.original.totalAmount,
+                row.original.settlementCurrency || 'usd',
+                features.iqd_display_preference,
+            ),
+        },
+        {
+            id: 'actions',
+            enableSorting: false,
+            header: t('common.actions'),
+            cell: ({ row }) => {
+                const invoice = row.original
+                return (
+                    <div className="flex justify-end gap-2">
+                        {(invoice.localPathA4 || invoice.pdfBlobA4 || invoice.r2PathA4) && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                allowViewer={true}
+                                className="flex items-center gap-2 rounded-xl px-3 transition-all hover:bg-primary/10 hover:text-primary"
+                                onClick={() => void handleView(invoice, 'a4')}
+                            >
+                                <Eye className="h-4 w-4" />
+                                <span className="font-mono text-xs font-bold">A4</span>
+                            </Button>
+                        )}
+                        {(invoice.localPathReceipt || invoice.pdfBlobReceipt || invoice.r2PathReceipt) && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                allowViewer={true}
+                                className="flex items-center gap-2 rounded-xl px-3 transition-all hover:bg-primary/10 hover:text-primary"
+                                onClick={() => void handleView(invoice, 'receipt')}
+                            >
+                                <FileText className="h-4 w-4" />
+                                <span className="font-mono text-xs font-bold">Receipt</span>
+                            </Button>
+                        )}
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            allowViewer={true}
+                            className="flex items-center gap-2 rounded-xl px-3 transition-all hover:bg-primary/10 hover:text-primary"
+                            onClick={() => setVersionsTarget(invoice)}
+                        >
+                            <History className="h-4 w-4" />
+                            <span className="text-xs font-bold">
+                                {t('invoices.versions', { defaultValue: 'Versions' })}
+                                {invoice.latestVersionNumber ? ` (${invoice.latestVersionNumber})` : ''}
+                            </span>
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            allowViewer={true}
+                            className="flex items-center gap-2 rounded-xl px-3 transition-all hover:bg-primary/10 hover:text-primary"
+                            onClick={() => {
+                                const format = (invoice.localPathA4 || invoice.pdfBlobA4 || invoice.r2PathA4) ? 'a4' : 'receipt'
+                                void handleShare(invoice, format)
+                            }}
+                        >
+                            <Share2 className="h-4 w-4" />
+                        </Button>
+                    </div>
+                )
+            },
+        },
+    ], [features.iqd_display_preference, handleShare, handleView, t])
+
+    const invoiceTable = useReactTable({
+        data: historyInvoices,
+        columns: tableColumns,
+        getRowId: (invoice) => invoice.id,
+        getCoreRowModel: getCoreRowModel(),
+        manualPagination: true,
+        manualSorting: true,
+        rowCount: historyPage.totalCount,
+        onSortingChange: (updater) => {
+            setSorting((current) => {
+                const next = typeof updater === 'function' ? updater(current) : updater
+                return next.length ? [next[0]] : [{ id: 'createdAt', desc: true }]
+            })
+        },
+        state: {
+            pagination: { pageIndex: historyPageState.currentPage - 1, pageSize: historyPagination.pageSize },
+            sorting,
+        },
+    })
+
     return (
         <Tabs
             value={activeTab}
@@ -367,25 +551,25 @@ export function InvoicesHistory() {
                     <div className="flex flex-wrap items-center gap-3">
                         <h1 className="flex items-center gap-2 text-2xl font-bold">
                             <FileText className="h-6 w-6 text-primary" />
-                            {t('invoices.historyTitle') || 'Invoices History'}
+                        {t('nav.invoicesHistory')}
                         </h1>
                         {activeTab === 'history' ? <DateRangeBadge>{getDateDisplay()}</DateRangeBadge> : null}
                     </div>
                     <p className="text-muted-foreground">
                         {activeTab === 'history'
-                            ? (t('invoices.historySubtitle', { count: historyInvoices.length }) || `${historyInvoices.length} historical records`)
-                            : `${uploadedFilesCount} uploaded PDF file${uploadedFilesCount === 1 ? '' : 's'}`} <ModulePageFreshness className="ms-2" />
+                            ? t('invoices.historySubtitle', { count: historyPage.totalCount })
+                            : t('invoices.uploadedFilesCount', { count: uploadedFilesCount })} <ModulePageFreshness tableNames={['invoices']} className="ms-2" />
                     </p>
                 </div>
 
                 <TabsList className="grid h-auto w-full max-w-[380px] grid-cols-2 rounded-2xl bg-secondary/50 p-1">
                     <TabsTrigger value="history" className="gap-2 rounded-xl font-bold">
                         <FileText className="h-4 w-4" />
-                        History
+                        {t('nav.invoicesHistory')}
                     </TabsTrigger>
                     <TabsTrigger value="uploads" className="gap-2 rounded-xl font-bold">
                         <Upload className="h-4 w-4" />
-                        Upload Files
+                        {t('nav.uploadFiles')}
                     </TabsTrigger>
                 </TabsList>
             </div>
@@ -399,7 +583,10 @@ export function InvoicesHistory() {
                                 allowViewer={true}
                                 placeholder={t('invoices.searchPlaceholder') || 'Search by ID...'}
                                 value={search}
-                                onChange={(event) => setSearch(event.target.value)}
+                                onChange={(event) => {
+                                    setSearch(event.target.value)
+                                    historyPagination.resetPage()
+                                }}
                                 className="pl-10 rounded-xl"
                             />
                         </div>
@@ -408,7 +595,9 @@ export function InvoicesHistory() {
                             size="icon"
                             allowViewer={true}
                             className="shrink-0 rounded-xl"
-                            onClick={() => refreshInvoices()}
+                            onClick={() => activeTab === 'history'
+                                ? void historyPage.refetch()
+                                : void Promise.all([uploadPage.refetch(), refreshInvoices()])}
                             title={t('common.refresh') || 'Refresh'}
                         >
                             <RefreshCw className="h-4 w-4" />
@@ -418,107 +607,82 @@ export function InvoicesHistory() {
                 </div>
 
                 <Card className="overflow-hidden rounded-2xl border-2 shadow-sm">
-                    <CardHeader className="border-b bg-muted/30">
+                    <CardHeader className="flex flex-col gap-3 border-b bg-muted/30 md:flex-row md:items-center md:justify-between">
                         <CardTitle className="flex items-center gap-2 text-lg font-bold">
                             <FileText className="h-5 w-5 text-primary/70" />
                             {t('invoices.listTitle') || 'Historical Records'}
                         </CardTitle>
+                        <AppPagination
+                            currentPage={historyPageState.currentPage}
+                            totalCount={historyPage.totalCount}
+                            pageCount={historyPageState.pageCount}
+                            pageSize={historyPagination.pageSize}
+                            pageSizeOptions={[10, 20, 50, 100]}
+                            onPageChange={historyPagination.setCurrentPage}
+                            onPageSizeChange={historyPagination.setPageSize}
+                            className="w-auto"
+                        />
                     </CardHeader>
                     <CardContent className="p-0">
-                        {filteredInvoices.length === 0 ? (
+                        {historyPage.isLoading ? (
+                            <div className="flex min-h-44 items-center justify-center gap-3 text-sm text-muted-foreground" role="status">
+                                <LoaderCircle className="h-5 w-5 animate-spin text-primary" />
+                                {t('common.loading') || 'Loading...'}
+                            </div>
+                        ) : historyPage.error ? (
+                            <div className="py-12 text-center text-sm text-destructive" role="alert">
+                                {t('invoices.historyLoadError')}
+                            </div>
+                        ) : historyPage.totalCount === 0 ? (
                             <div className="bg-muted/5 py-12 text-center text-muted-foreground">
                                 <FileText className="mx-auto mb-4 h-12 w-12 opacity-10" />
-                                {historyInvoices.length === 0 ? t('common.noData') : t('common.noResults')}
+                                {t('common.noData')}
                             </div>
                         ) : (
                             <Table>
                                 <TableHeader className="bg-muted/20">
-                                    <TableRow className="border-b hover:bg-transparent">
-                                        <TableHead className="py-4 font-bold">{t('invoices.table.created')}</TableHead>
-                                        <TableHead className="font-bold">{t('invoices.table.invoiceid')}</TableHead>
-                                        <TableHead className="text-center font-bold">{t('invoices.table.createdBy') || 'Created By'}</TableHead>
-                                        <TableHead className="text-center font-bold">{t('invoices.table.origin') || 'Origin'}</TableHead>
-                                        <TableHead className="text-right font-bold">{t('invoices.table.total')}</TableHead>
-                                        <TableHead className="pr-6 text-right font-bold">{t('common.actions')}</TableHead>
-                                    </TableRow>
+                                    {invoiceTable.getHeaderGroups().map((headerGroup) => (
+                                        <TableRow key={headerGroup.id} className="border-b hover:bg-transparent">
+                                            {headerGroup.headers.map((header) => (
+                                                <TableHead
+                                                    key={header.id}
+                                                    className={header.column.id === 'createdAt'
+                                                        ? 'py-4 font-bold'
+                                                        : header.column.id === 'createdBy' || header.column.id === 'origin'
+                                                            ? 'text-center font-bold'
+                                                            : header.column.id === 'totalAmount'
+                                                                ? 'text-right font-bold'
+                                                                : header.column.id === 'actions'
+                                                                    ? 'pr-6 text-right font-bold'
+                                                                    : 'font-bold'}
+                                                >
+                                                    {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
+                                                </TableHead>
+                                            ))}
+                                        </TableRow>
+                                    ))}
                                 </TableHeader>
                                 <TableBody>
-                                    {filteredInvoices.map((invoice) => (
-                                        <TableRow key={invoice.id} className="group transition-colors hover:bg-muted/30">
-                                            <TableCell className="py-4 pl-4 text-xs font-medium text-muted-foreground">
-                                                {formatDateTime(invoice.createdAt)}
-                                            </TableCell>
-                                            <TableCell className="font-mono text-xs font-bold text-primary">
-                                                {invoice.sequenceId ? `#${String(invoice.sequenceId).padStart(5, '0')}` : invoice.invoiceid}
-                                            </TableCell>
-                                            <TableCell className="text-center text-xs font-medium">
-                                                {invoice.createdByName || invoice.createdBy || 'Unknown'}
-                                            </TableCell>
-                                            <TableCell className="text-center">
-                                                <span className="rounded-lg bg-secondary/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-secondary-foreground">
-                                                    {invoice.origin === 'direct_transaction' ? t('directTransactions.title') : formatOriginLabel(invoice.origin)}
-                                                </span>
-                                            </TableCell>
-                                            <TableCell className="text-right font-black tabular-nums">
-                                                {formatCurrency(invoice.totalAmount, invoice.settlementCurrency || 'usd', features.iqd_display_preference)}
-                                            </TableCell>
-                                            <TableCell className="pr-6 text-right">
-                                                <div className="flex justify-end gap-2">
-                                                    {(invoice.localPathA4 || invoice.pdfBlobA4 || invoice.r2PathA4) && (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            allowViewer={true}
-                                                            className="flex items-center gap-2 rounded-xl px-3 transition-all hover:bg-primary/10 hover:text-primary"
-                                                            onClick={() => {
-                                                                void handleView(invoice, 'a4')
-                                                            }}
-                                                        >
-                                                            <Eye className="h-4 w-4" />
-                                                            <span className="font-mono text-xs font-bold">A4</span>
-                                                        </Button>
-                                                    )}
-                                                    {(invoice.localPathReceipt || invoice.pdfBlobReceipt || invoice.r2PathReceipt) && (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            allowViewer={true}
-                                                            className="flex items-center gap-2 rounded-xl px-3 transition-all hover:bg-primary/10 hover:text-primary"
-                                                            onClick={() => {
-                                                                void handleView(invoice, 'receipt')
-                                                            }}
-                                                        >
-                                                            <FileText className="h-4 w-4" />
-                                                            <span className="font-mono text-xs font-bold">Receipt</span>
-                                                        </Button>
-                                                    )}
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        allowViewer={true}
-                                                        className="flex items-center gap-2 rounded-xl px-3 transition-all hover:bg-primary/10 hover:text-primary"
-                                                        onClick={() => setVersionsTarget(invoice)}
-                                                    >
-                                                        <History className="h-4 w-4" />
-                                                        <span className="text-xs font-bold">
-                                                            {t('invoices.versions', { defaultValue: 'Versions' })}
-                                                            {invoice.latestVersionNumber ? ` (${invoice.latestVersionNumber})` : ''}
-                                                        </span>
-                                                    </Button>
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        allowViewer={true}
-                                                        className="flex items-center gap-2 rounded-xl px-3 transition-all hover:bg-primary/10 hover:text-primary"
-                                                        onClick={() => {
-                                                            const format = (invoice.localPathA4 || invoice.pdfBlobA4 || invoice.r2PathA4) ? 'a4' : 'receipt'
-                                                            void handleShare(invoice, format)
-                                                        }}
-                                                    >
-                                                        <Share2 className="h-4 w-4" />
-                                                    </Button>
-                                                </div>
-                                            </TableCell>
+                                    {invoiceTable.getRowModel().rows.map((row) => (
+                                        <TableRow key={row.id} className="group transition-colors hover:bg-muted/30">
+                                            {row.getVisibleCells().map((cell) => (
+                                                <TableCell
+                                                    key={cell.id}
+                                                    className={cell.column.id === 'createdAt'
+                                                        ? 'py-4 pl-4 text-xs font-medium text-muted-foreground'
+                                                        : cell.column.id === 'invoiceid'
+                                                            ? 'font-mono text-xs font-bold text-primary'
+                                                            : cell.column.id === 'createdBy'
+                                                                ? 'text-center text-xs font-medium'
+                                                                : cell.column.id === 'origin'
+                                                                    ? 'text-center'
+                                                                    : cell.column.id === 'totalAmount'
+                                                                        ? 'text-right font-black tabular-nums'
+                                                                        : 'pr-6 text-right'}
+                                                >
+                                                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                                </TableCell>
+                                            ))}
                                         </TableRow>
                                     ))}
                                 </TableBody>
@@ -530,7 +694,17 @@ export function InvoicesHistory() {
 
             <TabsContent value="uploads" className="mt-0">
                 <UploadFilesTab
-                    invoices={invoices}
+                    page={uploadPage}
+                    search={uploadSearch}
+                    onSearchChange={(value) => {
+                        setUploadSearch(value)
+                        uploadPagination.resetPage()
+                    }}
+                    currentPage={uploadPageState.currentPage}
+                    pageCount={uploadPageState.pageCount}
+                    pageSize={uploadPagination.pageSize}
+                    onPageChange={uploadPagination.setCurrentPage}
+                    onPageSizeChange={uploadPagination.setPageSize}
                     onPreview={(invoice) => {
                         void handleView(invoice, 'a4')
                     }}

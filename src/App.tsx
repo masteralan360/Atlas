@@ -51,6 +51,7 @@ import {
   UPDATE_PREFERENCE_CHANGED_EVENT,
 } from "@/lib/updatePreference";
 import { checkForTauriUpdate } from "@/lib/tauriUpdater";
+import { QueryScopeBoundary } from "@/query/QueryScopeBoundary";
 
 // @ts-ignore
 const isTauri = !!window.__TAURI_INTERNALS__;
@@ -1419,6 +1420,7 @@ function App() {
     <AuthProvider>
       <DeviceTokenBootstrap />
       <WorkspaceProvider>
+        <QueryScopeBoundary />
         <ClinicalRegistryLocaleSync />
         <WorkspacePermissionsProvider>
           <FleetLocationSharingProvider>

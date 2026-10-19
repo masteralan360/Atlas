@@ -11,6 +11,7 @@ import { formatCurrency, formatDateTime, formatCompactDateTime, formatDate, form
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { getSalesHistoryRowTotal } from '@/lib/salesHistoryTotals'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import { getLoanDetailsPath } from '@/lib/loanPresentation'
 import { isActiveSale, isSaleFullyReturned } from '@/lib/saleArchiving'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
@@ -452,9 +453,9 @@ export function Sales() {
     const deferredSalesSearch = useDeferredValue(filters.search)
     const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
     const [draftFilters, setDraftFilters] = useState<SalesFilterState>(filters)
-    const [currentPage, setCurrentPage] = useState(1)
-    const [pageSize, setPageSize] = useState(() => {
-        return Number(localStorage.getItem('sales_page_size')) || 20
+    const pagination = usePaginationState({
+        resetOn: [dateRange, customDates.start, customDates.end, filters],
+        initialPageSize: Number(localStorage.getItem('sales_page_size')) || 20,
     })
 
     const productExchangeSaleItems = useMemo<ProductExchangeSaleItem[]>(() => {
@@ -549,8 +550,8 @@ export function Sales() {
     }, [priceBookReplacementAmountByKey, saleForProductExchange?.settlement_currency])
 
     useEffect(() => {
-        localStorage.setItem('sales_page_size', String(pageSize))
-    }, [pageSize])
+        localStorage.setItem('sales_page_size', String(pagination.pageSize))
+    }, [pagination.pageSize])
 
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => {
         return (localStorage.getItem('sales_view_mode') as 'table' | 'grid') || 'table'
@@ -731,10 +732,6 @@ export function Sales() {
     }, [isDateLoading, isLoading, filteredSales])
 
     useEffect(() => {
-        setCurrentPage(1)
-    }, [dateRange, customDates, filters])
-
-    useEffect(() => {
         if (!isFilterDialogOpen) {
             return
         }
@@ -746,16 +743,22 @@ export function Sales() {
     const handleApplyFilters = () => {
         setFilters(draftFilters)
         setIsFilterDialogOpen(false)
-        setCurrentPage(1)
     }
 
     const totalCount = filteredSales.length
+    const salesPagination = usePaginationBounds({
+        currentPage: pagination.currentPage,
+        setCurrentPage: pagination.setCurrentPage,
+        totalCount,
+        pageSize: pagination.pageSize,
+        isLoading: isLoading || isDateLoading,
+    })
 
     // Client-side pagination
     const sales = useMemo(() => {
-        const from = (currentPage - 1) * pageSize
-        return filteredSales.slice(from, from + pageSize)
-    }, [filteredSales, currentPage, pageSize])
+        const from = (salesPagination.currentPage - 1) * pagination.pageSize
+        return filteredSales.slice(from, from + pagination.pageSize)
+    }, [filteredSales, pagination.pageSize, salesPagination.currentPage])
 
     // Derive available cashiers from local data
     const availableCashiers = useMemo(() => {
@@ -2561,14 +2564,12 @@ export function Sales() {
                         </div>
                         <div className="flex flex-col sm:flex-row items-center gap-4">
                             <AppPagination
-                                currentPage={currentPage}
+                                currentPage={salesPagination.currentPage}
                                 totalCount={totalCount}
-                                pageSize={pageSize}
-                                onPageChange={setCurrentPage}
-                                onPageSizeChange={(newSize) => {
-                                    setPageSize(newSize)
-                                    setCurrentPage(1)
-                                }}
+                                pageCount={salesPagination.pageCount}
+                                pageSize={pagination.pageSize}
+                                onPageChange={pagination.setCurrentPage}
+                                onPageSizeChange={pagination.setPageSize}
                                 className="w-auto"
                             />
                             {hasCapability('excelExportSales') && (

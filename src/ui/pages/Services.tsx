@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useState } from 'react'
+import { useDeferredValue, useState } from 'react'
 import { useLocation } from 'wouter'
 import { BriefcaseBusiness, FolderKey, Loader2, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -13,6 +13,7 @@ import {
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { formatCurrency } from '@/lib/utils'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
@@ -40,8 +41,7 @@ export function Services() {
     const isRemoteBrowse = Boolean(workspaceId && isOnline && !isLocalWorkspaceMode(workspaceId))
     const [search, setSearch] = useState('')
     const deferredSearch = useDeferredValue(search)
-    const [currentPage, setCurrentPage] = useState(1)
-    const [pageSize, setPageSize] = useState(20)
+    const pagination = usePaginationState({ resetOn: [search], initialPageSize: 20 })
     const [refreshKey, setRefreshKey] = useState(0)
     const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
     const [isDeleting, setIsDeleting] = useState(false)
@@ -52,17 +52,20 @@ export function Services() {
     const servicesPage = useServicesCatalogPage({
         workspaceId,
         search: deferredSearch,
-        page: currentPage,
-        pageSize,
+        page: pagination.currentPage,
+        pageSize: pagination.pageSize,
         enabled: isRemoteBrowse,
         refreshKey
     }, categories)
-
-    useEffect(() => setCurrentPage(1), [search, pageSize])
-    useEffect(() => {
-        if (servicesPage.isLoading) return
-        setCurrentPage((page) => Math.min(page, servicesPage.pageCount))
-    }, [servicesPage.isLoading, servicesPage.pageCount])
+    const servicesPagination = usePaginationBounds({
+        currentPage: pagination.currentPage,
+        setCurrentPage: pagination.setCurrentPage,
+        totalCount: servicesPage.totalCount,
+        pageCount: servicesPage.pageCount,
+        pageSize: pagination.pageSize,
+        isLoading: servicesPage.isLoading,
+        error: servicesPage.error,
+    })
 
     const handleDelete = async () => {
         if (!deleteTarget || isDeleting) return
@@ -115,15 +118,12 @@ export function Services() {
                         </p>
                     </div>
                     <AppPagination
-                        currentPage={currentPage}
+                        currentPage={servicesPagination.currentPage}
                         totalCount={servicesPage.totalCount}
-                        pageCount={servicesPage.pageCount}
-                        pageSize={pageSize}
-                        onPageChange={setCurrentPage}
-                        onPageSizeChange={(nextPageSize) => {
-                            setPageSize(nextPageSize)
-                            setCurrentPage(1)
-                        }}
+                        pageCount={servicesPagination.pageCount}
+                        pageSize={pagination.pageSize}
+                        onPageChange={pagination.setCurrentPage}
+                        onPageSizeChange={pagination.setPageSize}
                         className="mx-0 w-auto justify-start"
                     />
                 </CardHeader>

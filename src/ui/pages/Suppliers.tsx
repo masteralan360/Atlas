@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { Eye, Loader2, Pencil, Plus, Search, Trash2, Truck } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 
 import { useAuth } from '@/auth'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import {
     createBusinessPartner,
     deleteBusinessPartner,
@@ -50,8 +51,7 @@ export function Suppliers() {
     const canViewCustomers = hasPermission('customers.access')
     const [scope, setScope] = useState<'all' | 'customers' | 'suppliers'>('suppliers')
     const [search, setSearch] = useState('')
-    const [currentPage, setCurrentPage] = useState(1)
-    const [pageSize, setPageSize] = useState(20)
+    const pagination = usePaginationState({ resetOn: [search], initialPageSize: 20 })
     const [dialogOpen, setDialogOpen] = useState(false)
     const [editingPartner, setEditingPartner] = useState<BusinessPartner | null>(null)
     const [deleteTarget, setDeleteTarget] = useState<BusinessPartner | null>(null)
@@ -59,9 +59,16 @@ export function Suppliers() {
 
     const suppliers = useBusinessPartnerDirectoryPage(user?.workspaceId, {
         roles: ['supplier'],
-        page: currentPage,
-        pageSize,
+        page: pagination.currentPage,
+        pageSize: pagination.pageSize,
         search,
+    })
+    const suppliersPagination = usePaginationBounds({
+        currentPage: pagination.currentPage,
+        setCurrentPage: pagination.setCurrentPage,
+        totalCount: suppliers.totalCount,
+        pageSize: pagination.pageSize,
+        isLoading: suppliers.isLoading,
     })
 
     const availableCurrencies = useMemo(() => {
@@ -69,13 +76,6 @@ export function Suppliers() {
     }, [features.allowed_currencies, features.default_currency])
 
     const filteredSuppliers = suppliers.items
-
-    useEffect(() => setCurrentPage(1), [search, pageSize])
-    useEffect(() => {
-        if (suppliers.isLoading) return
-        const pageCount = Math.max(1, Math.ceil(suppliers.totalCount / pageSize))
-        setCurrentPage((page) => Math.min(page, pageCount))
-    }, [suppliers.isLoading, suppliers.totalCount, pageSize])
 
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
     const canDelete = user?.role === 'admin'
@@ -209,11 +209,12 @@ export function Suppliers() {
                     <div className="flex min-w-0 flex-wrap items-center gap-3">
                         <CardTitle>{t('suppliers.title') || 'Suppliers'}</CardTitle>
                         <AppPagination
-                            currentPage={currentPage}
+                            currentPage={suppliersPagination.currentPage}
                             totalCount={suppliers.totalCount}
-                            pageSize={pageSize}
-                            onPageChange={setCurrentPage}
-                            onPageSizeChange={setPageSize}
+                            pageCount={suppliersPagination.pageCount}
+                            pageSize={pagination.pageSize}
+                            onPageChange={pagination.setCurrentPage}
+                            onPageSizeChange={pagination.setPageSize}
                             className="mx-0 w-auto justify-start"
                         />
                     </div>

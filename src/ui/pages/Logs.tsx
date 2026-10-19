@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { useDateRange } from '@/context/DateRangeContext'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import {
     copyErrorLogRecord,
     exportErrorLogRecord,
@@ -111,8 +112,10 @@ export function Logs() {
     const [search, setSearch] = useState('')
     const deferredSearch = useDeferredValue(search)
     const { dateRange, customDates, setDateRange, setCustomDates } = useDateRange()
-    const [currentPage, setCurrentPage] = useState(1)
-    const [pageSize, setPageSize] = useState(() => getLogsPageSize(localStorage.getItem('logs_page_size')))
+    const pagination = usePaginationState({
+        resetOn: [search, dateRange, customDates.start, customDates.end],
+        initialPageSize: getLogsPageSize(localStorage.getItem('logs_page_size')),
+    })
     const [selectedRecord, setSelectedRecord] = useState<ErrorLogRecord | null>(null)
     const [isCopying, setIsCopying] = useState(false)
     const [isExporting, setIsExporting] = useState(false)
@@ -126,8 +129,8 @@ export function Logs() {
         try {
             const { start, end } = getDateRangeBounds(dateRange, customDates)
             const page = await readErrorLogsPage({
-                offset: (currentPage - 1) * pageSize,
-                limit: pageSize,
+                offset: (pagination.currentPage - 1) * pagination.pageSize,
+                limit: pagination.pageSize,
                 from: start?.toISOString(),
                 to: end?.toISOString(),
                 search: deferredSearch,
@@ -142,7 +145,7 @@ export function Logs() {
         } finally {
             if (requestId === refreshRequestIdRef.current && showLoading) setIsLoading(false)
         }
-    }, [currentPage, customDates, dateRange, deferredSearch, pageSize])
+    }, [customDates, dateRange, deferredSearch, pagination.currentPage, pagination.pageSize])
 
     useEffect(() => {
         void refresh()
@@ -161,17 +164,16 @@ export function Logs() {
     }, [refresh])
 
     useEffect(() => {
-        localStorage.setItem('logs_page_size', String(pageSize))
-    }, [pageSize])
+        localStorage.setItem('logs_page_size', String(pagination.pageSize))
+    }, [pagination.pageSize])
 
-    const pageCount = Math.max(1, Math.ceil(filteredRecordCount / pageSize))
-    const paginatedCurrentPage = Math.min(currentPage, pageCount)
-
-    useEffect(() => {
-        if (currentPage !== paginatedCurrentPage) {
-            setCurrentPage(paginatedCurrentPage)
-        }
-    }, [currentPage, paginatedCurrentPage])
+    const logsPagination = usePaginationBounds({
+        currentPage: pagination.currentPage,
+        setCurrentPage: pagination.setCurrentPage,
+        totalCount: filteredRecordCount,
+        pageSize: pagination.pageSize,
+        isLoading,
+    })
 
     const copySelectedRecord = async () => {
         if (!selectedRecord) return
@@ -307,14 +309,12 @@ export function Logs() {
                     </div>
                     <div className="flex w-full flex-wrap items-center gap-3 xl:w-auto">
                         <AppPagination
-                            currentPage={paginatedCurrentPage}
+                            currentPage={logsPagination.currentPage}
                             totalCount={filteredRecordCount}
-                            pageSize={pageSize}
-                            onPageChange={setCurrentPage}
-                            onPageSizeChange={(nextPageSize) => {
-                                setPageSize(nextPageSize)
-                                setCurrentPage(1)
-                            }}
+                            pageCount={logsPagination.pageCount}
+                            pageSize={pagination.pageSize}
+                            onPageChange={pagination.setCurrentPage}
+                            onPageSizeChange={pagination.setPageSize}
                             className="w-auto"
                         />
                         <div className="relative w-full xl:w-80">
@@ -323,7 +323,6 @@ export function Logs() {
                                 value={search}
                                 onChange={(event) => {
                                     setSearch(event.target.value)
-                                    setCurrentPage(1)
                                 }}
                                 placeholder={t('errorLogs.search')}
                                 className="ps-9"
@@ -336,11 +335,9 @@ export function Logs() {
                         label={t('errorLogs.dateFilter')}
                         onDateRangeChange={(range) => {
                             setDateRange(range)
-                            setCurrentPage(1)
                         }}
                         onCustomDatesChange={(dates) => {
                             setCustomDates(dates)
-                            setCurrentPage(1)
                         }}
                     />
 

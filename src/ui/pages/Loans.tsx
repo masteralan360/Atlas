@@ -24,6 +24,7 @@ import {
 } from '@/local-db'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { getDateRangeBounds, isDateInDateRange } from '@/lib/dateRangeFilters'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import { calculateInstallmentLoanListMetrics } from '@/lib/loanListMetrics'
 import { getLoanLinkedPartySummary } from '@/lib/loanParties'
 import { getReportOriginId } from '@/lib/printIdentity'
@@ -196,14 +197,14 @@ function LoanListView({
     const deferredSearch = useDeferredValue(search)
     const [filter, setFilter] = useState<LoanFilter>('all')
     const [paymentFilter, setPaymentFilter] = useState<LoanPaymentFilter>('all')
-    const [currentPage, setCurrentPage] = useState(1)
-    const [pageSize, setPageSize] = useState(() => {
-        return Number(localStorage.getItem('loans_page_size')) || 10
+    const pagination = usePaginationState({
+        resetOn: [customDates.start, customDates.end, dateRange, search, filter, paymentFilter],
+        initialPageSize: Number(localStorage.getItem('loans_page_size')) || 10,
     })
 
     useEffect(() => {
-        localStorage.setItem('loans_page_size', String(pageSize))
-    }, [pageSize])
+        localStorage.setItem('loans_page_size', String(pagination.pageSize))
+    }, [pagination.pageSize])
 
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => {
         return (localStorage.getItem('loans_view_mode') as 'table' | 'grid') || 'table'
@@ -328,14 +329,16 @@ function LoanListView({
         [dateScopedInstallments, filtered]
     )
 
+    const loansPagination = usePaginationBounds({
+        currentPage: pagination.currentPage,
+        setCurrentPage: pagination.setCurrentPage,
+        totalCount: filtered.length,
+        pageSize: pagination.pageSize,
+    })
     const paginated = useMemo(() => {
-        const from = (currentPage - 1) * pageSize
-        return filtered.slice(from, from + pageSize)
-    }, [filtered, currentPage, pageSize])
-
-    useEffect(() => {
-        setCurrentPage(1)
-    }, [customDates.end, customDates.start, dateRange])
+        const from = (loansPagination.currentPage - 1) * pagination.pageSize
+        return filtered.slice(from, from + pagination.pageSize)
+    }, [filtered, loansPagination.currentPage, pagination.pageSize])
 
     const currency = features.default_currency || 'usd'
     const iqdPreference = features.iqd_display_preference
@@ -564,7 +567,6 @@ function LoanListView({
                                 className="ps-9"
                                 value={search}
                                 onChange={e => {
-                                    setCurrentPage(1)
                                     setSearch(e.target.value)
                                 }}
                                 allowViewer={true}
@@ -574,11 +576,11 @@ function LoanListView({
                         <div className="hidden md:flex items-center bg-muted/30 p-1 rounded-lg border border-border/40">
                             <Button
                                 variant="ghost"
-                                size={filtered.length > pageSize ? "icon" : "sm"}
+                                size={filtered.length > pagination.pageSize ? "icon" : "sm"}
                                 allowViewer={true}
                                 onClick={() => setViewMode('table')}
                                 className={cn(
-                                    filtered.length > pageSize ? "h-7 w-7" : "h-7 px-3 font-bold uppercase text-[9px] flex items-center gap-1.5",
+                                    filtered.length > pagination.pageSize ? "h-7 w-7" : "h-7 px-3 font-bold uppercase text-[9px] flex items-center gap-1.5",
                                     "transition-all",
                                     viewMode === 'table'
                                         ? "bg-primary text-primary-foreground shadow-sm"
@@ -586,15 +588,15 @@ function LoanListView({
                                 )}
                             >
                                 <List className="w-3.5 h-3.5" />
-                                {filtered.length <= pageSize && t('loans.view.table')}
+                                {filtered.length <= pagination.pageSize && t('loans.view.table')}
                             </Button>
                             <Button
                                 variant="ghost"
-                                size={filtered.length > pageSize ? "icon" : "sm"}
+                                size={filtered.length > pagination.pageSize ? "icon" : "sm"}
                                 allowViewer={true}
                                 onClick={() => setViewMode('grid')}
                                 className={cn(
-                                    filtered.length > pageSize ? "h-7 w-7" : "h-7 px-3 font-bold uppercase text-[9px] flex items-center gap-1.5",
+                                    filtered.length > pagination.pageSize ? "h-7 w-7" : "h-7 px-3 font-bold uppercase text-[9px] flex items-center gap-1.5",
                                     "transition-all",
                                     viewMode === 'grid'
                                         ? "bg-primary text-primary-foreground shadow-sm"
@@ -602,19 +604,17 @@ function LoanListView({
                                 )}
                             >
                                 <LayoutGrid className="w-3.5 h-3.5" />
-                                {filtered.length <= pageSize && t('loans.view.grid')}
+                                {filtered.length <= pagination.pageSize && t('loans.view.grid')}
                             </Button>
                         </div>
                         <div className="flex flex-wrap items-center gap-4">
                             <AppPagination
-                                currentPage={currentPage}
+                                currentPage={loansPagination.currentPage}
                                 totalCount={filtered.length}
-                                pageSize={pageSize}
-                                onPageChange={setCurrentPage}
-                                onPageSizeChange={(newSize) => {
-                                    setPageSize(newSize)
-                                    setCurrentPage(1)
-                                }}
+                                pageCount={loansPagination.pageCount}
+                                pageSize={pagination.pageSize}
+                                onPageChange={pagination.setCurrentPage}
+                                onPageSizeChange={pagination.setPageSize}
                                 className="w-auto"
                             />
                             <FilterDropdown
@@ -628,7 +628,6 @@ function LoanListView({
                                     label: t(`loans.filters.${value}`) || value,
                                 }))}
                                 onValueChange={(value) => {
-                                    setCurrentPage(1)
                                     setFilter(value)
                                 }}
                             />
@@ -645,7 +644,6 @@ function LoanListView({
                                         : t(`loans.paymentFilters.${value}`, { defaultValue: value }),
                                 }))}
                                 onValueChange={(value) => {
-                                    setCurrentPage(1)
                                     setPaymentFilter(value)
                                 }}
                             />

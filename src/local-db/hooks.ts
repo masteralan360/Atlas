@@ -3,6 +3,8 @@ import Dexie from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useViewOwnRecordScope, type ViewOwnRecordScope } from '@/permissions/useViewOwnRecordScope'
 import i18n from '@/i18n/config'
+import { queryClient } from '@/query/queryClient'
+import { queryKeys } from '@/query/queryKeys'
 
 import { db } from './database'
 import { toLiveCollection, useLiveCollection } from './liveCollection'
@@ -2200,12 +2202,23 @@ async function updateEntity<T extends { id: string, workspaceId: string, version
 // INVOICES HOOKS
 // ===================
 
-export function useInvoices(workspaceId: string | undefined) {
+function invalidateInvoiceHistory(workspaceId: string) {
+    void queryClient.invalidateQueries({
+        queryKey: queryKeys.invoiceHistory.all(workspaceId),
+    })
+}
+
+export function useInvoices(
+    workspaceId: string | undefined,
+    options: { includeAll?: boolean; syncRemote?: boolean } = {},
+) {
     const isOnline = useNetworkStatus()
     const viewOwnScope = useViewOwnRecordScope('invoice_history.view_own')
+    const includeAll = options.includeAll ?? true
+    const syncRemote = options.syncRemote ?? true
 
     const invoices = useLiveQuery(
-        () => workspaceId
+        () => includeAll && workspaceId
             ? db.invoices
                 .where('workspaceId')
                 .equals(workspaceId)
@@ -2216,64 +2229,23 @@ export function useInvoices(workspaceId: string | undefined) {
                 ))
                 .toArray()
             : [],
-        [workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId]
+        [includeAll, workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId]
     )
 
     const syncInvoicesFromSupabase = useCallback(async () => {
-        if (isOnline && workspaceId && await canReconcileCloudWorkspaceData(workspaceId)) {
-            const { data, error } = await supabase
-                .from('invoices')
-                .select('*')
-                .eq('workspace_id', workspaceId)
-                .eq('is_deleted', false)
-
-            if (!data || error || !await canReconcileCloudWorkspaceData(workspaceId)) {
-                return
-            }
-
-            if (data && !error) {
-                if (!await canReconcileCloudWorkspaceData(workspaceId)) {
-                    return
-                }
-                await db.transaction('rw', [db.invoices, db.offline_mutations], async () => {
-                    const remoteIds = new Set(data.map(d => d.id))
-                    const localItems = await db.invoices.where('workspaceId').equals(workspaceId).toArray()
-
-                    // Delete local items that are missing from server (remotely deleted).
-                    // Handles 'synced', 'pending', and orphan items with no syncStatus.
-                    // Pending items also get their offline mutations cleaned up to prevent re-creation.
-                    for (const local of localItems) {
-                        if (!remoteIds.has(local.id)) {
-                            if (local.syncStatus === 'pending') {
-                                await db.offline_mutations
-                                    .where({ entityType: 'invoices', entityId: local.id, status: 'pending' })
-                                    .delete()
-                            }
-                            await db.invoices.delete(local.id)
-                        }
-                    }
-
-                    for (const remoteItem of data) {
-                        const existing = await db.invoices.get(remoteItem.id)
-                        // If we have pending local changes (like PDF blobs waiting to upload), 
-                        // DO NOT overwrite with remote state yet.
-                        if (existing && existing.syncStatus === 'pending') {
-                            continue
-                        }
-
-                        const localItem = toCamelCase(remoteItem as any) as unknown as Invoice
-                        localItem.syncStatus = 'synced'
-                        localItem.lastSyncedAt = new Date().toISOString()
-                        await db.invoices.put(localItem)
-                    }
-                })
-            }
-        }
+        if (!isOnline || !workspaceId) return
+        await fetchTableFromSupabase<Invoice>(
+            'invoices',
+            db.invoices,
+            workspaceId,
+            { force: true, includeDeleted: true },
+        )
     }, [isOnline, workspaceId])
 
     useEffect(() => {
-        syncInvoicesFromSupabase()
+        if (syncRemote) void syncInvoicesFromSupabase()
     }, [
+        syncRemote,
         syncInvoicesFromSupabase,
         viewOwnScope.isRestricted,
         viewOwnScope.userId,
@@ -2281,12 +2253,13 @@ export function useInvoices(workspaceId: string | undefined) {
 
     // Re-sync on window focus/visibility so deletions from another tab/client are reflected
     useEffect(() => {
+        if (!syncRemote) return
         const handleFocus = () => {
-            syncInvoicesFromSupabase()
+            void syncInvoicesFromSupabase()
         }
         const handleVisibility = () => {
             if (document.visibilityState === 'visible') {
-                syncInvoicesFromSupabase()
+                void syncInvoicesFromSupabase()
             }
         }
         window.addEventListener('focus', handleFocus)
@@ -2295,7 +2268,7 @@ export function useInvoices(workspaceId: string | undefined) {
             window.removeEventListener('focus', handleFocus)
             document.removeEventListener('visibilitychange', handleVisibility)
         }
-    }, [syncInvoicesFromSupabase])
+    }, [syncRemote, syncInvoicesFromSupabase])
 
     return { invoices: invoices ?? [], refreshInvoices: syncInvoicesFromSupabase }
 }
@@ -2384,6 +2357,8 @@ export async function createInvoice(
             await addToOfflineMutations('invoices', id, 'create', invoice as unknown as Record<string, unknown>, workspaceId)
         }
     }
+
+    invalidateInvoiceHistory(workspaceId)
 
     return invoice
 }
@@ -2474,6 +2449,8 @@ export async function updateInvoice(id: string, data: Partial<Invoice>): Promise
             await addToOfflineMutations('invoices', id, 'update', updated as unknown as Record<string, unknown>, existing.workspaceId)
         }
     }
+
+    invalidateInvoiceHistory(existing.workspaceId)
 }
 
 export async function deleteInvoice(id: string): Promise<void> {
@@ -2508,6 +2485,8 @@ export async function deleteInvoice(id: string): Promise<void> {
             await addToOfflineMutations('invoices', id, 'delete', { id }, existing.workspaceId)
         }
     }
+
+    invalidateInvoiceHistory(existing.workspaceId)
 }
 
 // ===================

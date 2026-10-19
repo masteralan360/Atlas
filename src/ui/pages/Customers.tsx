@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { Eye, Loader2, Pencil, Plus, Search, Trash2, Users } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 
 import { useAuth } from '@/auth'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import {
     createBusinessPartner,
     deleteBusinessPartner,
@@ -53,20 +54,25 @@ export function Customers() {
     const canViewSuppliers = hasPermission('suppliers.access')
     const [scope, setScope] = useState<'all' | 'customers' | 'suppliers'>('customers')
     const [search, setSearch] = useState('')
-    const [currentPage, setCurrentPage] = useState(1)
-    const [pageSize, setPageSize] = useState(20)
+    const [showEcommerceCustomers, setShowEcommerceCustomers] = useState(true)
+    const pagination = usePaginationState({ resetOn: [search, showEcommerceCustomers], initialPageSize: 20 })
     const [dialogOpen, setDialogOpen] = useState(false)
     const [editingPartner, setEditingPartner] = useState<BusinessPartner | null>(null)
     const [deleteTarget, setDeleteTarget] = useState<BusinessPartner | null>(null)
     const [isSaving, setIsSaving] = useState(false)
-    const [showEcommerceCustomers, setShowEcommerceCustomers] = useState(true)
-
     const customers = useBusinessPartnerDirectoryPage(user?.workspaceId, {
         roles: ['customer'],
-        page: currentPage,
-        pageSize,
+        page: pagination.currentPage,
+        pageSize: pagination.pageSize,
         search,
         includeEcommerce: showEcommerceCustomers,
+    })
+    const customersPagination = usePaginationBounds({
+        currentPage: pagination.currentPage,
+        setCurrentPage: pagination.setCurrentPage,
+        totalCount: customers.totalCount,
+        pageSize: pagination.pageSize,
+        isLoading: customers.isLoading,
     })
 
     const availableCurrencies = useMemo(() => {
@@ -74,13 +80,6 @@ export function Customers() {
     }, [features.allowed_currencies, features.default_currency])
 
     const filteredCustomers = customers.items
-
-    useEffect(() => setCurrentPage(1), [search, pageSize, showEcommerceCustomers])
-    useEffect(() => {
-        if (customers.isLoading) return
-        const pageCount = Math.max(1, Math.ceil(customers.totalCount / pageSize))
-        setCurrentPage((page) => Math.min(page, pageCount))
-    }, [customers.isLoading, customers.totalCount, pageSize])
 
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
     const canDelete = user?.role === 'admin'
@@ -219,11 +218,12 @@ export function Customers() {
                     <div className="flex min-w-0 flex-wrap items-center gap-3">
                         <CardTitle>{t('customers.title') || 'Customers'}</CardTitle>
                         <AppPagination
-                            currentPage={currentPage}
+                            currentPage={customersPagination.currentPage}
                             totalCount={customers.totalCount}
-                            pageSize={pageSize}
-                            onPageChange={setCurrentPage}
-                            onPageSizeChange={setPageSize}
+                            pageCount={customersPagination.pageCount}
+                            pageSize={pagination.pageSize}
+                            onPageChange={pagination.setCurrentPage}
+                            onPageSizeChange={pagination.setPageSize}
                             className="mx-0 w-auto justify-start"
                         />
                     </div>

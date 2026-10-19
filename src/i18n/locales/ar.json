@@ -2791,7 +2791,9 @@
   },
   "invoices": {
     "historyTitle": "سجل الفواتير",
-    "historySubtitle": "إجمالي الفواتير",
+    "historySubtitle": "إجمالي الفواتير: {{count}}",
+    "historyLoadError": "تعذر تحميل سجل الفواتير. يرجى المحاولة مرة أخرى.",
+    "uploadedFilesCount": "الملفات المرفوعة: {{count}}",
     "searchPlaceholder": "البحث في الفواتير",
     "viewInvoice": "عرض الفاتورة",
     "listTitle": "قائمة الفواتير",
@@ -6747,6 +6749,7 @@
     "uploadFailed": "فشل رفع ملف PDF.",
     "uploadedFiles": "الملفات المرفوعة",
     "filesCount": "{{count}} ملف(ات) مخزنة في رفوعات مساحة العمل.",
+    "loadError": "تعذر تحميل الملفات المرفوعة. يرجى المحاولة مرة أخرى.",
     "searchPlaceholder": "البحث في الملفات المرفوعة",
     "noFiles": "لا توجد ملفات مرفوعة بعد",
     "noMatch": "لا توجد ملفات تطابق بحثك",

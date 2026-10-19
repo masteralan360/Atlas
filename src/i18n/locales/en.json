@@ -3072,6 +3072,7 @@
     "uploadFailed": "Failed to upload the PDF file.",
     "uploadedFiles": "Uploaded Files",
     "filesCount": "{{count}} file(s) stored in workspace uploads.",
+    "loadError": "Uploaded files could not be loaded. Please try again.",
     "searchPlaceholder": "Search uploaded files",
     "noFiles": "No uploaded files yet",
     "noMatch": "No files match your search",
@@ -4322,7 +4323,9 @@
   },
   "invoices": {
     "historyTitle": "Invoices History",
-    "historySubtitle": "invoices total",
+    "historySubtitle": "{{count}} historical records",
+    "historyLoadError": "Invoice history could not be loaded. Please try again.",
+    "uploadedFilesCount": "{{count}} uploaded files",
     "searchPlaceholder": "Search invoices",
     "viewInvoice": "View Invoice",
     "listTitle": "Invoice List",

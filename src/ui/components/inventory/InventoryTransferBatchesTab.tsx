@@ -18,6 +18,7 @@ import {
 } from '@/local-db'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import { Input } from '@/ui/components/input'
 import {
   AppDialog,
@@ -121,12 +122,22 @@ export function InventoryTransferBatchesTab({
   const [customDates, setCustomDates] = useState<CustomDates>({ start: '', end: '' })
   const [searchInput, setSearchInput] = useState('')
   const [search, setSearch] = useState('')
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  const pagination = usePaginationState({
+    resetOn: [search, dateRange, customDates.start, customDates.end],
+    initialPageSize: 20,
+  })
   const [rows, setRows] = useState<InventoryTransferBatchHistoryItem[]>([])
   const [totalCount, setTotalCount] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
+  const paginationBounds = usePaginationBounds({
+    currentPage: pagination.currentPage,
+    setCurrentPage: pagination.setCurrentPage,
+    totalCount,
+    pageSize: pagination.pageSize,
+    isLoading,
+    error: loadError,
+  })
   const [selectedDetails, setSelectedDetails] = useState<InventoryTransferBatchDetails | null>(null)
   const [isDetailsOpen, setIsDetailsOpen] = useState(false)
   const [isLoadingDetails, setIsLoadingDetails] = useState(false)
@@ -229,7 +240,6 @@ export function InventoryTransferBatchesTab({
     if (searchTimer.current) clearTimeout(searchTimer.current)
     searchTimer.current = setTimeout(() => {
       setSearch(searchInput.trim())
-      setPage(1)
     }, 250)
     return () => {
       if (searchTimer.current) clearTimeout(searchTimer.current)
@@ -250,8 +260,8 @@ export function InventoryTransferBatchesTab({
       search,
       from,
       to,
-      page,
-      pageSize,
+      page: pagination.currentPage,
+      pageSize: pagination.pageSize,
     }).then((result) => {
       if (currentRequest !== requestId.current) return
       setRows(result.rows)
@@ -267,7 +277,7 @@ export function InventoryTransferBatchesTab({
       if (currentRequest === requestId.current) setIsLoading(false)
     })
     return () => { requestId.current += 1 }
-  }, [from, page, pageSize, resolvedWorkspaceId, search, to])
+  }, [from, pagination.currentPage, pagination.pageSize, resolvedWorkspaceId, search, to])
 
   const loadBatchDetails = useCallback(async (batchId: string) => {
     if (!resolvedWorkspaceId) return null
@@ -364,8 +374,8 @@ export function InventoryTransferBatchesTab({
         <DateRangeFilters
           dateRange={dateRange}
           customDates={customDates}
-          onDateRangeChange={(value) => { setDateRange(value); setPage(1) }}
-          onCustomDatesChange={(value) => { setCustomDates(value); setPage(1) }}
+          onDateRangeChange={setDateRange}
+          onCustomDatesChange={setCustomDates}
           showYesterday
           showAllTime
           className="xl:max-w-fit"
@@ -460,11 +470,12 @@ export function InventoryTransferBatchesTab({
       </Card>
 
       <AppPagination
-        currentPage={page}
+        currentPage={paginationBounds.currentPage}
         totalCount={totalCount}
-        pageSize={pageSize}
-        onPageChange={setPage}
-        onPageSizeChange={(value) => { setPageSize(value); setPage(1) }}
+        pageCount={paginationBounds.pageCount}
+        pageSize={pagination.pageSize}
+        onPageChange={pagination.setCurrentPage}
+        onPageSizeChange={pagination.setPageSize}
         className="justify-end"
       />
 

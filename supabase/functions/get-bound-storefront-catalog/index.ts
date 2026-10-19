@@ -7,6 +7,7 @@ import {
 } from '../_shared/marketplace.ts'
 import {
     isWebsiteStorefrontGatewayRequest,
+    loadRowsInBatches,
     loadVisibleModeProducts,
     loadWebsiteStorefrontContext,
     parseWebsiteStorefrontMode,
@@ -125,19 +126,19 @@ Deno.serve(async (req) => {
         ))
         const categoryNameById = new Map<string, string>()
         if (categoryIds.length > 0) {
-            const { data: categories, error: categoryError } = await adminClient
-                .from('categories')
-                .select('id, name')
-                .eq('workspace_id', context.workspace.id)
-                .eq('is_deleted', false)
-                .in('id', categoryIds)
-                .order('name', { ascending: true })
+            const categories = await loadRowsInBatches<CategoryRow>(categoryIds, async (batchIds) => {
+                const { data, error } = await adminClient
+                    .from('categories')
+                    .select('id, name')
+                    .eq('workspace_id', context.workspace.id)
+                    .eq('is_deleted', false)
+                    .in('id', batchIds)
+                    .order('name', { ascending: true })
 
-            if (categoryError) {
-                return errorResponse(categoryError.message, 500)
-            }
+                return { data: data as CategoryRow[] | null, error }
+            })
 
-            for (const category of (categories ?? []) as CategoryRow[]) {
+            for (const category of categories) {
                 categoryNameById.set(category.id, category.name)
             }
         }

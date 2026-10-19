@@ -24,17 +24,14 @@ import { buildOrderExchangeRatesSnapshot, convertCurrencyAmountWithLiveRates, ge
 import { ORDER_DECIMAL_STEP, roundOrderValue } from '@/lib/orderPrecision'
 import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import { createSalesOrderModuleWideIntegrityAuditAdapter } from '@/lib/integrityAudit/salesOrderModuleWide'
 import { createPurchaseOrderModuleWideIntegrityAuditAdapter } from '@/lib/integrityAudit/purchaseOrderModuleWide'
 import { isPurchaseOrderIntegrityAuditEligible } from '@/lib/integrityAudit/purchaseOrderAudit'
 import {
-    clampOrdersPagination,
     createOrdersPaginationState,
     ORDERS_PAGE_SIZE_OPTIONS,
-    ORDERS_PAGE_SIZE_STORAGE_KEY,
-    resetOrdersPagination,
-    setOrdersPage,
-    setOrdersPageSize
+    ORDERS_PAGE_SIZE_STORAGE_KEY
 } from '@/lib/ordersListPagination'
 import { formatCurrency, formatDate, formatLocalDateTimeValue, generateId, parseLocalDateTimeValue } from '@/lib/utils'
 import { generateTemplatePdf, type PrintFormat } from '@/services/pdfGenerator'
@@ -389,7 +386,6 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     } : {}, [previousDateRange])
     const [activeTab, setActiveTab] = useState<OrderTab>(initialTab)
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => (localStorage.getItem('orders_view_mode') as 'table' | 'grid') || 'table')
-    const [pagination, setPagination] = useState(() => createOrdersPaginationState(localStorage.getItem(ORDERS_PAGE_SIZE_STORAGE_KEY)))
     const [search, setSearch] = useState('')
     const deferredSearch = useDeferredValue(search)
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -401,9 +397,27 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const [isFulfilledDateFilterExpanded, setIsFulfilledDateFilterExpanded] = useState(false)
     const [archivesOpen, setArchivesOpen] = useState(false)
     const [moduleWideAuditOpen, setModuleWideAuditOpen] = useState(false)
-    const [archivePagination, setArchivePagination] = useState({ currentPage: 1, pageSize: 20 })
+    const archivePagination = usePaginationState({
+        resetOn: [activeTab, archivesOpen],
+        initialPageSize: 20,
+    })
     const [ordersRefreshToken, setOrdersRefreshToken] = useState(0)
     const [dialogOpen, setDialogOpen] = useState(false)
+    const pagination = usePaginationState({
+        resetOn: [
+            activeTab,
+            commissionModeFilter,
+            customDates,
+            dateRange,
+            ecommerceFilter,
+            fulfillmentCustomDates,
+            fulfillmentDateRange,
+            paymentFilter,
+            search,
+            statusFilter,
+        ],
+        initialPageSize: createOrdersPaginationState(localStorage.getItem(ORDERS_PAGE_SIZE_STORAGE_KEY)).pageSize,
+    })
 
     const fulfillmentBounds = useMemo(() => {
         const { start, end } = getDateRangeBounds(fulfillmentDateRange, fulfillmentCustomDates)
@@ -488,6 +502,14 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         refreshToken: ordersRefreshToken,
         includeArchived: true,
         enabled: archivesOpen
+    })
+    const archivedPagination = usePaginationBounds({
+        currentPage: archivePagination.currentPage,
+        setCurrentPage: archivePagination.setCurrentPage,
+        totalCount: archivedOrdersPage.totalCount,
+        pageSize: archivePagination.pageSize,
+        isLoading: archivedOrdersPage.isLoading,
+        error: archivedOrdersPage.error,
     })
 
     const salesOrders = activeTab === 'sales' ? ordersPage.rows as SalesOrder[] : []
@@ -631,29 +653,19 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     }, [defaultStorageId])
 
     const summaryTotalCount = ordersPage.totalCount
+    const ordersPagination = usePaginationBounds({
+        currentPage: pagination.currentPage,
+        setCurrentPage: pagination.setCurrentPage,
+        totalCount: summaryTotalCount,
+        pageSize: pagination.pageSize,
+        isLoading: ordersPage.isLoading,
+        error: ordersPage.error,
+    })
     const paginatedOrders = useMemo(() => ({
         ...ordersPage,
-        currentPage: pagination.currentPage
-    }), [ordersPage, pagination.currentPage])
+        currentPage: ordersPagination.currentPage
+    }), [ordersPage, ordersPagination.currentPage])
 
-    useEffect(() => {
-        setPagination((current) => clampOrdersPagination(current, summaryTotalCount))
-    }, [summaryTotalCount])
-
-    useEffect(() => {
-        setPagination(resetOrdersPagination)
-    }, [
-        activeTab,
-        commissionModeFilter,
-        customDates,
-        dateRange,
-        ecommerceFilter,
-        fulfillmentCustomDates,
-        fulfillmentDateRange,
-        paymentFilter,
-        search,
-        statusFilter
-    ])
     const workspaceCurrency = (features.default_currency || 'usd') as CurrencyCode
     const orderValueEntries = useMemo(
         () => [...ordersPage.totalsByCurrency]
@@ -687,10 +699,6 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const totalOrdersTrend = !hasAdditionalTableFilters && previousOrderCount && previousOrderCount > 0
         ? ((summaryTotalCount - previousOrderCount) / previousOrderCount) * 100
         : null
-
-    useEffect(() => {
-        setArchivePagination((current) => ({ ...current, currentPage: 1 }))
-    }, [activeTab, archivesOpen])
 
     useEffect(() => {
         if (ordersPage.error) {
@@ -2171,10 +2179,11 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                             <AppPagination
                                                 currentPage={paginatedOrders.currentPage}
                                                 totalCount={summaryTotalCount}
+                                                pageCount={ordersPagination.pageCount}
                                                 pageSize={pagination.pageSize}
                                                 pageSizeOptions={[...ORDERS_PAGE_SIZE_OPTIONS]}
-                                                onPageChange={(page) => setPagination((current) => setOrdersPage(current, page))}
-                                                onPageSizeChange={(pageSize) => setPagination((current) => setOrdersPageSize(current, pageSize))}
+                                                onPageChange={pagination.setCurrentPage}
+                                                onPageSizeChange={pagination.setPageSize}
                                                 className="w-auto"
                                             />
                                         </div>
@@ -2978,12 +2987,13 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                         </AppDialogTitle>
                         {archivedOrdersPage.totalCount > 0 ? (
                             <AppPagination
-                                currentPage={archivePagination.currentPage}
+                                currentPage={archivedPagination.currentPage}
                                 totalCount={archivedOrdersPage.totalCount}
+                                pageCount={archivedPagination.pageCount}
                                 pageSize={archivePagination.pageSize}
                                 pageSizeOptions={[...ORDERS_PAGE_SIZE_OPTIONS]}
-                                onPageChange={(page) => setArchivePagination((current) => ({ ...current, currentPage: page }))}
-                                onPageSizeChange={(pageSize) => setArchivePagination({ currentPage: 1, pageSize })}
+                                onPageChange={archivePagination.setCurrentPage}
+                                onPageSizeChange={archivePagination.setPageSize}
                                 className="w-auto"
                             />
                         ) : null}

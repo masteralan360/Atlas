@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import i18n from '@/i18n/config'
@@ -16,6 +17,7 @@ import {
 import { roundOrderValue } from '@/lib/orderPrecision'
 import { generateId, toCamelCase } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { queryKeys } from '@/query/queryKeys'
 import { assignNewBusinessPartnerToCreatorGroups } from './businessPartnerGroups'
 import { getVisibleBusinessPartnerIdsByGroup, type BusinessPartnerGroupPrivacyViewer } from '@/lib/businessPartnerGroupPrivacy'
 import { useAuth } from '@/auth/AuthContext'
@@ -1786,9 +1788,11 @@ async function fetchRemoteBusinessPartnerDirectoryPage(
   options: BusinessPartnerDirectoryPageOptions,
   includeMetadata = true,
   cacheResults = true,
+  signal?: AbortSignal,
 ): Promise<BusinessPartnerDirectoryPage> {
   const client = getSupabaseClientForTable('business_partners')
-  const result = await runMutation('businessPartners.directory.page', () => client.rpc('list_business_partner_directory_page', {
+  const result = await runMutation('businessPartners.directory.page', () => {
+    const request = client.rpc('list_business_partner_directory_page', {
     p_workspace_id: workspaceId,
     p_roles: options.roles?.length ? options.roles : null,
     p_include_merged: options.includeMerged ?? false,
@@ -1799,7 +1803,9 @@ async function fetchRemoteBusinessPartnerDirectoryPage(
     p_page: Math.max(1, Math.floor(options.page) || 1),
     p_page_size: Math.min(100, Math.max(1, Math.floor(options.pageSize) || 20)),
     p_include_metadata: includeMetadata,
-  }))
+    })
+    return signal ? request.abortSignal(signal) : request
+  })
   if (result.error) throw result.error
   if (!result.data || typeof result.data !== 'object') {
     throw new Error('Business partner directory returned an invalid page')
@@ -1971,9 +1977,7 @@ export function useBusinessPartnerDirectoryPage(
   const { user } = useAuth()
   const { hasCapability } = useWorkspace()
   const online = useNetworkStatus()
-  const [refreshVersion, setRefreshVersion] = useState(0)
-  const [remotePage, setRemotePage] = useState<{ key: string; value: BusinessPartnerDirectoryPage } | null>(null)
-  const [remoteErrorKey, setRemoteErrorKey] = useState<string | null>(null)
+  const queryClient = useQueryClient()
   const [settledSearch, setSettledSearch] = useState(options.search ?? '')
   const viewer = useMemo<BusinessPartnerGroupPrivacyViewer>(() => ({
     userId: user?.id,
@@ -1987,25 +1991,16 @@ export function useBusinessPartnerDirectoryPage(
   }, [options.search])
   const requestOptions = useMemo(() => ({ ...options, search: settledSearch }), [optionsKey, settledSearch])
   const requestOptionsKey = JSON.stringify(requestOptions)
-  const queryKey = JSON.stringify([workspaceId, requestOptionsKey, viewer.featureEnabled, viewer.role, viewer.userId, refreshVersion])
+  const queryKey = JSON.stringify([workspaceId, requestOptionsKey, viewer.featureEnabled, viewer.role, viewer.userId])
   const enabled = options.enabled !== false
   const useRemote = Boolean(enabled && online && shouldUseCloudBusinessData(workspaceId))
-  const matchingRemotePage = remotePage?.key === queryKey ? remotePage.value : null
-
-  useEffect(() => {
-    if (!enabled || !workspaceId || !useRemote) return
-    let disposed = false
-    setRemoteErrorKey(null)
-    void fetchRemoteBusinessPartnerDirectoryPage(workspaceId, requestOptions)
-      .then((value) => {
-        if (!disposed) setRemotePage({ key: queryKey, value })
-      })
-      .catch((error) => {
-        console.error('[BusinessPartners] Failed to load a directory page:', error)
-        if (!disposed) setRemoteErrorKey(queryKey)
-      })
-    return () => { disposed = true }
-  }, [enabled, queryKey, requestOptionsKey, useRemote, workspaceId])
+  const remotePageQuery = useQuery({
+    queryKey: queryKeys.businessPartners.directoryPage(workspaceId, requestOptions, viewer),
+    queryFn: ({ signal }) => fetchRemoteBusinessPartnerDirectoryPage(workspaceId!, requestOptions, true, true, signal),
+    enabled: useRemote,
+  })
+  const matchingRemotePage = useRemote ? remotePageQuery.data ?? null : null
+  const remoteErrorKey = remotePageQuery.isError ? queryKey : null
 
   const localOrCachedPage = useLiveQuery(async () => {
     if (!enabled || !workspaceId) return { items: [], totalCount: 0, summary: { ...EMPTY_BUSINESS_PARTNER_DIRECTORY_SUMMARY } }
@@ -2122,11 +2117,16 @@ export function useBusinessPartnerDirectoryPage(
     return () => { disposed = true }
   }, [pageIdsKey, useRemote, workspaceId])
 
-  const refresh = useCallback(() => setRefreshVersion((current) => current + 1), [])
+  const refresh = useCallback(() => {
+    if (!workspaceId) return
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.businessPartners.all(workspaceId),
+    })
+  }, [queryClient, workspaceId])
   const isLoading = useRemote
     ? matchingRemotePage
       ? false
-      : remoteErrorKey === queryKey
+      : remotePageQuery.isError
         ? localOrCachedPage === undefined
         : true
     : localOrCachedPage === undefined
@@ -2139,7 +2139,7 @@ export function useBusinessPartnerDirectoryPage(
     workspaceUsers: workspaceUsers ?? [],
     isLoading,
     isHydrating: useRemote && isLoading,
-    hydrationFailed: useRemote && remoteErrorKey === queryKey,
+    hydrationFailed: useRemote && remotePageQuery.isError,
     refresh,
   }
 }

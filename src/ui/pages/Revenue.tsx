@@ -11,6 +11,7 @@ import { isActiveSale } from '@/lib/saleArchiving'
 import { cn } from '@/lib/utils'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import { isMobile } from '@/lib/platform'
 import { getReportOriginId } from '@/lib/printIdentity'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
@@ -753,14 +754,14 @@ export function Revenue() {
     }, [viewMode])
 
     const [isExportModalOpen, setIsExportModalOpen] = useState(false)
-    const [currentPage, setCurrentPage] = useState(1)
-    const [itemsPerPage, setItemsPerPage] = useState(() => {
-        return Number(localStorage.getItem('revenue_page_size')) || 25
+    const pagination = usePaginationState({
+        resetOn: [dateRange, customDates.start, customDates.end, filters],
+        initialPageSize: Number(localStorage.getItem('revenue_page_size')) || 25,
     })
 
     useEffect(() => {
-        localStorage.setItem('revenue_page_size', String(itemsPerPage))
-    }, [itemsPerPage])
+        localStorage.setItem('revenue_page_size', String(pagination.pageSize))
+    }, [pagination.pageSize])
     const listRef = useRef<HTMLDivElement>(null)
 
     const categoryNameById = useMemo(
@@ -884,8 +885,7 @@ export function Revenue() {
     // Clear selection when the visible result set changes.
     useEffect(() => {
         setSelectedRecordKeys(new Set())
-        setCurrentPage(1)
-    }, [dateRange, customDates, filters, itemsPerPage])
+    }, [dateRange, customDates, filters, pagination.pageSize])
 
     useEffect(() => {
         if (!isFilterDialogOpen) return
@@ -1114,6 +1114,13 @@ export function Revenue() {
         const { statsByCurrency, saleStats } = calculateStats(filteredRevenueRecords, features.default_currency || 'usd')
         return { statsByCurrency, saleStats }
     }, [calculateStats, filteredRevenueRecords, features.default_currency])
+    const revenuePagination = usePaginationBounds({
+        currentPage: pagination.currentPage,
+        setCurrentPage: pagination.setCurrentPage,
+        totalCount: stats.saleStats.length,
+        pageSize: pagination.pageSize,
+        isLoading: isLoading || isDateLoading,
+    })
 
     const accountingExpensesByCurrency = useMemo(() => {
         const totals: Record<string, number> = {}
@@ -1387,9 +1394,9 @@ export function Revenue() {
     }
 
     const paginatedSales = useMemo(() => {
-        const startIndex = (currentPage - 1) * itemsPerPage
-        return stats.saleStats.slice(startIndex, startIndex + itemsPerPage)
-    }, [stats.saleStats, currentPage, itemsPerPage])
+        const startIndex = (revenuePagination.currentPage - 1) * pagination.pageSize
+        return stats.saleStats.slice(startIndex, startIndex + pagination.pageSize)
+    }, [pagination.pageSize, revenuePagination.currentPage, stats.saleStats])
 
     if (isExportModalOpen) {
         return (
@@ -2028,14 +2035,12 @@ export function Revenue() {
                             </div>
                             <div className="flex items-center gap-4">
                                 <AppPagination
-                                    currentPage={currentPage}
+                                    currentPage={revenuePagination.currentPage}
                                     totalCount={stats.saleStats.length}
-                                    pageSize={itemsPerPage}
-                                    onPageChange={setCurrentPage}
-                                    onPageSizeChange={(newSize) => {
-                                        setItemsPerPage(newSize)
-                                        setCurrentPage(1)
-                                    }}
+                                    pageCount={revenuePagination.pageCount}
+                                    pageSize={pagination.pageSize}
+                                    onPageChange={pagination.setCurrentPage}
+                                    onPageSizeChange={pagination.setPageSize}
                                     className="w-auto"
                                 />
                                 <div className="flex items-center gap-2">

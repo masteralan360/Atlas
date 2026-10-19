@@ -11,8 +11,30 @@ All Supabase Edge Functions and database migrations related to the Admin dashboa
 - **Local:** The device’s SQLite database is the source of truth; business data does not synchronize with Supabase.
 - All modes use Dexie/IndexedDB for responsive local UI reads and writes.
 
+## TanStack Query and server-state conventions
+
+- TanStack Query is an in-memory cache for remote Cloud/Hybrid server state. It does not replace Dexie, the offline mutation queue, workspace hydration/freshness, or SQLite authority in Local mode. Do not persist the Query cache.
+- The app-level `QueryClientProvider` and workspace/user/data-mode cache boundary live in `src/main.tsx`, `src/App.tsx`, and `src/query/`. Reuse the shared `queryClient`; do not create feature-level clients or providers.
+- Define reusable keys in `src/query/queryKeys.ts`. Keys must include the workspace, every filter/page/sort input, and any user or permission scope that changes visibility. Keep related keys under a feature root so mutations can invalidate the smallest correct namespace. Do not include presentation-only state or refresh counters in keys.
+- Keep remote page fetchers and reusable hooks in the relevant `src/local-db` data module. Pass TanStack Query's `AbortSignal` to Supabase requests, normalize and validate remote results there, and update the Dexie cache without overwriting pending or conflicting local rows. Pages and components must not issue their own Supabase requests for list data.
+- Use TanStack Query for remote reads that benefit from request deduplication, scoped caching, cancellation, or refetching. Local mode must continue reading its indexed Dexie/SQLite mirror reactively. Do not wrap every existing Dexie hook in Query or duplicate the same server data in competing state stores.
+- Query cache defaults are centralized in `src/query/queryClient.ts`. Keep page requests free of previous-page placeholder data: while a remote page is loading, show the localized centered loader and do not display rows from another page or filter.
+- After a mutation changes data represented by Query, invalidate the affected feature key after the existing persistence/offline-queue operation succeeds. Prefer the established local database mutation path; do not add a second Query-cache optimistic write for data already updated through Dexie.
+- Optimistic Query updates are allowed only for low-risk, reversible actions whose authoritative state is not already updated through Dexie. Cancel in-flight related queries, snapshot every affected cache entry, apply one deterministic update, restore snapshots on failure, and invalidate the related namespace on settlement. Never optimistically change payments, ledger entries, inventory quantities, permissions, or irreversible business operations.
+
+## TanStack Table and virtualization
+
+- Use TanStack Table when a table has meaningful sorting, filtering, selection, or server-pagination state to coordinate. Keep Atlas table components and existing visual conventions for markup; TanStack Table manages row/state models and is not a UI replacement.
+- For source-paged data, configure manual pagination/sorting/filtering and pass the exact filtered row count from the source. Sorting must use a stable unique tie-breaker at the data source. Keep pagination in the table header as required below.
+- Keep the existing `react-virtuoso` integrations where they already solve large-list rendering. Do not add TanStack Virtual or migrate a working virtualizer without profiling that shows a measurable benefit.
+- For combined or derived lists, do not claim compliance by slicing an already-loaded array. Provide an equivalent filtered page and summary from the authoritative source, or keep full-dataset operations batched when they truly require every row.
+
 ## Pagination and large lists
 
+- Use the shared `AppPagination` control for list and table pagination. Use `usePaginationState` from `src/hooks/usePaginationState.ts` for a single list's page and page-size state, and `usePaginationPageMap` for views with an independent page per tab. Keep persisted page-size preferences and validate them against the view's offered options.
+- Declare the filters that invalidate the current page in `resetOn`; changing search, date range, sorting, or result filters must return to page 1 in the same render as the new criteria. Changing page size must also return to page 1.
+- After the page data is available, use `usePaginationBounds` to derive the displayed page and page count. Pass its `pageCount` into `AppPagination`. Clamp only after a successful result; while a remote request is loading or failed, preserve the selected page and last known page count so pending empty data cannot reset navigation.
+- Keep page data-source behavior appropriate to Cloud, Hybrid, and Local modes. The shared pagination hooks standardize navigation state and bounds; they do not replace source-side filtering, remote paging, indexed Dexie reads, or module-specific APIs.
 - Apply search, filters, sorting, and pagination at the data source before loading records into the UI. UI pagination alone does not prevent the app from loading the full dataset.
 - Cloud and Hybrid modules must page remote data through Supabase queries or RPCs and keep Dexie cache reads consistent. Local modules must use indexed local queries with equivalent filtering and ordering.
 - Calculate the total count from the same filtered dataset as the current page.

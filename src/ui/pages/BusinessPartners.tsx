@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 
 import { useAuth } from '@/auth'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import {
     createBusinessPartner,
     deleteBusinessPartner,
@@ -168,15 +169,21 @@ export function BusinessPartners() {
     const canViewSuppliers = hasPermission('suppliers.access')
     const [scope, setScope] = useState<'all' | 'customers' | 'suppliers' | 'groups'>('all')
     const [search, setSearch] = useState('')
-    const [currentPage, setCurrentPage] = useState(1)
-    const [pageSize, setPageSize] = useState(20)
+    const pagination = usePaginationState({ resetOn: [search], initialPageSize: 20 })
     const directoryPage = useBusinessPartnerDirectoryPage(user?.workspaceId, {
         includeRealEstateRoles: features.real_estate,
         includeAgentRoles: features.agents,
         includeEcommerce: false,
-        page: currentPage,
-        pageSize,
+        page: pagination.currentPage,
+        pageSize: pagination.pageSize,
         search,
+    })
+    const directoryPagination = usePaginationBounds({
+        currentPage: pagination.currentPage,
+        setCurrentPage: pagination.setCurrentPage,
+        totalCount: directoryPage.totalCount,
+        pageSize: pagination.pageSize,
+        isLoading: directoryPage.isLoading,
     })
     const [activeTab, setActiveTab] = useState<'partners' | 'maps'>('partners')
     const [mapPartners, setMapPartners] = useState<BusinessPartner[] | null>(null)
@@ -197,13 +204,6 @@ export function BusinessPartners() {
         role: user?.role,
         featureEnabled: hasCapability('businessPartnerGroupPrivacy'),
     }), [hasCapability, user?.id, user?.role])
-
-    useEffect(() => setCurrentPage(1), [search, pageSize])
-    useEffect(() => {
-        if (directoryPage.isLoading) return
-        const pageCount = Math.max(1, Math.ceil(directoryPage.totalCount / pageSize))
-        setCurrentPage((page) => Math.min(page, pageCount))
-    }, [directoryPage.isLoading, directoryPage.totalCount, pageSize])
 
     useEffect(() => {
         if (activeTab !== 'maps' || !user?.workspaceId || mapPartners !== null) return
@@ -457,11 +457,12 @@ export function BusinessPartners() {
                             <div className="flex min-w-0 flex-wrap items-center gap-3">
                                 <CardTitle>{t('businessPartners.title') || 'Business Partners'}</CardTitle>
                                 <AppPagination
-                                    currentPage={currentPage}
+                                    currentPage={directoryPagination.currentPage}
                                     totalCount={directoryPage.totalCount}
-                                    pageSize={pageSize}
-                                    onPageChange={setCurrentPage}
-                                    onPageSizeChange={setPageSize}
+                                    pageCount={directoryPagination.pageCount}
+                                    pageSize={pagination.pageSize}
+                                    onPageChange={pagination.setCurrentPage}
+                                    onPageSizeChange={pagination.setPageSize}
                                     className="mx-0 w-auto justify-start"
                                 />
                             </div>

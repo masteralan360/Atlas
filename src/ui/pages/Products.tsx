@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { ArrowDown, ArrowUp, ArrowUpDown, Barcode, BookOpen, Boxes, Camera, ChevronDown, ChevronRight, CircleAlert, Copy, FileSpreadsheet, GitBranch, Info, LayoutGrid, List as ListIcon, Loader2, Package, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Tags, Trash2 } from 'lucide-react'
 
 import { useAuth } from '@/auth'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import {
     createProduct,
     deleteProduct,
@@ -398,15 +399,15 @@ export function Products() {
     const [filters, setFilters] = useState<ProductFilterState>(DEFAULT_PRODUCT_FILTERS)
     const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
     const [draftFilters, setDraftFilters] = useState<ProductFilterState>(filters)
-    const [currentPage, setCurrentPage] = useState(1)
     const [collapsedPrimaryProductIds, setCollapsedPrimaryProductIds] = useState<Set<string>>(() => new Set())
-    const [pageSize, setPageSize] = useState(() => {
-        return Number(localStorage.getItem('products_page_size')) || 20
+    const pagination = usePaginationState({
+        resetOn: [search, catalogType, filters],
+        initialPageSize: Number(localStorage.getItem('products_page_size')) || 20,
     })
 
     useEffect(() => {
-        localStorage.setItem('products_page_size', String(pageSize))
-    }, [pageSize])
+        localStorage.setItem('products_page_size', String(pagination.pageSize))
+    }, [pagination.pageSize])
     const [isProductCategoryManagerOpen, setIsProductCategoryManagerOpen] = useState(false)
     const [isPriceBookDialogOpen, setIsPriceBookDialogOpen] = useState(false)
     const [adjustmentDialogOpen, setAdjustmentDialogOpen] = useState(false)
@@ -467,8 +468,8 @@ export function Products() {
         minStock: filters.minStock,
         maxStock: filters.maxStock,
         sort: filters.sort,
-        page: currentPage,
-        pageSize,
+        page: pagination.currentPage,
+        pageSize: pagination.pageSize,
         enabled: remoteCatalogPageEnabled
     })
     // Keep the full Dexie collection for offline screens and explicit bulk
@@ -1312,7 +1313,7 @@ export function Products() {
     const productPages = useMemo(
         () => useRemoteCatalogPage
             ? {
-                currentPage,
+                currentPage: pagination.currentPage,
                 pageCount: productCatalogPage.pageCount,
                 groups: productListGroups.map((group) => {
                     const isExpanded = isMobile()
@@ -1327,13 +1328,22 @@ export function Products() {
                     }
                 })
             }
-            : paginateProductGroups(productListGroups, pageSize, currentPage, (group) => (
+            : paginateProductGroups(productListGroups, pagination.pageSize, pagination.currentPage, (group) => (
                 isMobile()
                 || viewMode === 'grid'
                 || !collapsedPrimaryProductIds.has(group.primary.id)
             )),
-        [collapsedPrimaryProductIds, currentPage, pageSize, productCatalogPage.pageCount, productListGroups, useRemoteCatalogPage, viewMode]
+        [collapsedPrimaryProductIds, pagination.currentPage, pagination.pageSize, productCatalogPage.pageCount, productListGroups, useRemoteCatalogPage, viewMode]
     )
+    const productPagination = usePaginationBounds({
+        currentPage: pagination.currentPage,
+        setCurrentPage: pagination.setCurrentPage,
+        totalCount,
+        pageCount: productPages.pageCount,
+        pageSize: pagination.pageSize,
+        isLoading: useRemoteCatalogPage && productCatalogPage.isLoading,
+        error: useRemoteCatalogPage ? productCatalogPage.error : null,
+    })
     const paginatedProductGroups = productPages.groups
     const productQuantityProductIds = useMemo(() => Array.from(new Set(paginatedProductGroups.flatMap((group) => [
         ...(group.includesPrimary ? [group.primary.id] : []),
@@ -1398,15 +1408,7 @@ export function Products() {
         })
     }, [collapsedPrimaryProductIds, paginatedProductGroups, variantsByParentId, viewMode])
 
-    useEffect(() => {
-        setCurrentPage((page) => Math.min(page, productPages.pageCount))
-    }, [productPages.pageCount])
-
     const isPrimaryProduct = (product: Product) => (variantsByParentId.get(product.id)?.length ?? 0) > 0
-
-    useEffect(() => {
-        setCurrentPage(1)
-    }, [search, pageSize, filters])
 
     useEffect(() => {
         if (!isFilterDialogOpen) return
@@ -1430,7 +1432,6 @@ export function Products() {
                 && hasApplicableStockQuantityDisplayMode
         })
         setIsFilterDialogOpen(false)
-        setCurrentPage(1)
     }
 
     const isProductSelectionMode = isBranchCloneSelectionMode || isBarcodeSelectionMode
@@ -2156,7 +2157,7 @@ export function Products() {
                             size="sm"
                             variant={catalogType === type ? 'secondary' : 'ghost'}
                             className="h-9 rounded-xl px-3 capitalize"
-                            onClick={() => { setCatalogType(type); setCurrentPage(1) }}
+                            onClick={() => setCatalogType(type)}
                         >
                             {type === 'all' ? t('common.all', { defaultValue: 'All' }) : type === 'services' ? t('services.title', { defaultValue: 'Services' }) : t('products.title', { defaultValue: 'Products' })}
                         </Button>
@@ -2266,15 +2267,12 @@ export function Products() {
                             <DeveloperTestButton suiteId="products" />
                         </Suspense>}
                         <AppPagination
-                            currentPage={currentPage}
+                            currentPage={productPagination.currentPage}
                             totalCount={totalCount}
-                            pageCount={productPages.pageCount}
-                            pageSize={pageSize}
-                            onPageChange={setCurrentPage}
-                            onPageSizeChange={(newSize) => {
-                                setPageSize(newSize)
-                                setCurrentPage(1)
-                            }}
+                            pageCount={productPagination.pageCount}
+                            pageSize={pagination.pageSize}
+                            onPageChange={pagination.setCurrentPage}
+                            onPageSizeChange={pagination.setPageSize}
                             className="w-auto"
                         />
                         <Button
