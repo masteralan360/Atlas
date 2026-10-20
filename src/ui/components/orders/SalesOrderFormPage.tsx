@@ -29,6 +29,15 @@ import {
     getSalesOrderFormItemStorageId
 } from '@/lib/salesOrderLineStorage'
 import {
+    appendSalesOrderLineDraft,
+    getSalesOrderLineIdForSave,
+    getSalesOrderLineSequence,
+    getSalesOrderLinesNewestFirst,
+    removeSalesOrderLineDraft,
+    shouldInitializeSalesOrderDraft,
+    updateSalesOrderLineDraft
+} from '@/lib/salesOrderLineDraft'
+import {
     createSalesOrder,
     buildAgentCommissionObligations,
     findPartnerProductPriceBookItem,
@@ -153,6 +162,8 @@ interface SalesOrderFormPageProps {
     editingOrderId?: string
 }
 type FormItem = {
+    clientId: string
+    persistedId?: string
     seq: number
     productId: string
     productSearch: string
@@ -179,8 +190,9 @@ type FormItem = {
     note: string
 }
 
-function createEmptyItem(storageId = '', seq = 1): FormItem {
+function createEmptyItem(storageId = '', seq = 1, clientId = generateId()): FormItem {
     return {
+        clientId,
         seq,
         productId: '',
         productSearch: '',
@@ -431,7 +443,7 @@ export function SalesOrderFormPage({
     }, [])
     useEffect(() => () => dismissSaveProgressToast(), [dismissSaveProgressToast])
     const [isLossWarningOpen, setIsLossWarningOpen] = useState(false)
-    const [productsViewItemIndex, setProductsViewItemIndex] = useState<number | null>(null)
+    const [productsViewItemId, setProductsViewItemId] = useState<string | null>(null)
     const [customerId, setCustomerId] = useState(editingOrder?.businessPartnerId || editingOrder?.customerId || '')
     const [customerSearch, setCustomerSearch] = useState(editingOrder?.customerName || '')
     const [selectedCustomerSnapshot, setSelectedCustomerSnapshot] = useState<BusinessPartner | null>(null)
@@ -475,61 +487,63 @@ export function SalesOrderFormPage({
         setCurrency(nextCurrency)
         setOrderAdjustments(repricedAdjustments as OrderAdjustment[])
     }, [eurRates, exchangeData, orderAdjustments, t, toast, tryRates])
-    const [items, setItems] = useState<FormItem[]>(() => {
-        if (editingOrder) {
-            return editingOrder.items.map((item, idx) => {
-                const product = products.find((p) => p.id === item.productId)
-                return {
-                    seq: idx + 1,
-                    productId: item.productId,
-                    productSearch: product?.name || '',
-                    storageId: getSalesOrderFormItemStorageId(
-                        product,
-                        item.storageId,
-                        editingOrder.sourceStorageId || defaultStorageId
-                    ),
-                    quantity: String(item.quantity),
-                    unitRef: item.unitRef || '',
-                    uomId: item.uomId || '',
-                    unitFactor: item.unitFactor == null ? '' : String(item.unitFactor),
-                    baseUnitRef: item.baseUnitRef || '',
-                    baseUnitCode: item.baseUnitCode || item.unit || product?.unit || '',
-                    unitNameSnapshot: item.unitNameSnapshot || item.unit || product?.unit || '',
-                    baseUnitNameSnapshot: item.baseUnitNameSnapshot || item.baseUnitCode || item.unit || product?.unit || '',
-                    freeBonusQuantity: String(getOrderLineFreeBonusQuantity(item)),
-                    freeBonusUnit: item.freeBonusUnit || '',
-                    unitPrice: String(item.convertedUnitPrice),
-                    batchId: item.batchAllocations?.[0]?.batchId || '',
-                    priceBookId: item.priceBookId || '',
-                    priceBookItemId: item.priceBookItemId || '',
-                    priceSourceCurrency: item.priceBookId && item.priceBookItemId ? item.originalCurrency : '',
-                    priceBookCostPrice: item.priceBookId && item.priceBookItemId
-                        ? String(item.uomCostPrice ?? item.costPrice)
-                        : '',
-                    priceBookCostCurrency: item.priceBookId && item.priceBookItemId ? item.originalCurrency : '',
-                    priceBookMinimumSellingPrice: item.priceBookId && item.priceBookItemId && item.minimumSellingPriceSnapshot != null
-                        ? String(item.minimumSellingPriceSnapshot)
-                        : '',
-                    priceBookMinimumCurrency: item.priceBookId && item.priceBookItemId ? product?.currency ?? '' : '',
-                    note: item.note || ''
-                }
-            })
+    const mapExistingOrderItems = useCallback((order: SalesOrder): FormItem[] => order.items.map((item, index) => {
+        const product = products.find((candidate) => candidate.id === item.productId)
+        return {
+            clientId: `persisted:${item.id}`,
+            persistedId: item.id,
+            seq: getSalesOrderLineSequence(item.id, index + 1),
+            productId: item.productId,
+            productSearch: product?.name || '',
+            storageId: getSalesOrderFormItemStorageId(
+                product,
+                item.storageId,
+                order.sourceStorageId || defaultStorageId
+            ),
+            quantity: String(item.quantity),
+            unitRef: item.unitRef || '',
+            uomId: item.uomId || '',
+            unitFactor: item.unitFactor == null ? '' : String(item.unitFactor),
+            baseUnitRef: item.baseUnitRef || '',
+            baseUnitCode: item.baseUnitCode || item.unit || product?.unit || '',
+            unitNameSnapshot: item.unitNameSnapshot || item.unit || product?.unit || '',
+            baseUnitNameSnapshot: item.baseUnitNameSnapshot || item.baseUnitCode || item.unit || product?.unit || '',
+            freeBonusQuantity: String(getOrderLineFreeBonusQuantity(item)),
+            freeBonusUnit: item.freeBonusUnit || '',
+            unitPrice: String(item.convertedUnitPrice),
+            batchId: item.batchAllocations?.[0]?.batchId || '',
+            priceBookId: item.priceBookId || '',
+            priceBookItemId: item.priceBookItemId || '',
+            priceSourceCurrency: item.priceBookId && item.priceBookItemId ? item.originalCurrency : '',
+            priceBookCostPrice: item.priceBookId && item.priceBookItemId
+                ? String(item.uomCostPrice ?? item.costPrice)
+                : '',
+            priceBookCostCurrency: item.priceBookId && item.priceBookItemId ? item.originalCurrency : '',
+            priceBookMinimumSellingPrice: item.priceBookId && item.priceBookItemId && item.minimumSellingPriceSnapshot != null
+                ? String(item.minimumSellingPriceSnapshot)
+                : '',
+            priceBookMinimumCurrency: item.priceBookId && item.priceBookItemId ? product?.currency ?? '' : '',
+            note: item.note || ''
         }
+    }), [defaultStorageId, products])
+    const [items, setItems] = useState<FormItem[]>(() => {
+        if (editingOrder) return mapExistingOrderItems(editingOrder)
         return [createEmptyItem(defaultStorageId)]
     })
+    const displayedItems = useMemo(() => getSalesOrderLinesNewestFirst(items), [items])
     const requiresApprovalRequest = user?.role === 'staff' && permissionKeys.includes('orders.requireSalesOrderRequest')
     const canUseFreeBonus = hasCapability('orderFreeBonus')
-    const [highlightedStorageIndex, setHighlightedStorageIndex] = useState<number | null>(null)
-    const [highlightedNewSeq, setHighlightedNewSeq] = useState<number | null>(null)
+    const [highlightedStorageItemId, setHighlightedStorageItemId] = useState<string | null>(null)
+    const [highlightedNewItemId, setHighlightedNewItemId] = useState<string | null>(null)
     const [isCustomerInformationHighlighted, setIsCustomerInformationHighlighted] = useState(false)
     const customerInformationRef = useRef<HTMLDivElement>(null)
     const customerHighlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
     useEffect(() => {
-        if (highlightedNewSeq == null) return
-        const timeout = setTimeout(() => setHighlightedNewSeq(null), 1600)
+        if (highlightedNewItemId == null) return
+        const timeout = setTimeout(() => setHighlightedNewItemId(null), 1600)
         return () => clearTimeout(timeout)
-    }, [highlightedNewSeq])
+    }, [highlightedNewItemId])
 
     useEffect(() => {
         if (isTrackedCommission) {
@@ -542,10 +556,11 @@ export function SalesOrderFormPage({
     useEffect(() => () => {
         if (customerHighlightTimeoutRef.current) clearTimeout(customerHighlightTimeoutRef.current)
     }, [])
-
-
+    const initializedOrderIdRef = useRef<string | null>(null)
     useEffect(() => {
-        if (!editingOrder) return
+        if (!editingOrder || editingOrder.id !== editingOrderId) return
+        if (!shouldInitializeSalesOrderDraft(initializedOrderIdRef.current, editingOrder.id)) return
+        initializedOrderIdRef.current = editingOrder.id
         setCustomerId(editingOrder.businessPartnerId || editingOrder.customerId)
         setCustomerSearch(editingOrder.customerName)
         setSalesAccountAgentId(editingOrder.salesAccountAgentId || '')
@@ -567,44 +582,8 @@ export function SalesOrderFormPage({
         setInitialPaymentAmount(editingOrder.initialPaymentAmount ? String(editingOrder.initialPaymentAmount) : '')
         setInitialPaymentAccountId(editingOrder.initialPaymentAccountId ?? null)
         setInitialPaymentAccountNameSnapshot(editingOrder.initialPaymentAccountNameSnapshot ?? null)
-        setItems(editingOrder.items.map((item, idx) => {
-            const product = products.find((p) => p.id === item.productId)
-            return {
-                seq: idx + 1,
-                productId: item.productId,
-                productSearch: product?.name || '',
-                storageId: getSalesOrderFormItemStorageId(
-                    product,
-                    item.storageId,
-                    editingOrder.sourceStorageId || defaultStorageId
-                ),
-                quantity: String(item.quantity),
-                unitRef: item.unitRef || '',
-                uomId: item.uomId || '',
-                unitFactor: item.unitFactor == null ? '' : String(item.unitFactor),
-                baseUnitRef: item.baseUnitRef || '',
-                baseUnitCode: item.baseUnitCode || item.unit || product?.unit || '',
-                unitNameSnapshot: item.unitNameSnapshot || item.unit || product?.unit || '',
-                baseUnitNameSnapshot: item.baseUnitNameSnapshot || item.baseUnitCode || item.unit || product?.unit || '',
-                freeBonusQuantity: String(getOrderLineFreeBonusQuantity(item)),
-                freeBonusUnit: item.freeBonusUnit || '',
-                unitPrice: String(item.convertedUnitPrice),
-                batchId: item.batchAllocations?.[0]?.batchId || '',
-                priceBookId: item.priceBookId || '',
-                priceBookItemId: item.priceBookItemId || '',
-                priceSourceCurrency: item.priceBookId && item.priceBookItemId ? item.originalCurrency : '',
-                priceBookCostPrice: item.priceBookId && item.priceBookItemId
-                    ? String(item.uomCostPrice ?? item.costPrice)
-                    : '',
-                priceBookCostCurrency: item.priceBookId && item.priceBookItemId ? item.originalCurrency : '',
-                priceBookMinimumSellingPrice: item.priceBookId && item.priceBookItemId && item.minimumSellingPriceSnapshot != null
-                    ? String(item.minimumSellingPriceSnapshot)
-                    : '',
-                priceBookMinimumCurrency: item.priceBookId && item.priceBookItemId ? product?.currency ?? '' : '',
-                note: item.note || ''
-            }
-        }))
-    }, [defaultStorageId, editingOrder, products])
+        setItems(mapExistingOrderItems(editingOrder))
+    }, [defaultStorageId, editingOrder, editingOrderId, mapExistingOrderItems])
 
     useEffect(() => {
         if (!editingOrder || !products.length) return
@@ -1120,10 +1099,10 @@ export function SalesOrderFormPage({
         ))
     }, [agentPartners, agents, changeOrderCurrency, currency, resolveItemPricing])
 
-    const handleStorageMissing = useCallback((index: number) => {
-        setHighlightedStorageIndex(index)
-        setTimeout(() => setHighlightedStorageIndex((prev) => prev === index ? null : prev), 3000)
-        const el = document.getElementById(`sales-storage-${index}`)
+    const handleStorageMissing = useCallback((clientId: string) => {
+        setHighlightedStorageItemId(clientId)
+        setTimeout(() => setHighlightedStorageItemId((previous) => previous === clientId ? null : previous), 3000)
+        const el = document.getElementById(`sales-storage-${clientId}`)
         el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, [])
 
@@ -1144,10 +1123,8 @@ export function SalesOrderFormPage({
         }, 250)
     }, [isCustomerSelectionRequired])
 
-    const updateItem = (index: number, changes: Partial<FormItem>) => {
-        setItems((current) =>
-            current.map((item, itemIndex) => {
-                if (itemIndex !== index) return item
+    const updateItem = (clientId: string, changes: Partial<FormItem>) => {
+        setItems((current) => updateSalesOrderLineDraft(current, clientId, (item) => {
                 if (priceBooksEnabled && changes.productId && !selectedCustomer) return item
                 const next = { ...item, ...changes }
                 if (changes.productId !== undefined) {
@@ -1225,11 +1202,10 @@ export function SalesOrderFormPage({
                     next.unitPrice = resolveItemPricing(next.productId, changes.batchId, currency, selectedCustomer, next.unitRef).unitPrice
                 }
                 return next
-            })
-        )
+            }))
     }
 
-    const selectProductForItem = (index: number, product: typeof products[number]) => {
+    const selectProductForItem = (clientId: string, product: typeof products[number]) => {
         if (!isService(product) && !hasValidProductCost(product.costPrice)) {
             toast({
                 title: t('common.error') || 'Error',
@@ -1246,7 +1222,7 @@ export function SalesOrderFormPage({
             })
             return
         }
-        updateItem(index, {
+        updateItem(clientId, {
             productId: product.id,
             productSearch: product.name,
             ...(isService(product) ? { storageId: SERVICES_VIRTUAL_STORAGE_ID, batchId: '' } : {})
@@ -1255,11 +1231,11 @@ export function SalesOrderFormPage({
 
     useOrderBarcodeScanner({
         enabled: !isCustomerSelectionRequired && !(priceBooksEnabled && (!isPriceBookCatalogReady || !selectedCustomer)),
-        items,
+        items: displayedItems,
         products,
         productBarcodes,
         onProductScanned: (product, index) => {
-            const item = items[index]
+            const item = displayedItems[index]
             const isAvailableForLine = item && getSalesProductOptions(item.storageId, item.productId)
                 .some((candidate) => candidate.id === product.id)
             if (!isAvailableForLine) {
@@ -1270,7 +1246,7 @@ export function SalesOrderFormPage({
                 })
                 return
             }
-            selectProductForItem(index, product)
+            selectProductForItem(item.clientId, product)
         },
         onProductNotFound: () => toast({
             title: t('products.notFoundTitle', { defaultValue: 'Product not found' }),
@@ -1301,18 +1277,18 @@ export function SalesOrderFormPage({
 
     const lossMakingItems = useMemo(() => {
         const rows: Array<{
-            index: number
+            clientId: string
             productName: string
             sellingPrice: number
             costPrice: number
         }> = []
 
-        items.forEach((item, index) => {
+        items.forEach((item) => {
             const product = products.find((entry) => entry.id === item.productId)
             if (!product || Number(item.quantity) <= 0 || !isItemSellingAtLoss(item, product)) return
 
             rows.push({
-                index,
+                clientId: item.clientId,
                 productName: product.name,
                 sellingPrice: Number(item.unitPrice),
                 costPrice: getItemCostDetails(item, product).selectedConvertedCostPrice
@@ -1363,7 +1339,7 @@ export function SalesOrderFormPage({
             currency: product.currency
         }]
     }), [currency, getFormUnitOption, getItemMinimumPriceDetails, items, liveRates, products])
-    const minimumPriceViolations = useMemo(() => items.flatMap((item, lineIndex) => {
+    const minimumPriceViolations = useMemo(() => items.flatMap((item) => {
         if (user?.role !== 'staff') return []
         const product = products.find((entry) => entry.id === item.productId)
         if (!product) return []
@@ -1379,7 +1355,7 @@ export function SalesOrderFormPage({
         )
         if (!minimumPriceConversion) {
             return [{
-                lineIndex,
+                clientId: item.clientId,
                 product,
                 minimumPrice: minimumPrice.amount,
                 currency: minimumPrice.currency,
@@ -1388,7 +1364,7 @@ export function SalesOrderFormPage({
         }
         return isBelowMinimumSellingPrice(user.role, effectivePrice, minimumPriceConversion.convertedAmount)
             ? [{
-                lineIndex,
+                clientId: item.clientId,
                 product,
                 minimumPrice: minimumPriceConversion.convertedAmount,
                 currency,
@@ -1576,7 +1552,7 @@ export function SalesOrderFormPage({
                         }
                     }
                     return {
-                        id: buildSalesOrderLineId({
+                        id: getSalesOrderLineIdForSave(item.persistedId, () => buildSalesOrderLineId({
                             productId: product.id,
                             storageId: item.storageId,
                             batchId: item.batchId,
@@ -1585,7 +1561,7 @@ export function SalesOrderFormPage({
                             freeBonusQuantity,
                             unitPrice,
                             seq: item.seq
-                        }),
+                        })),
                         productId: product.id,
                         note: item.note.trim() || null,
                         priceBookId: hasPriceBookProvenance ? item.priceBookId : null,
@@ -2111,17 +2087,27 @@ export function SalesOrderFormPage({
                                             {t('orders.form.lineItemsDescription', { defaultValue: 'Add products with quantities and prices.' })}
                                         </p>
                                     </div>
-                                    <Button type="button" variant="outline" size="sm" onClick={() => setItems((current) => {
-                                        const nextSeq = current.reduce((max, it) => Math.max(max, it.seq), 0) + 1
-                                        setHighlightedNewSeq(nextSeq)
-                                        return [createEmptyItem(current[current.length - 1]?.storageId || sourceStorageId || defaultStorageId, nextSeq), ...current]
-                                    })}>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => {
+                                        const clientId = generateId()
+                                        setItems((current) => appendSalesOrderLineDraft(current, (seq) => {
+                                            const newestItem = current.reduce<FormItem | null>(
+                                                (newest, candidate) => !newest || candidate.seq > newest.seq ? candidate : newest,
+                                                null
+                                            )
+                                            return createEmptyItem(
+                                                newestItem?.storageId || sourceStorageId || defaultStorageId,
+                                                seq,
+                                                clientId
+                                            )
+                                        }))
+                                        setHighlightedNewItemId(clientId)
+                                    }}>
                                         <Plus className="mr-1 h-3.5 w-3.5" />
                                         {t('orders.form.addItem', { defaultValue: 'Add Item' })}
                                     </Button>
                                 </CardHeader>
                                 <CardContent className="space-y-3">
-                                    {items.map((item, index) => {
+                                    {displayedItems.map((item, index) => {
                                         const product = products.find((entry) => entry.id === item.productId)
                                         const itemUnitOptions = product ? getProductUnitOptions(product.id) : []
             const hasAdditionalUoms = itemUnitOptions.length > 1
@@ -2131,7 +2117,7 @@ export function SalesOrderFormPage({
                                         const lineTotal = roundFormAmount((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0))
                                         const costPrice = product ? getItemCostDetails(item, product).selectedConvertedCostPrice : 0
                                         const isSellingAtLoss = isItemSellingAtLoss(item, product)
-                                        const minimumPriceViolation = minimumPriceViolations.find((violation) => violation.lineIndex === index)
+                                        const minimumPriceViolation = minimumPriceViolations.find((violation) => violation.clientId === item.clientId)
                                         const freeBonusQuantity = Math.max(0, Number(item.freeBonusQuantity || 0))
                                         const inventoryQuantity = getOrderLineInventoryQuantity({
                                             quantity: Number(item.quantity) || 0,
@@ -2151,11 +2137,11 @@ export function SalesOrderFormPage({
 
                                         return (
                                             <div
-                                                key={`sales-item-${index}`}
+                                                key={item.clientId}
                                                 className={cn(
                                                     'relative grid gap-4 rounded-2xl border bg-background p-4 transition-all duration-700 sm:grid-cols-2 lg:grid-cols-[repeat(24,minmax(0,1fr))]',
                                                     (isSellingAtLoss || minimumPriceViolation) && 'border-destructive bg-destructive/5',
-                                                    item.seq === highlightedNewSeq && 'border-primary ring-2 ring-primary/60 bg-primary/5'
+                                                    item.clientId === highlightedNewItemId && 'border-primary ring-2 ring-primary/60 bg-primary/5'
                                                 )}
                                             >
                                                 <span className="absolute -top-2 start-3 z-10 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground">
@@ -2197,7 +2183,7 @@ export function SalesOrderFormPage({
                                                         {canOpenProductsView ? (
                                                             <ProductsViewModalTrigger
                                                                 label={t('products.title', { defaultValue: 'Browse products' })}
-                                                                onClick={() => setProductsViewItemIndex(index)}
+                                                            onClick={() => setProductsViewItemId(item.clientId)}
                                                             />
                                                         ) : null}
                                                         <ProductAutocompleteInput
@@ -2205,8 +2191,8 @@ export function SalesOrderFormPage({
                                                             inputClassName={canOpenProductsView ? 'rounded-s-none' : undefined}
                                                             scannerTargetIndex={index}
                                                             value={item.productSearch}
-                                                            onChange={(value) => updateItem(index, { productSearch: value, productId: '' })}
-                                                            onSelectProduct={(product) => selectProductForItem(index, product)}
+                                                            onChange={(value) => updateItem(item.clientId, { productSearch: value, productId: '' })}
+                                                            onSelectProduct={(product) => selectProductForItem(item.clientId, product)}
 
                                                             disabled={priceBooksEnabled && (!isPriceBookCatalogReady || !selectedCustomer)}
                                                             placeholder={priceBooksEnabled && !selectedCustomer
@@ -2222,13 +2208,13 @@ export function SalesOrderFormPage({
                                                                 .some((candidate) => candidate.id === product.id)}
                                                             storageMissing={!item.storageId}
                                                             storageMissingLabel={t('orders.form.selectStorage', { defaultValue: 'Select Storage' })}
-                                                            onStorageMissingClick={() => handleStorageMissing(index)}
+                                                            onStorageMissingClick={() => handleStorageMissing(item.clientId)}
                                                         />
                                                     </div>
                                                     {item.productId && item.storageId && !isService(product) ? (
                                                         <div className="space-y-1.5 pt-1">
                                                             <Label className="text-xs">{t('orders.form.stockSource', { defaultValue: 'Stock source' })}</Label>
-                                                            <Select value={batchSelectionValue} onValueChange={(value) => updateItem(index, { batchId: value })}>
+                                                            <Select value={batchSelectionValue} onValueChange={(value) => updateItem(item.clientId, { batchId: value })}>
                                                                 <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
                                                                 <SelectContent>
                                                                     <SelectItem value={PRODUCT_STOCK_SELECTION} disabled={regularStockQuantity <= 0 && lineBatches.length > 0}>
@@ -2269,16 +2255,16 @@ export function SalesOrderFormPage({
                                                     </div>
                                                 ) : (
                                                     <div
-                                                        id={`sales-storage-${index}`}
+                                                        id={`sales-storage-${item.clientId}`}
                                                         className={cn(
                                                             'min-w-0 space-y-2',
                                                             canUseFreeBonus ? 'lg:col-span-4' : 'lg:col-span-5',
-                                                            highlightedStorageIndex === index && 'animate-pulse'
+                                                            highlightedStorageItemId === item.clientId && 'animate-pulse'
                                                         )}
                                                     >
-                                                        <Label className={cn(highlightedStorageIndex === index && 'text-destructive font-bold')}>{t('orders.form.selectStorage', { defaultValue: 'Select Storage' })}</Label>
-                                                        <Select value={item.storageId} onValueChange={(value) => { setHighlightedStorageIndex(null); updateItem(index, { storageId: value }) }}>
-                                                            <SelectTrigger className={cn('w-full min-w-0', highlightedStorageIndex === index && 'ring-2 ring-destructive')}><SelectValue placeholder={t('orders.form.selectStorage', { defaultValue: 'Select Storage' })} /></SelectTrigger>
+                                                        <Label className={cn(highlightedStorageItemId === item.clientId && 'text-destructive font-bold')}>{t('orders.form.selectStorage', { defaultValue: 'Select Storage' })}</Label>
+                                                        <Select value={item.storageId} onValueChange={(value) => { setHighlightedStorageItemId(null); updateItem(item.clientId, { storageId: value }) }}>
+                                                            <SelectTrigger className={cn('w-full min-w-0', highlightedStorageItemId === item.clientId && 'ring-2 ring-destructive')}><SelectValue placeholder={t('orders.form.selectStorage', { defaultValue: 'Select Storage' })} /></SelectTrigger>
                                                             <SelectContent>
                                                                 {storages.map((storage) => (
                                                                     <SelectItem key={storage.id} value={storage.id}>
@@ -2315,11 +2301,11 @@ export function SalesOrderFormPage({
                                                             min={(isService(product) || selectedUnitOption?.isDynamic) ? ORDER_DECIMAL_STEP : '1'}
                                                             step={(isService(product) || selectedUnitOption?.isDynamic) ? ORDER_DECIMAL_STEP : '1'}
                                                             value={item.quantity}
-                                                            onChange={(event) => updateItem(index, { quantity: event.target.value })}
+                                                            onChange={(event) => updateItem(item.clientId, { quantity: event.target.value })}
                                                             placeholder={t('common.quantity', { defaultValue: 'Quantity' })}
                                                         />
                                                         {hasAdditionalUoms ? (
-                                                            <Select value={item.unitRef} onValueChange={(value) => updateItem(index, { unitRef: value })}>
+                                                            <Select value={item.unitRef} onValueChange={(value) => updateItem(item.clientId, { unitRef: value })}>
                                                                 <SelectTrigger className="min-w-28 flex-1 basis-28" aria-label={t('orders.form.unit', { defaultValue: 'Unit' })}>
                                                                     <SelectValue placeholder={t('orders.form.selectUnit', { defaultValue: 'Select unit' })} />
                                                                 </SelectTrigger>
@@ -2346,7 +2332,7 @@ export function SalesOrderFormPage({
                                                                 min="0"
                                                                 step={selectedUnitOption?.isDynamic ? ORDER_DECIMAL_STEP : '1'}
                                                                 value={item.freeBonusQuantity}
-                                                                onChange={(event) => updateItem(index, { freeBonusQuantity: event.target.value })}
+                                                                onChange={(event) => updateItem(item.clientId, { freeBonusQuantity: event.target.value })}
                                                                 placeholder="0"
                                                             />
                                                             {freeBonusDisplayUnit && <span className="block truncate text-xs text-muted-foreground">{t(`products.units.${freeBonusDisplayUnit}`, freeBonusDisplayUnit)}</span>}
@@ -2356,7 +2342,7 @@ export function SalesOrderFormPage({
                                                                 value={item.freeBonusUnit}
                                                                 productUnit={product?.unit}
                                                                 units={unitOptions}
-                                                                onValueChange={(value) => updateItem(index, { freeBonusUnit: value })}
+                                                                onValueChange={(value) => updateItem(item.clientId, { freeBonusUnit: value })}
                                                             />
                                                         ) : null}
                                                     </div>
@@ -2374,7 +2360,7 @@ export function SalesOrderFormPage({
                                                             minimumPriceViolation && 'border-destructive bg-destructive/5 text-destructive focus-visible:ring-destructive/25'
                                                         )}
                                                         value={formatNumericInput(item.unitPrice)}
-                                                        onChange={(event) => updateItem(index, { unitPrice: sanitizeNumericInput(event.target.value, { allowDecimal: true, maxFractionDigits: 3 }) })}
+                                                        onChange={(event) => updateItem(item.clientId, { unitPrice: sanitizeNumericInput(event.target.value, { allowDecimal: true, maxFractionDigits: 3 }) })}
                                                         placeholder={t('common.sellingPrice', { defaultValue: 'Selling Price' })}
                                                         aria-invalid={Boolean(minimumPriceViolation)}
                                                     />
@@ -2402,7 +2388,7 @@ export function SalesOrderFormPage({
                                                 <div className="flex min-w-0 items-start justify-end gap-0 sm:col-span-2 lg:col-span-2 lg:justify-center">
                                                     <OrderLineItemNoteDialog
                                                         note={item.note}
-                                                        onSave={(note) => updateItem(index, { note })}
+                                                        onSave={(note) => updateItem(item.clientId, { note })}
                                                         labels={{
                                                             trigger: t('orders.form.lineItemNote', { defaultValue: 'Line item note' }),
                                                             title: t('orders.form.lineItemNote', { defaultValue: 'Line item note' }),
@@ -2412,7 +2398,7 @@ export function SalesOrderFormPage({
                                                             cancel: t('common.cancel', { defaultValue: 'Cancel' })
                                                         }}
                                                     />
-                                                    <Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+                                                    <Button type="button" variant="ghost" size="icon" className="text-destructive" onClick={() => setItems((current) => removeSalesOrderLineDraft(current, item.clientId))}>
                                                         <Trash2 className="h-4 w-4" />
                                                     </Button>
                                                 </div>
@@ -2766,7 +2752,7 @@ export function SalesOrderFormPage({
                     </DialogHeader>
                     <div className="max-h-48 space-y-2 overflow-y-auto rounded-xl border border-destructive/20 bg-destructive/5 p-3">
                         {lossMakingItems.map((item) => (
-                            <div key={`${item.index}-${item.productName}`} className="flex items-center justify-between gap-3 text-sm">
+                            <div key={`${item.clientId}-${item.productName}`} className="flex items-center justify-between gap-3 text-sm">
                                 <span className="min-w-0 truncate font-medium">{item.productName}</span>
                                 <span className="shrink-0 text-xs text-muted-foreground">
                                     {t('common.sellingPrice', { defaultValue: 'Selling Price' })}: {formatCurrency(item.sellingPrice, currency, features.iqd_display_preference)}
@@ -2795,18 +2781,20 @@ export function SalesOrderFormPage({
                 </DialogContent>
             </Dialog>
             <ProductsViewModal
-                open={productsViewItemIndex !== null}
+                open={productsViewItemId !== null}
                 onOpenChange={(open) => {
-                    if (!open) setProductsViewItemIndex(null)
+                    if (!open) setProductsViewItemId(null)
                 }}
                 products={products}
                 storages={storageOptionsForModal}
-                initialStorageId={productsViewItemIndex === null
+                initialStorageId={productsViewItemId === null
                     ? ''
-                    : (items[productsViewItemIndex]?.storageId || sourceStorageId)}
+                    : (items.find((item) => item.clientId === productsViewItemId)?.storageId || sourceStorageId)}
                 filterProducts={(_, storageId) => getSalesProductOptions(
                     storageId,
-                    productsViewItemIndex === null ? '' : (items[productsViewItemIndex]?.productId || '')
+                    productsViewItemId === null
+                        ? ''
+                        : (items.find((item) => item.clientId === productsViewItemId)?.productId || '')
                 )}
                 getStorageLabel={(storage) => storage.isSystem
                     ? (t(`storages.${storage.name.toLowerCase()}`) || storage.name)
@@ -2843,7 +2831,7 @@ export function SalesOrderFormPage({
                     selectSourceLabel: t('orders.form.stockSource', { defaultValue: 'Select stock source' })
                 }}
                 onSelectProduct={(product, storageId, batchId) => {
-                    if (productsViewItemIndex === null) return
+                    if (productsViewItemId === null) return
                     if (!isService(product) && !hasValidProductCost(product.costPrice)) {
                         toast({
                             title: t('common.error') || 'Error',
@@ -2860,14 +2848,14 @@ export function SalesOrderFormPage({
                         })
                         return
                     }
-                    setHighlightedStorageIndex(null)
-                    updateItem(productsViewItemIndex, {
+                    setHighlightedStorageItemId(null)
+                    updateItem(productsViewItemId, {
                         productId: product.id,
                         productSearch: product.name,
                         storageId: isService(product) ? SERVICES_VIRTUAL_STORAGE_ID : storageId,
                         batchId: isService(product) ? '' : batchId
                     })
-                    setProductsViewItemIndex(null)
+                    setProductsViewItemId(null)
                 }}
             />
             <SettlementDialog
