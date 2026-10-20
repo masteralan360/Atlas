@@ -434,6 +434,7 @@ export function Products() {
     })
     const [deleteModalOpen, setDeleteModalOpen] = useState(false)
     const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null)
+    const [catalogRefreshKey, setCatalogRefreshKey] = useState(0)
     const [selectedProductIds, setSelectedProductIds] = useState<Set<string>>(new Set())
     const [isBranchCloneSelectionMode, setIsBranchCloneSelectionMode] = useState(false)
     const [isBarcodeSelectionMode, setIsBarcodeSelectionMode] = useState(false)
@@ -470,6 +471,7 @@ export function Products() {
         sort: filters.sort,
         page: pagination.currentPage,
         pageSize: pagination.pageSize,
+        refreshKey: catalogRefreshKey,
         enabled: remoteCatalogPageEnabled
     })
     // Keep the full Dexie collection for offline screens and explicit bulk
@@ -1984,6 +1986,7 @@ export function Products() {
 
             setDeleteModalOpen(false)
             setItemToDelete(null)
+            setCatalogRefreshKey((current) => current + 1)
         } catch (error) {
             console.error('Error deleting:', error)
         } finally {

@@ -1,6 +1,3 @@
-Profit for Commerce Operations
-Notification when an order is done
-
 Sale Order Exchange
 
 Fix Purchase Order form page and fix purchase order error, order_payment_source_not_found

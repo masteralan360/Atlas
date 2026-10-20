@@ -3526,7 +3526,7 @@ async function completePaidQuickSalesOrderAtomically(
 
     const payment = order.paidAmount > ORDER_AMOUNT_EPSILON
         ? sanitizeSyncPayload('payment_transactions', {
-            id: generateId(),
+            id: uuidv5(order.id, uuidv5.URL),
             workspaceId: order.workspaceId,
             sourceRecordId: order.id,
             direction: 'incoming',
@@ -3640,6 +3640,7 @@ export async function createQuickSalesOrder(
         onProgress?: (stage: CompletedSalesOrderProgressStage) => void
         actingUserRole?: UserRole
         minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
+        orderId?: string
     }
 ) {
     options?.onProgress?.('creating')
@@ -3674,7 +3675,7 @@ export async function createQuickSalesOrder(
             status: 'completed',
             actualDeliveryDate: completedAt,
             reservedAt: completedAt
-        }, createdBy)
+        }, createdBy, { orderId: options?.orderId })
         await assertSalesOrderMinimumPrices(order, options)
         return completePaidQuickSalesOrderAtomically(order, options)
     }
@@ -3686,7 +3687,9 @@ export async function createQuickSalesOrder(
         reservedAt: null
     }, createdBy, {
         actingUserRole: options?.actingUserRole,
-        minimumPriceValidationItems: options?.minimumPriceValidationItems
+        minimumPriceValidationItems: options?.minimumPriceValidationItems,
+        orderId: options?.orderId,
+        initialPaymentTransactionId: options?.orderId ? uuidv5(options.orderId, uuidv5.URL) : undefined
     })
 
     if (targetStatus === 'draft') {

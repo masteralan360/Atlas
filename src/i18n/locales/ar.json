@@ -8,16 +8,16 @@
     "metrics": { "intakeOrders": "الطلبات المستلمة", "waitingCollection": "طلبات غير مدفوعة", "orderValue": "قيمة الطلبات" },
     "filters": { "orderDate": "تاريخ الطلب", "recordDate": "تاريخ السجل", "commissionDate": "تاريخ العمولة" },
     "orders": {
-      "unpaidHint": "يُحفظ الطلب دون دفع. نفّذه وحصّل المبلغ لاحقاً من قسم الطلبات.",
+      "unpaidHint": "تُستكمل طلبات الاستقبال الجديدة وتُسجل مدفوعة بالكامل بعد تأكيد الدفع.",
       "prerequisite": "يتطلب استقبال الطلبات صلاحية الوصول إلى الطلبات والمنتجات وCRM، مع صلاحية إنشاء طلبات البيع.",
-      "recent": "أحدث الطلبات المستلمة", "emptyTitle": "لا توجد طلبات مستلمة بعد", "emptyBody": "أنشئ طلباً لربطه بالمنتجات وسجل العميل والتنفيذ وتحصيل الدفعة لاحقاً.",
+      "recent": "أحدث الطلبات المستلمة", "emptyTitle": "لا توجد طلبات مستلمة بعد", "emptyBody": "أنشئ طلباً لربطه بالمنتجات وسجل العميل والتنفيذ والدفع.",
       "paid": "مدفوع", "unpaid": "غير مدفوع", "sellerUnavailable": "البائع غير متاح"
     },
     "actions": {
       "newOrder": "طلب جديد", "products": "المنتجات", "openOrder": "فتح الطلب", "addRecord": "إضافة سجل", "openStockAdjustments": "فتح تسويات المخزون",
       "addCoach": "إضافة مدرب", "openAgents": "فتح الوكلاء", "openCommissionLedger": "دفتر العمولات", "browseProducts": "استعراض المنتجات", "addProductLine": "إضافة سطر منتج",
       "removeProduct": "إزالة المنتج", "unlinkProduct": "إلغاء ربط المنتج", "unlinkBuyer": "إلغاء ربط العميل", "unlinkCoach": "إلغاء ربط المدرب", "editRecord": "تعديل السجل",
-      "saveUnpaidOrder": "حفظ طلب غير مدفوع", "saveRecord": "حفظ السجل", "updateRecord": "تحديث السجل", "saveCoach": "حفظ المدرب", "saving": "جارٍ الحفظ…"
+      "continueToPayment": "المتابعة إلى الدفع", "backToOrder": "العودة إلى الطلب", "confirmPaymentAndComplete": "تأكيد الدفع وإكمال الطلب", "completeOrder": "إكمال الطلب", "preparingPayment": "جارٍ إعداد الدفع…", "saveRecord": "حفظ السجل", "updateRecord": "تحديث السجل", "saveCoach": "حفظ المدرب", "saving": "جارٍ الحفظ…"
     },
     "platforms": { "instagram": "إنستغرام", "tiktok": "تيك توك", "whatsapp": "واتساب", "messenger": "ماسنجر", "coach": "مدرب", "other": "أخرى" },
     "recordTypes": { "order_details": "استقبال طلب", "ad_spend": "إنفاق إعلاني", "dm_funnel": "مسار الرسائل", "city_market": "سوق المدينة", "competitor": "منافس", "coach_profile": "ملف المدرب" },
@@ -43,7 +43,7 @@
     "order": {
       "socialTitle": "طلب تواصل اجتماعي جديد", "wholesaleTitle": "طلب جملة جديد", "items": "المنتجات", "itemLine": "العنصر {{number}}", "each": "للوحدة", "noItems": "أضف منتجاً واحداً على الأقل إلى الطلب.",
       "noSku": "لا يوجد رمز منتج", "currencyNote": "تستخدم جميع عناصر الطلب عملة {{currency}}.", "deliveryFee": "رسوم التوصيل (د.ع)", "deliveryFeeHint": "تُملأ الرسوم حسب المدينة المختارة ويمكنك تعديلها. أدخل الرسوم يدوياً للخيارات الأخرى.", "discount": "الخصم",
-      "subtotal": "المجموع الفرعي", "total": "الإجمالي", "noPaymentAtIntake": "ينشئ هذا طلباً غير مدفوع. سجّل الدفع لاحقاً من خلال مسار دفع الطلب المعتاد.",
+      "subtotal": "المجموع الفرعي", "total": "الإجمالي", "paymentAtIntakeHint": "سيكتمل الطلب بعد تأكيد استلام كامل المبلغ.", "paymentTitle": "تأكيد الدفع", "paymentDescription": "أكد استلام إجمالي الطلب بالكامل لإكماله.", "zeroTotalDescription": "الإجمالي صفر، لذلك لن تُسجل معاملة دفع. أكد لإكمال الطلب.", "amountReceived": "المبلغ المستلم",
       "productBrowseHint": "اختر منتجاً وموقع التخزين.", "priceBookHint": "تُستخدم قائمة الأسعار المحددة لأسعار الجملة.",
       "noAgentAttribution": "بدون إسناد إلى وكيل", "agentFallback": "وكيل", "agentUnavailable": "غير متاح",
       "agentAttributionHint": "عند اختيار وكيل، سيُستخدم حساب المستخدم المرتبط به كمنشئ الطلب. اترك الحقل فارغاً لاستخدام حسابك."
@@ -70,7 +70,7 @@
     },
     "languages": { "ku": "الكردية", "ar": "العربية", "en": "الإنجليزية" },
     "toast": {
-      "orderSaved": "تم حفظ الطلب غير المدفوع", "orderSavedDetail": "افتح الطلب لمتابعة التنفيذ وتحصيل الدفعة لاحقاً.", "orderFailed": "تعذر حفظ الطلب",
+      "orderSaved": "اكتمل الطلب ودُفع بالكامل", "orderSavedDetail": "اكتمل الطلب وتم تحديث المخزون.", "intakeRecordFailedDetail": "اكتمل الطلب والدفع، لكن تعذر حفظ تفاصيل استقبال الطلب.", "orderFailed": "تعذر إكمال الطلب",
       "recordSaved": "تم حفظ السجل", "recordFailed": "تعذر حفظ السجل", "coachSaved": "تم ربط ملف المدرب", "coachFailed": "تعذر حفظ ملف المدرب",
       "costRequired": "تكلفة المنتج غير محددة", "costRequiredDetail": "أضف تكلفة للمنتج أو لقائمة الأسعار المحددة قبل إدراجه في الطلب.",
       "currencyMismatch": "اختر منتجات تستخدم العملة نفسها.", "deliveryFeeRateFailed": "تعذر تحويل رسوم التوصيل إلى عملة الطلب. تحقق من أسعار الصرف وحاول مرة أخرى.", "tryAgain": "يرجى المحاولة مرة أخرى."
@@ -81,7 +81,7 @@
       "amountRequired": "أدخل مبلغاً صالحاً.", "cityRequired": "أدخل المدينة.", "otherCityRequired": "أدخل المدينة أو المنطقة.", "nameRequired": "أدخل اسماً.", "coachRequired": "اختر وكيلاً موجوداً.",
       "coachExists": "هذا الوكيل مرتبط بالفعل كمدرب.",
       "agentCreatorInvalid": "لم يعد لهذا الوكيل مستخدم مرتبط صالح. اختر وكيلاً آخر أو أزل الاختيار.",
-      "agentCreatorConnectionRequired": "اتصل بالإنترنت للتحقق من الوكيل المحدد قبل إنشاء الطلب."
+      "agentCreatorConnectionRequired": "اتصل بالإنترنت للتحقق من الوكيل المحدد قبل إنشاء الطلب.", "paymentAccountUnavailable": "لم يعد حساب الدفع هذا متاحاً. اختر حساباً آخر أو اختر التسجيل في دفتر المعاملات فقط."
     },
     "permissions": { "access": "الوصول إلى إدارة التجارة", "accessDescription": "عرض استقبال الطلبات والسجلات السوقية وأداء المدربين." }
   },

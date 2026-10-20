@@ -135,6 +135,8 @@ export interface ProductCatalogPageQuery {
   page: number
   pageSize: number
   enabled?: boolean
+  /** Changes when a mutation requires the current remote page to be reloaded. */
+  refreshKey?: number
 }
 
 export interface ProductCatalogPage {

@@ -8,16 +8,16 @@
     "metrics": { "intakeOrders": "Intake orders", "waitingCollection": "Unpaid orders", "orderValue": "Order value" },
     "filters": { "orderDate": "Order date", "recordDate": "Record date", "commissionDate": "Commission date" },
     "orders": {
-      "unpaidHint": "Orders are saved unpaid. Fulfill them and collect payment later from Orders.",
+      "unpaidHint": "New intake orders are completed and fully paid after you confirm payment.",
       "prerequisite": "Order intake requires Orders, Products, and CRM access, plus permission to create sales orders.",
-      "recent": "Recent intake", "emptyTitle": "No intake orders yet", "emptyBody": "Create an order to connect it to products, customer records, fulfillment, and later payment collection.",
+      "recent": "Recent intake", "emptyTitle": "No intake orders yet", "emptyBody": "Create an order to connect it to products, customer records, fulfillment, and payment.",
       "paid": "Paid", "unpaid": "Unpaid", "sellerUnavailable": "Seller unavailable"
     },
     "actions": {
       "newOrder": "New order", "products": "Products", "openOrder": "Open order", "addRecord": "Add record", "openStockAdjustments": "Open stock adjustments",
       "addCoach": "Add coach", "openAgents": "Open agents", "openCommissionLedger": "Commission ledger", "browseProducts": "Browse products", "addProductLine": "Add product line",
       "removeProduct": "Remove product", "unlinkProduct": "Unlink product", "unlinkBuyer": "Unlink buyer", "unlinkCoach": "Unlink coach", "editRecord": "Edit record",
-      "saveUnpaidOrder": "Save unpaid order", "saveRecord": "Save record", "updateRecord": "Update record", "saveCoach": "Save coach", "saving": "Saving…"
+      "continueToPayment": "Continue to payment", "backToOrder": "Back to order", "confirmPaymentAndComplete": "Confirm payment and complete", "completeOrder": "Complete order", "preparingPayment": "Preparing payment…", "saveRecord": "Save record", "updateRecord": "Update record", "saveCoach": "Save coach", "saving": "Saving…"
     },
     "platforms": { "instagram": "Instagram", "tiktok": "TikTok", "whatsapp": "WhatsApp", "messenger": "Messenger", "coach": "Coach", "other": "Other" },
     "recordTypes": { "order_details": "Order intake", "ad_spend": "Ad spend", "dm_funnel": "Message funnel", "city_market": "City market", "competitor": "Competitor", "coach_profile": "Coach profile" },
@@ -44,7 +44,7 @@
     "order": {
       "socialTitle": "New social order", "wholesaleTitle": "New wholesale order", "items": "Products", "itemLine": "Item {{number}}", "each": "each", "noItems": "Add at least one product to this order.",
       "noSku": "No SKU", "currencyNote": "All order items use {{currency}}.", "deliveryFee": "Delivery fee (IQD)", "deliveryFeeHint": "The fee fills from the selected city and can be edited. Enter a fee manually for Other.", "discount": "Discount",
-      "subtotal": "Subtotal", "total": "Total", "noPaymentAtIntake": "This creates an unpaid order. Record payment later through the standard order payment flow.",
+      "subtotal": "Subtotal", "total": "Total", "paymentAtIntakeHint": "The order will be completed after you confirm the full payment.", "paymentTitle": "Confirm payment", "paymentDescription": "Confirm that you received the full order total to complete this order.", "zeroTotalDescription": "The total is zero, so no payment will be recorded. Confirm to complete the order.", "amountReceived": "Amount received",
       "productBrowseHint": "Choose a product and storage location.", "priceBookHint": "Wholesale prices use the selected price book.",
       "noAgentAttribution": "No agent attribution", "agentFallback": "Agent", "agentUnavailable": "unavailable",
       "agentAttributionHint": "If selected, the order's Created By uses the agent's linked user account. Leave this empty to use your account."
@@ -71,7 +71,7 @@
     },
     "languages": { "ku": "Kurdish", "ar": "Arabic", "en": "English" },
     "toast": {
-      "orderSaved": "Unpaid order saved", "orderSavedDetail": "Open the order to continue fulfillment and collect payment later.", "orderFailed": "Could not save order",
+      "orderSaved": "Order completed and fully paid", "orderSavedDetail": "The order was completed and inventory was updated.", "intakeRecordFailedDetail": "The order and payment were completed, but the intake details could not be saved.", "orderFailed": "Could not complete the order",
       "recordSaved": "Record saved", "recordFailed": "Could not save record", "coachSaved": "Coach profile linked", "coachFailed": "Could not save coach profile",
       "costRequired": "Product cost is missing", "costRequiredDetail": "Add a product cost or a cost to the selected price book before including this product in an order.",
       "currencyMismatch": "Choose products that use the same currency.", "deliveryFeeRateFailed": "The delivery fee could not be converted to the order currency. Check exchange rates and try again.", "tryAgain": "Please try again."
@@ -82,7 +82,7 @@
       "amountRequired": "Enter a valid amount.", "cityRequired": "Enter a city.", "otherCityRequired": "Enter the city or region.", "nameRequired": "Enter a name.", "coachRequired": "Select an existing agent.",
       "coachExists": "This agent is already linked as a coach.",
       "agentCreatorInvalid": "This agent no longer has a valid linked user. Choose another agent or clear the selection.",
-      "agentCreatorConnectionRequired": "Connect to verify the selected agent before creating this order."
+      "agentCreatorConnectionRequired": "Connect to verify the selected agent before creating this order.", "paymentAccountUnavailable": "This payment account is no longer available. Choose another account or select ledger only."
     },
     "permissions": { "access": "Access Commerce Operations", "accessDescription": "View social and wholesale order intake, market records, and coach performance." }
   },

@@ -4,7 +4,7 @@ import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 import {
   Activity, ArrowUpRight, BarChart3, Boxes, Building2, Check, ClipboardList,
-  FileBarChart2, Instagram, MessageCircle, Package, Plus, Search, ShoppingBag,
+  FileBarChart2, Instagram, Loader2, MessageCircle, Package, Plus, Search, ShoppingBag,
   Pencil, Store, Target, TrendingUp, Unlink, UserRound, UsersRound, Wallet, X,
   type LucideIcon,
 } from 'lucide-react'
@@ -14,11 +14,11 @@ import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useWorkspacePermissions } from '@/permissions'
 import { db } from '@/local-db/database'
-import type { Agent, BusinessPartner, CommerceOperationRecord, CommerceOperationRecordType, CurrencyCode, ExchangeRateSnapshot, Product, SalesOrder, SalesOrderItem } from '@/local-db/models'
-import { createSalesOrder, resolveSocialOrderAgentCreator } from '@/local-db/orders'
+import type { Agent, BusinessPartner, CommerceOperationRecord, CommerceOperationRecordType, CurrencyCode, ExchangeRateSnapshot, PaymentAccount, Product, SalesOrder, SalesOrderItem } from '@/local-db/models'
+import { createQuickSalesOrder, resolveSocialOrderAgentCreator } from '@/local-db/orders'
 import { createBusinessPartner } from '@/local-db/businessPartners'
 import { createCommerceOperationRecord, refreshCommerceOperationRecords, updateCommerceOperationRecord } from '@/local-db/commerceOperations'
-import { useProducts, useStorages, usePriceBooks, usePriceBookItems, useInventory } from '@/local-db'
+import { useProducts, useStorages, usePriceBooks, usePriceBookItems, useInventory, usePaymentAccountsState } from '@/local-db'
 import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { CompactBusinessPartnerFormDialog, type CompactBusinessPartnerFormPayload } from '@/ui/components/crm/CompactBusinessPartnerFormDialog'
@@ -27,6 +27,8 @@ import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { DateTimePicker } from '@/ui/components/ui/date-time-picker'
 import { PriceBookName } from '@/ui/components/PriceBookName'
+import { PaymentMethodSelector } from '@/ui/components/PaymentMethodSelector'
+import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { Button } from '@/ui/components/button'
 import { Input } from '@/ui/components/input'
 import {
@@ -63,6 +65,7 @@ import { fetchEURToIQDRate, fetchTRYToIQDRate, fetchUSDToIQDRate } from '@/lib/e
 import { formatCurrency, formatNumericInput, generateId, sanitizeNumericInput } from '@/lib/utils'
 import { useDateRange } from '@/context/DateRangeContext'
 import { isOnline } from '@/lib/network'
+import { STANDARD_PAYMENT_METHODS, type PaymentMethodOption } from '@/lib/paymentMethods'
 
 type CommerceSection = 'social' | 'wholesale' | 'data' | 'coaches'
 type OrderChannel = 'social' | 'wholesale'
@@ -652,8 +655,16 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
   const [discount, setDiscount] = useState('')
   const [productsModalOpen, setProductsModalOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
+  const [preparingPayment, setPreparingPayment] = useState(false)
+  const [paymentFeeExchangeRates, setPaymentFeeExchangeRates] = useState<ExchangeRateSnapshot[] | null>(null)
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethodOption | null>('cash')
+  const [paymentAccount, setPaymentAccount] = useState<PaymentAccount | null>(null)
+  const [paymentAccountSelectionTouched, setPaymentAccountSelectionTouched] = useState(false)
+  const [orderId, setOrderId] = useState(() => generateId())
   const [attempted, setAttempted] = useState(false)
   const [date, setDate] = useState(new Date())
+  const paymentAccountsState = usePaymentAccountsState(workspaceId, userId)
   const previewExchangeRates = useMemo(
     () => buildOrderExchangeRatesSnapshot({ exchangeData, eurRates, tryRates }),
     [exchangeData, eurRates, tryRates],
@@ -682,11 +693,19 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
   const fee = parseAmount(deliveryFee) ?? 0
   const deliveryFeeInvalid = (deliveryFeeTouched || Boolean(city)) && parseAmount(deliveryFee) === null
   const discountAmount = parseAmount(discount) ?? 0
+  const appliedFeeExchangeRates = paymentDialogOpen && paymentFeeExchangeRates !== null
+    ? paymentFeeExchangeRates
+    : previewExchangeRates
   const feeConversion = totalCurrency
-    ? getAppliedCurrencyConversion(fee, 'iqd', totalCurrency, previewExchangeRates)
+    ? getAppliedCurrencyConversion(fee, 'iqd', totalCurrency, appliedFeeExchangeRates)
     : null
   const feeInOrderCurrency = fee === 0 ? 0 : feeConversion?.convertedAmount ?? null
-  const total = feeInOrderCurrency === null ? null : Math.max(0, lineSubtotal + feeInOrderCurrency - discountAmount)
+  const roundedSubtotal = Math.round(lineSubtotal * 100) / 100
+  const discountedSubtotal = Math.round((roundedSubtotal - discountAmount) * 100) / 100
+  const total = feeInOrderCurrency === null
+    ? null
+    : Math.max(0, Math.round((discountedSubtotal + feeInOrderCurrency) * 100) / 100)
+  const orderTotalForPayment = total ?? 0
   const selectedCityOption = COMMERCE_CITY_OPTIONS.find((option) => option.value === city)
   const selectedCity = city === 'other'
     ? otherCity.trim()
@@ -701,6 +720,26 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
   const selectedLinkedAgent = linkedAgents.find((agent) => agent.id === agentId)
   const selectedAgentAvailable = !agentId || Boolean(selectedLinkedAgent)
   const discountInvalid = lineSubtotal > 0 && discountAmount / lineSubtotal * 100 > maxDiscountPercent
+  const paymentRequired = total !== null && total > 0.000001
+  const selectedPaymentAccount = paymentAccount
+    ? paymentAccountsState.accounts.find((account) => account.id === paymentAccount.id)
+    : null
+  const selectedPaymentAccountInvalid = Boolean(
+    paymentAccount && paymentAccountsState.isReady && (
+      !selectedPaymentAccount
+      || !selectedPaymentAccount.isActive
+      || (paymentMethod === 'cash' && selectedPaymentAccount.accountType !== 'cash_drawer')
+    ),
+  )
+  const hasApplicableDefaultPaymentAccount = paymentAccountsState.accounts.some((account) => (
+    account.isActive
+    && account.isDefaultForPaymentSelector
+    && (paymentMethod !== 'cash' || account.accountType === 'cash_drawer')
+  ))
+  const paymentAccountSelectionReady = !paymentRequired || (
+    paymentAccountsState.isReady
+    && (!hasApplicableDefaultPaymentAccount || Boolean(paymentAccount) || paymentAccountSelectionTouched)
+  )
   const canSave = Boolean(
     available && !saving && workspaceId && seller.trim() && buyerName.trim() && buyerPhone.trim()
     && storageId && lines.length && lines.every((line) => line.product && line.currency && Number(line.quantity.replace(/,/g, '')) > 0)
@@ -734,13 +773,45 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
     setDeliveryFeeTouched(false)
     setDiscount('')
     setSaving(false)
+    setPaymentDialogOpen(false)
+    setPreparingPayment(false)
+    setPaymentFeeExchangeRates(null)
+    setPaymentMethod('cash')
+    setPaymentAccount(null)
+    setPaymentAccountSelectionTouched(false)
+    setOrderId(generateId())
     setAttempted(false)
     setDate(new Date())
   }, [open, storages, userName])
 
   function close(next: boolean) {
-    if (saving && !next) return
+    if ((saving || preparingPayment || paymentDialogOpen) && !next) return
     onOpenChange(next)
+  }
+
+  async function continueToPayment() {
+    setAttempted(true)
+    if (!canSave || !workspaceId || !totalCurrency) return
+    setPaymentDialogOpen(true)
+    if (fee <= 0 || totalCurrency === 'iqd') {
+      setPaymentFeeExchangeRates([])
+      return
+    }
+
+    setPreparingPayment(true)
+    try {
+      setPaymentFeeExchangeRates(await fetchDeliveryFeeExchangeRates(totalCurrency))
+    } catch {
+      setPaymentDialogOpen(false)
+      toast({ title: t('commerceOperations.toast.orderFailed'), description: t('commerceOperations.toast.deliveryFeeRateFailed'), variant: 'destructive' })
+    } finally {
+      setPreparingPayment(false)
+    }
+  }
+
+  function handlePaymentAccountChange(account: PaymentAccount | null) {
+    setPaymentAccount(account)
+    setPaymentAccountSelectionTouched(true)
   }
 
   function addLine() {
@@ -811,9 +882,13 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
     }
   }
 
-  async function save() {
-    setAttempted(true)
-    if (!canSave || !workspaceId || !totalCurrency) return
+  async function saveCompletedPaidOrder() {
+    if (!canSave || !workspaceId || !totalCurrency || !paymentDialogOpen) return
+    if (paymentRequired && (!paymentMethod || !STANDARD_PAYMENT_METHODS.includes(paymentMethod as typeof STANDARD_PAYMENT_METHODS[number]))) return
+    if (!paymentAccountSelectionReady || (paymentAccount && (!paymentAccountsState.isReady || !selectedPaymentAccount || selectedPaymentAccountInvalid))) {
+      toast({ title: t('commerceOperations.toast.orderFailed'), description: t('commerceOperations.validation.paymentAccountUnavailable'), variant: 'destructive' })
+      return
+    }
     setSaving(true)
     try {
       let orderCreatorId = userId ?? null
@@ -835,15 +910,7 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
           return
         }
       }
-      let feeExchangeRates: ExchangeRateSnapshot[] = []
-      if (fee > 0 && totalCurrency !== 'iqd') {
-        try {
-          feeExchangeRates = await fetchDeliveryFeeExchangeRates(totalCurrency)
-        } catch {
-          toast({ title: t('commerceOperations.toast.orderFailed'), description: t('commerceOperations.toast.deliveryFeeRateFailed'), variant: 'destructive' })
-          return
-        }
-      }
+      const feeExchangeRates = paymentFeeExchangeRates ?? []
 
       let partner = buyerPartner
       if (!partner) {
@@ -884,8 +951,7 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
           storageId, ...(priceBookId ? { priceBookId, priceBookItemId: line.priceBookItemId } : {}),
         }]
       })
-      const orderId = generateId()
-      const order = await createSalesOrder(workspaceId, {
+      const order = await createQuickSalesOrder(workspaceId, {
         businessPartnerId: partner.id,
         customerId: partner.id,
         customerName: buyerName.trim(),
@@ -901,12 +967,17 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
         exchangeRateSource: null,
         exchangeRateTimestamp: null,
         exchangeRates: fee > 0 ? feeExchangeRates : [],
-        status: 'draft',
-        isPaid: false,
-        paymentStatus: 'unpaid',
-        paidAmount: 0,
-        balanceAmount: orderTotal,
-        paymentMethod: 'cash',
+        status: 'completed',
+        actualDeliveryDate: null,
+        reservedAt: null,
+        isPaid: true,
+        paymentStatus: 'paid',
+        paidAmount: orderTotal,
+        balanceAmount: 0,
+        paidAt: paymentRequired ? new Date().toISOString() : null,
+        paymentMethod: paymentRequired ? paymentMethod as NonNullable<SalesOrder['paymentMethod']> : 'cash',
+        initialPaymentAccountId: paymentRequired ? selectedPaymentAccount?.id ?? null : null,
+        initialPaymentAccountNameSnapshot: paymentRequired ? selectedPaymentAccount?.name ?? null : null,
         initialPaymentAmount: 0,
         isInstallmentBased: false,
         installmentCount: 0,
@@ -917,23 +988,33 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
         notes: notes.trim() || undefined,
         sourceChannel: 'manual',
         createdAt: savedAt,
-      }, orderCreatorId, { orderId, actingUserRole: userRole })
+      }, orderCreatorId, { actingUserRole: userRole, orderId })
 
-      await createCommerceOperationRecord(workspaceId, {
-        recordType: 'order_details', recordDate: savedAt, title: order.orderNumber,
-        relatedOrderId: order.id, relatedPartnerId: partner.id, createdBy: userId ?? null,
-        payload: {
-          channel, platform: channel === 'social' ? platform : 'other', socialHandle: socialHandle.trim() || null,
-          seller: seller.trim(), buyerName: buyerName.trim(), buyerPhone: buyerPhone.trim(),
-          city: selectedCity, address: address.trim(), deliveryFee: fee, deliveryFeeCurrency: 'iqd', discount: discountAmount,
-          subtotal, total: orderTotal, currency: totalCurrency, orderNumber: order.orderNumber,
-          fulfillmentStatus: 'received', notes: notes.trim() || null,
-        },
+      let intakeRecordSaved = true
+      try {
+        await createCommerceOperationRecord(workspaceId, {
+          recordType: 'order_details', recordDate: savedAt, title: order.orderNumber,
+          relatedOrderId: order.id, relatedPartnerId: partner.id, createdBy: userId ?? null,
+          payload: {
+            channel, platform: channel === 'social' ? platform : 'other', socialHandle: socialHandle.trim() || null,
+            seller: seller.trim(), buyerName: buyerName.trim(), buyerPhone: buyerPhone.trim(),
+            city: selectedCity, address: address.trim(), deliveryFee: fee, deliveryFeeCurrency: 'iqd', discount: discountAmount,
+            subtotal, total: orderTotal, currency: totalCurrency, orderNumber: order.orderNumber,
+            fulfillmentStatus: 'completed', notes: notes.trim() || null,
+          },
+        })
+      } catch {
+        intakeRecordSaved = false
+      }
+
+      toast({
+        title: t('commerceOperations.toast.orderSaved'),
+        description: t(intakeRecordSaved ? 'commerceOperations.toast.orderSavedDetail' : 'commerceOperations.toast.intakeRecordFailedDetail'),
+        ...(intakeRecordSaved ? {} : { variant: 'destructive' as const }),
       })
-
-      toast({ title: t('commerceOperations.toast.orderSaved'), description: t('commerceOperations.toast.orderSavedDetail') })
+      setPaymentDialogOpen(false)
       onSaved()
-      close(false)
+      onOpenChange(false)
     } catch {
       toast({ title: t('commerceOperations.toast.orderFailed'), description: t('commerceOperations.toast.tryAgain'), variant: 'destructive' })
     } finally {
@@ -943,8 +1024,9 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
 
   const selectedBook = priceBooks.find((book) => book.id === priceBookId)
   return (
+    <>
     <AppDialog open={open} onOpenChange={close}>
-      <AppDialogContent className="max-w-4xl" onPointerDownOutside={(event) => saving && event.preventDefault()} onEscapeKeyDown={(event) => saving && event.preventDefault()}>
+      <AppDialogContent className="max-w-4xl" onPointerDownOutside={(event) => (saving || preparingPayment || paymentDialogOpen) && event.preventDefault()} onEscapeKeyDown={(event) => (saving || preparingPayment || paymentDialogOpen) && event.preventDefault()}>
         <AppDialogHeader><AppDialogTitle className="flex items-center gap-2"><ShoppingBag className="h-5 w-5 text-primary" />{t(channel === 'social' ? 'commerceOperations.order.socialTitle' : 'commerceOperations.order.wholesaleTitle')}</AppDialogTitle></AppDialogHeader>
         <AppDialogBody>
           {!available ? <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-muted-foreground">{t('commerceOperations.orders.prerequisite')}</div> : null}
@@ -1146,9 +1228,9 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
             <div className="space-y-2 sm:col-span-2"><Label htmlFor="commerce-order-notes">{t('commerceOperations.fields.notes')}</Label><Textarea id="commerce-order-notes" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} disabled={saving} /></div>
           </div>
           <div className="mt-4 rounded-xl bg-primary/5 p-4"><div className="flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.subtotal')}</span><span>{totalCurrency ? amountLabel(lineSubtotal, totalCurrency, iqdPreference) : '—'}</span></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.deliveryFee')}</span><span>{amountLabel(fee, 'iqd', iqdPreference)}</span></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.discount')}</span><span>{totalCurrency ? amountLabel(discountAmount, totalCurrency, iqdPreference) : '—'}</span></div><div className="mt-3 flex justify-between gap-3 border-t pt-3 text-lg font-bold"><span>{t('commerceOperations.order.total')}</span><span>{totalCurrency && total !== null ? amountLabel(total, totalCurrency, iqdPreference) : '—'}</span></div></div>
-          <p className="mt-3 text-xs text-muted-foreground">{t('commerceOperations.order.noPaymentAtIntake')}</p>
+          <p className="mt-3 text-xs text-muted-foreground">{t('commerceOperations.order.paymentAtIntakeHint')}</p>
         </AppDialogBody>
-        <AppDialogFooter><Button type="button" variant="outline" disabled={saving} onClick={() => close(false)}>{t('common.cancel')}</Button><Button type="button" disabled={!canSave} onClick={() => void save()}>{saving ? t('commerceOperations.actions.saving') : t('commerceOperations.actions.saveUnpaidOrder')}</Button></AppDialogFooter>
+        <AppDialogFooter><Button type="button" variant="outline" disabled={saving || preparingPayment || paymentDialogOpen} onClick={() => close(false)}>{t('common.cancel')}</Button><Button type="button" className="gap-2" disabled={!canSave || saving || preparingPayment || paymentDialogOpen} onClick={() => void continueToPayment()}><Wallet className="h-4 w-4" />{t('commerceOperations.actions.continueToPayment')}</Button></AppDialogFooter>
       </AppDialogContent>
       <ProductsViewModal
         key={storageId}
@@ -1188,6 +1270,61 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
         />
       ) : null}
     </AppDialog>
+    <AppDialog open={paymentDialogOpen} onOpenChange={(next) => { if (!saving && !preparingPayment) setPaymentDialogOpen(next) }}>
+      <AppDialogContent className="max-w-lg" onPointerDownOutside={(event) => (saving || preparingPayment) && event.preventDefault()} onEscapeKeyDown={(event) => (saving || preparingPayment) && event.preventDefault()}>
+        <AppDialogHeader><AppDialogTitle className="flex items-center gap-2">{paymentRequired ? <Wallet className="h-5 w-5 text-primary" /> : <ShoppingBag className="h-5 w-5 text-primary" />}{t(paymentRequired ? 'commerceOperations.order.paymentTitle' : 'orders.status.completed')}</AppDialogTitle></AppDialogHeader>
+        <AppDialogBody className="space-y-4" aria-busy={preparingPayment}>
+          {preparingPayment ? (
+            <div role="status" className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{t('commerceOperations.actions.preparingPayment')}</div>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">{t(paymentRequired ? 'commerceOperations.order.paymentDescription' : 'commerceOperations.order.zeroTotalDescription')}</p>
+              <div className="rounded-xl border bg-muted/30 p-4">
+                <p className="text-sm text-muted-foreground">{t(paymentRequired ? 'commerceOperations.order.amountReceived' : 'commerceOperations.order.total')}</p>
+                <p className="mt-1 text-2xl font-bold tabular-nums">{totalCurrency ? amountLabel(orderTotalForPayment, totalCurrency, iqdPreference) : '—'}</p>
+              </div>
+              {paymentRequired ? (
+                <>
+                  <div className="space-y-2">
+                    <RequiredLabel>{t('pos.paymentMethod')}</RequiredLabel>
+                    <PaymentMethodSelector
+                      value={paymentMethod}
+                      onValueChange={setPaymentMethod}
+                      methods={STANDARD_PAYMENT_METHODS}
+                      allowNone
+                      noneLabel={t('pos.quickOrder.selectPaymentMethod')}
+                      workspaceId={workspaceId}
+                      disabled={saving}
+                      onLinkedPaymentAccountSelect={handlePaymentAccountChange}
+                    />
+                  </div>
+                  <PaymentAccountSelector
+                    workspaceId={workspaceId}
+                    value={paymentAccount?.id ?? null}
+                    onValueChange={handlePaymentAccountChange}
+                    disabled={saving}
+                    cashDrawerOnly={paymentMethod === 'cash'}
+                  />
+                  {selectedPaymentAccountInvalid ? <p className="text-xs text-destructive">{t('commerceOperations.validation.paymentAccountUnavailable')}</p> : null}
+                </>
+              ) : null}
+            </>
+          )}
+        </AppDialogBody>
+        <AppDialogFooter>
+          <Button type="button" variant="outline" disabled={saving || preparingPayment} onClick={() => setPaymentDialogOpen(false)}>{t('commerceOperations.actions.backToOrder')}</Button>
+          <Button
+            type="button"
+            disabled={saving || preparingPayment || !canSave || (paymentRequired && (!paymentMethod || !STANDARD_PAYMENT_METHODS.includes(paymentMethod as typeof STANDARD_PAYMENT_METHODS[number]))) || !paymentAccountSelectionReady || (Boolean(paymentAccount) && (!paymentAccountsState.isReady || selectedPaymentAccountInvalid))}
+            onClick={() => void saveCompletedPaidOrder()}
+          >
+            {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Check className="me-2 h-4 w-4" />}
+            {saving ? t('commerceOperations.actions.saving') : t(paymentRequired ? 'commerceOperations.actions.confirmPaymentAndComplete' : 'commerceOperations.actions.completeOrder')}
+          </Button>
+        </AppDialogFooter>
+      </AppDialogContent>
+    </AppDialog>
+    </>
   )
 }
 

@@ -16,6 +16,7 @@ import { isPurchaseOrderIntegrityAuditEligible, runPurchaseOrderIntegrityAudit }
 import type { IntegrityAuditResult } from '@/lib/integrityAudit/types'
 import { getTransactionIntegritySeverity } from '@/lib/integrityAudit/severity'
 import { getOrderLineCostPerInventoryUnit, getOrderLineSelectedUnitCost, getOrderLineFreeBonusInventoryQuantity, getOrderLineFreeBonusQuantity, getOrderLineFulfilledQuantity, getOrderLineInventoryQuantity, getOrderLinePaidInventoryQuantity, getOrderLinePaidQuantity, getOrderLineUnitFactor, hasOrderLineFreeBonus, isFulfilledUnitsAvailableForOrder } from '@/lib/orderLineItems'
+import { isService } from '@/lib/catalogItem'
 import {
     getOrderAdjustmentTotals,
     getOrderTotalWithPostReturnAdjustments,
@@ -448,6 +449,10 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         [resolved]
     )
     const orderProducts = useProductsByIds(workspaceId, orderProductIds)
+    const orderProductsById = useMemo(
+        () => new Map(orderProducts.map((product) => [product.id, product])),
+        [orderProducts]
+    )
     const productUnits = useMemo(() => orderProducts.reduce<Record<string, string>>((units, product) => {
         const unit = normalizeUnitCode(product.unit)
         if (unit) units[product.id] = unit
@@ -1075,12 +1080,38 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         ? linkedLoan.loanCategory === 'simple' ? `/loans/${linkedLoan.id}` : `/installments/${linkedLoan.id}`
         : null
     const nextInstallment = installments.find((installment) => installment.balanceAmount > 0)
-    const profit = isSales
-        ? order.total - (order as SalesOrder).items.reduce((sum, item) => sum + (
-            getOrderLineCostPerInventoryUnit(item) * Math.max(0, getOrderLineInventoryQuantity(item) - (returnedQuantityByItemId.get(item.id) || 0))
-        ), 0)
+    const salesOrderProfitBasis = isSales
+        ? (order as SalesOrder).items.reduce((totals, item) => {
+            const returnedQuantity = returnedQuantityByItemId.get(item.id) || 0
+            const returnState = getOrderPrintReturnState(item, {
+                returnedQuantity,
+                returnedPaidInventoryQuantity: returnedPaidInventoryByItemId.get(item.id) || 0,
+                returnedAmount: returnedAmountByItemId.get(item.id) || 0
+            })
+            const remainingLineTotal = returnState?.remainingLineTotal ?? item.lineTotal
+            const isProduct = Boolean(item.storageId) && !isService(orderProductsById.get(item.productId))
+            const remainingInventoryQuantity = Math.max(0, getOrderLineInventoryQuantity(item) - returnedQuantity)
+
+            totals.remainingLineRevenue += remainingLineTotal
+            if (isProduct) {
+                totals.productRevenue += remainingLineTotal
+                totals.productCost += getOrderLineCostPerInventoryUnit(item) * remainingInventoryQuantity
+            }
+            return totals
+        }, { remainingLineRevenue: 0, productRevenue: 0, productCost: 0 })
         : null
-    const margin = profit !== null && order.total > 0 ? (profit / order.total) * 100 : null
+    const productDiscount = salesOrderProfitBasis && salesOrderProfitBasis.remainingLineRevenue > 0
+        ? order.discount * (salesOrderProfitBasis.productRevenue / salesOrderProfitBasis.remainingLineRevenue)
+        : 0
+    const netProductRevenue = salesOrderProfitBasis
+        ? Math.max(0, salesOrderProfitBasis.productRevenue - productDiscount)
+        : null
+    const profit = salesOrderProfitBasis && netProductRevenue !== null
+        ? netProductRevenue - salesOrderProfitBasis.productCost
+        : null
+    const margin = profit !== null && netProductRevenue !== null && netProductRevenue > 0
+        ? (profit / netProductRevenue) * 100
+        : null
     const receivedUnits = !isSales
         ? (order.status === 'received' || order.status === 'completed'
             ? (order as PurchaseOrder).items.reduce((sum, item) => sum + (item.receivedQuantity ?? getOrderLineInventoryQuantity(item)), 0)

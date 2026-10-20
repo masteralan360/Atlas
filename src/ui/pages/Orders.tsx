@@ -291,10 +291,33 @@ function getPreviousDateRange(dateRange: DateRangeType, customDates: { start: st
     }
 }
 
-function getOrderSummary(items: Array<{ productName: string }>) {
-    const firstItems = items.slice(0, 2).map((item) => item.productName)
-    if (items.length <= 2) return firstItems.join(', ')
-    return `${firstItems.join(', ')} +${items.length - 2}`
+const ORDER_ITEM_SUMMARY_MAX_CHARACTERS = 32
+
+function OrderItemSummary({
+    items,
+    className
+}: {
+    items: Array<{ productName: string }>
+    className?: string
+}) {
+    const fullProductNames = items.slice(0, 2).map((item) => item.productName).join(', ')
+    const productNameCharacters = Array.from(fullProductNames)
+    const productNames = productNameCharacters.length > ORDER_ITEM_SUMMARY_MAX_CHARACTERS
+        ? `${productNameCharacters.slice(0, ORDER_ITEM_SUMMARY_MAX_CHARACTERS - 1).join('').trimEnd()}…`
+        : fullProductNames
+    const remainingCount = Math.max(0, items.length - 2)
+    const fullSummary = items.map((item) => item.productName).join(', ')
+
+    return (
+        <div
+            className={cn('flex w-full min-w-0 items-center gap-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground', className)}
+            title={fullSummary}
+            aria-label={fullSummary}
+        >
+            <span className="min-w-0 truncate">{productNames}</span>
+            {remainingCount > 0 ? <span className="shrink-0">+{remainingCount}</span> : null}
+        </div>
+    )
 }
 
 function getCommonStorageId(items: Array<{ storageId?: string | null }>, fallbackStorageId = '') {
@@ -1598,7 +1621,6 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                 </TableCell>
                             </TableRow>
                         ) : rows.map((row) => {
-                            const summary = getOrderSummary(row.items)
                             const isDraft = row.status === 'draft'
                             const isApprovalRequested = isOrderApprovalRequested(row)
                             const canEdit = canManageOrders && isDraft && (!isApprovalRequested || canApproveOrderRequests)
@@ -1630,7 +1652,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                                         </span>
                                                     ) : null}
                                                 </div>
-                                                <div className="text-xs text-muted-foreground">{summary}</div>
+                                                <OrderItemSummary items={row.items} />
                                             </div>
                                         </div>
                                     </TableCell>
@@ -1738,7 +1760,6 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                         {t('common.noData') || 'No data available'}
                     </div>
                 ) : rows.map((row) => {
-                    const summary = getOrderSummary(row.items)
                     const isDraft = row.status === 'draft'
                     const isApprovalRequested = isOrderApprovalRequested(row)
                     const canEdit = canManageOrders && isDraft && (!isApprovalRequested || canApproveOrderRequests)
@@ -1796,9 +1817,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                                  })()}
                                              </div>
                                          ) : null}
-                                        <div className="text-xs text-muted-foreground truncate max-w-[200px]">
-                                            {summary}
-                                        </div>
+                                        <OrderItemSummary items={row.items} className="max-w-[200px]" />
                                     </div>
                                 </div>
                                 <div className="flex flex-col items-end gap-1.5 text-end">
