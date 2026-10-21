@@ -462,14 +462,13 @@ function OrdersSection({
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div><h2 className="flex items-center gap-2 text-xl font-semibold">{channel === 'social' ? <Instagram className="h-5 w-5 text-primary" /> : <Store className="h-5 w-5 text-primary" />}{t(channel === 'social' ? 'commerceOperations.social.title' : 'commerceOperations.wholesale.title')}</h2><p className="mt-1 text-sm text-muted-foreground">{t('commerceOperations.orders.unpaidHint')}</p></div>
-        <Button variant="outline" className="gap-2" onClick={() => navigate('/products')}><Package className="h-4 w-4" />{t('commerceOperations.actions.products')}</Button>
-      </div>
       {!canCreate ? <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-muted-foreground">{t('commerceOperations.orders.prerequisite')}</div> : null}
-      <div className="flex gap-2 border-b" role="tablist" aria-label={t(channel === 'social' ? 'commerceOperations.social.title' : 'commerceOperations.wholesale.title')}>
-        <Button type="button" id={`${channel}-recent-tab`} role="tab" aria-controls={`${channel}-recent-panel`} aria-selected={activeTab === 'recent'} variant={activeTab === 'recent' ? 'default' : 'ghost'} className="-mb-px gap-2 rounded-b-none" onClick={() => onTabChange('recent')}><Activity className="h-4 w-4" />{t('commerceOperations.orders.recent')}</Button>
-        <Button type="button" id={`${channel}-new-order-tab`} role="tab" aria-controls={`${channel}-new-order-panel`} aria-selected={activeTab === 'newOrder'} variant={activeTab === 'newOrder' ? 'default' : 'ghost'} className="-mb-px gap-2 rounded-b-none" onClick={() => onTabChange('newOrder')}><Plus className="h-4 w-4" />{t('commerceOperations.actions.newOrder')}</Button>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b">
+        <div className="flex min-w-0 gap-2" role="tablist" aria-label={t(channel === 'social' ? 'commerceOperations.social.title' : 'commerceOperations.wholesale.title')}>
+          <Button type="button" id={`${channel}-recent-tab`} role="tab" aria-controls={`${channel}-recent-panel`} aria-selected={activeTab === 'recent'} variant={activeTab === 'recent' ? 'default' : 'ghost'} className="-mb-px gap-2 rounded-b-none" onClick={() => onTabChange('recent')}><Activity className="h-4 w-4" />{t('commerceOperations.orders.recent')}</Button>
+          <Button type="button" id={`${channel}-new-order-tab`} role="tab" aria-controls={`${channel}-new-order-panel`} aria-selected={activeTab === 'newOrder'} variant={activeTab === 'newOrder' ? 'default' : 'ghost'} className="-mb-px gap-2 rounded-b-none" onClick={() => onTabChange('newOrder')}><Plus className="h-4 w-4" />{t('commerceOperations.actions.newOrder')}</Button>
+        </div>
+        <Button variant="outline" className="mb-1 shrink-0 gap-2" onClick={() => navigate('/products')}><Package className="h-4 w-4" />{t('commerceOperations.actions.products')}</Button>
       </div>
       <div id={`${channel}-recent-panel`} role="tabpanel" aria-labelledby={`${channel}-recent-tab`} tabIndex={0} hidden={activeTab !== 'recent'} className="space-y-5">
         <div className="grid gap-3 sm:grid-cols-3">
@@ -671,7 +670,6 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
   const [platform, setPlatform] = useState<(typeof PLATFORM_OPTIONS)[number]>('instagram')
   const [agentId, setAgentId] = useState('')
   const [agentNameSnapshot, setAgentNameSnapshot] = useState('')
-  const [socialHandle, setSocialHandle] = useState('')
   const [seller, setSeller] = useState(userName)
   const [city, setCity] = useState('')
   const [otherCity, setOtherCity] = useState('')
@@ -790,7 +788,6 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
     setPlatform('instagram')
     setAgentId('')
     setAgentNameSnapshot('')
-    setSocialHandle('')
     setSeller(userName)
     setCity('')
     setOtherCity('')
@@ -1022,7 +1019,7 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
           recordType: 'order_details', recordDate: savedAt, title: order.orderNumber,
           relatedOrderId: order.id, relatedPartnerId: partner.id, createdBy: userId ?? null,
           payload: {
-            channel, platform: channel === 'social' ? platform : 'other', socialHandle: socialHandle.trim() || null,
+            channel, platform: channel === 'social' ? platform : 'other',
             seller: seller.trim(), buyerName: buyerName.trim(), buyerPhone: buyerPhone.trim(),
             city: selectedCity, address: address.trim(), deliveryFee: fee, deliveryFeeCurrency: 'iqd', discount: discountAmount,
             subtotal, total: orderTotal, currency: totalCurrency, orderNumber: order.orderNumber,
@@ -1117,7 +1114,6 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
                 {attempted && agentId && (!agentsLoaded || !selectedAgentAvailable) ? <p className="text-xs text-destructive">{t('commerceOperations.validation.agentCreatorInvalid')}</p> : null}
               </div>
             ) : null}
-            {channel === 'social' ? <div className="space-y-2"><Label htmlFor="commerce-social-handle">{t('commerceOperations.fields.socialHandle')}</Label><Input id="commerce-social-handle" value={socialHandle} onChange={(event) => setSocialHandle(event.target.value)} placeholder={t('commerceOperations.placeholders.socialHandle')} disabled={saving} /></div> : null}
             <div className="space-y-2">
               <Label>{t('commerceOperations.fields.cityRegion')}</Label>
               <Select value={city || 'unspecified'} onValueChange={(value) => {

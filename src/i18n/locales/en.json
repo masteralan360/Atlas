@@ -27,7 +27,7 @@
     "paintNote": "Trace starts at instrumented shared data boundaries. UI event handling, visual paint, and server-side database time are not inferred.",
     "resize": { "topLeft": "Resize from top left", "topRight": "Resize from top right", "bottomLeft": "Resize from bottom left", "bottomRight": "Resize from bottom right" },
     "actions": { "create": "Create", "read": "Read", "update": "Update", "delete": "Delete" },
-    "entities": { "product": "Product", "category": "Category", "unit": "Unit", "businessPartner": "Business partner" },
+    "entities": { "product": "Product", "category": "Category", "unit": "Unit", "businessPartner": "Business partner", "salesOrder": "Sales order", "salesOrderReturn": "Sales order return" },
     "modes": { "cloud": "Cloud", "hybrid": "Hybrid", "local": "Local", "demo": "Demo", "unknown": "Resolving" },
     "layers": { "interaction": "User interaction", "application": "Application logic", "data": "Data layer", "network": "Network round trip", "persistence": "Local persistence", "response": "Response processing", "unknown": "Layer not measured" },
     "statuses": { "pending": "Pending", "success": "Complete", "failure": "Failed", "cancelled": "Cancelled" },
@@ -54,6 +54,19 @@
       "businessPartnerResponse": "Local sync acknowledgement",
       "businessPartnerGroupAssignment": "Creator access group assignment",
       "businessPartnerSummary": "Partner summary refresh (combined)",
+      "salesOrderDetailLookup": "Sales order details lookup",
+      "salesOrderPreparation": "Sales order preparation and validation",
+      "salesOrderPayment": "Initial payment transaction",
+      "salesOrderLocalRead": "Local sales order read",
+      "salesOrderLocalWrite": "Local sales order persistence",
+      "salesOrderRemote": "Sales order Supabase round trip",
+      "salesOrderResponse": "Response normalization and local reconciliation",
+      "salesOrderOfflineQueue": "Sales order offline queue write",
+      "salesOrderSummary": "Sales order summary refresh",
+      "salesOrderTransition": "Sales order status transition",
+      "salesOrderReturnBoundary": "Sales order return workflow",
+      "salesOrderInventory": "Sales order inventory fulfillment",
+      "quickSalesOrderAtomic": "Atomic Quick Order checkout",
       "remoteSyncQueued": "Remote sync queued"
     },
     "details": {
@@ -65,7 +78,14 @@
       "businessPartnerSupabaseRoundTrip": "Measures the Supabase request round trip for partner or facet synchronization; network and remote processing are included, but server-side database time is unavailable.",
       "businessPartnerSyncAcknowledgement": "Measures local sync-status reconciliation after a successful remote response.",
       "businessPartnerSummaryBoundary": "Measures the existing summary refresh boundary, which combines local reads, recalculation, persistence, and its configured sync behavior.",
-      "businessPartnerGroupAssignment": "Measures the existing workspace group-assignment operation, including its own local data access and writes."
+      "businessPartnerGroupAssignment": "Measures the existing workspace group-assignment operation, including its own local data access and writes.",
+      "salesOrderRemoteRoundTrip": "Measures the Supabase request round trip, including network and remote processing; server-side database execution time is unavailable.",
+      "salesOrderPaymentBoundary": "Measures the awaited payment transaction workflow; its own local and remote work is combined here.",
+      "salesOrderFinanceBoundary": "Measures the awaited financing or cancellation workflow; local persistence and remote synchronization may be combined here.",
+      "salesOrderInventoryBoundary": "Measures the awaited inventory reservation or fulfillment workflow; its internal local and remote boundaries are not split here.",
+      "salesOrderSummaryBoundary": "Measures the awaited derived summary refresh and its configured mirror or sync work.",
+      "salesOrderAtomicResponse": "Measures returned order and payment normalization plus the awaited local mirror transaction.",
+      "salesOrderReturnBoundary": "This workflow can include inventory, payment or financing, and local or remote work; those internal boundaries are not separately instrumented."
     }
   },
   "commerceOperations": {
@@ -91,13 +111,13 @@
     "platforms": { "instagram": "Instagram", "tiktok": "TikTok", "whatsapp": "WhatsApp", "messenger": "Messenger", "coach": "Coach", "other": "Other" },
     "recordTypes": { "order_details": "Order intake", "ad_spend": "Ad spend", "dm_funnel": "Message funnel", "city_market": "City market", "competitor": "Competitor", "coach_profile": "Coach profile" },
     "fields": {
-      "buyer": "Buyer", "seller": "Seller", "phone": "Phone", "socialHandle": "Social handle", "city": "City", "address": "Address",
+      "buyer": "Buyer", "seller": "Seller", "phone": "Phone", "city": "City", "address": "Address",
       "cityRegion": "City / region",
       "orderDate": "Order date", "date": "Date", "storage": "Storage", "priceBook": "Price book", "catalogPrices": "Use product prices",
       "quantity": "Quantity", "product": "Product", "currency": "Currency", "platform": "Platform", "agent": "Agent", "notes": "Notes"
     },
     "placeholders": {
-      "findBuyer": "Search or enter buyer name", "seller": "Staff member", "phone": "Phone number", "socialHandle": "@username",
+      "findBuyer": "Search or enter buyer name", "seller": "Staff member", "phone": "Phone number",
       "city": "Choose a city or region", "otherCity": "Enter city or region", "address": "Delivery address", "storage": "Choose storage", "priceBook": "Choose a price book",
       "searchProduct": "Search products", "agent": "Choose an agent"
     },
@@ -7523,7 +7543,7 @@
   },
   "inventoryTransactions": {
     "pageSubtitle": "Review permanent records for stock movements, transfers, adjustments, sales, returns, and purchase receipts.",
-    "subtitle": "New stock movements are recorded here. Historical movements from before audit coverage was enabled are not backfilled. These records are permanent and cannot be deleted.",
+    "subtitle": "Review stock movements and check transaction quantity consistency.",
     "emptyTitle": "No inventory transactions yet",
     "emptyDescription": "Complete a sale or purchase receipt, process a return, transfer products, or record a stock adjustment to see it here.",
     "increaseLabel": "Increase",
@@ -7556,8 +7576,48 @@
       "incoming": "Incoming",
       "outgoing": "Outgoing",
       "balance": "Balance",
+      "loading": "Loading product summary…",
+      "loadError": "The product summary could not be loaded. Please try again.",
+      "exportError": "The product summary could not be prepared. Please try again.",
       "emptyTitle": "No product movement in this period",
       "emptyDescription": "Change the date range or record inventory movement to see a product summary."
+    },
+    "integrityAudit": {
+      "action": "Transactions integrity Audit",
+      "runningTitle": "Audit in progress",
+      "issuesTitle": "Arithmetic inconsistencies found",
+      "completeTitle": "Audit complete",
+      "cancelledTitle": "Audit cancelled",
+      "errorTitle": "Audit could not be completed",
+      "progress": "Checked {{checked}} of {{total}} transactions…",
+      "progressLabel": "Audit progress",
+      "issuesDescription": "Review the transactions below; the audit compared each recorded balance with the previous balance plus the change.",
+      "cleanDescription": "No arithmetic inconsistencies were found among transactions with recorded quantity snapshots.",
+      "cancelledDescription": "The audit stopped before all matching transactions were checked.",
+      "errorDescription": "The matching transactions could not all be checked. Please try again.",
+      "cancel": "Cancel audit",
+      "retry": "Run again",
+      "noIssues": "No arithmetic inconsistencies to review.",
+      "notAvailable": "—",
+      "stats": {
+        "checked": "Transactions checked",
+        "arithmeticChecked": "Arithmetic checked",
+        "consistent": "Consistent",
+        "inconsistent": "Inconsistent",
+        "unverifiable": "Not verifiable"
+      },
+      "fields": {
+        "product": "Product ID",
+        "storage": "Storage ID",
+        "previous": "Previous quantity",
+        "change": "Quantity change",
+        "expected": "Expected after",
+        "recorded": "Recorded after"
+      }
+    },
+    "pagination": {
+      "loading": "Loading inventory transactions…",
+      "loadError": "Inventory transactions could not be loaded. Please try again."
     },
     "filters": {
       "title": "Filters",

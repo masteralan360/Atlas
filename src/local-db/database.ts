@@ -182,6 +182,46 @@ interface LocalModeSqliteTransactionContext {
 }
 
 const localModeSqliteTransactions = new WeakMap<object, LocalModeSqliteTransactionContext>()
+export const INVENTORY_TRANSACTIONS_CHANGED_EVENT = 'atlas:inventory-transactions-changed'
+
+let inventoryTransactionChangeSuppressionDepth = 0
+const pendingInventoryTransactionWorkspaceIds = new Set<string>()
+let inventoryTransactionChangeTimer: ReturnType<typeof setTimeout> | undefined
+
+function queueInventoryTransactionsChanged(workspaceId?: string | null) {
+  if (
+    inventoryTransactionChangeSuppressionDepth > 0 ||
+    !workspaceId ||
+    typeof window === 'undefined'
+  ) {
+    return
+  }
+
+  pendingInventoryTransactionWorkspaceIds.add(workspaceId)
+  if (inventoryTransactionChangeTimer) return
+  inventoryTransactionChangeTimer = setTimeout(() => {
+    inventoryTransactionChangeTimer = undefined
+    const workspaceIds = Array.from(pendingInventoryTransactionWorkspaceIds)
+    pendingInventoryTransactionWorkspaceIds.clear()
+    if (workspaceIds.length > 0) {
+      window.dispatchEvent(new CustomEvent(INVENTORY_TRANSACTIONS_CHANGED_EVENT, {
+        detail: { workspaceIds }
+      }))
+    }
+  }, 0)
+}
+
+export async function withoutInventoryTransactionChangeEvents<T>(task: () => Promise<T>) {
+  inventoryTransactionChangeSuppressionDepth += 1
+  try {
+    return await task()
+  } finally {
+    inventoryTransactionChangeSuppressionDepth = Math.max(
+      0,
+      inventoryTransactionChangeSuppressionDepth - 1
+    )
+  }
+}
 
 function isMirroredSqliteTable(tableName: string): tableName is LocalModeSqliteTableName {
   return (LOCAL_MODE_SQLITE_TABLES as readonly string[]).includes(tableName)
@@ -3833,6 +3873,13 @@ export class AtlasDatabase extends Dexie {
         'id, invoiceid, sourceId, orderId, customerId, status, workspaceId, syncStatus, updatedAt, createdAt, isDeleted, origin, createdBy, cashierName, createdByName, sequenceId, printFormat, r2PathA4, r2PathReceipt, latestVersionId, latestVersionNumber, [workspaceId+origin+sourceId], [workspaceId+createdAt+id], [workspaceId+origin+createdAt+id]'
     })
 
+    this.version(157).stores({
+      products:
+        'id, sku, skuKey, name, categoryId, storageId, workspaceId, parentProductId, currency, syncStatus, updatedAt, isDeleted, canBeReturned, [workspaceId+name], [workspaceId+name+id], [workspaceId+sku], [workspaceId+sku+id], [workspaceId+skuKey], [workspaceId+parentProductId], [workspaceId+categoryId], [workspaceId+currency], [workspaceId+updatedAt], [workspaceId+storageId]',
+      inventory_transactions:
+        'id, workspaceId, productId, storageId, transactionType, adjustmentReason, referenceId, transferBatchId, createdAt, isDeleted, syncStatus, [workspaceId+productId], [workspaceId+createdAt], [workspaceId+transactionType], [workspaceId+adjustmentReason], [workspaceId+transferBatchId], [workspaceId+createdAt+id], [workspaceId+productId+createdAt+id], [workspaceId+storageId+createdAt+id], [workspaceId+transactionType+createdAt+id]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
@@ -4132,6 +4179,9 @@ export class AtlasDatabase extends Dexie {
 
         this.onsuccess = () => {
           queueLocalModeSqliteUpsert(database, tableName, obj as Record<string, unknown>)
+          if (tableName === 'inventory_transactions' || tableName === 'products') {
+            queueInventoryTransactionsChanged((obj as { workspaceId?: string }).workspaceId)
+          }
         }
       })
 
@@ -4145,6 +4195,9 @@ export class AtlasDatabase extends Dexie {
 
         this.onsuccess = (updatedObj) => {
           queueLocalModeSqliteUpsert(database, tableName, updatedObj as Record<string, unknown>)
+          if (tableName === 'inventory_transactions' || tableName === 'products') {
+            queueInventoryTransactionsChanged((updatedObj as { workspaceId?: string }).workspaceId)
+          }
         }
 
         if (!normalized) {
@@ -4164,6 +4217,9 @@ export class AtlasDatabase extends Dexie {
 
         this.onsuccess = () => {
           queueLocalModeSqliteDelete(database, tableName, obj as Record<string, unknown>)
+          if (tableName === 'inventory_transactions' || tableName === 'products') {
+            queueInventoryTransactionsChanged((obj as { workspaceId?: string }).workspaceId)
+          }
         }
       })
     }

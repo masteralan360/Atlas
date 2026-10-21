@@ -1,33 +1,50 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  getCoreRowModel,
+  useReactTable,
+  type ColumnDef,
+} from "@tanstack/react-table";
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness';
 import {
   ArrowRightLeft,
+  AlertCircle,
   Bot,
   Boxes,
   ChevronRight,
   FileSpreadsheet,
   History,
+  Loader2,
   Link2,
   RotateCcw,
+  ShieldAlert,
+  ShieldCheck,
   SlidersHorizontal,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "wouter";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 
 import {
-  useInventoryTransactions,
-  usePurchaseOrders,
-  useProducts,
-  useSales,
-  useSalesOrderReturnItemsForWorkspace,
-  useSalesOrders,
+  fetchAllInventoryTransactionProductSummary,
+  auditInventoryTransactionIntegrity,
+  getInventoryTransactionMovementSource,
+  useInventoryTransactionPageRelations,
+  useInventoryTransactionPagesChanged,
+  useInventoryTransactionProduct,
+  useInventoryTransactionProductSummaryPage,
+  useInventoryTransactionsPage,
+  useStorageAccess,
   useStorages,
   type InventoryTransferBatchAllocation,
+  type InventoryTransactionListFilters,
+  type InventoryTransactionIntegrityAuditReport,
+  type InventoryTransactionIntegrityAuditProgress,
+  type InventoryTransactionProductSummary,
   type InventoryTransactionType,
   type Storage,
 } from "@/local-db";
-import { hydrateInventoryTransactionsFromSupabase } from "@/local-db/inventoryTransactions";
-import { isDateInDateRange } from "@/lib/dateRangeFilters";
+import { usePaginationBounds, usePaginationPageMap } from "@/hooks/usePaginationState";
+import { getDateRangeBounds } from "@/lib/dateRangeFilters";
 import { setPendingSaleDetailsId } from "@/lib/saleNavigation";
 import { formatDateTime } from "@/lib/utils";
 import { ProductAutocompleteInput } from "@/ui/components/orders/ProductAutocompleteInput";
@@ -40,6 +57,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  AppPagination,
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
@@ -66,6 +84,7 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
+  useToast,
 } from "@/ui/components";
 import { DateRangeBadge } from "@/ui/components/DateRangeBadge";
 import { useDateRange } from "@/context/DateRangeContext";
@@ -127,30 +146,12 @@ type InventoryActivityRecord =
       newQuantity: number | null;
     };
 
-type InventoryMovementDirectionFilter = "all" | "incoming" | "outgoing";
-type InventoryMovementSourceFilter =
-  | "all"
-  | "stock-adjustment"
-  | "transfer"
-  | "pos-sale"
-  | "pos-return"
-  | "sales-order"
-  | "sales-order-return"
-  | "purchase-order"
-  | "initial-stock"
-  | "inventory-change"
-  | "sale-product-exchange"
-  | "sale-product-exchange-return";
-type InventoryMovementSource = Exclude<InventoryMovementSourceFilter, "all">;
-type InventorySnapshotFilter = "all" | "recorded" | "not-recorded";
+type InventoryMovementDirectionFilter = InventoryTransactionListFilters["direction"];
+type InventoryMovementSourceFilter = InventoryTransactionListFilters["source"];
+type InventorySnapshotFilter = InventoryTransactionListFilters["snapshot"];
 
-type InventoryTransactionFilters = {
-  productId: string | null;
+type InventoryTransactionFilters = InventoryTransactionListFilters & {
   productSearch: string;
-  direction: InventoryMovementDirectionFilter;
-  source: InventoryMovementSourceFilter;
-  storageId: string | null;
-  snapshot: InventorySnapshotFilter;
 };
 
 const DEFAULT_INVENTORY_TRANSACTION_FILTERS: InventoryTransactionFilters = {
@@ -162,72 +163,28 @@ const DEFAULT_INVENTORY_TRANSACTION_FILTERS: InventoryTransactionFilters = {
   snapshot: "all",
 };
 
-type MirroredSaleItem = {
-  id: string;
-  product_id: string;
-  storage_id?: string | null;
-  quantity: number;
-  inventory_snapshot?: number | null;
-};
-
-type MirroredSaleReturnItem = {
-  id: string;
-  sale_item_id: string;
-  quantity: number;
-  restored_storage_id?: string | null;
-  created_at?: string | null;
-};
-
 type MirroredSale = {
   id: string;
   createdAt: string;
   sequenceId?: number;
-  _enrichedItems?: MirroredSaleItem[];
-  _returns?: Array<{ id?: string; items?: MirroredSaleReturnItem[] }>;
 };
 
-function getInventoryTransactionMovementSource(
-  transactionType: InventoryTransactionType,
-  referenceType?: string | null,
-): InventoryMovementSource {
-  switch (referenceType) {
-    case "pos_sale":
-      return "pos-sale";
-    case "pos_return":
-      return "pos-return";
-    case "sales_order":
-      return "sales-order";
-    case "sales_order_return":
-      return "sales-order-return";
-    case "purchase_order":
-    case "purchase_order_repair":
-      return "purchase-order";
-    case "inventory_transfer":
-    case "inventory_transfer_rollback":
-    case "reorder_transfer":
-      return "transfer";
-    case "sale_product_exchange":
-      return "sale-product-exchange";
-    case "sale_product_exchange_return":
-      return "sale-product-exchange-return";
-  }
+const INVENTORY_TRANSACTION_PAGE_SIZE_OPTIONS = [20, 50, 100];
+const INITIAL_INVENTORY_TRANSACTION_PAGES = {
+  timeline: 1,
+  productSummary: 1,
+  integrityAudit: 1,
+};
 
-  switch (transactionType) {
-    case "stock_adjustment":
-      return "stock-adjustment";
-    case "transfer_in":
-    case "transfer_out":
-      return "transfer";
-    case "purchase":
-      return "purchase-order";
-    case "initial_stock":
-      return "initial-stock";
-    case "sale":
-    case "return":
-      return "inventory-change";
-    default:
-      return "inventory-change";
-  }
+type InventoryTransactionIntegrityAuditState =
+  | ({ status: "running" | "cancelled" } & InventoryTransactionIntegrityAuditProgress)
+  | { status: "complete"; report: InventoryTransactionIntegrityAuditReport }
+  | { status: "error" };
+
+function getSavedInventoryTransactionPageSize() {
+  if (typeof localStorage === "undefined") return 20;
+  const saved = Number(localStorage.getItem("inventory_transactions_page_size"));
+  return INVENTORY_TRANSACTION_PAGE_SIZE_OPTIONS.includes(saved) ? saved : 20;
 }
 
 function formatPosSaleReference(sale: MirroredSale) {
@@ -238,90 +195,6 @@ function formatPosSaleReference(sale: MirroredSale) {
 
 function formatSignedQuantity(quantity: number) {
   return quantity > 0 ? `+${quantity}` : quantity < 0 ? `${quantity}` : "0";
-}
-
-function getMovementSource(record: InventoryActivityRecord) {
-  if (record.kind === "adjustment") {
-    return "stock-adjustment" as const;
-  }
-
-  if (record.kind === "transfer") {
-    return "transfer" as const;
-  }
-
-  return record.movementSource;
-}
-
-function hasRecordedQuantitySnapshot(record: InventoryActivityRecord) {
-  return (
-    record.kind === "adjustment" ||
-    (record.kind === "ledger" &&
-      record.previousQuantity !== null &&
-      record.newQuantity !== null)
-  );
-}
-
-function matchesInventoryTransactionFilters(
-  record: InventoryActivityRecord,
-  filters: InventoryTransactionFilters,
-  workspaceId: string | undefined,
-) {
-  if (filters.productId && record.productId !== filters.productId) {
-    return false;
-  }
-
-  if (
-    filters.source !== "all" &&
-    getMovementSource(record) !== filters.source
-  ) {
-    return false;
-  }
-
-  if (filters.storageId) {
-    const storageIds =
-      record.kind === "transfer"
-        ? [record.sourceStorageId, record.destinationStorageId]
-        : [record.storageId];
-    if (!storageIds.includes(filters.storageId)) {
-      return false;
-    }
-  }
-
-  if (
-    filters.snapshot !== "all" &&
-    (filters.snapshot === "recorded") !== hasRecordedQuantitySnapshot(record)
-  ) {
-    return false;
-  }
-
-  if (filters.direction === "all") {
-    return true;
-  }
-
-  if (record.kind === "ledger") {
-    return filters.direction === "incoming"
-      ? record.quantityDelta > 0
-      : record.quantityDelta < 0;
-  }
-
-  if (record.kind === "adjustment") {
-    return filters.direction === "incoming"
-      ? record.adjustmentType === "increase"
-      : record.adjustmentType === "decrease";
-  }
-
-  const isCrossWorkspaceTransfer =
-    Boolean(record.sourceWorkspaceId) &&
-    Boolean(record.destinationWorkspaceId) &&
-    record.sourceWorkspaceId !== record.destinationWorkspaceId;
-
-  if (!isCrossWorkspaceTransfer) {
-    return true;
-  }
-
-  return filters.direction === "incoming"
-    ? record.destinationWorkspaceId === workspaceId
-    : record.sourceWorkspaceId === workspaceId;
 }
 
 function formatDateTimeLabel(value?: string | null) {
@@ -354,22 +227,16 @@ function getStorageDisplayName(
 export function InventoryTransactionsPage() {
   const { t, i18n } = useTranslation();
   const [, navigate] = useLocation();
+  const { toast } = useToast();
   const { activeWorkspace } = useWorkspace();
   const { dateRange, customDates, setDateRange } = useDateRange();
+  const online = useNetworkStatus();
   const inventoryDateRange = dateRange === "allTime" ? "month" : dateRange;
   const pageDirection =
     typeof document === "undefined"
       ? i18n.dir(i18n.resolvedLanguage || i18n.language)
       : document.documentElement.dir || document.dir || "ltr";
   const isRtl = pageDirection === "rtl";
-  const inventoryTransactions = useInventoryTransactions(activeWorkspace?.id);
-  const sales = useSales(activeWorkspace?.id);
-  const salesOrders = useSalesOrders(activeWorkspace?.id);
-  const purchaseOrders = usePurchaseOrders(activeWorkspace?.id);
-  const salesOrderReturnItems = useSalesOrderReturnItemsForWorkspace(
-    activeWorkspace?.id,
-  );
-  const products = useProducts(activeWorkspace?.id);
   const storages = useStorages(activeWorkspace?.id);
   const [filters, setFilters] = useState<InventoryTransactionFilters>(
     DEFAULT_INVENTORY_TRANSACTION_FILTERS,
@@ -377,123 +244,203 @@ export function InventoryTransactionsPage() {
   const [draftFilters, setDraftFilters] =
     useState<InventoryTransactionFilters>(DEFAULT_INVENTORY_TRANSACTION_FILTERS);
   const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"timeline" | "product-summary">("timeline");
   const [isProductSummaryExportOpen, setIsProductSummaryExportOpen] =
     useState(false);
+  const [isProductSummaryExporting, setIsProductSummaryExporting] = useState(false);
+  const [productSummaryExportRows, setProductSummaryExportRows] = useState<Record<string, unknown>[]>([]);
+  const [integrityAudit, setIntegrityAudit] =
+    useState<InventoryTransactionIntegrityAuditState | null>(null);
+  const integrityAuditController = useRef<AbortController | null>(null);
 
-  const productsById = useMemo(
-    () => new Map(products.map((product) => [product.id, product] as const)),
-    [products],
-  );
+  useInventoryTransactionPagesChanged(activeWorkspace?.id);
+  const storageAccess = useStorageAccess(activeWorkspace?.id);
 
-  const storagesById = useMemo(
-    () => new Map(storages.map((storage) => [storage.id, storage] as const)),
-    [storages],
+  const pagination = usePaginationPageMap({
+    initialPages: INITIAL_INVENTORY_TRANSACTION_PAGES,
+    initialPageSize: getSavedInventoryTransactionPageSize(),
+    resetOn: [
+      activeWorkspace?.id,
+      inventoryDateRange,
+      customDates.start,
+      customDates.end,
+      filters.productId,
+      filters.direction,
+      filters.source,
+      filters.storageId,
+      filters.snapshot,
+    ],
+    onPageSizeChange: (pageSize) => {
+      if (typeof localStorage !== "undefined") {
+        localStorage.setItem("inventory_transactions_page_size", String(pageSize));
+      }
+    },
+  });
+
+  const dateBounds = useMemo(
+    () => getDateRangeBounds(inventoryDateRange, customDates),
+    [customDates, inventoryDateRange],
   );
+  const listFilters = useMemo<InventoryTransactionListFilters>(() => ({
+    productId: filters.productId,
+    direction: filters.direction,
+    source: filters.source,
+    storageId: filters.storageId,
+    snapshot: filters.snapshot,
+  }), [filters.direction, filters.productId, filters.snapshot, filters.source, filters.storageId]);
+  const listQueryBase = useMemo(() => ({
+    workspaceId: activeWorkspace?.id,
+    startAt: dateBounds.start?.toISOString(),
+    endBefore: dateBounds.end?.toISOString(),
+    filters: listFilters,
+  }), [activeWorkspace?.id, dateBounds.end, dateBounds.start, listFilters]);
+  const integrityAuditScopeKey = JSON.stringify([
+    activeWorkspace?.id ?? null,
+    listQueryBase.startAt ?? null,
+    listQueryBase.endBefore ?? null,
+    filters.productId,
+    filters.direction,
+    filters.source,
+    filters.storageId,
+    filters.snapshot,
+    storageAccess.signature,
+    online,
+  ]);
 
   useEffect(() => {
-    if (!activeWorkspace?.id) {
-      return;
-    }
+    integrityAuditController.current?.abort();
+    integrityAuditController.current = null;
+    setIntegrityAudit(null);
+    pagination.setPage("integrityAudit", 1);
+    return () => integrityAuditController.current?.abort();
+  }, [integrityAuditScopeKey, pagination.setPage]);
 
-    void hydrateInventoryTransactionsFromSupabase(activeWorkspace.id);
-  }, [activeWorkspace?.id]);
+  const timelineQuery = useInventoryTransactionsPage({
+    ...listQueryBase,
+    page: pagination.pages.timeline,
+    pageSize: pagination.pageSize,
+  }, true, online);
+  const timelinePagination = usePaginationBounds({
+    currentPage: pagination.pages.timeline,
+    setCurrentPage: (page) => pagination.setPage("timeline", page),
+    totalCount: timelineQuery.data?.totalCount ?? 0,
+    pageSize: pagination.pageSize,
+    pageCount: timelineQuery.data?.pageCount,
+    isLoading: timelineQuery.isPending,
+    error: timelineQuery.error,
+  });
+  const summaryQuery = useInventoryTransactionProductSummaryPage({
+    ...listQueryBase,
+    page: pagination.pages.productSummary,
+    pageSize: pagination.pageSize,
+  }, activeTab === "product-summary", online);
+  const summaryPagination = usePaginationBounds({
+    currentPage: pagination.pages.productSummary,
+    setCurrentPage: (page) => pagination.setPage("productSummary", page),
+    totalCount: summaryQuery.data?.totalCount ?? 0,
+    pageSize: pagination.pageSize,
+    pageCount: summaryQuery.data?.pageCount,
+    isLoading: summaryQuery.isPending,
+    error: summaryQuery.error,
+  });
+  const integrityAuditReport = integrityAudit?.status === "complete"
+    ? integrityAudit.report
+    : null;
+  const integrityAuditPagination = usePaginationBounds({
+    currentPage: pagination.pages.integrityAudit,
+    setCurrentPage: (page) => pagination.setPage("integrityAudit", page),
+    totalCount: integrityAuditReport?.issues.length ?? 0,
+    pageSize: pagination.pageSize,
+  });
+  const visibleIntegrityAuditIssues = useMemo(() => {
+    if (!integrityAuditReport) return [];
+    const startIndex = (integrityAuditPagination.currentPage - 1) * pagination.pageSize;
+    return integrityAuditReport.issues.slice(startIndex, startIndex + pagination.pageSize);
+  }, [integrityAuditPagination.currentPage, integrityAuditReport, pagination.pageSize]);
+
+  const inventoryTransactions = timelineQuery.data?.rows ?? [];
+  const relations = useInventoryTransactionPageRelations(
+    inventoryTransactions,
+    activeWorkspace?.id,
+    online,
+  );
+  const productsById = useMemo(
+    () => new Map((relations?.products ?? []).map((product) => [product.id, product] as const)),
+    [relations?.products],
+  );
+  const storagesById = useMemo(
+    () => new Map((relations?.storages ?? []).map((storage) => [storage.id, storage] as const)),
+    [relations?.storages],
+  );
 
   const activityRecords = useMemo(() => {
-    const typedSales = sales as MirroredSale[];
+    const typedSales = (relations?.sales ?? []) as MirroredSale[];
     const salesById = new Map(typedSales.map((sale) => [sale.id, sale] as const));
-    const saleByReturnId = new Map(
-      typedSales.flatMap((sale) =>
-        (sale._returns ?? [])
-          .filter((saleReturn) => Boolean(saleReturn.id))
-          .map((saleReturn) => [saleReturn.id as string, sale] as const),
-      ),
+    const saleReturnsById = new Map(
+      (relations?.saleReturns ?? []).map((saleReturn) => [saleReturn.id, saleReturn] as const),
     );
-    const salesOrdersById = new Map(salesOrders.map((order) => [order.id, order] as const));
+    const salesOrdersById = new Map(
+      (relations?.salesOrders ?? []).map((order) => [order.id, order] as const),
+    );
     const salesOrderReturnsById = new Map(
-      salesOrderReturnItems.map((returnItem) => [returnItem.returnId, returnItem] as const),
+      (relations?.salesOrderReturnItems ?? []).map((returnItem) => [returnItem.returnId, returnItem] as const),
     );
-    const purchaseOrdersById = new Map(purchaseOrders.map((order) => [order.id, order] as const));
+    const purchaseOrdersById = new Map(
+      (relations?.purchaseOrders ?? []).map((order) => [order.id, order] as const),
+    );
 
-    return inventoryTransactions
-      .map((transaction): InventoryActivityRecord => {
-        const movementSource = getInventoryTransactionMovementSource(
-          transaction.transactionType,
-          transaction.referenceType,
-        );
-        const referenceId = transaction.referenceId || transaction.id;
-        const sale = movementSource === "pos-sale"
-          ? salesById.get(referenceId)
-          : movementSource === "pos-return"
-            ? saleByReturnId.get(referenceId)
-            : undefined;
-        const salesOrderId = movementSource === "sales-order"
-          ? referenceId
-          : movementSource === "sales-order-return"
-            ? salesOrderReturnsById.get(referenceId)?.orderId
-            : undefined;
-        const purchaseOrder = movementSource === "purchase-order"
-          ? purchaseOrdersById.get(referenceId)
-          : undefined;
-        const salesOrder = salesOrderId ? salesOrdersById.get(salesOrderId) : undefined;
-        const sourceRecordId = sale?.id || salesOrderId || referenceId;
-        const referenceLabel = sale
-          ? formatPosSaleReference(sale)
-          : salesOrder?.orderNumber || purchaseOrder?.orderNumber
-            || ("#" + referenceId.slice(0, 8));
-
-        return {
-          id: transaction.id,
-          kind: "ledger",
-          createdAt: transaction.createdAt,
-          productId: transaction.productId,
-          storageId: transaction.storageId,
-          sourceRecordId,
-          referenceLabel,
-          transactionType: transaction.transactionType,
-          movementSource,
-          sourceKind: movementSource === "transfer" && transaction.referenceType === "reorder_transfer"
-            ? "automation"
-            : movementSource === "transfer"
-              ? "manual"
-              : undefined,
-          quantityDelta: transaction.quantityDelta,
-          previousQuantity: transaction.previousQuantity,
-          newQuantity: transaction.newQuantity,
-        };
-      })
-      .filter((record) => !productsById.get(record.productId)?.isService)
-      .sort((left, right) =>
-        right.createdAt.localeCompare(left.createdAt) ||
-        right.id.localeCompare(left.id),
+    return inventoryTransactions.map((transaction): InventoryActivityRecord => {
+      const movementSource = getInventoryTransactionMovementSource(
+        transaction.transactionType,
+        transaction.referenceType,
       );
-  }, [
-    inventoryTransactions,
-    productsById,
-    purchaseOrders,
-    sales,
-    salesOrderReturnItems,
-    salesOrders,
-  ]);
-  const dateScopedActivityRecords = useMemo(
-    () =>
-      activityRecords.filter((record) =>
-        isDateInDateRange(record.createdAt, inventoryDateRange, customDates),
-      ),
-    [activityRecords, customDates, inventoryDateRange],
-  );
+      const referenceId = transaction.referenceId || transaction.id;
+      const saleId = movementSource === "pos-return"
+        ? saleReturnsById.get(referenceId)?.saleId
+        : undefined;
+      const sale = movementSource === "pos-sale"
+        ? salesById.get(referenceId)
+        : saleId
+          ? salesById.get(saleId)
+          : undefined;
+      const salesOrderId = movementSource === "sales-order"
+        ? referenceId
+        : movementSource === "sales-order-return"
+          ? salesOrderReturnsById.get(referenceId)?.orderId
+          : undefined;
+      const purchaseOrder = movementSource === "purchase-order"
+        ? purchaseOrdersById.get(referenceId)
+        : undefined;
+      const salesOrder = salesOrderId ? salesOrdersById.get(salesOrderId) : undefined;
+      const sourceRecordId = sale?.id || salesOrderId || referenceId;
+      const referenceLabel = sale
+        ? formatPosSaleReference(sale)
+        : salesOrder?.orderNumber || purchaseOrder?.orderNumber
+          || ("#" + referenceId.slice(0, 8));
 
-  const filteredActivityRecords = useMemo(
-    () =>
-      dateScopedActivityRecords.filter((record) =>
-        matchesInventoryTransactionFilters(
-          record,
-          filters,
-          activeWorkspace?.id,
-        ),
-      ),
-    [activeWorkspace?.id, dateScopedActivityRecords, filters],
-  );
+      return {
+        id: transaction.id,
+        kind: "ledger",
+        createdAt: transaction.createdAt,
+        productId: transaction.productId,
+        storageId: transaction.storageId,
+        sourceRecordId,
+        referenceLabel,
+        transactionType: transaction.transactionType,
+        movementSource,
+        sourceKind: movementSource === "transfer" && transaction.referenceType === "reorder_transfer"
+          ? "automation"
+          : movementSource === "transfer"
+            ? "manual"
+            : undefined,
+        quantityDelta: transaction.quantityDelta,
+        previousQuantity: transaction.previousQuantity,
+        newQuantity: transaction.newQuantity,
+      };
+    });
+  }, [inventoryTransactions, relations]);
 
+  const productMovementSummary = summaryQuery.data?.rows ?? [];
   const activeFilterCount = [
     filters.productId,
     filters.direction !== "all",
@@ -501,106 +448,175 @@ export function InventoryTransactionsPage() {
     filters.storageId,
     filters.snapshot !== "all",
   ].filter(Boolean).length;
+  const selectedDraftProduct = useInventoryTransactionProduct(
+    activeWorkspace?.id,
+    draftFilters.productId,
+  );
+  const timelineTableColumns = useMemo<ColumnDef<InventoryActivityRecord>[]>(() => [
+    { id: "createdAt", accessorFn: (record) => record.createdAt },
+    { id: "id", accessorFn: (record) => record.id },
+    { id: "productId", accessorFn: (record) => record.productId },
+    { id: "movementSource", accessorFn: (record) => record.kind === "ledger" ? record.movementSource : "" },
+    { id: "quantity", accessorFn: (record) => record.kind === "ledger" ? record.quantityDelta : 0 },
+  ], []);
+  const summaryTableColumns = useMemo<ColumnDef<InventoryTransactionProductSummary>[]>(() => [
+    { id: "productId", accessorFn: (summary) => summary.productId },
+    { id: "incoming", accessorFn: (summary) => summary.incoming },
+    { id: "outgoing", accessorFn: (summary) => summary.outgoing },
+    { id: "balance", accessorFn: (summary) => summary.balance },
+  ], []);
+  const timelineTable = useReactTable({
+    data: activityRecords,
+    columns: timelineTableColumns,
+    getRowId: (record) => record.id,
+    getCoreRowModel: getCoreRowModel(),
+    manualPagination: true,
+    manualSorting: true,
+    manualFiltering: true,
+    rowCount: timelineQuery.data?.totalCount ?? 0,
+    state: {
+      pagination: {
+        pageIndex: timelinePagination.currentPage - 1,
+        pageSize: pagination.pageSize,
+      },
+      sorting: [
+        { id: "createdAt", desc: true },
+        { id: "id", desc: true },
+      ],
+      columnFilters: [
+        { id: "productId", value: filters.productId },
+        { id: "direction", value: filters.direction },
+        { id: "movementSource", value: filters.source },
+        { id: "storageId", value: filters.storageId },
+        { id: "snapshot", value: filters.snapshot },
+      ],
+    },
+  });
+  const summaryTable = useReactTable({
+    data: productMovementSummary,
+    columns: summaryTableColumns,
+    getRowId: (summary) => summary.productId,
+    getCoreRowModel: getCoreRowModel(),
+    manualPagination: true,
+    manualSorting: true,
+    manualFiltering: true,
+    rowCount: summaryQuery.data?.totalCount ?? 0,
+    state: {
+      pagination: {
+        pageIndex: summaryPagination.currentPage - 1,
+        pageSize: pagination.pageSize,
+      },
+      sorting: [{ id: "productId", desc: false }],
+      columnFilters: [
+        { id: "productId", value: filters.productId },
+        { id: "direction", value: filters.direction },
+        { id: "movementSource", value: filters.source },
+        { id: "storageId", value: filters.storageId },
+        { id: "snapshot", value: filters.snapshot },
+      ],
+    },
+  });
 
-  const selectedDraftProduct = draftFilters.productId
-    ? productsById.get(draftFilters.productId)
-    : undefined;
-
-  const productMovementSummary = useMemo(() => {
-    const summaries = new Map<
-      string,
-      {
-        productId: string;
-        productName: string;
-        sku: string | null;
-        unit: string | null;
-        incoming: number;
-        outgoing: number;
-      }
-    >();
-
-    for (const record of filteredActivityRecords) {
-      let incoming = 0;
-      let outgoing = 0;
-
-      if (record.kind === "ledger") {
-        if (record.quantityDelta > 0) {
-          incoming = record.quantityDelta;
-        } else {
-          outgoing = Math.abs(record.quantityDelta);
-        }
-      } else if (record.kind === "adjustment") {
-        if (record.adjustmentType === "increase") {
-          incoming = record.quantity;
-        } else {
-          outgoing = record.quantity;
-        }
-      } else {
-        const isCrossWorkspaceTransfer =
-          Boolean(record.sourceWorkspaceId) &&
-          Boolean(record.destinationWorkspaceId) &&
-          record.sourceWorkspaceId !== record.destinationWorkspaceId;
-
-        if (!isCrossWorkspaceTransfer) {
-          incoming = record.quantity;
-          outgoing = record.quantity;
-        } else if (record.destinationWorkspaceId === activeWorkspace?.id) {
-          incoming = record.quantity;
-        } else {
-          outgoing = record.quantity;
-        }
-      }
-
-      const existing = summaries.get(record.productId);
-      if (existing) {
-        existing.incoming += incoming;
-        existing.outgoing += outgoing;
-        continue;
-      }
-
-      const product = productsById.get(record.productId);
-      summaries.set(record.productId, {
-        productId: record.productId,
-        productName:
-          product?.name ||
-          t("inventoryTransfer.transactions.unknownProduct", "Unknown product"),
-        sku: product?.sku || null,
-        unit: product?.unit || null,
-        incoming,
-        outgoing,
+  const openProductSummaryExport = async () => {
+    if (!activeWorkspace?.id || isProductSummaryExporting) return;
+    setIsProductSummaryExporting(true);
+    try {
+      const summaryRows = await fetchAllInventoryTransactionProductSummary({
+        ...listQueryBase,
+        page: 1,
+        pageSize: 250,
+      }, storageAccess, online);
+      setProductSummaryExportRows(summaryRows.map((summary) => ({
+        [t("inventoryTransactions.productSummary.name", "Name")]:
+          summary.productName || t("inventoryTransfer.transactions.unknownProduct", "Unknown product"),
+        [t("inventoryTransactions.productSummary.sku", "SKU")]: summary.sku || "",
+        [t("inventoryTransactions.productSummary.unit", "Unit")]: summary.unit || "",
+        [t("inventoryTransactions.productSummary.incoming", "Incoming")]: summary.incoming,
+        [t("inventoryTransactions.productSummary.outgoing", "Outgoing")]: summary.outgoing,
+        [t("inventoryTransactions.productSummary.balance", "Balance")]: summary.balance,
+      })));
+      setIsProductSummaryExportOpen(true);
+    } catch {
+      toast({
+        title: t("common.error", "Something went wrong"),
+        description: t(
+          "inventoryTransactions.productSummary.exportError",
+          "The product summary could not be prepared. Please try again.",
+        ),
+        variant: "destructive",
       });
+    } finally {
+      setIsProductSummaryExporting(false);
+    }
+  };
+
+  const startInventoryTransactionIntegrityAudit = async () => {
+    if (
+      !activeWorkspace?.id ||
+      storageAccess.isReady === false ||
+      integrityAuditController.current
+    ) {
+      return;
     }
 
-    return Array.from(summaries.values())
-      .map((summary) => ({
-        ...summary,
-        balance: summary.incoming - summary.outgoing,
-      }))
-      .sort((left, right) =>
-        left.productName.localeCompare(right.productName, undefined, {
-          sensitivity: "base",
-        }),
-      );
-  }, [activeWorkspace?.id, filteredActivityRecords, productsById, t]);
+    const controller = new AbortController();
+    integrityAuditController.current = controller;
+    setIntegrityAudit({
+      status: "running",
+      checkedCount: 0,
+      totalCount: timelineQuery.data?.totalCount ?? null,
+    });
 
-  const productSummaryExportRows = useMemo(
-    () =>
-      productMovementSummary.map((summary) => ({
-        [t("inventoryTransactions.productSummary.name", "Name")]:
-          summary.productName,
-        [t("inventoryTransactions.productSummary.sku", "SKU")]:
-          summary.sku || "",
-        [t("inventoryTransactions.productSummary.unit", "Unit")]:
-          summary.unit || "",
-        [t("inventoryTransactions.productSummary.incoming", "Incoming")]:
-          summary.incoming,
-        [t("inventoryTransactions.productSummary.outgoing", "Outgoing")]:
-          summary.outgoing,
-        [t("inventoryTransactions.productSummary.balance", "Balance")]:
-          summary.balance,
-      })),
-    [productMovementSummary, t],
-  );
+    try {
+      const report = await auditInventoryTransactionIntegrity(
+        {
+          ...listQueryBase,
+          page: 1,
+          pageSize: 250,
+        },
+        storageAccess,
+        {
+          signal: controller.signal,
+          online,
+          expectedTotalCount: timelineQuery.data?.totalCount,
+          onProgress: (progress) => {
+            if (integrityAuditController.current !== controller) return;
+            setIntegrityAudit({ status: "running", ...progress });
+          },
+        },
+      );
+      if (integrityAuditController.current !== controller) return;
+      setIntegrityAudit({ status: "complete", report });
+      pagination.setPage("integrityAudit", 1);
+    } catch {
+      if (integrityAuditController.current !== controller) return;
+      setIntegrityAudit(controller.signal.aborted ? {
+        status: "cancelled",
+        checkedCount: 0,
+        totalCount: null,
+      } : { status: "error" });
+    } finally {
+      if (integrityAuditController.current === controller) {
+        integrityAuditController.current = null;
+      }
+    }
+  };
+
+  const cancelInventoryTransactionIntegrityAudit = () => {
+    const controller = integrityAuditController.current;
+    if (!controller) return;
+    integrityAuditController.current = null;
+    controller.abort();
+    setIntegrityAudit((current) => current?.status === "running"
+      ? { ...current, status: "cancelled" }
+      : current);
+  };
+
+  const formatAuditQuantity = (value: number | null) => value === null
+    ? t("inventoryTransactions.integrityAudit.notAvailable", "—")
+    : new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, {
+      maximumFractionDigits: 6,
+    }).format(value);
 
   const getLedgerMovementLabel = (
     record: Extract<InventoryActivityRecord, { kind: "ledger" }>,
@@ -725,6 +741,8 @@ export function InventoryTransactionsPage() {
     );
   }
 
+  const integrityAuditRunning = integrityAudit?.status === "running";
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-2">
@@ -746,13 +764,36 @@ export function InventoryTransactionsPage() {
           <CardHeader className="border-b bg-muted/20 p-6">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
               <div className="min-w-0 xl:flex-1">
-                <CardTitle className="flex items-center gap-2 text-xl">
-                  <History className="h-5 w-5 text-primary" />
-                  {t(
-                    "inventoryTransfer.transactions.title",
-                    "Inventory Transactions",
-                  )}
-                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="flex items-center gap-2 text-xl">
+                    <History className="h-5 w-5 text-primary" />
+                    {t(
+                      "inventoryTransfer.transactions.title",
+                      "Inventory Transactions",
+                    )}
+                  </CardTitle>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 w-9 shrink-0 rounded-xl p-0"
+                    aria-label={t(
+                      integrityAuditRunning
+                        ? "inventoryTransactions.integrityAudit.runningTitle"
+                        : "inventoryTransactions.integrityAudit.action",
+                      integrityAuditRunning ? "Audit in progress" : "Transactions integrity Audit",
+                    )}
+                    title={t(
+                      "inventoryTransactions.integrityAudit.action",
+                      "Transactions integrity Audit",
+                    )}
+                    disabled={!activeWorkspace?.id || storageAccess.isReady === false || integrityAuditRunning}
+                    onClick={() => void startInventoryTransactionIntegrityAudit()}
+                  >
+                    {integrityAuditRunning
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : <ShieldCheck className="h-4 w-4" />}
+                  </Button>
+                </div>
                 <CardDescription className="mt-1.5">
                   {t(
                     "inventoryTransactions.subtitle",
@@ -760,7 +801,7 @@ export function InventoryTransactionsPage() {
                   )}
                 </CardDescription>
               </div>
-              <div className="flex shrink-0 items-center gap-3">
+              <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto xl:justify-end">
                 <DateRangeFilters
                   dateRange={inventoryDateRange}
                   onDateRangeChange={setDateRange}
@@ -798,7 +839,13 @@ export function InventoryTransactionsPage() {
             </div>
           </CardHeader>
           <CardContent className="p-6">
-            <Tabs defaultValue="timeline" className="space-y-4">
+            <Tabs
+              value={activeTab}
+              onValueChange={(value) => {
+                if (value === "timeline" || value === "product-summary") setActiveTab(value);
+              }}
+              className="space-y-4"
+            >
               <TabsList className="grid w-full max-w-md grid-cols-2 rounded-2xl bg-muted/60 p-1">
                 <TabsTrigger value="timeline" className="rounded-xl">
                   {t("inventoryTransactions.tabs.timeline", "Timeline")}
@@ -812,7 +859,33 @@ export function InventoryTransactionsPage() {
               </TabsList>
 
               <TabsContent value="timeline" className="mt-0">
-            {filteredActivityRecords.length === 0 ? (
+                <div className="mb-4 flex justify-end">
+                  <AppPagination
+                    currentPage={timelinePagination.currentPage}
+                    totalCount={timelineQuery.data?.totalCount ?? 0}
+                    pageCount={timelinePagination.pageCount}
+                    pageSize={pagination.pageSize}
+                    onPageChange={(page) => pagination.setPage("timeline", page)}
+                    onPageSizeChange={pagination.setPageSize}
+                    pageSizeOptions={INVENTORY_TRANSACTION_PAGE_SIZE_OPTIONS}
+                  />
+                </div>
+            {timelineQuery.isPending && activeWorkspace?.id ? (
+              <div className="flex min-h-56 items-center justify-center gap-3 text-sm text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                {t("inventoryTransactions.pagination.loading", "Loading inventory transactions…")}
+              </div>
+            ) : timelineQuery.error ? (
+              <div className="flex min-h-56 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed px-6 text-center">
+                <AlertCircle className="h-8 w-8 text-destructive" />
+                <p className="text-sm text-muted-foreground">
+                  {t("inventoryTransactions.pagination.loadError", "Inventory transactions could not be loaded. Please try again.")}
+                </p>
+                <Button type="button" variant="outline" onClick={() => void timelineQuery.refetch()}>
+                  {t("common.retry", "Retry")}
+                </Button>
+              </div>
+            ) : !activeWorkspace?.id || (timelineQuery.data?.totalCount ?? 0) === 0 ? (
               <div className="rounded-3xl border border-dashed border-muted-foreground/30 bg-muted/10 px-6 py-12 text-center">
                 <History className="mx-auto mb-4 h-10 w-10 text-primary/70" />
                 <h3 className="text-lg font-semibold">
@@ -870,7 +943,7 @@ export function InventoryTransactionsPage() {
                 </div>
 
                 <div className="divide-y">
-                  {filteredActivityRecords.map((record) => {
+                  {timelineTable.getRowModel().rows.map(({ original: record }) => {
                     const product = productsById.get(record.productId);
                     const isQuantityIncrease =
                       record.kind === "adjustment"
@@ -1289,7 +1362,46 @@ export function InventoryTransactionsPage() {
               </TabsContent>
 
               <TabsContent value="product-summary" className="mt-0">
-                {productMovementSummary.length === 0 ? (
+                <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <AppPagination
+                    currentPage={summaryPagination.currentPage}
+                    totalCount={summaryQuery.data?.totalCount ?? 0}
+                    pageCount={summaryPagination.pageCount}
+                    pageSize={pagination.pageSize}
+                    onPageChange={(page) => pagination.setPage("productSummary", page)}
+                    onPageSizeChange={pagination.setPageSize}
+                    pageSizeOptions={INVENTORY_TRANSACTION_PAGE_SIZE_OPTIONS}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    allowViewer={true}
+                    disabled={isProductSummaryExporting}
+                    onClick={() => void openProductSummaryExport()}
+                    className="h-10 gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-5 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition-all hover:bg-emerald-100 hover:shadow-[0_0_20px_-5px_rgba(16,185,129,0.3)] active:scale-95 disabled:opacity-60 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/20"
+                  >
+                    {isProductSummaryExporting
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : <FileSpreadsheet className="h-4 w-4" />}
+                    {t("sales.export.button", "Excel Export")}
+                  </Button>
+                </div>
+                {summaryQuery.isPending && activeWorkspace?.id ? (
+                  <div className="flex min-h-56 items-center justify-center gap-3 text-sm text-muted-foreground">
+                    <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    {t("inventoryTransactions.productSummary.loading", "Loading product summary…")}
+                  </div>
+                ) : summaryQuery.error ? (
+                  <div className="flex min-h-56 flex-col items-center justify-center gap-3 rounded-3xl border border-dashed px-6 text-center">
+                    <AlertCircle className="h-8 w-8 text-destructive" />
+                    <p className="text-sm text-muted-foreground">
+                      {t("inventoryTransactions.productSummary.loadError", "The product summary could not be loaded. Please try again.")}
+                    </p>
+                    <Button type="button" variant="outline" onClick={() => void summaryQuery.refetch()}>
+                      {t("common.retry", "Retry")}
+                    </Button>
+                  </div>
+                ) : !activeWorkspace?.id || (summaryQuery.data?.totalCount ?? 0) === 0 ? (
                   <div className="rounded-3xl border border-dashed border-muted-foreground/30 bg-muted/10 px-6 py-12 text-center">
                     <Boxes className="mx-auto mb-4 h-10 w-10 text-primary/70" />
                     <h3 className="text-lg font-semibold">
@@ -1306,19 +1418,6 @@ export function InventoryTransactionsPage() {
                     </p>
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    <div className="flex justify-end">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        allowViewer={true}
-                        onClick={() => setIsProductSummaryExportOpen(true)}
-                        className="h-10 gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-5 text-[10px] font-black uppercase tracking-widest text-emerald-700 transition-all hover:bg-emerald-100 hover:shadow-[0_0_20px_-5px_rgba(16,185,129,0.3)] active:scale-95 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-400 dark:hover:bg-emerald-500/20"
-                      >
-                        <FileSpreadsheet className="h-4 w-4" />
-                        {t("sales.export.button", "Excel Export")}
-                      </Button>
-                    </div>
                     <div
                       dir={pageDirection}
                       className="overflow-x-auto rounded-3xl border bg-card"
@@ -1353,15 +1452,17 @@ export function InventoryTransactionsPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {productMovementSummary.map((summary) => (
+                        {summaryTable.getRowModel().rows.map(({ original: summary }) => (
                           <TableRow key={summary.productId}>
                             <TableCell className="text-start">
                               <div className="font-semibold">
-                                {summary.productName}
+                                {summary.productName || t("inventoryTransfer.transactions.unknownProduct", "Unknown product")}
                               </div>
                               {(summary.sku || summary.unit) && (
                                 <div className="mt-1 text-xs text-muted-foreground">
-                                  {summary.sku ? `SKU: ${summary.sku}` : null}
+                                  {summary.sku
+                                    ? `${t("inventoryTransactions.productSummary.sku", "SKU")}: ${summary.sku}`
+                                    : null}
                                   {summary.sku && summary.unit ? " · " : null}
                                   {summary.unit || null}
                                 </div>
@@ -1391,10 +1492,183 @@ export function InventoryTransactionsPage() {
                       </TableBody>
                       </Table>
                     </div>
-                  </div>
                 )}
               </TabsContent>
             </Tabs>
+            {integrityAudit ? (
+              <section
+                aria-live="polite"
+                className="mt-6 space-y-5 rounded-3xl border bg-muted/10 p-4 sm:p-6"
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <h3 className="flex items-center gap-2 text-lg font-semibold">
+                      {integrityAuditRunning ? (
+                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                      ) : integrityAudit.status === "complete" && integrityAudit.report.inconsistentCount > 0 ? (
+                        <ShieldAlert className="h-5 w-5 text-destructive" />
+                      ) : integrityAudit.status === "error" ? (
+                        <AlertCircle className="h-5 w-5 text-destructive" />
+                      ) : (
+                        <ShieldCheck className="h-5 w-5 text-emerald-600" />
+                      )}
+                      {integrityAuditRunning
+                        ? t("inventoryTransactions.integrityAudit.runningTitle", "Audit in progress")
+                        : integrityAudit.status === "complete"
+                          ? integrityAudit.report.inconsistentCount > 0
+                            ? t("inventoryTransactions.integrityAudit.issuesTitle", "Arithmetic inconsistencies found")
+                            : t("inventoryTransactions.integrityAudit.completeTitle", "Audit complete")
+                          : integrityAudit.status === "cancelled"
+                            ? t("inventoryTransactions.integrityAudit.cancelledTitle", "Audit cancelled")
+                            : t("inventoryTransactions.integrityAudit.errorTitle", "Audit could not be completed")}
+                    </h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {integrityAuditRunning ? (
+                        t("inventoryTransactions.integrityAudit.progress", "Checked {{checked}} of {{total}} transactions…", {
+                          checked: integrityAudit.checkedCount.toLocaleString(i18n.resolvedLanguage || i18n.language),
+                          total: integrityAudit.totalCount === null
+                            ? "…"
+                            : integrityAudit.totalCount.toLocaleString(i18n.resolvedLanguage || i18n.language),
+                        })
+                      ) : integrityAudit.status === "complete" ? (
+                        integrityAudit.report.inconsistentCount > 0
+                          ? t("inventoryTransactions.integrityAudit.issuesDescription", "Review the transactions below; the audit compared each recorded balance with the previous balance plus the change.")
+                          : t("inventoryTransactions.integrityAudit.cleanDescription", "No arithmetic inconsistencies were found among transactions with recorded quantity snapshots.")
+                      ) : integrityAudit.status === "cancelled" ? (
+                        t("inventoryTransactions.integrityAudit.cancelledDescription", "The audit stopped before all matching transactions were checked.")
+                      ) : (
+                        t("inventoryTransactions.integrityAudit.errorDescription", "The matching transactions could not all be checked. Please try again.")
+                      )}
+                    </p>
+                  </div>
+                  {integrityAuditRunning ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="shrink-0 self-start"
+                      onClick={cancelInventoryTransactionIntegrityAudit}
+                    >
+                      {t("inventoryTransactions.integrityAudit.cancel", "Cancel audit")}
+                    </Button>
+                  ) : integrityAudit.status !== "complete" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="shrink-0 self-start"
+                      onClick={() => void startInventoryTransactionIntegrityAudit()}
+                    >
+                      <RotateCcw className="me-2 h-4 w-4" />
+                      {t("inventoryTransactions.integrityAudit.retry", "Run again")}
+                    </Button>
+                  ) : null}
+                </div>
+
+                {integrityAuditRunning ? (
+                  <div
+                    className="h-2 overflow-hidden rounded-full bg-muted"
+                    role="progressbar"
+                    aria-label={t("inventoryTransactions.integrityAudit.progressLabel", "Audit progress")}
+                    aria-valuemin={0}
+                    aria-valuemax={integrityAudit.totalCount ?? undefined}
+                    aria-valuenow={integrityAudit.checkedCount}
+                  >
+                    <div
+                      className={`h-full rounded-full bg-primary transition-[width] ${integrityAudit.totalCount === null ? "w-1/3 animate-pulse" : ""}`}
+                      style={integrityAudit.totalCount === null
+                        ? undefined
+                        : { width: `${integrityAudit.totalCount > 0
+                          ? Math.min(100, (integrityAudit.checkedCount / integrityAudit.totalCount) * 100)
+                          : 100}%` }}
+                    />
+                  </div>
+                ) : null}
+
+                {integrityAudit.status === "complete" ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                      {[
+                        { key: "checked", value: integrityAudit.report.checkedCount },
+                        { key: "arithmeticChecked", value: integrityAudit.report.arithmeticCheckedCount },
+                        { key: "consistent", value: integrityAudit.report.consistentCount },
+                        { key: "inconsistent", value: integrityAudit.report.inconsistentCount },
+                        { key: "unverifiable", value: integrityAudit.report.unverifiableCount },
+                      ].map(({ key, value }) => (
+                        <div key={key} className="rounded-2xl border bg-background p-3">
+                          <div className="text-xs text-muted-foreground">
+                            {t(`inventoryTransactions.integrityAudit.stats.${key}`, key)}
+                          </div>
+                          <div className="mt-1 text-xl font-semibold tabular-nums">
+                            {Number(value).toLocaleString(i18n.resolvedLanguage || i18n.language)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {integrityAudit.report.issues.length === 0 ? (
+                      <div className="flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
+                        <ShieldCheck className="h-4 w-4 shrink-0" />
+                        {t("inventoryTransactions.integrityAudit.noIssues", "No arithmetic inconsistencies to review.")}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex justify-end">
+                          <AppPagination
+                            currentPage={integrityAuditPagination.currentPage}
+                            totalCount={integrityAudit.report.issues.length}
+                            pageCount={integrityAuditPagination.pageCount}
+                            pageSize={pagination.pageSize}
+                            onPageChange={(page) => pagination.setPage("integrityAudit", page)}
+                            onPageSizeChange={pagination.setPageSize}
+                            pageSizeOptions={INVENTORY_TRANSACTION_PAGE_SIZE_OPTIONS}
+                          />
+                        </div>
+                        <div className="grid gap-3">
+                          {visibleIntegrityAuditIssues.map((issue) => (
+                            <article key={issue.id} className="min-w-0 rounded-2xl border bg-background p-4">
+                              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                                <div className="flex min-w-0 items-center gap-2 font-semibold">
+                                  <ShieldAlert className="h-4 w-4 shrink-0 text-destructive" />
+                                  <span className="truncate">{issue.id}</span>
+                                </div>
+                                <time className="text-xs text-muted-foreground">
+                                  {formatDateTimeLabel(issue.createdAt) || t("inventoryTransactions.integrityAudit.notAvailable", "—")}
+                                </time>
+                              </div>
+                              <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3 lg:grid-cols-4">
+                                <div className="min-w-0">
+                                  <dt className="text-xs text-muted-foreground">{t("inventoryTransactions.integrityAudit.fields.product", "Product ID")}</dt>
+                                  <dd className="break-all font-medium">{issue.productId}</dd>
+                                </div>
+                                <div className="min-w-0">
+                                  <dt className="text-xs text-muted-foreground">{t("inventoryTransactions.integrityAudit.fields.storage", "Storage ID")}</dt>
+                                  <dd className="break-all font-medium">{issue.storageId}</dd>
+                                </div>
+                                <div>
+                                  <dt className="text-xs text-muted-foreground">{t("inventoryTransactions.integrityAudit.fields.previous", "Previous quantity")}</dt>
+                                  <dd className="font-medium tabular-nums">{formatAuditQuantity(issue.previousQuantity)}</dd>
+                                </div>
+                                <div>
+                                  <dt className="text-xs text-muted-foreground">{t("inventoryTransactions.integrityAudit.fields.change", "Quantity change")}</dt>
+                                  <dd className="font-medium tabular-nums">{formatAuditQuantity(issue.quantityDelta)}</dd>
+                                </div>
+                                <div>
+                                  <dt className="text-xs text-muted-foreground">{t("inventoryTransactions.integrityAudit.fields.expected", "Expected after")}</dt>
+                                  <dd className="font-medium tabular-nums">{formatAuditQuantity(issue.expectedNewQuantity)}</dd>
+                                </div>
+                                <div>
+                                  <dt className="text-xs text-muted-foreground">{t("inventoryTransactions.integrityAudit.fields.recorded", "Recorded after")}</dt>
+                                  <dd className="font-medium tabular-nums">{formatAuditQuantity(issue.newQuantity)}</dd>
+                                </div>
+                              </dl>
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : null}
+              </section>
+            ) : null}
           </CardContent>
         </Card>
       </div>

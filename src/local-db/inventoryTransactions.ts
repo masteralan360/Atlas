@@ -1,25 +1,48 @@
+import Dexie, { type Table } from "dexie";
+import { useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
+import { useQuery } from "@tanstack/react-query";
 import { v5 as uuidv5 } from "uuid";
 
+import { queryKeys } from "@/query/queryKeys";
 import i18n from "@/i18n/config";
 import {
   QUANTITY_EPSILON,
   quantitiesEqual,
   roundQuantity,
 } from "@/lib/quantity";
-import { isOnline } from "@/lib/network";
+import {
+  getActiveBusinessUserId,
+  getActiveBusinessUserRole,
+  isOnline,
+} from "@/lib/network";
 import { getSupabaseClientForTable } from "@/lib/supabaseSchema";
-import { isRetriableWebRequestError, runSupabaseAction } from "@/lib/supabaseRequest";
+import {
+  isRetriableWebRequestError,
+  normalizeSupabaseActionError,
+  runSupabaseAction,
+} from "@/lib/supabaseRequest";
 import { generateId, toCamelCase, toSnakeCase } from "@/lib/utils";
 import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
-import { db } from "./database";
+import {
+  db,
+  INVENTORY_TRANSACTIONS_CHANGED_EVENT,
+  withoutInventoryTransactionChangeEvents,
+} from "./database";
 import { isAllowedInventoryQuantityTransition } from "./inventoryDeficit";
 import { canAccessStorage, useStorageAccess } from "./storagePermissions";
 import type {
   Inventory,
   InventoryTransaction,
   InventoryTransactionType,
+  OrderReturnItem,
+  Product,
+  PurchaseOrder,
+  Sale,
+  SaleReturn,
+  SalesOrder,
+  Storage,
   StockAdjustmentReason,
 } from "./models";
 
@@ -431,7 +454,9 @@ export async function hydrateInventoryTransactionsFromSupabase(
   }
 
   if (remoteTransactions.length > 0) {
-    await db.inventory_transactions.bulkPut(remoteTransactions);
+    await withoutInventoryTransactionChangeEvents(() =>
+      db.inventory_transactions.bulkPut(remoteTransactions),
+    );
   }
 }
 
@@ -575,4 +600,1065 @@ export function useInventoryTransactions(workspaceId: string | undefined) {
   }, [storageAccess.signature, workspaceId]);
 
   return transactions ?? [];
+}
+
+export type InventoryMovementDirection = "all" | "incoming" | "outgoing";
+export type InventoryMovementSource =
+  | "all"
+  | "stock-adjustment"
+  | "transfer"
+  | "pos-sale"
+  | "pos-return"
+  | "sales-order"
+  | "sales-order-return"
+  | "purchase-order"
+  | "initial-stock"
+  | "inventory-change"
+  | "sale-product-exchange"
+  | "sale-product-exchange-return";
+export type InventorySnapshotFilter = "all" | "recorded" | "not-recorded";
+
+export interface InventoryTransactionListFilters {
+  productId: string | null;
+  direction: InventoryMovementDirection;
+  source: InventoryMovementSource;
+  storageId: string | null;
+  snapshot: InventorySnapshotFilter;
+}
+
+export interface InventoryTransactionListQuery {
+  workspaceId?: string;
+  page: number;
+  pageSize: number;
+  startAt?: string;
+  endBefore?: string;
+  filters: InventoryTransactionListFilters;
+}
+
+export interface InventoryTransactionListPage {
+  rows: InventoryTransaction[];
+  totalCount: number;
+  pageCount: number;
+}
+
+export interface InventoryTransactionProductSummary {
+  productId: string;
+  productName: string | null;
+  sku: string | null;
+  unit: string | null;
+  incoming: number;
+  outgoing: number;
+  balance: number;
+}
+
+export interface InventoryTransactionProductSummaryPage {
+  rows: InventoryTransactionProductSummary[];
+  totalCount: number;
+  pageCount: number;
+}
+
+const EMPTY_INVENTORY_TRANSACTION_PAGE: InventoryTransactionListPage = {
+  rows: [],
+  totalCount: 0,
+  pageCount: 1,
+};
+
+const EMPTY_INVENTORY_TRANSACTION_SUMMARY_PAGE: InventoryTransactionProductSummaryPage = {
+  rows: [],
+  totalCount: 0,
+  pageCount: 1,
+};
+
+const inventoryTransactionTypes = new Set<InventoryTransactionType>([
+  "stock_adjustment",
+  "transfer_in",
+  "transfer_out",
+  "sale",
+  "return",
+  "purchase",
+  "initial_stock",
+  "inventory_change",
+]);
+
+export function getInventoryTransactionMovementSource(
+  transactionType: InventoryTransactionType,
+  referenceType?: string | null,
+): Exclude<InventoryMovementSource, "all"> {
+  switch (referenceType) {
+    case "pos_sale":
+      return "pos-sale";
+    case "pos_return":
+      return "pos-return";
+    case "sales_order":
+      return "sales-order";
+    case "sales_order_return":
+      return "sales-order-return";
+    case "purchase_order":
+    case "purchase_order_repair":
+      return "purchase-order";
+    case "inventory_transfer":
+    case "inventory_transfer_rollback":
+    case "reorder_transfer":
+      return "transfer";
+    case "sale_product_exchange":
+      return "sale-product-exchange";
+    case "sale_product_exchange_return":
+      return "sale-product-exchange-return";
+  }
+
+  switch (transactionType) {
+    case "stock_adjustment":
+      return "stock-adjustment";
+    case "transfer_in":
+    case "transfer_out":
+      return "transfer";
+    case "purchase":
+      return "purchase-order";
+    case "initial_stock":
+      return "initial-stock";
+    default:
+      return "inventory-change";
+  }
+}
+
+function normalizeInventoryTransactionRow(
+  value: unknown,
+  workspaceId: string,
+): InventoryTransaction | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = toCamelCase(value as Record<string, unknown>) as Record<string, unknown>;
+  const quantityDelta = Number(row.quantityDelta);
+  const previousQuantity = row.previousQuantity == null
+    ? null
+    : Number(row.previousQuantity);
+  const newQuantity = row.newQuantity == null
+    ? null
+    : Number(row.newQuantity);
+  if (
+    typeof row.id !== "string" ||
+    row.workspaceId !== workspaceId ||
+    typeof row.productId !== "string" ||
+    typeof row.storageId !== "string" ||
+    typeof row.createdAt !== "string" ||
+    Number.isNaN(Date.parse(row.createdAt)) ||
+    !inventoryTransactionTypes.has(row.transactionType as InventoryTransactionType) ||
+    !Number.isFinite(quantityDelta) ||
+    (previousQuantity !== null && !Number.isFinite(previousQuantity)) ||
+    (newQuantity !== null && !Number.isFinite(newQuantity))
+  ) {
+    return null;
+  }
+
+  return {
+    ...row,
+    id: row.id,
+    workspaceId,
+    productId: row.productId,
+    storageId: row.storageId,
+    createdAt: row.createdAt,
+    updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : row.createdAt,
+    transactionType: row.transactionType as InventoryTransactionType,
+    quantityDelta,
+    previousQuantity: previousQuantity as number,
+    newQuantity: newQuantity as number,
+    isDeleted: row.isDeleted === true,
+  } as InventoryTransaction;
+}
+
+function getRemoteInventoryTransactionArgs(
+  query: InventoryTransactionListQuery,
+  access: ReturnType<typeof useStorageAccess>,
+) {
+  return {
+    p_workspace_id: query.workspaceId,
+    p_page: Math.max(1, Math.floor(query.page)),
+    p_page_size: Math.max(1, Math.floor(query.pageSize)),
+    p_start_at: query.startAt ?? null,
+    p_end_before: query.endBefore ?? null,
+    p_product_id: query.filters.productId,
+    p_direction: query.filters.direction,
+    p_source: query.filters.source,
+    p_storage_id: query.filters.storageId,
+    p_excluded_storage_ids: access.isAdmin
+      ? []
+      : Array.from(access.excludedStorageIds),
+    p_snapshot: query.filters.snapshot,
+  };
+}
+
+function normalizeInventoryTransactionPage(
+  value: unknown,
+  workspaceId: string,
+  pageSize: number,
+): InventoryTransactionListPage {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid inventory transaction page response.");
+  }
+  const payload = value as Record<string, unknown>;
+  if (!Array.isArray(payload.rows)) {
+    throw new Error("Invalid inventory transaction rows.");
+  }
+  const totalCount = Number(payload.total_count);
+  if (!Number.isInteger(totalCount) || totalCount < 0) {
+    throw new Error("Invalid inventory transaction count.");
+  }
+  const rows = payload.rows.map((row) => normalizeInventoryTransactionRow(row, workspaceId));
+  if (rows.some((row) => row === null)) {
+    throw new Error("Invalid inventory transaction record.");
+  }
+  return {
+    rows: rows as InventoryTransaction[],
+    totalCount,
+    pageCount: Math.max(1, Math.ceil(totalCount / Math.max(1, pageSize))),
+  };
+}
+
+async function cacheRemoteInventoryTransactions(rows: readonly InventoryTransaction[]) {
+  if (rows.length === 0) return;
+  const existingRows = await db.inventory_transactions.bulkGet(rows.map((row) => row.id));
+  const fetchedAt = new Date().toISOString();
+  const cacheRows = rows.flatMap((row, index) => {
+    const existing = existingRows[index];
+    if (existing?.syncStatus === "pending" || existing?.syncStatus === "conflict") {
+      return [];
+    }
+    const existingUpdatedAt = Date.parse(existing?.updatedAt || "");
+    const remoteUpdatedAt = Date.parse(row.updatedAt || "");
+    if (
+      existing &&
+      Number.isFinite(existingUpdatedAt) &&
+      Number.isFinite(remoteUpdatedAt) &&
+      remoteUpdatedAt <= existingUpdatedAt
+    ) {
+      return [];
+    }
+    return [{ ...row, syncStatus: "synced" as const, lastSyncedAt: fetchedAt }];
+  });
+  if (cacheRows.length > 0) {
+    await withoutInventoryTransactionChangeEvents(() =>
+      db.inventory_transactions.bulkPut(cacheRows),
+    );
+  }
+}
+
+async function fetchRemoteInventoryTransactionPage(
+  query: InventoryTransactionListQuery,
+  access: ReturnType<typeof useStorageAccess>,
+  signal?: AbortSignal,
+): Promise<InventoryTransactionListPage> {
+  if (!query.workspaceId) return EMPTY_INVENTORY_TRANSACTION_PAGE;
+  const response = await runSupabaseAction("inventoryTransactions.listPage", () => {
+    const request = getSupabaseClientForTable(TABLE_NAME).rpc(
+      "get_inventory_transactions_list_page",
+      getRemoteInventoryTransactionArgs(query, access),
+    );
+    return signal ? request.abortSignal(signal) : request;
+  });
+  if (response.error) {
+    throw normalizeSupabaseActionError(response.error);
+  }
+  if (signal?.aborted) throw signal.reason ?? new Error("Inventory transaction request cancelled.");
+
+  const page = normalizeInventoryTransactionPage(
+    response.data,
+    query.workspaceId,
+    query.pageSize,
+  );
+  await cacheRemoteInventoryTransactions(page.rows);
+  return page;
+}
+
+function getLocalInventoryTransactionCollection(query: InventoryTransactionListQuery) {
+  const workspaceId = query.workspaceId!;
+  const startAt = query.startAt ?? Dexie.minKey;
+  const endBefore = query.endBefore ?? Dexie.maxKey;
+  const endId = query.endBefore ? Dexie.minKey : Dexie.maxKey;
+  const includeUpper = !query.endBefore;
+  const productId = query.filters.productId;
+  const storageId = query.filters.storageId;
+
+  if (productId) {
+    return db.inventory_transactions
+      .where("[workspaceId+productId+createdAt+id]")
+      .between(
+        [workspaceId, productId, startAt, Dexie.minKey],
+        [workspaceId, productId, endBefore, endId],
+        true,
+        includeUpper,
+      );
+  }
+
+  if (storageId) {
+    return db.inventory_transactions
+      .where("[workspaceId+storageId+createdAt+id]")
+      .between(
+        [workspaceId, storageId, startAt, Dexie.minKey],
+        [workspaceId, storageId, endBefore, endId],
+        true,
+        includeUpper,
+      );
+  }
+
+  return db.inventory_transactions
+    .where("[workspaceId+createdAt+id]")
+    .between(
+      [workspaceId, startAt, Dexie.minKey],
+      [workspaceId, endBefore, endId],
+      true,
+      includeUpper,
+    );
+}
+
+function matchesInventoryTransactionListFilters(
+  transaction: InventoryTransaction,
+  query: InventoryTransactionListQuery,
+  access: ReturnType<typeof useStorageAccess>,
+  serviceProductIds: ReadonlySet<string>,
+) {
+  const { filters } = query;
+  if (
+    transaction.workspaceId !== query.workspaceId ||
+    transaction.isDeleted ||
+    !access.canAccessStorage(transaction.storageId) ||
+    serviceProductIds.has(transaction.productId)
+  ) {
+    return false;
+  }
+  if (filters.productId && transaction.productId !== filters.productId) return false;
+  if (filters.storageId && transaction.storageId !== filters.storageId) return false;
+
+  const movementSource = getInventoryTransactionMovementSource(
+    transaction.transactionType,
+    transaction.referenceType,
+  );
+  if (filters.source !== "all" && movementSource !== filters.source) return false;
+  if (
+    filters.direction === "incoming" && transaction.quantityDelta <= 0 ||
+    filters.direction === "outgoing" && transaction.quantityDelta >= 0
+  ) {
+    return false;
+  }
+
+  const hasSnapshot =
+    transaction.previousQuantity !== null &&
+    transaction.previousQuantity !== undefined &&
+    transaction.newQuantity !== null &&
+    transaction.newQuantity !== undefined;
+  if (filters.snapshot === "recorded" && !hasSnapshot) return false;
+  if (filters.snapshot === "not-recorded" && hasSnapshot) return false;
+  return true;
+}
+
+async function getServiceProductIds(workspaceId: string) {
+  const ids = await db.products
+    .where("workspaceId")
+    .equals(workspaceId)
+    .filter((product) => product.isService === true)
+    .primaryKeys();
+  return new Set(ids.map(String));
+}
+
+async function fetchLocalInventoryTransactionPage(
+  query: InventoryTransactionListQuery,
+  access: ReturnType<typeof useStorageAccess>,
+  signal?: AbortSignal,
+): Promise<InventoryTransactionListPage> {
+  if (!query.workspaceId || access.isReady === false) {
+    return EMPTY_INVENTORY_TRANSACTION_PAGE;
+  }
+  const serviceProductIds = await getServiceProductIds(query.workspaceId);
+  const offset = (Math.max(1, query.page) - 1) * Math.max(1, query.pageSize);
+  const limit = Math.max(1, query.pageSize);
+  const rows: InventoryTransaction[] = [];
+  let totalCount = 0;
+
+  await getLocalInventoryTransactionCollection(query).reverse().each((row) => {
+    if (signal?.aborted) return false;
+    if (!matchesInventoryTransactionListFilters(row, query, access, serviceProductIds)) {
+      return;
+    }
+    if (totalCount >= offset && rows.length < limit) rows.push(row);
+    totalCount += 1;
+  });
+  if (signal?.aborted) throw signal.reason ?? new Error("Inventory transaction request cancelled.");
+
+  return {
+    rows,
+    totalCount,
+    pageCount: Math.max(1, Math.ceil(totalCount / limit)),
+  };
+}
+
+function getInventoryTransactionQueryKeyParts(
+  query: InventoryTransactionListQuery,
+  sourceMode: "remote" | "local",
+) {
+  return {
+    workspaceId: query.workspaceId,
+    page: query.page,
+    pageSize: query.pageSize,
+    startAt: query.startAt,
+    endBefore: query.endBefore,
+    ...query.filters,
+    sort: "createdAt:desc,id:desc" as const,
+    sourceMode,
+    viewer: {
+      userId: getActiveBusinessUserId(),
+      role: getActiveBusinessUserRole(),
+      storageScope: "",
+    },
+  };
+}
+
+export function useInventoryTransactionsPage(
+  query: InventoryTransactionListQuery,
+  enabled = true,
+  onlineOverride?: boolean,
+) {
+  const access = useStorageAccess(query.workspaceId);
+  const online = onlineOverride ?? isOnline(query.workspaceId);
+  const sourceMode = query.workspaceId && online && !isLocalWorkspaceMode(query.workspaceId)
+    ? "remote"
+    : "local";
+  const keyParts = getInventoryTransactionQueryKeyParts(query, sourceMode);
+  keyParts.viewer.storageScope = access.signature;
+
+  return useQuery({
+    queryKey: queryKeys.inventoryTransactions.page(keyParts),
+    queryFn: ({ signal }) => sourceMode === "remote"
+      ? fetchRemoteInventoryTransactionPage(query, access, signal)
+      : fetchLocalInventoryTransactionPage(query, access, signal),
+    enabled: enabled && Boolean(query.workspaceId) && access.isReady !== false,
+    placeholderData: undefined,
+  });
+}
+
+function normalizeProductSummaryPage(
+  value: unknown,
+  pageSize: number,
+): InventoryTransactionProductSummaryPage {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid inventory product summary response.");
+  }
+  const payload = value as Record<string, unknown>;
+  if (!Array.isArray(payload.rows)) throw new Error("Invalid inventory product summary rows.");
+  const totalCount = Number(payload.total_count);
+  if (!Number.isInteger(totalCount) || totalCount < 0) {
+    throw new Error("Invalid inventory product summary count.");
+  }
+  const rows = payload.rows.map((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const row = toCamelCase(value as Record<string, unknown>) as Record<string, unknown>;
+    if (typeof row.productId !== "string") return null;
+    const incoming = Number(row.incoming);
+    const outgoing = Number(row.outgoing);
+    const balance = Number(row.balance);
+    if (![incoming, outgoing, balance].every(Number.isFinite)) return null;
+    return {
+      productId: row.productId,
+      productName: typeof row.productName === "string" ? row.productName : null,
+      sku: typeof row.sku === "string" ? row.sku : null,
+      unit: typeof row.unit === "string" ? row.unit : null,
+      incoming,
+      outgoing,
+      balance,
+    } satisfies InventoryTransactionProductSummary;
+  });
+  if (rows.some((row) => row === null)) {
+    throw new Error("Invalid inventory product summary record.");
+  }
+  return {
+    rows: rows as InventoryTransactionProductSummary[],
+    totalCount,
+    pageCount: Math.max(1, Math.ceil(totalCount / Math.max(1, pageSize))),
+  };
+}
+
+async function aggregateLocalInventoryTransactions(
+  query: InventoryTransactionListQuery,
+  access: ReturnType<typeof useStorageAccess>,
+  signal?: AbortSignal,
+) {
+  if (!query.workspaceId || access.isReady === false) return new Map<string, { incoming: number; outgoing: number }>();
+  const serviceProductIds = await getServiceProductIds(query.workspaceId);
+  const totals = new Map<string, { incoming: number; outgoing: number }>();
+  await getLocalInventoryTransactionCollection(query).reverse().each((row) => {
+    if (signal?.aborted) return false;
+    if (!matchesInventoryTransactionListFilters(row, query, access, serviceProductIds)) return;
+    const current = totals.get(row.productId) ?? { incoming: 0, outgoing: 0 };
+    if (row.quantityDelta > 0) current.incoming += row.quantityDelta;
+    else current.outgoing += Math.abs(row.quantityDelta);
+    totals.set(row.productId, current);
+  });
+  if (signal?.aborted) throw signal.reason ?? new Error("Inventory transaction request cancelled.");
+  return totals;
+}
+
+async function localProductSummaryPageFromTotals(
+  totals: ReadonlyMap<string, { incoming: number; outgoing: number }>,
+  query: InventoryTransactionListQuery,
+): Promise<InventoryTransactionProductSummaryPage> {
+  const productIds = Array.from(totals.keys()).sort((left, right) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  );
+  const offset = (Math.max(1, query.page) - 1) * Math.max(1, query.pageSize);
+  const pageIds = productIds.slice(offset, offset + Math.max(1, query.pageSize));
+  const products = await db.products.bulkGet(pageIds);
+  const rows = pageIds.flatMap((productId, index) => {
+    const totalsForProduct = totals.get(productId);
+    if (!totalsForProduct) return [];
+    const product = products[index];
+    return [{
+      productId,
+      productName: product?.name ?? null,
+      sku: product?.sku ?? null,
+      unit: product?.unit ?? null,
+      incoming: totalsForProduct.incoming,
+      outgoing: totalsForProduct.outgoing,
+      balance: totalsForProduct.incoming - totalsForProduct.outgoing,
+    }];
+  });
+  return {
+    rows,
+    totalCount: productIds.length,
+    pageCount: Math.max(1, Math.ceil(productIds.length / Math.max(1, query.pageSize))),
+  };
+}
+
+async function fetchRemoteInventoryTransactionProductSummaryPage(
+  query: InventoryTransactionListQuery,
+  access: ReturnType<typeof useStorageAccess>,
+  signal?: AbortSignal,
+) {
+  if (!query.workspaceId) return EMPTY_INVENTORY_TRANSACTION_SUMMARY_PAGE;
+  const response = await runSupabaseAction("inventoryTransactions.productSummaryPage", () => {
+    const request = getSupabaseClientForTable(TABLE_NAME).rpc(
+      "get_inventory_transaction_product_summary_page",
+      getRemoteInventoryTransactionArgs(query, access),
+    );
+    return signal ? request.abortSignal(signal) : request;
+  });
+  if (response.error) throw normalizeSupabaseActionError(response.error);
+  if (signal?.aborted) throw signal.reason ?? new Error("Inventory summary request cancelled.");
+  return normalizeProductSummaryPage(response.data, query.pageSize);
+}
+
+export function useInventoryTransactionProductSummaryPage(
+  query: InventoryTransactionListQuery,
+  enabled = true,
+  onlineOverride?: boolean,
+) {
+  const access = useStorageAccess(query.workspaceId);
+  const online = onlineOverride ?? isOnline(query.workspaceId);
+  const sourceMode = query.workspaceId && online && !isLocalWorkspaceMode(query.workspaceId)
+    ? "remote"
+    : "local";
+  const keyParts = getInventoryTransactionQueryKeyParts(query, sourceMode);
+  keyParts.viewer.storageScope = access.signature;
+  const summaryKeyParts = { ...keyParts, sort: "productId:asc" as const };
+
+  return useQuery({
+    queryKey: queryKeys.inventoryTransactions.productSummaryPage(summaryKeyParts),
+    queryFn: async ({ signal }) => {
+      if (sourceMode === "remote") {
+        return fetchRemoteInventoryTransactionProductSummaryPage(query, access, signal);
+      }
+      const totals = await aggregateLocalInventoryTransactions(query, access, signal);
+      return localProductSummaryPageFromTotals(totals, query);
+    },
+    enabled: enabled && Boolean(query.workspaceId) && access.isReady !== false,
+    placeholderData: undefined,
+  });
+}
+
+export async function fetchAllInventoryTransactionProductSummary(
+  query: InventoryTransactionListQuery,
+  access: ReturnType<typeof useStorageAccess>,
+  onlineOverride?: boolean,
+) {
+  if (!query.workspaceId || access.isReady === false) return [] as InventoryTransactionProductSummary[];
+  const exportPageSize = 250;
+  const exportQuery = { ...query, page: 1, pageSize: exportPageSize };
+  const online = (onlineOverride ?? isOnline(query.workspaceId))
+    && !isLocalWorkspaceMode(query.workspaceId);
+
+  if (online) {
+    const firstPage = await fetchRemoteInventoryTransactionProductSummaryPage(exportQuery, access);
+    const rows = [...firstPage.rows];
+    for (let page = 2; page <= firstPage.pageCount; page += 1) {
+      const result = await fetchRemoteInventoryTransactionProductSummaryPage(
+        { ...exportQuery, page },
+        access,
+      );
+      rows.push(...result.rows);
+    }
+    return rows;
+  }
+
+  const totals = await aggregateLocalInventoryTransactions(exportQuery, access);
+  const productIds = Array.from(totals.keys()).sort((left, right) =>
+    left < right ? -1 : left > right ? 1 : 0,
+  );
+  const rows: InventoryTransactionProductSummary[] = [];
+  for (let offset = 0; offset < productIds.length; offset += exportPageSize) {
+    const pageIds = productIds.slice(offset, offset + exportPageSize);
+    const products = await db.products.bulkGet(pageIds);
+    for (let index = 0; index < pageIds.length; index += 1) {
+      const productId = pageIds[index];
+      const productTotals = totals.get(productId);
+      if (!productTotals) continue;
+      const product = products[index];
+      rows.push({
+        productId,
+        productName: product?.name ?? null,
+        sku: product?.sku ?? null,
+        unit: product?.unit ?? null,
+        incoming: productTotals.incoming,
+        outgoing: productTotals.outgoing,
+        balance: productTotals.incoming - productTotals.outgoing,
+      });
+    }
+  }
+  return rows;
+}
+
+export interface InventoryTransactionIntegrityIssue {
+  id: string;
+  productId: string;
+  storageId: string;
+  createdAt: string;
+  quantityDelta: number | null;
+  previousQuantity: number | null;
+  newQuantity: number | null;
+  expectedNewQuantity: number | null;
+}
+
+export interface InventoryTransactionIntegrityAuditReport {
+  checkedCount: number;
+  arithmeticCheckedCount: number;
+  consistentCount: number;
+  inconsistentCount: number;
+  unverifiableCount: number;
+  issues: InventoryTransactionIntegrityIssue[];
+}
+
+export interface InventoryTransactionIntegrityAuditProgress {
+  checkedCount: number;
+  totalCount: number | null;
+}
+
+export interface InventoryTransactionIntegrityAuditOptions {
+  signal?: AbortSignal;
+  online?: boolean;
+  expectedTotalCount?: number;
+  onProgress?: (progress: InventoryTransactionIntegrityAuditProgress) => void;
+}
+
+const INVENTORY_TRANSACTION_AUDIT_BATCH_SIZE = 250;
+
+function createInventoryTransactionIntegrityAuditReport(
+  checkedCount: number,
+  unverifiableCount: number,
+  issues: InventoryTransactionIntegrityIssue[],
+): InventoryTransactionIntegrityAuditReport {
+  const arithmeticCheckedCount = Math.max(0, checkedCount - unverifiableCount);
+  return {
+    checkedCount,
+    arithmeticCheckedCount,
+    consistentCount: Math.max(0, arithmeticCheckedCount - issues.length),
+    inconsistentCount: issues.length,
+    unverifiableCount,
+    issues,
+  };
+}
+
+/** Audits every transaction matching the active list filters, across source pages. */
+export async function auditInventoryTransactionIntegrity(
+  query: InventoryTransactionListQuery,
+  access: ReturnType<typeof useStorageAccess>,
+  options: InventoryTransactionIntegrityAuditOptions = {},
+): Promise<InventoryTransactionIntegrityAuditReport> {
+  if (!query.workspaceId || access.isReady === false) {
+    throw new Error("Inventory transaction access is not ready.");
+  }
+
+  const issues: InventoryTransactionIntegrityIssue[] = [];
+  let checkedCount = 0;
+  let unverifiableCount = 0;
+  const signal = options.signal;
+  const reportProgress = (totalCount: number | null) => {
+    options.onProgress?.({ checkedCount, totalCount });
+  };
+
+  const inspectTransaction = (transaction: InventoryTransaction) => {
+    checkedCount += 1;
+    const quantityDelta = transaction.quantityDelta as unknown;
+    const previousQuantity = transaction.previousQuantity as unknown;
+    const newQuantity = transaction.newQuantity as unknown;
+    const deltaValue = typeof quantityDelta === "number" ? quantityDelta : null;
+    const previousValue = typeof previousQuantity === "number" ? previousQuantity : null;
+    const newValue = typeof newQuantity === "number" ? newQuantity : null;
+    const deltaIsFinite = deltaValue !== null && Number.isFinite(deltaValue);
+    const previousIsFinite = typeof previousQuantity === "number" && Number.isFinite(previousQuantity);
+    const newIsFinite = typeof newQuantity === "number" && Number.isFinite(newQuantity);
+
+    if (!deltaIsFinite) {
+      issues.push({
+        id: transaction.id,
+        productId: transaction.productId,
+        storageId: transaction.storageId,
+        createdAt: transaction.createdAt,
+        quantityDelta: deltaValue,
+        previousQuantity: previousValue,
+        newQuantity: newValue,
+        expectedNewQuantity: null,
+      });
+      return;
+    }
+
+    if (previousQuantity == null || newQuantity == null) {
+      unverifiableCount += 1;
+      return;
+    }
+
+    const expectedValue = previousIsFinite
+      ? previousValue! + deltaValue!
+      : Number.NaN;
+    const expectedNewQuantity = Number.isFinite(expectedValue)
+      ? roundQuantity(expectedValue)
+      : null;
+    if (
+      !previousIsFinite ||
+      !newIsFinite ||
+      expectedNewQuantity === null ||
+      !quantitiesEqual(expectedValue, newValue!)
+    ) {
+      issues.push({
+        id: transaction.id,
+        productId: transaction.productId,
+        storageId: transaction.storageId,
+        createdAt: transaction.createdAt,
+        quantityDelta: deltaValue,
+        previousQuantity: previousValue,
+        newQuantity: newValue,
+        expectedNewQuantity,
+      });
+    }
+  };
+
+  const online = (options.online ?? isOnline(query.workspaceId))
+    && !isLocalWorkspaceMode(query.workspaceId);
+
+  if (online) {
+    const auditPageSize = INVENTORY_TRANSACTION_AUDIT_BATCH_SIZE;
+    const firstPage = await fetchRemoteInventoryTransactionPage(
+      { ...query, page: 1, pageSize: auditPageSize },
+      access,
+      signal,
+    );
+    const totalCount = firstPage.totalCount;
+    for (let page = 1; page <= firstPage.pageCount; page += 1) {
+      if (signal?.aborted) {
+        throw signal.reason ?? new Error("Inventory transaction audit cancelled.");
+      }
+      const result = page === 1
+        ? firstPage
+        : await fetchRemoteInventoryTransactionPage(
+          { ...query, page, pageSize: auditPageSize },
+          access,
+          signal,
+        );
+      result.rows.forEach(inspectTransaction);
+      reportProgress(totalCount);
+    }
+    return createInventoryTransactionIntegrityAuditReport(
+      checkedCount,
+      unverifiableCount,
+      issues,
+    );
+  }
+
+  const serviceProductIds = await getServiceProductIds(query.workspaceId);
+  const expectedTotalCount = Number.isFinite(options.expectedTotalCount)
+    ? Math.max(0, options.expectedTotalCount!)
+    : null;
+  await getLocalInventoryTransactionCollection(query).reverse().each((transaction) => {
+    if (signal?.aborted) {
+      throw signal.reason ?? new Error("Inventory transaction audit cancelled.");
+    }
+    if (!matchesInventoryTransactionListFilters(
+      transaction,
+      query,
+      access,
+      serviceProductIds,
+    )) {
+      return;
+    }
+    inspectTransaction(transaction);
+    if (checkedCount % INVENTORY_TRANSACTION_AUDIT_BATCH_SIZE === 0) {
+      reportProgress(expectedTotalCount);
+    }
+  });
+  if (signal?.aborted) {
+    throw signal.reason ?? new Error("Inventory transaction audit cancelled.");
+  }
+  reportProgress(expectedTotalCount ?? checkedCount);
+  return createInventoryTransactionIntegrityAuditReport(
+    checkedCount,
+    unverifiableCount,
+    issues,
+  );
+}
+
+export function useInventoryTransactionPagesChanged(workspaceId?: string) {
+  useEffect(() => {
+    if (!workspaceId || typeof window === "undefined") return;
+    const handleChanged = (event: Event) => {
+      const changedWorkspaceIds = (event as CustomEvent<{ workspaceIds?: string[] }>).detail
+        ?.workspaceIds;
+      if (!changedWorkspaceIds?.includes(workspaceId)) return;
+      void import("@/query/queryClient").then(({ queryClient }) =>
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.inventoryTransactions.all(workspaceId),
+        }),
+      );
+    };
+    window.addEventListener(INVENTORY_TRANSACTIONS_CHANGED_EVENT, handleChanged);
+    return () => window.removeEventListener(INVENTORY_TRANSACTIONS_CHANGED_EVENT, handleChanged);
+  }, [workspaceId]);
+}
+
+export interface InventoryTransactionPageRelations {
+  products: Product[];
+  storages: Storage[];
+  sales: Sale[];
+  saleReturns: SaleReturn[];
+  salesOrders: SalesOrder[];
+  purchaseOrders: PurchaseOrder[];
+  salesOrderReturnItems: OrderReturnItem[];
+}
+
+export function useInventoryTransactionProduct(
+  workspaceId?: string,
+  productId?: string | null,
+) {
+  return useLiveQuery(async () => {
+    if (!workspaceId || !productId) return undefined;
+    const product = await db.products.get(productId);
+    return product?.workspaceId === workspaceId && !product.isDeleted
+      ? product
+      : undefined;
+  }, [productId, workspaceId]);
+}
+
+type WorkspaceRelatedRecord = {
+  id: string;
+  workspaceId: string;
+  updatedAt?: string;
+  syncStatus?: string;
+  lastSyncedAt?: string | null;
+};
+
+async function cacheInventoryTransactionRelatedRows<T extends WorkspaceRelatedRecord>(
+  table: Table<T, string>,
+  rows: readonly T[],
+) {
+  if (rows.length === 0) return;
+  const existingRows = await table.bulkGet(rows.map((row) => row.id));
+  const syncedAt = new Date().toISOString();
+  const cacheRows = rows.flatMap((row, index) => {
+    const existing = existingRows[index];
+    if (existing?.syncStatus === "pending" || existing?.syncStatus === "conflict") return [];
+    const existingUpdatedAt = Date.parse(existing?.updatedAt || "");
+    const remoteUpdatedAt = Date.parse(row.updatedAt || "");
+    if (
+      existing &&
+      Number.isFinite(existingUpdatedAt) &&
+      Number.isFinite(remoteUpdatedAt) &&
+      remoteUpdatedAt <= existingUpdatedAt
+    ) {
+      return [];
+    }
+    return [{ ...existing, ...row, syncStatus: "synced", lastSyncedAt: syncedAt } as T];
+  });
+  if (cacheRows.length > 0) await table.bulkPut(cacheRows);
+}
+
+async function fetchInventoryTransactionRelatedRows(
+  tableName: string,
+  workspaceId: string,
+  ids: readonly string[],
+  signal: AbortSignal,
+  filterColumn = "id",
+) {
+  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+  if (uniqueIds.length === 0 || signal.aborted) return [] as WorkspaceRelatedRecord[];
+  try {
+    const response = await runSupabaseAction(`inventoryTransactions.pageRelations.${tableName}`, () => {
+      const request = getSupabaseClientForTable(tableName)
+        .from(tableName)
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .in(filterColumn, uniqueIds);
+      return request.abortSignal(signal);
+    });
+    if (response.error) return [] as WorkspaceRelatedRecord[];
+    return (response.data ?? []).flatMap((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const row = toCamelCase(value as Record<string, unknown>) as Record<string, unknown>;
+      if (typeof row.id !== "string" || row.workspaceId !== workspaceId) return [];
+      return [row as WorkspaceRelatedRecord];
+    });
+  } catch {
+    return [] as WorkspaceRelatedRecord[];
+  }
+}
+
+async function hydrateInventoryTransactionPageRelations(
+  workspaceId: string,
+  transactions: readonly InventoryTransaction[],
+  signal: AbortSignal,
+) {
+  const bySource = (source: string) => Array.from(new Set(
+    transactions.flatMap((transaction) => getInventoryTransactionMovementSource(
+      transaction.transactionType,
+      transaction.referenceType,
+    ) === source
+      ? [transaction.referenceId || transaction.id]
+      : []),
+  ));
+  const productIds = Array.from(new Set(transactions.map((transaction) => transaction.productId)));
+  const storageIds = Array.from(new Set(transactions.map((transaction) => transaction.storageId)));
+  const posSaleIds = bySource("pos-sale");
+  const posReturnIds = bySource("pos-return");
+  const salesOrderIds = bySource("sales-order");
+  const salesOrderReturnIds = bySource("sales-order-return");
+  const purchaseOrderIds = bySource("purchase-order");
+
+  const [products, storages, directSales, saleReturns, directSalesOrders, purchaseOrders, returnItems] = await Promise.all([
+    fetchInventoryTransactionRelatedRows("products", workspaceId, productIds, signal),
+    fetchInventoryTransactionRelatedRows("storages", workspaceId, storageIds, signal),
+    fetchInventoryTransactionRelatedRows("sales", workspaceId, posSaleIds, signal),
+    fetchInventoryTransactionRelatedRows("sale_returns", workspaceId, posReturnIds, signal),
+    fetchInventoryTransactionRelatedRows("sales_orders", workspaceId, salesOrderIds, signal),
+    fetchInventoryTransactionRelatedRows("purchase_orders", workspaceId, purchaseOrderIds, signal),
+    fetchInventoryTransactionRelatedRows("order_return_items", workspaceId, salesOrderReturnIds, signal, "return_id"),
+  ]);
+  if (signal.aborted) return;
+
+  const saleIds = Array.from(new Set([
+    ...posSaleIds,
+    ...saleReturns.flatMap((saleReturn) => typeof saleReturn.saleId === "string" ? [saleReturn.saleId] : []),
+  ]));
+  const relatedSales = saleReturns.length === 0
+    ? directSales
+    : await fetchInventoryTransactionRelatedRows("sales", workspaceId, saleIds, signal);
+  const relatedOrderIds = Array.from(new Set([
+    ...salesOrderIds,
+    ...returnItems.flatMap((item) => typeof item.orderId === "string" ? [item.orderId] : []),
+  ]));
+  const relatedSalesOrders = returnItems.length === 0
+    ? directSalesOrders
+    : await fetchInventoryTransactionRelatedRows("sales_orders", workspaceId, relatedOrderIds, signal);
+
+  await Promise.all([
+    cacheInventoryTransactionRelatedRows(db.products, products as Product[]),
+    cacheInventoryTransactionRelatedRows(db.storages, storages as Storage[]),
+    cacheInventoryTransactionRelatedRows(db.sales, relatedSales as Sale[]),
+    cacheInventoryTransactionRelatedRows(db.sale_returns, saleReturns as SaleReturn[]),
+    cacheInventoryTransactionRelatedRows(db.sales_orders, relatedSalesOrders as SalesOrder[]),
+    cacheInventoryTransactionRelatedRows(db.purchase_orders, purchaseOrders as PurchaseOrder[]),
+    cacheInventoryTransactionRelatedRows(db.order_return_items, returnItems as OrderReturnItem[]),
+  ]);
+}
+
+export function useInventoryTransactionPageRelations(
+  transactions: readonly InventoryTransaction[],
+  workspaceId?: string,
+  online = false,
+) {
+  const idsKey = transactions.map((transaction) => [
+    transaction.id,
+    transaction.productId,
+    transaction.storageId,
+    transaction.referenceId ?? "",
+    transaction.referenceType ?? "",
+    transaction.updatedAt,
+  ].join(":")).join("|");
+  useEffect(() => {
+    if (
+      !workspaceId ||
+      !online ||
+      isLocalWorkspaceMode(workspaceId) ||
+      transactions.length === 0
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    void hydrateInventoryTransactionPageRelations(workspaceId, transactions, controller.signal);
+    return () => controller.abort();
+  }, [idsKey, online, transactions, workspaceId]);
+  return useLiveQuery<InventoryTransactionPageRelations>(async () => {
+    if (transactions.length === 0) {
+      return {
+        products: [],
+        storages: [],
+        sales: [],
+        saleReturns: [],
+        salesOrders: [],
+        purchaseOrders: [],
+        salesOrderReturnItems: [],
+      };
+    }
+    const unique = (values: Array<string | null | undefined>) =>
+      Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+    const referenceIds = (source: string) => unique(
+      transactions
+        .filter((transaction) => getInventoryTransactionMovementSource(
+          transaction.transactionType,
+          transaction.referenceType,
+        ) === source)
+        .map((transaction) => transaction.referenceId || transaction.id),
+    );
+    const productIds = unique(transactions.map((transaction) => transaction.productId));
+    const storageIds = unique(transactions.map((transaction) => transaction.storageId));
+    const posSaleIds = referenceIds("pos-sale");
+    const posReturnIds = referenceIds("pos-return");
+    const salesOrderIds = referenceIds("sales-order");
+    const salesOrderReturnIds = referenceIds("sales-order-return");
+    const purchaseOrderIds = referenceIds("purchase-order");
+
+    const [products, storages, directSales, saleReturns, purchaseOrders, salesOrderReturnItems] = await Promise.all([
+      db.products.bulkGet(productIds),
+      db.storages.bulkGet(storageIds),
+      db.sales.bulkGet(posSaleIds),
+      db.sale_returns.bulkGet(posReturnIds),
+      db.purchase_orders.bulkGet(purchaseOrderIds),
+      salesOrderReturnIds.length > 0
+        ? db.order_return_items.where("returnId").anyOf(salesOrderReturnIds).toArray()
+        : Promise.resolve([] as OrderReturnItem[]),
+    ]);
+    const returnedSaleIds = saleReturns.flatMap((saleReturn) => saleReturn?.saleId ? [saleReturn.saleId] : []);
+    const additionalSales = returnedSaleIds.length > 0
+      ? await db.sales.bulkGet(returnedSaleIds)
+      : [];
+    const relatedSalesOrderIds = unique([
+      ...salesOrderIds,
+      ...salesOrderReturnItems.map((item) => item.orderId),
+    ]);
+    const salesOrders = relatedSalesOrderIds.length > 0
+      ? await db.sales_orders.bulkGet(relatedSalesOrderIds)
+      : [];
+
+    return {
+      products: products.filter((product): product is Product => Boolean(product)),
+      storages: storages.filter((storage): storage is Storage => Boolean(storage)),
+      sales: [...directSales, ...additionalSales]
+        .filter((sale): sale is Sale => Boolean(sale)),
+      saleReturns: saleReturns.filter((saleReturn): saleReturn is SaleReturn => Boolean(saleReturn)),
+      salesOrders: salesOrders.filter((order): order is SalesOrder => Boolean(order)),
+      purchaseOrders: purchaseOrders.filter((order): order is PurchaseOrder => Boolean(order)),
+      salesOrderReturnItems,
+    };
+  }, [idsKey]);
 }

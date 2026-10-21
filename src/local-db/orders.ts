@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import Dexie from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { v5 as uuidv5 } from 'uuid'
@@ -34,7 +34,8 @@ import { canBePurchased, isService } from '@/lib/catalogItem'
 import { getPartnerSyncWriteRpc, getSupabaseClientForTable, getSupabaseRemoteTableName } from '@/lib/supabaseSchema'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId, toCamelCase } from '@/lib/utils'
-import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { getWorkspaceDataMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { isCrudDebuggerEnabled, runCrudOperation, type CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import { readWorkspaceCache } from '@/workspace/workspaceCache'
 import { supabase } from '@/auth/supabase'
 import { useViewOwnRecordScope } from '@/permissions/useViewOwnRecordScope'
@@ -238,6 +239,30 @@ export type OrderFormSaveOptions = {
     actingUserRole?: UserRole
     /** Optional prices already converted to each product's selling-price currency. */
     minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
+    /** Development-only trace propagated through the shared order persistence path. */
+    trace?: CrudTraceHandle
+}
+
+function runSalesOrderCrud<T>(
+    action: 'create' | 'read' | 'update' | 'delete',
+    execute: (trace: CrudTraceHandle | undefined) => Promise<T>,
+    workspaceId?: string,
+    entityId?: string,
+    parentTrace?: CrudTraceHandle
+) {
+    if (parentTrace) return execute(parentTrace)
+    if (!isCrudDebuggerEnabled()) return execute(undefined)
+    return runCrudOperation({ action, entityKey: 'salesOrder', workspaceId, entityId }, execute)
+}
+
+function measureSalesOrderStage<T>(
+    trace: CrudTraceHandle | undefined,
+    labelKey: string,
+    layer: 'interaction' | 'application' | 'data' | 'network' | 'persistence' | 'response' | 'unknown',
+    work: () => Promise<T> | T,
+    detailsKey?: string
+) {
+    return trace ? trace.measure(labelKey, layer, work, detailsKey) : work()
 }
 
 async function assertSalesOrderMinimumPrices(
@@ -426,6 +451,8 @@ type SyncUpsertOptions = {
     requireRemoteConfirmation?: boolean
     /** Fields intentionally kept server-authoritative during narrow updates. */
     omitFields?: readonly string[]
+    /** Optional trace propagated only for a user-initiated sales order operation. */
+    trace?: CrudTraceHandle
 }
 
 async function syncUpsertEntities(
@@ -442,7 +469,14 @@ async function syncUpsertEntities(
         if (options.requireRemoteConfirmation) {
             throw createRemoteOrderSaveConfirmationError()
         }
-        await queueOfflineUpserts(tableName, entities, workspaceId, options)
+        await measureSalesOrderStage(
+            options.trace,
+            'crudDebugger.stages.salesOrderOfflineQueue',
+            'data',
+            () => queueOfflineUpserts(tableName, entities, workspaceId, options),
+            'crudDebugger.details.queuedForSync'
+        )
+        options.trace?.addPendingStage('crudDebugger.stages.remoteSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
         return
     }
 
@@ -452,35 +486,50 @@ async function syncUpsertEntities(
         const partnerSyncWriteRpc = getPartnerSyncWriteRpc(tableName)
 
         if (partnerSyncWriteRpc) {
-            for (const entity of payload) {
-                const { error } = await runMutation(`${tableName}.sync`, () => client.rpc(partnerSyncWriteRpc, {
-                    p_operation: 'upsert',
-                    p_entity_id: entity.id,
-                    p_workspace_id: workspaceId,
-                    p_payload: entity
-                }))
-                if (error) {
-                    throw error
+            await measureSalesOrderStage(options.trace, 'crudDebugger.stages.salesOrderRemote', 'network', async () => {
+                for (const entity of payload) {
+                    const { error } = await runMutation(`${tableName}.sync`, () => client.rpc(partnerSyncWriteRpc, {
+                        p_operation: 'upsert',
+                        p_entity_id: entity.id,
+                        p_workspace_id: workspaceId,
+                        p_payload: entity
+                    }))
+                    if (error) throw error
                 }
-            }
+            }, 'crudDebugger.details.salesOrderRemoteRoundTrip')
 
-            await markEntitiesSynced(tableName, entities.map((entity) => entity.id))
+            await measureSalesOrderStage(
+                options.trace,
+                'crudDebugger.stages.salesOrderResponse',
+                'response',
+                () => markEntitiesSynced(tableName, entities.map((entity) => entity.id))
+            )
             return
         }
 
         const shouldReceiveOrderNumber = tableName === 'sales_orders' || tableName === 'purchase_orders'
-        const result = shouldReceiveOrderNumber
-            ? await runMutation(`${tableName}.sync`, () =>
-                client.from(tableName).upsert(payload).select('id, order_number, items')
-            )
-            : await runMutation(`${tableName}.sync`, () => client.from(tableName).upsert(payload))
+        const request = () => shouldReceiveOrderNumber
+            ? runMutation(`${tableName}.sync`, () => client.from(tableName).upsert(payload).select('id, order_number, items'))
+            : runMutation(`${tableName}.sync`, () => client.from(tableName).upsert(payload))
+        const result = await measureSalesOrderStage(
+            options.trace,
+            'crudDebugger.stages.salesOrderRemote',
+            'network',
+            request,
+            'crudDebugger.details.salesOrderRemoteRoundTrip'
+        )
         const { error } = result
         if (error) {
             throw error
         }
 
         if (!shouldReceiveOrderNumber) {
-            await markEntitiesSynced(tableName, entities.map((entity) => entity.id))
+            await measureSalesOrderStage(
+                options.trace,
+                'crudDebugger.stages.salesOrderResponse',
+                'response',
+                () => markEntitiesSynced(tableName, entities.map((entity) => entity.id))
+            )
             return
         }
 
@@ -498,34 +547,36 @@ async function syncUpsertEntities(
             }
         }
 
-        const syncedAt = new Date().toISOString()
-        const table = (db as unknown as Record<OrderTableName, {
-            update: (id: string, changes: Record<string, unknown>) => Promise<number>
-        }>)[tableName as OrderTableName]
-        await Promise.all(entities.map(async (entity) => {
-            const orderNumber = orderNumbers.get(entity.id)
-            const items = orderItems.get(entity.id)
-            if (options.requireRemoteConfirmation && !orderNumber) {
-                throw createRemoteOrderSaveConfirmationError()
-            }
-            await table.update(entity.id, {
-                ...(orderNumber ? { orderNumber } : {}),
-                // The server response is authoritative even when the update
-                // intentionally omitted this field from its request.
-                ...(items ? { items } : {}),
-                syncStatus: 'synced',
-                lastSyncedAt: syncedAt
-            })
-            if (orderNumber) {
-                await synchronizeOrderPaymentReferences(
-                    workspaceId,
-                    tableName === 'sales_orders' ? 'sales' : 'purchase',
-                    entity.id,
-                    orderNumber,
-                    { requireRemoteConfirmation: options.requireRemoteConfirmation }
-                )
-            }
-        }))
+        await measureSalesOrderStage(options.trace, 'crudDebugger.stages.salesOrderResponse', 'response', async () => {
+            const syncedAt = new Date().toISOString()
+            const table = (db as unknown as Record<OrderTableName, {
+                update: (id: string, changes: Record<string, unknown>) => Promise<number>
+            }>)[tableName as OrderTableName]
+            await Promise.all(entities.map(async (entity) => {
+                const orderNumber = orderNumbers.get(entity.id)
+                const items = orderItems.get(entity.id)
+                if (options.requireRemoteConfirmation && !orderNumber) {
+                    throw createRemoteOrderSaveConfirmationError()
+                }
+                await table.update(entity.id, {
+                    ...(orderNumber ? { orderNumber } : {}),
+                    // The server response is authoritative even when the update
+                    // intentionally omitted this field from the request.
+                    ...(items ? { items } : {}),
+                    syncStatus: 'synced',
+                    lastSyncedAt: syncedAt
+                })
+                if (orderNumber) {
+                    await synchronizeOrderPaymentReferences(
+                        workspaceId,
+                        tableName === 'sales_orders' ? 'sales' : 'purchase',
+                        entity.id,
+                        orderNumber,
+                        { requireRemoteConfirmation: options.requireRemoteConfirmation }
+                    )
+                }
+            }))
+        }, 'crudDebugger.details.salesOrderAtomicResponse')
     } catch (error) {
         console.error(`[Orders] Failed to sync ${tableName}:`, error)
 
@@ -538,24 +589,37 @@ async function syncUpsertEntities(
             throw normalizeSupabaseActionError(error)
         }
 
-        await queueOfflineUpserts(tableName, entities, workspaceId, options)
+        await measureSalesOrderStage(
+            options.trace,
+            'crudDebugger.stages.salesOrderOfflineQueue',
+            'data',
+            () => queueOfflineUpserts(tableName, entities, workspaceId, options),
+            'crudDebugger.details.queuedForSync'
+        )
+        options.trace?.addPendingStage('crudDebugger.stages.remoteSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
     }
 }
 
-async function syncSoftDelete(tableName: SimpleEntityTableName | OrderTableName | OrderInstallmentTableName, entityId: string, workspaceId: string) {
+async function syncSoftDelete(
+    tableName: SimpleEntityTableName | OrderTableName | OrderInstallmentTableName,
+    entityId: string,
+    workspaceId: string,
+    trace?: CrudTraceHandle
+) {
     if (!shouldUseCloudBusinessData(workspaceId)) {
         return
     }
 
     if (!isOnline(workspaceId)) {
         await addToOfflineMutations(tableName, entityId, 'delete', { id: entityId }, workspaceId)
+        trace?.addPendingStage('crudDebugger.stages.remoteSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
         return
     }
 
     try {
         const client = getSupabaseClientForTable(tableName)
         const partnerSyncWriteRpc = getPartnerSyncWriteRpc(tableName)
-        const { error } = await runMutation(`${tableName}.delete`, () => partnerSyncWriteRpc
+        const { error } = await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderRemote', 'network', () => runMutation(`${tableName}.delete`, () => partnerSyncWriteRpc
             ? client.rpc(partnerSyncWriteRpc, {
                 p_operation: 'soft_delete',
                 p_entity_id: entityId,
@@ -566,15 +630,16 @@ async function syncSoftDelete(tableName: SimpleEntityTableName | OrderTableName 
                 .from(tableName)
                 .update({ is_deleted: true, updated_at: new Date().toISOString() })
                 .eq('id', entityId)
-        )
+        ), 'crudDebugger.details.salesOrderRemoteRoundTrip')
         if (error) {
             throw error
         }
 
-        await markEntitiesSynced(tableName, [entityId])
+        await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderResponse', 'response', () => markEntitiesSynced(tableName, [entityId]))
     } catch (error) {
         console.error(`[Orders] Failed to delete ${tableName}:`, error)
         await addToOfflineMutations(tableName, entityId, 'delete', { id: entityId }, workspaceId)
+        trace?.addPendingStage('crudDebugger.stages.remoteSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
     }
 }
 
@@ -2720,12 +2785,22 @@ export function useSalesOrderLookup(orderId: string | undefined, refreshKey = 0)
     const permissionKeys = permissions?.permissionKeys
     const storageAccess = useStorageAccess(undefined)
     const serviceAccess = useServiceAccessIds(undefined)
+    const tracedReadOrderIdRef = useRef<string | undefined>(undefined)
     const lookup = useLiveQuery<OrderRecordLookup<SalesOrder>>(async () => {
-        try {
-            if (!serviceAccess.isReady) return { status: 'loading' }
-            if (!orderId) return { status: 'not-found' }
-            const order = await db.sales_orders.get(orderId)
+        if (!serviceAccess.isReady) return { status: 'loading' }
+        if (!orderId) return { status: 'not-found' }
+
+        const resolveLookup = async (trace?: CrudTraceHandle): Promise<OrderRecordLookup<SalesOrder>> => {
+            const order = await measureSalesOrderStage(
+                trace,
+                'crudDebugger.stages.salesOrderLocalRead',
+                'data',
+                () => db.sales_orders.get(orderId),
+                'crudDebugger.details.dexiePersistence'
+            )
             if (!order) return { status: 'not-found' }
+            trace?.setEntityId(order.id)
+            trace?.setWorkspaceMode(getWorkspaceDataMode(order.workspaceId))
             if (!await canReadSalesOrderServices(order, serviceAccess.ids)) return { status: 'not-found' }
 
             const visible = order.businessPartnerId
@@ -2757,6 +2832,14 @@ export function useSalesOrderLookup(orderId: string | undefined, refreshKey = 0)
                 ? redactSalesOrderForStorageAccess(order, storageAccess)
                 : undefined
             return redactedOrder ? { status: 'found', order: redactedOrder } : { status: 'not-found' }
+        }
+
+        const shouldTraceFirstLookup = isCrudDebuggerEnabled() && tracedReadOrderIdRef.current !== orderId
+        if (shouldTraceFirstLookup) tracedReadOrderIdRef.current = orderId
+        try {
+            return shouldTraceFirstLookup
+                ? await runSalesOrderCrud('read', resolveLookup, undefined, orderId)
+                : await resolveLookup()
         } catch (error) {
             console.error('[Orders] Failed to resolve sales order from the local cache:', error)
             return { status: 'error' }
@@ -3332,23 +3415,36 @@ export async function resolveSocialOrderAgentCreator(workspaceId: string, agentI
     return data.trim()
 }
 
-export async function createSalesOrder(
+async function createSalesOrderInternal(
     workspaceId: string,
     data: CreateOrderInput<SalesOrder>,
     createdBy?: string | null,
     options?: OrderFormSaveOptions
 ) {
     reportOrderSaveProgress(options, 'preparing')
+    if (options?.orderId) options.trace?.setEntityId(options.orderId)
     if (options?.orderId) {
-        const saved = await db.sales_orders.get(options.orderId)
+        const saved = await measureSalesOrderStage(
+            options.trace,
+            'crudDebugger.stages.salesOrderLocalRead',
+            'data',
+            () => db.sales_orders.get(options.orderId!),
+            'crudDebugger.details.dexiePersistence'
+        )
         if (saved && saved.workspaceId !== workspaceId) throw new Error('Sales order workspace mismatch')
         if (saved && !saved.isDeleted && saved.status === 'draft' && (data.status ?? 'draft') === 'draft') {
             // A retry of creation must not reset a subsequently edited draft or its version.
             if (saved.syncStatus !== 'synced' || options.requireRemoteConfirmation) {
                 await syncUpsertEntities('sales_orders', [saved as unknown as Record<string, unknown> & { id: string; version: number }], workspaceId,
-                    { requireRemoteConfirmation: options.requireRemoteConfirmation })
+                    { requireRemoteConfirmation: options.requireRemoteConfirmation, trace: options.trace })
             }
-            const confirmed = (await db.sales_orders.get(saved.id)) as SalesOrder
+            const confirmed = (await measureSalesOrderStage(
+                options.trace,
+                'crudDebugger.stages.salesOrderResponse',
+                'response',
+                () => db.sales_orders.get(saved.id),
+                'crudDebugger.details.salesOrderAtomicResponse'
+            )) as SalesOrder
             if (!isOrderApprovalRequested(confirmed)) {
                 await appendInitialOrderPaymentTransaction('sales', confirmed, {
                     ...options,
@@ -3357,55 +3453,99 @@ export async function createSalesOrder(
                         : {})
                 })
             }
-            await refreshSavedSalesOrderSummaries([confirmed], options)
+            await measureSalesOrderStage(
+                options.trace,
+                'crudDebugger.stages.salesOrderSummary',
+                'response',
+                () => refreshSavedSalesOrderSummaries([confirmed], options),
+                'crudDebugger.details.salesOrderSummaryBoundary'
+            )
             reportOrderSaveProgress(options, 'complete')
             return confirmed
         }
     }
-    const order = await buildSalesOrderEntity(workspaceId, data, createdBy, options)
+    const order = await measureSalesOrderStage(
+        options?.trace,
+        'crudDebugger.stages.salesOrderPreparation',
+        'application',
+        () => buildSalesOrderEntity(workspaceId, data, createdBy, options)
+    )
+    options?.trace?.setEntityId(order.id)
     const status = order.status
 
-    await assertSalesOrderMinimumPrices(order, options)
-    await assertSalesProductsHaveCosts(order)
+    await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', async () => {
+        await assertSalesOrderMinimumPrices(order, options)
+        await assertSalesProductsHaveCosts(order)
 
-    if (status === 'pending' || status === 'completed') {
-        if (isOrderFinancingMethod(order.paymentMethod)) {
-            throw new Error('Financed orders must be activated from draft')
+        if (status === 'pending' || status === 'completed') {
+            if (isOrderFinancingMethod(order.paymentMethod)) {
+                throw new Error('Financed orders must be activated from draft')
+            }
+            if (!order.isPaid) {
+                throw new Error('non_financed_order_must_be_paid')
+            }
+            await assertSalesStockAvailable(order)
         }
-        if (!order.isPaid) {
-            throw new Error('non_financed_order_must_be_paid')
-        }
-        await assertSalesStockAvailable(order)
-    }
+    })
 
     // The hosted parent and initial payment must commit together: payment
     // guards require the parent, and account rejection must roll back both.
     if (!isOrderApprovalRequested(order)) {
         reportOrderSaveProgress(options, 'payment')
-        await appendInitialOrderPaymentTransaction('sales', order, {
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPayment', 'unknown', () => appendInitialOrderPaymentTransaction('sales', order, {
             ...options,
             ...(shouldUseCloudBusinessData(workspaceId) && isOnline(workspaceId)
                 ? { initialSalesOrder: sanitizeSyncPayload('sales_orders', order as unknown as Record<string, unknown>) }
                 : {})
-        })
+        }), 'crudDebugger.details.salesOrderPaymentBoundary')
     }
-    const atomicallySavedOrder = await db.sales_orders.get(order.id)
+    const atomicallySavedOrder = await measureSalesOrderStage(
+        options?.trace,
+        'crudDebugger.stages.salesOrderLocalRead',
+        'data',
+        () => db.sales_orders.get(order.id),
+        'crudDebugger.details.dexiePersistence'
+    )
     if (atomicallySavedOrder?.syncStatus === 'synced') Object.assign(order, atomicallySavedOrder)
-    await db.sales_orders.put(order)
+    await measureSalesOrderStage(
+        options?.trace,
+        'crudDebugger.stages.salesOrderLocalWrite',
+        'persistence',
+        () => db.sales_orders.put(order),
+        'crudDebugger.details.dexiePersistence'
+    )
 
     if (status === 'completed') {
-        const fulfillment = await deductInventoryForSalesOrder(order)
+        const fulfillment = await measureSalesOrderStage(
+            options?.trace,
+            'crudDebugger.stages.salesOrderInventory',
+            'unknown',
+            () => deductInventoryForSalesOrder(order),
+            'crudDebugger.details.salesOrderInventoryBoundary'
+        )
         order.items = fulfillment.updatedItems
         const now = new Date().toISOString()
-        await db.sales_orders.update(order.id, {
-            items: fulfillment.updatedItems,
-            actualDeliveryDate: now,
-            updatedAt: now
-        })
+        await measureSalesOrderStage(
+            options?.trace,
+            'crudDebugger.stages.salesOrderLocalWrite',
+            'persistence',
+            () => db.sales_orders.update(order.id, {
+                items: fulfillment.updatedItems,
+                actualDeliveryDate: now,
+                updatedAt: now
+            }),
+            'crudDebugger.details.dexiePersistence'
+        )
     } else if (status === 'pending') {
-        await db.sales_orders.update(order.id, {
-            reservedAt: order.reservedAt || new Date().toISOString()
-        })
+        await measureSalesOrderStage(
+            options?.trace,
+            'crudDebugger.stages.salesOrderLocalWrite',
+            'persistence',
+            () => db.sales_orders.update(order.id, {
+                reservedAt: order.reservedAt || new Date().toISOString()
+            }),
+            'crudDebugger.details.dexiePersistence'
+        )
     }
 
     reportOrderSaveProgress(options, 'saving')
@@ -3413,23 +3553,55 @@ export async function createSalesOrder(
         'sales_orders',
         [order as unknown as Record<string, unknown> & { id: string; version: number }],
         workspaceId,
-        { requireRemoteConfirmation: options?.requireRemoteConfirmation }
+        { requireRemoteConfirmation: options?.requireRemoteConfirmation, trace: options?.trace }
     )
     reportOrderSaveProgress(options, 'confirming')
     await synchronizeSalesAccountCommissionBeneficiaryBestEffort(workspaceId, order.id, createdBy)
-    const createdOrder = (await db.sales_orders.get(order.id)) as SalesOrder
+    const createdOrder = (await measureSalesOrderStage(
+        options?.trace,
+        'crudDebugger.stages.salesOrderResponse',
+        'response',
+        () => db.sales_orders.get(order.id),
+        'crudDebugger.details.salesOrderAtomicResponse'
+    )) as SalesOrder
 
     if (!isOrderApprovalRequested(createdOrder)) {
-        await appendInitialOrderPaymentTransaction('sales', createdOrder, options)
+        await measureSalesOrderStage(
+            options?.trace,
+            'crudDebugger.stages.salesOrderPayment',
+            'unknown',
+            () => appendInitialOrderPaymentTransaction('sales', createdOrder, options),
+            'crudDebugger.details.salesOrderPaymentBoundary'
+        )
     }
 
     if (createdOrder.status === 'completed') {
         await reconcileSalesOrderCommissionBestEffort(workspaceId, createdOrder.id, createdBy)
     }
 
-    await refreshSavedSalesOrderSummaries([createdOrder], options)
+    await measureSalesOrderStage(
+        options?.trace,
+        'crudDebugger.stages.salesOrderSummary',
+        'response',
+        () => refreshSavedSalesOrderSummaries([createdOrder], options),
+        'crudDebugger.details.salesOrderSummaryBoundary'
+    )
     reportOrderSaveProgress(options, 'complete')
     return createdOrder
+}
+
+export function createSalesOrder(
+    workspaceId: string,
+    data: CreateOrderInput<SalesOrder>,
+    createdBy?: string | null,
+    options?: OrderFormSaveOptions
+) {
+    return runSalesOrderCrud('create', (trace) => createSalesOrderInternal(
+        workspaceId,
+        data,
+        createdBy,
+        { ...options, trace }
+    ), workspaceId, options?.orderId, options?.trace)
 }
 
 type CompletedQuickSalesOrderRpcResult = {
@@ -3517,11 +3689,12 @@ async function completePaidQuickSalesOrderAtomically(
     order: SalesOrder,
     options?: {
         onProgress?: (stage: CompletedSalesOrderProgressStage) => void
+        trace?: CrudTraceHandle
     }
 ) {
-    await assertSalesProductsHaveCosts(order)
+    await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesProductsHaveCosts(order))
     options?.onProgress?.('reserving')
-    await assertSalesStockAvailable(order)
+    await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesStockAvailable(order))
     options?.onProgress?.('completing')
 
     const payment = order.paidAmount > ORDER_AMOUNT_EPSILON
@@ -3550,8 +3723,12 @@ async function completePaidQuickSalesOrderAtomically(
         ),
         payment
     }
-    const { data, error } = await runMutation('sales_orders.quick_order.complete', () =>
-        supabase.rpc('complete_quick_sales_order', { payload })
+    const { data, error } = await measureSalesOrderStage(
+        options?.trace,
+        'crudDebugger.stages.salesOrderRemote',
+        'network',
+        () => runMutation('sales_orders.quick_order.complete', () => supabase.rpc('complete_quick_sales_order', { payload })),
+        'crudDebugger.details.salesOrderRemoteRoundTrip'
     )
     if (error) {
         const message = error.message
@@ -3569,9 +3746,12 @@ async function completePaidQuickSalesOrderAtomically(
         throw normalizeSupabaseActionError(error)
     }
 
-    const completedOrder = await applyCompletedQuickOrderRpcResult(
-        order.workspaceId,
-        (data ?? {}) as CompletedQuickSalesOrderRpcResult
+    const completedOrder = await measureSalesOrderStage(
+        options?.trace,
+        'crudDebugger.stages.salesOrderResponse',
+        'response',
+        () => applyCompletedQuickOrderRpcResult(order.workspaceId, (data ?? {}) as CompletedQuickSalesOrderRpcResult),
+        'crudDebugger.details.salesOrderAtomicResponse'
     )
 
     // Sales-account attribution is authoritative business data, so retain the
@@ -3632,16 +3812,19 @@ export type CompletedSalesOrderProgressStage = 'creating' | 'reserving' | 'compl
  * lifecycle so payment, financing, reservations, and fulfillment preserve
  * their established effects.
  */
-export async function createQuickSalesOrder(
+type QuickSalesOrderOptions = {
+    onProgress?: (stage: CompletedSalesOrderProgressStage) => void
+    actingUserRole?: UserRole
+    minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
+    orderId?: string
+    trace?: CrudTraceHandle
+}
+
+async function createQuickSalesOrderInternal(
     workspaceId: string,
     data: CreateOrderInput<SalesOrder>,
     createdBy?: string | null,
-    options?: {
-        onProgress?: (stage: CompletedSalesOrderProgressStage) => void
-        actingUserRole?: UserRole
-        minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
-        orderId?: string
-    }
+    options?: QuickSalesOrderOptions
 ) {
     options?.onProgress?.('creating')
     const targetStatus = data.status as QuickSalesOrderStatus
@@ -3670,13 +3853,15 @@ export async function createQuickSalesOrder(
 
     if (canUseAtomicPaidCheckout) {
         const completedAt = new Date().toISOString()
-        const order = await buildSalesOrderEntity(workspaceId, {
+        const order = await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => buildSalesOrderEntity(workspaceId, {
             ...data,
             status: 'completed',
             actualDeliveryDate: completedAt,
             reservedAt: completedAt
-        }, createdBy, { orderId: options?.orderId })
-        await assertSalesOrderMinimumPrices(order, options)
+        }, createdBy, { orderId: options?.orderId }))
+        options?.trace?.setEntityId(order.id)
+        options?.trace?.setWorkspaceMode(getWorkspaceDataMode(workspaceId))
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesOrderMinimumPrices(order, options))
         return completePaidQuickSalesOrderAtomically(order, options)
     }
 
@@ -3689,7 +3874,8 @@ export async function createQuickSalesOrder(
         actingUserRole: options?.actingUserRole,
         minimumPriceValidationItems: options?.minimumPriceValidationItems,
         orderId: options?.orderId,
-        initialPaymentTransactionId: options?.orderId ? uuidv5(options.orderId, uuidv5.URL) : undefined
+        initialPaymentTransactionId: options?.orderId ? uuidv5(options.orderId, uuidv5.URL) : undefined,
+        trace: options?.trace
     })
 
     if (targetStatus === 'draft') {
@@ -3703,7 +3889,8 @@ export async function createQuickSalesOrder(
         // paid-before-reservation rule.
         allowUnpaidNonFinanced: true,
         actingUserRole: options?.actingUserRole,
-        minimumPriceValidationItems: options?.minimumPriceValidationItems
+        minimumPriceValidationItems: options?.minimumPriceValidationItems,
+        trace: options?.trace
     })
 
     if (targetStatus === 'pending') {
@@ -3713,8 +3900,23 @@ export async function createQuickSalesOrder(
     options?.onProgress?.('completing')
     return updateSalesOrderStatus(pending.id, 'completed', {
         actingUserRole: options?.actingUserRole,
-        minimumPriceValidationItems: options?.minimumPriceValidationItems
+        minimumPriceValidationItems: options?.minimumPriceValidationItems,
+        trace: options?.trace
     })
+}
+
+export function createQuickSalesOrder(
+    workspaceId: string,
+    data: CreateOrderInput<SalesOrder>,
+    createdBy?: string | null,
+    options?: QuickSalesOrderOptions
+) {
+    return runSalesOrderCrud('create', (trace) => createQuickSalesOrderInternal(
+        workspaceId,
+        data,
+        createdBy,
+        { ...options, trace }
+    ), workspaceId, options?.orderId, options?.trace)
 }
 
 /**
@@ -3734,12 +3936,20 @@ export async function createCompletedSalesOrder(
     }, createdBy, options)
 }
 
-export async function updateSalesOrder(id: string, data: Partial<SalesOrder>, options?: OrderFormSaveOptions) {
+async function updateSalesOrderInternal(id: string, data: Partial<SalesOrder>, options?: OrderFormSaveOptions) {
     reportOrderSaveProgress(options, 'preparing')
-    const existing = await db.sales_orders.get(id)
+    const existing = await measureSalesOrderStage(
+        options?.trace,
+        'crudDebugger.stages.salesOrderLocalRead',
+        'data',
+        () => db.sales_orders.get(id),
+        'crudDebugger.details.dexiePersistence'
+    )
     if (!existing || existing.isDeleted) {
         throw new Error('Sales order not found')
     }
+    options?.trace?.setEntityId(existing.id)
+    options?.trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
 
     await assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id)
 
@@ -3827,12 +4037,26 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>, op
     if (confirmedAdjustments.length === 0) delete updated.orderAdjustments
 
     updated.nextDueDate = isOrderFinancingMethod(updated.paymentMethod) ? updated.firstDueDate || null : null
-    await assertOrderStorageAccess(updated)
-    await assertSalesOrderMinimumPrices(updated, options)
-    await assertSalesProductsHaveCosts(updated)
+    await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', async () => {
+        await assertOrderStorageAccess(updated)
+        await assertSalesOrderMinimumPrices(updated, options)
+        await assertSalesProductsHaveCosts(updated)
+    })
     reportOrderSaveProgress(options, 'payment')
-    await appendInitialOrderPaymentTransaction('sales', updated, options)
-    await db.sales_orders.put(updated)
+    await measureSalesOrderStage(
+        options?.trace,
+        'crudDebugger.stages.salesOrderPayment',
+        'unknown',
+        () => appendInitialOrderPaymentTransaction('sales', updated, options),
+        'crudDebugger.details.salesOrderPaymentBoundary'
+    )
+    await measureSalesOrderStage(
+        options?.trace,
+        'crudDebugger.stages.salesOrderLocalWrite',
+        'persistence',
+        () => db.sales_orders.put(updated),
+        'crudDebugger.details.dexiePersistence'
+    )
     const orderForSync = hasOrderAdjustmentsUpdate && confirmedAdjustments.length === 0
         ? { ...updated, orderAdjustments: null }
         : updated
@@ -3841,7 +4065,7 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>, op
         'sales_orders',
         [orderForSync as unknown as Record<string, unknown> & { id: string; version: number }],
         existing.workspaceId,
-        { requireRemoteConfirmation: options?.requireRemoteConfirmation }
+        { requireRemoteConfirmation: options?.requireRemoteConfirmation, trace: options?.trace }
     )
     reportOrderSaveProgress(options, 'confirming')
     await synchronizeSalesAccountCommissionBeneficiaryBestEffort(existing.workspaceId, updated.id, updated.createdBy)
@@ -3851,9 +4075,23 @@ export async function updateSalesOrder(id: string, data: Partial<SalesOrder>, op
         updated.id,
         updated.createdBy
     )
-    await refreshSavedSalesOrderSummaries([existing, updated], options)
+    await measureSalesOrderStage(
+        options?.trace,
+        'crudDebugger.stages.salesOrderSummary',
+        'response',
+        () => refreshSavedSalesOrderSummaries([existing, updated], options),
+        'crudDebugger.details.salesOrderSummaryBoundary'
+    )
     reportOrderSaveProgress(options, 'complete')
     return updated
+}
+
+export function updateSalesOrder(id: string, data: Partial<SalesOrder>, options?: OrderFormSaveOptions) {
+    return runSalesOrderCrud('update', (trace) => updateSalesOrderInternal(
+        id,
+        data,
+        { ...options, trace }
+    ), undefined, id, options?.trace)
 }
 
 async function activateOrderFinancing(
@@ -4065,6 +4303,7 @@ export function updateSalesOrderStatus(
         allowUnpaidNonFinanced?: boolean
         actingUserRole?: UserRole
         minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
+        trace?: CrudTraceHandle
     }
 ) {
     const existingTransition = salesOrderStatusTransitionsInFlight.get(id)
@@ -4072,9 +4311,16 @@ export function updateSalesOrderStatus(
         return existingTransition.promise
     }
 
+    const startTransition = () => runSalesOrderCrud(
+        'update',
+        (trace) => updateSalesOrderStatusOnce(id, status, { ...options, trace }),
+        undefined,
+        id,
+        options?.trace
+    )
     const transition = existingTransition
-        ? existingTransition.promise.catch(() => undefined).then(() => updateSalesOrderStatusOnce(id, status, options))
-        : updateSalesOrderStatusOnce(id, status, options)
+        ? existingTransition.promise.catch(() => undefined).then(startTransition)
+        : startTransition()
     salesOrderStatusTransitionsInFlight.set(id, { status, promise: transition })
     void transition.finally(() => {
         if (salesOrderStatusTransitionsInFlight.get(id)?.promise === transition) {
@@ -4091,15 +4337,24 @@ async function updateSalesOrderStatusOnce(
         allowUnpaidNonFinanced?: boolean
         actingUserRole?: UserRole
         minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
+        trace?: CrudTraceHandle
     }
 ) {
-    const existing = await db.sales_orders.get(id)
+    const existing = await measureSalesOrderStage(
+        options?.trace,
+        'crudDebugger.stages.salesOrderLocalRead',
+        'data',
+        () => db.sales_orders.get(id),
+        'crudDebugger.details.dexiePersistence'
+    )
     if (!existing || existing.isDeleted) {
         throw new Error('Sales order not found')
     }
+    options?.trace?.setEntityId(existing.id)
+    options?.trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
 
     if (status === 'cancelled') {
-        await assertSalesOrderServiceAccess(existing)
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesOrderServiceAccess(existing))
     }
 
     if (isOrderApprovalRequested(existing)) {
@@ -4119,28 +4374,40 @@ async function updateSalesOrderStatusOnce(
     // Status changes synchronize the entire order document. Check the raw
     // record before making any financial or inventory side effect, because a
     // details view may contain only its permitted lines.
-    await assertOrderStorageAccess(existing)
+    await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertOrderStorageAccess(existing))
 
     if (status !== 'cancelled') {
-        await assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id)
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id))
     }
 
     if (status === 'pending' || status === 'completed') {
-        await assertSalesOrderMinimumPrices(existing, options)
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesOrderMinimumPrices(existing, options))
     }
 
     if (status === 'cancelled' && shouldUseCloudBusinessData(existing.workspaceId)
         && (isOrderFinancingMethod(existing.paymentMethod) || existing.linkedLoanId)) {
         const { cancelFinancedOrder } = await import('./orderCancellation')
-        return (await cancelFinancedOrder('sales', existing)).order as SalesOrder
+        return (await measureSalesOrderStage(
+            options?.trace,
+            'crudDebugger.stages.salesOrderPayment',
+            'unknown',
+            () => cancelFinancedOrder('sales', existing),
+            'crudDebugger.details.salesOrderFinanceBoundary'
+        )).order as SalesOrder
     }
 
     let workingOrder = existing
     let linkedLoanId = existing.linkedLoanId || null
     if (status === 'pending') {
-        await assertSalesProductsHaveCosts(existing)
-        await assertSalesStockAvailable(existing, existing.id)
-        linkedLoanId = await activateOrderFinancing('sales', existing, options)
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesProductsHaveCosts(existing))
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesStockAvailable(existing, existing.id))
+        linkedLoanId = await measureSalesOrderStage(
+            options?.trace,
+            'crudDebugger.stages.salesOrderPayment',
+            'unknown',
+            () => activateOrderFinancing('sales', existing, options),
+            'crudDebugger.details.salesOrderFinanceBoundary'
+        )
     }
     if (status === 'cancelled') {
         await cancelOrderFinancialRecords('sales', existing)
@@ -4153,11 +4420,11 @@ async function updateSalesOrderStatusOnce(
     }
 
     const now = new Date().toISOString()
-    const counterparty = await normalizeSalesOrderCounterparty({
+    const counterparty = await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderTransition', 'application', () => normalizeSalesOrderCounterparty({
         businessPartnerId: workingOrder.businessPartnerId ?? null,
         customerId: workingOrder.businessPartnerId ?? workingOrder.customerId,
         customerName: workingOrder.customerName
-    })
+    }))
     let updated: SalesOrder = {
         ...workingOrder,
         ...counterparty,
@@ -4181,9 +4448,15 @@ async function updateSalesOrderStatusOnce(
 
     let completedRemotely = false
     if (status === 'completed') {
-        await assertSalesProductsHaveCosts(updated)
-        await assertSalesStockAvailable(updated, workingOrder.id)
-        const fulfillment = await deductInventoryForSalesOrder(updated, 0, true)
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesProductsHaveCosts(updated))
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesStockAvailable(updated, workingOrder.id))
+        const fulfillment = await measureSalesOrderStage(
+            options?.trace,
+            'crudDebugger.stages.salesOrderInventory',
+            'unknown',
+            () => deductInventoryForSalesOrder(updated, 0, true),
+            'crudDebugger.details.salesOrderInventoryBoundary'
+        )
         updated.items = fulfillment.updatedItems
         if (fulfillment.remotelyCompletedOrder) {
             updated = fulfillment.remotelyCompletedOrder
@@ -4191,12 +4464,18 @@ async function updateSalesOrderStatusOnce(
         }
     }
 
-    await db.sales_orders.put(updated)
+    await measureSalesOrderStage(
+        options?.trace,
+        'crudDebugger.stages.salesOrderLocalWrite',
+        'persistence',
+        () => db.sales_orders.put(updated),
+        'crudDebugger.details.dexiePersistence'
+    )
 
     if (!completedRemotely) {
-        await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
+        await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId, { trace: options?.trace })
     }
-    await Promise.all(
+    await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderSummary', 'response', () => Promise.all(
         Array.from(new Set([
             `${workingOrder.customerId}::${workingOrder.businessPartnerId || ''}`,
             `${updated.customerId}::${updated.businessPartnerId || ''}`
@@ -4208,18 +4487,20 @@ async function updateSalesOrderStatusOnce(
                 businessPartnerId || null
             )
         })
-    )
+    ), 'crudDebugger.details.salesOrderSummaryBoundary')
     if (updated.status === 'completed') {
         await reconcileSalesOrderCommissionBestEffort(existing.workspaceId, updated.id, updated.createdBy)
     }
     return updated
 }
 
-export async function approveSalesOrderRequest(id: string, reviewedBy?: string | null) {
-    const existing = await db.sales_orders.get(id)
+async function approveSalesOrderRequestInternal(id: string, reviewedBy: string | null | undefined, trace?: CrudTraceHandle) {
+    const existing = await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderLocalRead', 'data', () => db.sales_orders.get(id), 'crudDebugger.details.dexiePersistence')
     if (!existing || existing.isDeleted) {
         throw new Error('Sales order not found')
     }
+    trace?.setEntityId(existing.id)
+    trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
     if (!isOrderApprovalRequested(existing)) {
         throw new Error('Order request is not pending approval')
     }
@@ -4232,12 +4513,16 @@ export async function approveSalesOrderRequest(id: string, reviewedBy?: string |
         ...buildApprovalReviewPatch(existing, reviewedBy)
     }
 
-    await assertSalesProductsHaveCosts(updated)
-    await appendInitialOrderPaymentTransaction('sales', updated)
-    await db.sales_orders.put(updated)
-    await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
-    await appendInitialOrderPaymentTransaction('sales', updated)
+    await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesProductsHaveCosts(updated))
+    await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderPayment', 'unknown', () => appendInitialOrderPaymentTransaction('sales', updated), 'crudDebugger.details.salesOrderPaymentBoundary')
+    await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderLocalWrite', 'persistence', () => db.sales_orders.put(updated), 'crudDebugger.details.dexiePersistence')
+    await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId, { trace })
+    await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderPayment', 'unknown', () => appendInitialOrderPaymentTransaction('sales', updated), 'crudDebugger.details.salesOrderPaymentBoundary')
     return updated
+}
+
+export function approveSalesOrderRequest(id: string, reviewedBy?: string | null) {
+    return runSalesOrderCrud('update', (trace) => approveSalesOrderRequestInternal(id, reviewedBy, trace), undefined, id)
 }
 
 export async function setSalesOrderPaymentStatus(
@@ -4308,11 +4593,13 @@ export async function setSalesOrderPaymentStatus(
     return updated
 }
 
-export async function lockSalesOrder(id: string) {
-    const existing = await db.sales_orders.get(id)
+async function lockSalesOrderInternal(id: string, trace?: CrudTraceHandle) {
+    const existing = await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderLocalRead', 'data', () => db.sales_orders.get(id), 'crudDebugger.details.dexiePersistence')
     if (!existing || existing.isDeleted) {
         throw new Error('Sales order not found')
     }
+    trace?.setEntityId(existing.id)
+    trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
 
     if (!existing.isPaid) {
         throw new Error('only_paid_orders_can_be_locked')
@@ -4327,9 +4614,13 @@ export async function lockSalesOrder(id: string) {
         ...getSyncMetadata(existing.workspaceId, now)
     }
 
-    await db.sales_orders.put(updated)
-    await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
+    await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderLocalWrite', 'persistence', () => db.sales_orders.put(updated), 'crudDebugger.details.dexiePersistence')
+    await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId, { trace })
     return updated
+}
+
+export function lockSalesOrder(id: string) {
+    return runSalesOrderCrud('update', (trace) => lockSalesOrderInternal(id, trace), undefined, id)
 }
 
 export type SalesOrderReturnLineInput = {
@@ -4368,15 +4659,26 @@ export type CreatePostReturnOrderAdjustmentInput = {
  * rewrite the original return, its item rows, or payment reversals; those
  * remain the historical record while adjusted documents project this row.
  */
-export async function createPostReturnSalesOrderAdjustment(input: CreatePostReturnOrderAdjustmentInput) {
+async function createPostReturnSalesOrderAdjustmentInternal(
+    input: CreatePostReturnOrderAdjustmentInput,
+    trace?: CrudTraceHandle
+) {
     if (input.actorRole !== 'admin') {
         throw new Error('Only admins can add post-return adjustments')
     }
 
-    const order = await db.sales_orders.get(input.orderId)
+    const order = await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderLocalRead',
+        'data',
+        () => db.sales_orders.get(input.orderId),
+        'crudDebugger.details.dexiePersistence'
+    )
     if (!order || order.isDeleted) {
         throw new Error('Sales order not found')
     }
+    trace?.setEntityId(order.id)
+    trace?.setWorkspaceMode(getWorkspaceDataMode(order.workspaceId))
     if (order.status !== 'completed' || order.returnStatus === 'none' || !order.returnStatus) {
         throw new Error('Post-return adjustments require a returned completed sales order')
     }
@@ -4384,12 +4686,23 @@ export async function createPostReturnSalesOrderAdjustment(input: CreatePostRetu
         throw new Error('locked_order_immutable')
     }
 
-    const linkedReturn = await db.order_returns.get(input.returnId)
+    const linkedReturn = await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderLocalRead',
+        'data',
+        () => db.order_returns.get(input.returnId),
+        'crudDebugger.details.dexiePersistence'
+    )
     if (!linkedReturn || linkedReturn.isDeleted || linkedReturn.status !== 'posted' || linkedReturn.orderId !== order.id) {
         throw new Error('Posted order return not found')
     }
 
-    const confirmed = createOrderAdjustment(input.adjustment, order.currency, order.exchangeRates)
+    const confirmed = await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderPreparation',
+        'application',
+        () => createOrderAdjustment(input.adjustment, order.currency, order.exchangeRates)
+    )
     if (!confirmed) {
         throw new Error('Invalid post-return adjustment')
     }
@@ -4413,19 +4726,32 @@ export async function createPostReturnSalesOrderAdjustment(input: CreatePostRetu
         ...getSyncMetadata(order.workspaceId, timestamp)
     }
 
-    await db.sales_orders.put(updatedOrder)
+    await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderLocalWrite',
+        'persistence',
+        () => db.sales_orders.put(updatedOrder),
+        'crudDebugger.details.dexiePersistence'
+    )
     await syncUpsertEntities(
         'sales_orders',
         [updatedOrder] as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
-        order.workspaceId
-    )
-    await reconcileSalesOrderCommissionBestEffort(
         order.workspaceId,
-        order.id,
-        input.createdBy
+        { trace }
+    )
+    await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderSummary',
+        'response',
+        () => reconcileSalesOrderCommissionBestEffort(order.workspaceId, order.id, input.createdBy),
+        'crudDebugger.details.salesOrderSummaryBoundary'
     )
 
     return { order: updatedOrder, adjustment }
+}
+
+export function createPostReturnSalesOrderAdjustment(input: CreatePostReturnOrderAdjustmentInput) {
+    return runSalesOrderCrud('update', (trace) => createPostReturnSalesOrderAdjustmentInternal(input, trace), undefined, input.orderId)
 }
 
 type PreparedSalesOrderReturnLine = {
@@ -5247,12 +5573,16 @@ async function returnUnpaidSalesOrder(order: SalesOrder, input: ReturnSalesOrder
 const salesOrderReturnRequestsInFlight = new Map<string, { fingerprint: string; task: Promise<Awaited<ReturnType<typeof returnSalesOrderOnce>>> }>()
 
 export function returnSalesOrder(input: ReturnSalesOrderInput) {
-    if (!input.idempotencyKey) return returnSalesOrderOnce(input)
+    const execute = () => runCrudOperation(
+        { action: 'create', entityKey: 'salesOrderReturn', entityId: input.idempotencyKey || undefined },
+        (trace) => returnSalesOrderOnce(input, trace)
+    )
+    if (!input.idempotencyKey) return execute()
     const key = `${input.orderId}:${input.idempotencyKey}`
     const fingerprint = JSON.stringify({ ...input, items: [...input.items].sort((left, right) => left.orderItemId.localeCompare(right.orderItemId)) })
     const existing = salesOrderReturnRequestsInFlight.get(key)
     if (existing) return existing.fingerprint === fingerprint ? existing.task : Promise.reject(new Error('return_request_identity_mismatch'))
-    const task = returnSalesOrderOnce(input)
+    const task = execute()
     salesOrderReturnRequestsInFlight.set(key, { fingerprint, task })
     void task.finally(() => { if (salesOrderReturnRequestsInFlight.get(key)?.task === task) salesOrderReturnRequestsInFlight.delete(key) }).catch(() => undefined)
     return task
@@ -5260,27 +5590,41 @@ export function returnSalesOrder(input: ReturnSalesOrderInput) {
 
 type SalesOrderReturnRemoteFilter = { column: string; value: string | string[] }
 
-async function readSalesOrderReturnRemoteRows(tableName: string, workspaceId: string, filters: SalesOrderReturnRemoteFilter[]) {
+async function readSalesOrderReturnRemoteRows(
+    tableName: string,
+    workspaceId: string,
+    filters: SalesOrderReturnRemoteFilter[],
+    trace?: CrudTraceHandle
+) {
     if (filters.some(filter => Array.isArray(filter.value) && filter.value.length === 0)) return []
 
-    const client = getSupabaseClientForTable(tableName)
-    const remoteTableName = getSupabaseRemoteTableName(tableName)
-    const rows: Array<Record<string, unknown>> = []
-    for (let from = 0; ; from += 500) {
-        let query: any = client.from(remoteTableName).select('*').eq('workspace_id', workspaceId)
-        for (const filter of filters) {
-            query = Array.isArray(filter.value)
-                ? query.in(filter.column, filter.value)
-                : query.eq(filter.column, filter.value)
+    const read = async () => {
+        const client = getSupabaseClientForTable(tableName)
+        const remoteTableName = getSupabaseRemoteTableName(tableName)
+        const rows: Array<Record<string, unknown>> = []
+        for (let from = 0; ; from += 500) {
+            let query: any = client.from(remoteTableName).select('*').eq('workspace_id', workspaceId)
+            for (const filter of filters) {
+                query = Array.isArray(filter.value)
+                    ? query.in(filter.column, filter.value)
+                    : query.eq(filter.column, filter.value)
+            }
+            const result = await runSupabaseAction(`orders.returnContext.${tableName}`, () =>
+                query.order('id').range(from, from + 499)
+            )
+            if (result.error) throw normalizeSupabaseActionError(result.error)
+            const page: Record<string, unknown>[] = Array.isArray(result.data) ? result.data : []
+            rows.push(...page.map(row => toCamelCase(row) as Record<string, unknown>))
+            if (page.length < 500) return rows
         }
-        const result = await runSupabaseAction(`orders.returnContext.${tableName}`, () =>
-            query.order('id').range(from, from + 499)
-        )
-        if (result.error) throw normalizeSupabaseActionError(result.error)
-        const page: Record<string, unknown>[] = Array.isArray(result.data) ? result.data : []
-        rows.push(...page.map(row => toCamelCase(row) as Record<string, unknown>))
-        if (page.length < 500) return rows
     }
+    return measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderRemote',
+        'network',
+        read,
+        'crudDebugger.details.salesOrderRemoteRoundTrip'
+    )
 }
 
 function asFreshRemoteOrderRow<T extends { id: string; workspaceId: string }>(row: Record<string, unknown>, syncedAt: string): T {
@@ -5305,10 +5649,10 @@ async function replaceFreshRemoteOrderRows(
     if (remoteRows.length > 0) await table.bulkPut(remoteRows)
 }
 
-async function readFreshSalesOrderFromSupabase(orderId: string, workspaceId: string): Promise<SalesOrder> {
+async function readFreshSalesOrderFromSupabase(orderId: string, workspaceId: string, trace?: CrudTraceHandle): Promise<SalesOrder> {
     const remoteOrderRows = await readSalesOrderReturnRemoteRows('sales_orders', workspaceId, [
         { column: 'id', value: orderId }
-    ])
+    ], trace)
     const remoteOrderRow = remoteOrderRows[0]
     if (!remoteOrderRow || remoteOrderRow.workspaceId !== workspaceId || remoteOrderRow.isDeleted) {
         throw new Error('Sales order not found')
@@ -5317,8 +5661,8 @@ async function readFreshSalesOrderFromSupabase(orderId: string, workspaceId: str
 }
 
 /** Refresh the single order's return and payment evidence from Cloud/Hybrid source of truth. */
-async function refreshSalesOrderReturnContext(orderId: string, workspaceId: string): Promise<SalesOrder> {
-    const freshOrder = await readFreshSalesOrderFromSupabase(orderId, workspaceId)
+async function refreshSalesOrderReturnContext(orderId: string, workspaceId: string, trace?: CrudTraceHandle): Promise<SalesOrder> {
+    const freshOrder = await readFreshSalesOrderFromSupabase(orderId, workspaceId, trace)
     const cachedOrder = await db.sales_orders.get(orderId)
     if (cachedOrder && ((cachedOrder.syncStatus && cachedOrder.syncStatus !== 'synced')
         || Number(cachedOrder.version || 0) > Number(freshOrder.version || 0))) {
@@ -5328,12 +5672,12 @@ async function refreshSalesOrderReturnContext(orderId: string, workspaceId: stri
     const [remoteReturnsRaw, remoteReturnItemsRaw, remoteLoansRaw] = await Promise.all([
         readSalesOrderReturnRemoteRows('order_returns', workspaceId, [
             { column: 'order_id', value: orderId }
-        ]),
+        ], trace),
         readSalesOrderReturnRemoteRows('order_return_items', workspaceId, [
             { column: 'order_id', value: orderId }
-        ]),
+        ], trace),
         freshOrder.linkedLoanId
-            ? readSalesOrderReturnRemoteRows('loans', workspaceId, [{ column: 'id', value: freshOrder.linkedLoanId }])
+            ? readSalesOrderReturnRemoteRows('loans', workspaceId, [{ column: 'id', value: freshOrder.linkedLoanId }], trace)
             : Promise.resolve([])
     ])
     const syncedAt = freshOrder.lastSyncedAt || new Date().toISOString()
@@ -5342,10 +5686,10 @@ async function refreshSalesOrderReturnContext(orderId: string, workspaceId: stri
     const remoteLoans = remoteLoansRaw.map(row => asFreshRemoteOrderRow<Loan>(row, syncedAt))
     const loanIds = remoteLoans.map(row => row.id)
     const remoteLoanPaymentsRaw = loanIds.length
-        ? await readSalesOrderReturnRemoteRows('loan_payments', workspaceId, [{ column: 'loan_id', value: loanIds }])
+        ? await readSalesOrderReturnRemoteRows('loan_payments', workspaceId, [{ column: 'loan_id', value: loanIds }], trace)
         : []
     const remoteLoanInstallmentsRaw = loanIds.length
-        ? await readSalesOrderReturnRemoteRows('loan_installments', workspaceId, [{ column: 'loan_id', value: loanIds }])
+        ? await readSalesOrderReturnRemoteRows('loan_installments', workspaceId, [{ column: 'loan_id', value: loanIds }], trace)
         : []
     const remoteLoanPayments = remoteLoanPaymentsRaw.map(row => asFreshRemoteOrderRow<LoanPayment>(row, syncedAt))
     const remoteLoanInstallments = remoteLoanInstallmentsRaw.map(row => asFreshRemoteOrderRow<LoanInstallment>(row, syncedAt))
@@ -5354,17 +5698,17 @@ async function refreshSalesOrderReturnContext(orderId: string, workspaceId: stri
         [row.paymentTransactionId, row.reversalTransactionId].filter((id): id is string => !!id)
     ))]
     const [paymentsBySource, paymentsById, paymentsBySubrecord] = await Promise.all([
-        readSalesOrderReturnRemoteRows('payment_transactions', workspaceId, [{ column: 'source_record_id', value: sourceRecordIds }]),
+        readSalesOrderReturnRemoteRows('payment_transactions', workspaceId, [{ column: 'source_record_id', value: sourceRecordIds }], trace),
         linkedPaymentIds.length
-            ? readSalesOrderReturnRemoteRows('payment_transactions', workspaceId, [{ column: 'id', value: linkedPaymentIds }])
+            ? readSalesOrderReturnRemoteRows('payment_transactions', workspaceId, [{ column: 'id', value: linkedPaymentIds }], trace)
             : Promise.resolve([]),
         remoteLoanPayments.length
-            ? readSalesOrderReturnRemoteRows('payment_transactions', workspaceId, [{ column: 'source_subrecord_id', value: remoteLoanPayments.map(row => row.id) }])
+            ? readSalesOrderReturnRemoteRows('payment_transactions', workspaceId, [{ column: 'source_subrecord_id', value: remoteLoanPayments.map(row => row.id) }], trace)
             : Promise.resolve([])
     ])
     const originalPaymentIds = [...new Set([...paymentsBySource, ...paymentsById, ...paymentsBySubrecord].map(row => String(row.id)))]
     const remoteReversals = originalPaymentIds.length
-        ? await readSalesOrderReturnRemoteRows('payment_transactions', workspaceId, [{ column: 'reversal_of_transaction_id', value: originalPaymentIds }])
+        ? await readSalesOrderReturnRemoteRows('payment_transactions', workspaceId, [{ column: 'reversal_of_transaction_id', value: originalPaymentIds }], trace)
         : []
     const remotePayments = [...new Map([...paymentsBySource, ...paymentsById, ...paymentsBySubrecord, ...remoteReversals]
         .map(row => [String(row.id), asFreshRemoteOrderRow<PaymentTransaction>(row, syncedAt)])).values()]
@@ -5386,7 +5730,7 @@ async function refreshSalesOrderReturnContext(orderId: string, workspaceId: stri
     const localPaymentRows = [...new Map([...localPaymentSources, ...localLinkedPayments.filter(Boolean), ...localPaymentReversals]
         .map(row => [row!.id, row!])).values()]
 
-    await db.transaction('rw', [
+    await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderResponse', 'response', () => db.transaction('rw', [
         db.sales_orders, db.order_returns, db.order_return_items, db.loans, db.loan_payments,
         db.loan_installments, db.payment_transactions
     ], async () => {
@@ -5397,40 +5741,67 @@ async function refreshSalesOrderReturnContext(orderId: string, workspaceId: stri
         await replaceFreshRemoteOrderRows(db.loan_payments, localLoanPaymentRows, remoteLoanPayments, workspaceId)
         await replaceFreshRemoteOrderRows(db.loan_installments, localLoanInstallmentRows, remoteLoanInstallments, workspaceId)
         await replaceFreshRemoteOrderRows(db.payment_transactions, localPaymentRows, remotePayments, workspaceId)
-    })
+    }), 'crudDebugger.details.salesOrderAtomicResponse')
     return freshOrder
 }
 
-async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
-    let order = await db.sales_orders.get(input.orderId)
+async function returnSalesOrderOnce(input: ReturnSalesOrderInput, trace?: CrudTraceHandle) {
+    let order = await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderLocalRead',
+        'data',
+        () => db.sales_orders.get(input.orderId),
+        'crudDebugger.details.dexiePersistence'
+    )
     if (!order || order.isDeleted) {
         throw new Error('Sales order not found')
     }
+    trace?.setWorkspaceMode(getWorkspaceDataMode(order.workspaceId))
     const cloudBacked = shouldUseCloudBusinessData(order.workspaceId) && isOnline(order.workspaceId)
     if (cloudBacked) {
-        order = await readFreshSalesOrderFromSupabase(order.id, order.workspaceId)
+        order = await readFreshSalesOrderFromSupabase(order.id, order.workspaceId, trace)
     }
-    await assertSalesOrderServiceAccess(order)
-    if (!canReturnSalesOrder({
-        actorRole: input.actorRole,
-        actorId: input.returnedBy,
-        orderCreatedBy: order.createdBy,
-        permissionKeys: input.permissionKeys
-    })) {
-        throw new Error(SALES_ORDER_RETURN_NOT_ALLOWED)
-    }
+    await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderPreparation', 'application', async () => {
+        await assertSalesOrderServiceAccess(order!)
+        if (!canReturnSalesOrder({
+            actorRole: input.actorRole,
+            actorId: input.returnedBy,
+            orderCreatedBy: order!.createdBy,
+            permissionKeys: input.permissionKeys
+        })) {
+            throw new Error(SALES_ORDER_RETURN_NOT_ALLOWED)
+        }
+    })
     if (input.idempotencyKey) {
         const returnWorkspaceId = order.workspaceId
-        let previous = await db.order_returns.get(input.idempotencyKey)
+        let previous = await measureSalesOrderStage(
+            trace,
+            'crudDebugger.stages.salesOrderLocalRead',
+            'data',
+            () => db.order_returns.get(input.idempotencyKey!),
+            'crudDebugger.details.dexiePersistence'
+        )
         // A normal authenticated read recovers retry identity after a cache reset.
         if (!previous && shouldUseCloudBusinessData(returnWorkspaceId) && isOnline(returnWorkspaceId)) {
-            const result = await runSupabaseAction('orders.returnRetry.read', () => getSupabaseClientForTable('order_returns')
-                .from('order_returns').select('*').eq('workspace_id', returnWorkspaceId).eq('id', input.idempotencyKey!).maybeSingle())
+            const result = await measureSalesOrderStage(
+                trace,
+                'crudDebugger.stages.salesOrderRemote',
+                'network',
+                () => runSupabaseAction('orders.returnRetry.read', () => getSupabaseClientForTable('order_returns')
+                    .from('order_returns').select('*').eq('workspace_id', returnWorkspaceId).eq('id', input.idempotencyKey!).maybeSingle()),
+                'crudDebugger.details.salesOrderRemoteRoundTrip'
+            )
             if (result.error) throw normalizeSupabaseActionError(result.error)
             if (result.data) {
                 previous = toCamelCase(result.data) as unknown as OrderReturn
-                const lines = await runSupabaseAction('orders.returnRetry.readItems', () => getSupabaseClientForTable('order_return_items')
-                    .from('order_return_items').select('*').eq('workspace_id', returnWorkspaceId).eq('return_id', previous!.id))
+                const lines = await measureSalesOrderStage(
+                    trace,
+                    'crudDebugger.stages.salesOrderRemote',
+                    'network',
+                    () => runSupabaseAction('orders.returnRetry.readItems', () => getSupabaseClientForTable('order_return_items')
+                        .from('order_return_items').select('*').eq('workspace_id', returnWorkspaceId).eq('return_id', previous!.id)),
+                    'crudDebugger.details.salesOrderRemoteRoundTrip'
+                )
                 if (lines.error) throw normalizeSupabaseActionError(lines.error)
                 await db.order_returns.put(previous)
                 await db.order_return_items.bulkPut((lines.data ?? []).map(row => toCamelCase(row) as unknown as OrderReturnItem))
@@ -5445,11 +5816,12 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
                     && (line.paidQuantity === undefined || quantitiesEqual(item.paidSelectedUnitQuantity ?? 0, line.paidQuantity))
                     && (line.freeQuantity === undefined || quantitiesEqual(item.freeSelectedUnitQuantity ?? 0, line.freeQuantity))))
             if (!matches) throw new Error('return_request_identity_mismatch')
+            trace?.setEntityId(previous.id)
             return { order, return: previous, items }
         }
     }
     if (cloudBacked) {
-        order = await refreshSalesOrderReturnContext(order.id, order.workspaceId)
+        order = await refreshSalesOrderReturnContext(order.id, order.workspaceId, trace)
     }
     if (order.status !== 'completed') {
         throw new Error('Only completed sales orders can be returned')
@@ -5464,6 +5836,12 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
         throw new Error('Select at least one item to return')
     }
 
+    const preparedReturn = await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderPreparation',
+        'application',
+        () => prepareSalesOrderReturn(order!, input)
+    )
     const {
         quantitiesByItemId,
         returnedQuantityByItemId,
@@ -5474,9 +5852,10 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
         willBeFullyReturned,
         originalTotal,
         returnedAmount
-    } = await prepareSalesOrderReturn(order, input)
+    } = preparedReturn
 
     const returnId = input.idempotencyKey || generateId()
+    trace?.setEntityId(returnId)
     const timestamp = new Date().toISOString()
     const isFinanced = isOrderFinancingMethod(order.paymentMethod) || !!order.linkedLoanId
     const standardPaymentRows = !isFinanced
@@ -5494,7 +5873,17 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
             && order.paymentStatus === 'unpaid'
             && !order.isPaid
             && getOrderPaidAmount(order) <= ORDER_AMOUNT_EPSILON) {
-            return returnUnpaidSalesOrder(order, input)
+            return measureSalesOrderStage(
+                trace,
+                'crudDebugger.stages.salesOrderTransition',
+                'unknown',
+                async () => {
+                    const result = await returnUnpaidSalesOrder(order, input)
+                    trace?.setEntityId(result.return.id)
+                    return result
+                },
+                'crudDebugger.details.salesOrderReturnBoundary'
+            )
         }
         if (activePaymentAmount + ORDER_AMOUNT_EPSILON < returnAmount) {
             throw new Error('The order does not have enough posted payments to reverse this return')
@@ -5503,9 +5892,15 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
         await assertSalesOrderLoanReturnPaymentsReversible(order, returnAmount)
     }
 
-    const restoredLines = await restoreInventoryForSalesOrderReturn(order, preparedLines, timestamp, returnId)
+    const restoredLines = await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderTransition',
+        'unknown',
+        () => restoreInventoryForSalesOrderReturn(order, preparedLines, timestamp, returnId),
+        'crudDebugger.details.salesOrderReturnBoundary'
+    )
     const financingResult = isFinanced
-        ? await applySalesOrderReturnToFinancing({
+        ? await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderPayment', 'unknown', () => applySalesOrderReturnToFinancing({
             order,
             returnId,
             returnAmount,
@@ -5515,7 +5910,7 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
             accountId: input.accountId,
             accountNameSnapshot: input.accountNameSnapshot,
             timestamp
-        })
+        }), 'crudDebugger.details.salesOrderReturnBoundary')
         : null
 
     const newReturnedAmount = roundAmount(returnedAmount + returnAmount, order.currency)
@@ -5612,11 +6007,11 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
         ...getSyncMetadata(order.workspaceId, timestamp)
     }))
 
-    await db.transaction('rw', [db.sales_orders, db.order_returns, db.order_return_items], async () => {
+    await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderLocalWrite', 'persistence', () => db.transaction('rw', [db.sales_orders, db.order_returns, db.order_return_items], async () => {
         await db.sales_orders.put(updatedOrder)
         await db.order_returns.put(orderReturn)
         await db.order_return_items.bulkPut(orderReturnItems)
-    })
+    }), 'crudDebugger.details.dexiePersistence')
 
     if (!isFinanced) {
         const activePayments = getActiveOrderPayments(standardPaymentRows).reverse()
@@ -5626,7 +6021,7 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
             const original = standardPaymentRows.find((row) => row.id === payment.id)
             if (!original) continue
             const applied = roundAmount(Math.min(payment.amount, remainingPaymentReversal), order.currency)
-            await appendOrderReturnPaymentReversal({
+            await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderPayment', 'unknown', () => appendOrderReturnPaymentReversal({
                 transaction: original,
                 amount: applied,
                 returnId,
@@ -5634,18 +6029,24 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
                 returnedBy: input.returnedBy,
                 accountId: input.accountId,
                 accountNameSnapshot: input.accountNameSnapshot
-            })
+            }), 'crudDebugger.details.salesOrderReturnBoundary')
             remainingPaymentReversal = roundAmount(Math.max(0, remainingPaymentReversal - applied), order.currency)
         }
         if (remainingPaymentReversal > ORDER_AMOUNT_EPSILON) {
             throw new Error('The order does not have enough posted payments to reverse this return')
         }
-        finalOrder = await rebuildOrderPaymentState('sales', order.id, {
+        finalOrder = await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderPayment', 'unknown', () => rebuildOrderPaymentState('sales', order.id, {
             skipCommissionReconcile: true,
             deferOrderSync: true
-        }) as SalesOrder
+        }) as Promise<SalesOrder>, 'crudDebugger.details.salesOrderReturnBoundary')
     } else {
-        await recalculateCustomerAndPartnerSummaries(order.workspaceId, order.customerId, order.businessPartnerId)
+        await measureSalesOrderStage(
+            trace,
+            'crudDebugger.stages.salesOrderSummary',
+            'response',
+            () => recalculateCustomerAndPartnerSummaries(order.workspaceId, order.customerId, order.businessPartnerId),
+            'crudDebugger.details.salesOrderSummaryBoundary'
+        )
     }
 
     // Return rows establish the server-authorized audit trail before the
@@ -5653,12 +6054,14 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
     await syncUpsertEntities(
         'order_returns',
         [orderReturn] as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
-        order.workspaceId
+        order.workspaceId,
+        { trace }
     )
     await syncUpsertEntities(
         'order_return_items',
         orderReturnItems as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
-        order.workspaceId
+        order.workspaceId,
+        { trace }
     )
     await syncUpsertEntities(
         'sales_orders',
@@ -5666,43 +6069,73 @@ async function returnSalesOrderOnce(input: ReturnSalesOrderInput) {
         order.workspaceId,
         // Return item rows are the authoritative audit record. Keep the
         // server's immutable order-line snapshots when updating the summary.
-        { omitFields: ['items'] }
+        { omitFields: ['items'], trace }
     )
 
-    await reverseSalesOrderCommissionForReturnBestEffort(
-        order.workspaceId,
-        orderReturn.id,
-        input.returnedBy
+    await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderSummary',
+        'response',
+        () => reverseSalesOrderCommissionForReturnBestEffort(order.workspaceId, orderReturn.id, input.returnedBy),
+        'crudDebugger.details.salesOrderSummaryBoundary'
     )
 
     return { order: finalOrder, return: orderReturn, items: orderReturnItems }
 }
 
-export async function deleteSalesOrder(id: string) {
-    const existing = await db.sales_orders.get(id)
+async function deleteSalesOrderInternal(id: string, trace?: CrudTraceHandle) {
+    const existing = await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderLocalRead',
+        'data',
+        () => db.sales_orders.get(id),
+        'crudDebugger.details.dexiePersistence'
+    )
     if (!existing || existing.isDeleted) {
         return
     }
-    await assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id)
+    trace?.setEntityId(existing.id)
+    trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
+    await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id))
 
-    if (existing.status === 'completed' || existing.status === 'pending') {
-        throw new Error('Active sales orders cannot be deleted')
-    }
-    if (getOrderPaidAmount(existing) > 0) {
-        throw new Error('Orders with posted payments cannot be deleted')
-    }
+    await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => {
+        if (existing.status === 'completed' || existing.status === 'pending') {
+            throw new Error('Active sales orders cannot be deleted')
+        }
+        if (getOrderPaidAmount(existing) > 0) {
+            throw new Error('Orders with posted payments cannot be deleted')
+        }
+    })
 
     const now = new Date().toISOString()
-    await db.sales_orders.put({
-        ...existing,
-        isDeleted: true,
-        updatedAt: now,
-        version: existing.version + 1,
-        ...getSyncMetadata(existing.workspaceId, now)
-    })
-    await syncSoftDelete('sales_orders', id, existing.workspaceId)
-    await softDeleteOrderInstallments(id, existing.workspaceId)
-    await recalculateCustomerAndPartnerSummaries(existing.workspaceId, existing.customerId, existing.businessPartnerId)
+    await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderLocalWrite',
+        'persistence',
+        () => db.sales_orders.put({
+            ...existing,
+            isDeleted: true,
+            updatedAt: now,
+            version: existing.version + 1,
+            ...getSyncMetadata(existing.workspaceId, now)
+        }),
+        'crudDebugger.details.dexiePersistence'
+    )
+    await syncSoftDelete('sales_orders', id, existing.workspaceId, trace)
+    await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderSummary',
+        'response',
+        async () => {
+            await softDeleteOrderInstallments(id, existing.workspaceId)
+            await recalculateCustomerAndPartnerSummaries(existing.workspaceId, existing.customerId, existing.businessPartnerId)
+        },
+        'crudDebugger.details.salesOrderSummaryBoundary'
+    )
+}
+
+export function deleteSalesOrder(id: string) {
+    return runSalesOrderCrud('delete', (trace) => deleteSalesOrderInternal(id, trace), undefined, id)
 }
 
 export async function createPurchaseOrder(

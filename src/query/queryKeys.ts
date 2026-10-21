@@ -1,6 +1,74 @@
 import type { OrdersListPageQuery } from '@/local-db/ordersList'
 
 export const queryKeys = {
+  inventoryTransactions: {
+    all: (workspaceId: string | undefined) =>
+      ['atlas', 'workspace', workspaceId ?? 'unscoped', 'inventory-transactions'] as const,
+    page: (query: {
+      workspaceId?: string
+      page: number
+      pageSize: number
+      startAt?: string
+      endBefore?: string
+      productId?: string | null
+      direction: string
+      source: string
+      storageId?: string | null
+      snapshot: string
+      sort: 'createdAt:desc,id:desc'
+      sourceMode: 'remote' | 'local'
+      viewer: { userId?: string | null; role?: string | null; storageScope: string }
+    }) => [
+      ...queryKeys.inventoryTransactions.all(query.workspaceId),
+      'page',
+      query.page,
+      query.pageSize,
+      query.startAt ?? null,
+      query.endBefore ?? null,
+      query.productId ?? null,
+      query.direction,
+      query.source,
+      query.storageId ?? null,
+      query.snapshot,
+      query.sort,
+      query.sourceMode,
+      query.viewer.userId ?? null,
+      query.viewer.role ?? null,
+      query.viewer.storageScope,
+    ] as const,
+    productSummaryPage: (query: {
+      workspaceId?: string
+      page: number
+      pageSize: number
+      startAt?: string
+      endBefore?: string
+      productId?: string | null
+      direction: string
+      source: string
+      storageId?: string | null
+      snapshot: string
+      sort: 'productId:asc'
+      viewer: { userId?: string | null; role?: string | null; storageScope: string }
+      sourceMode: 'remote' | 'local'
+    }) => [
+      ...queryKeys.inventoryTransactions.all(query.workspaceId),
+      'product-summary',
+      query.page,
+      query.pageSize,
+      query.startAt ?? null,
+      query.endBefore ?? null,
+      query.productId ?? null,
+      query.direction,
+      query.source,
+      query.storageId ?? null,
+      query.snapshot,
+      query.sort,
+      query.sourceMode,
+      query.viewer.userId ?? null,
+      query.viewer.role ?? null,
+      query.viewer.storageScope,
+    ] as const,
+  },
   orders: {
     all: (workspaceId: string | undefined, orderType: OrdersListPageQuery['orderType']) =>
       ['atlas', 'workspace', workspaceId ?? 'unscoped', 'orders', orderType] as const,

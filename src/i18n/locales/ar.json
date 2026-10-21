@@ -27,7 +27,7 @@
     "paintNote": "يبدأ التتبع عند حدود البيانات المشتركة التي جرى تجهيزها. لا يتم تخمين معالجة أحداث الواجهة أو الرسم المرئي أو وقت قاعدة البيانات على الخادم.",
     "resize": { "topLeft": "تغيير الحجم من الزاوية العلوية اليسرى", "topRight": "تغيير الحجم من الزاوية العلوية اليمنى", "bottomLeft": "تغيير الحجم من الزاوية السفلية اليسرى", "bottomRight": "تغيير الحجم من الزاوية السفلية اليمنى" },
     "actions": { "create": "إنشاء", "read": "قراءة", "update": "تحديث", "delete": "حذف" },
-    "entities": { "product": "المنتج", "category": "الفئة", "unit": "الوحدة", "businessPartner": "شريك أعمال" },
+    "entities": { "product": "المنتج", "category": "الفئة", "unit": "الوحدة", "businessPartner": "شريك أعمال", "salesOrder": "طلب بيع", "salesOrderReturn": "مرتجع طلب البيع" },
     "modes": { "cloud": "سحابي", "hybrid": "هجين", "local": "محلي", "demo": "تجريبي", "unknown": "جارٍ التحديد" },
     "layers": { "interaction": "تفاعل المستخدم", "application": "منطق التطبيق", "data": "طبقة البيانات", "network": "زمن اتصال الشبكة", "persistence": "حفظ محلي", "response": "معالجة الاستجابة", "unknown": "طبقة غير مقاسة" },
     "statuses": { "pending": "قيد الانتظار", "success": "مكتمل", "failure": "فشل", "cancelled": "أُلغي" },
@@ -54,6 +54,19 @@
       "businessPartnerResponse": "تأكيد المزامنة محلياً",
       "businessPartnerGroupAssignment": "تعيين مجموعة منشئ السجل",
       "businessPartnerSummary": "تحديث ملخص الشريك (مجمع)",
+      "salesOrderDetailLookup": "البحث عن تفاصيل طلب البيع",
+      "salesOrderPreparation": "إعداد طلب البيع والتحقق منه",
+      "salesOrderPayment": "معاملة الدفعة الأولية",
+      "salesOrderLocalRead": "قراءة طلب البيع محلياً",
+      "salesOrderLocalWrite": "حفظ طلب البيع محلياً",
+      "salesOrderRemote": "زمن اتصال Supabase لطلب البيع",
+      "salesOrderResponse": "توحيد الاستجابة والمصالحة المحلية",
+      "salesOrderOfflineQueue": "كتابة طلب البيع في قائمة الانتظار دون اتصال",
+      "salesOrderSummary": "تحديث ملخص طلب البيع",
+      "salesOrderTransition": "تغيير حالة طلب البيع",
+      "salesOrderReturnBoundary": "مسار مرتجع طلب البيع",
+      "salesOrderInventory": "تنفيذ مخزون طلب البيع",
+      "quickSalesOrderAtomic": "إتمام الطلب السريع الذري",
       "remoteSyncQueued": "المزامنة البعيدة في قائمة الانتظار"
     },
     "details": {
@@ -65,7 +78,14 @@
       "businessPartnerSupabaseRoundTrip": "يقيس زمن طلب مزامنة الشريك أو بياناته التابعة إلى Supabase ذهاباً وإياباً، بما يشمل الشبكة والمعالجة البعيدة؛ وقت قاعدة البيانات على الخادم غير متاح.",
       "businessPartnerSyncAcknowledgement": "يقيس تحديث حالة المزامنة المحلية بعد استجابة بعيدة ناجحة.",
       "businessPartnerSummaryBoundary": "يقيس حد تحديث الملخص الحالي، ويشمل القراءات المحلية وإعادة الحساب والحفظ وسلوك المزامنة المهيأ.",
-      "businessPartnerGroupAssignment": "يقيس عملية تعيين مجموعات مساحة العمل الحالية، بما يشمل الوصول إلى البيانات المحلية وكتابتها."
+      "businessPartnerGroupAssignment": "يقيس عملية تعيين مجموعات مساحة العمل الحالية، بما يشمل الوصول إلى البيانات المحلية وكتابتها.",
+      "salesOrderRemoteRoundTrip": "يقيس زمن اتصال Supabase شاملاً الشبكة والمعالجة البعيدة؛ زمن تنفيذ قاعدة البيانات على الخادم غير متاح.",
+      "salesOrderPaymentBoundary": "يقيس مسار معاملة الدفع المنتظرة؛ يجمع عملها المحلي والبعيد في هذه المرحلة.",
+      "salesOrderFinanceBoundary": "يقيس مسار التمويل أو الإلغاء المنتظر؛ قد يجمع الحفظ المحلي والمزامنة البعيدة.",
+      "salesOrderInventoryBoundary": "يقيس مسار حجز المخزون أو تنفيذه المنتظر؛ لم تُفصل حدوده المحلية والبعيدة الداخلية.",
+      "salesOrderSummaryBoundary": "يقيس تحديث الملخص المشتق المنتظر وأعمال النسخ أو المزامنة المرتبطة به.",
+      "salesOrderAtomicResponse": "يقيس توحيد الطلب والدفع المُعادين ومعاملة المرآة المحلية المنتظرة.",
+      "salesOrderReturnBoundary": "قد يتضمن هذا المسار المخزون أو الدفع أو التمويل وأعمالاً محلية أو بعيدة؛ لم تُقَس حدوده الداخلية بشكل منفصل."
     }
   },
   "commerceOperations": {
@@ -91,13 +111,13 @@
     "platforms": { "instagram": "إنستغرام", "tiktok": "تيك توك", "whatsapp": "واتساب", "messenger": "ماسنجر", "coach": "مدرب", "other": "أخرى" },
     "recordTypes": { "order_details": "استقبال طلب", "ad_spend": "إنفاق إعلاني", "dm_funnel": "مسار الرسائل", "city_market": "سوق المدينة", "competitor": "منافس", "coach_profile": "ملف المدرب" },
     "fields": {
-      "buyer": "المشتري", "seller": "الموظف", "phone": "الهاتف", "socialHandle": "اسم الحساب الاجتماعي", "city": "المدينة", "address": "العنوان",
+      "buyer": "المشتري", "seller": "الموظف", "phone": "الهاتف", "city": "المدينة", "address": "العنوان",
       "cityRegion": "المدينة / المنطقة",
       "orderDate": "تاريخ الطلب", "date": "التاريخ", "storage": "المخزن", "priceBook": "قائمة الأسعار", "catalogPrices": "استخدام أسعار المنتجات",
       "quantity": "الكمية", "product": "المنتج", "currency": "العملة", "platform": "المنصة", "agent": "الوكيل", "notes": "ملاحظات"
     },
     "placeholders": {
-      "findBuyer": "ابحث عن المشتري أو أدخل اسمه", "seller": "الموظف", "phone": "رقم الهاتف", "socialHandle": "@اسم_المستخدم",
+      "findBuyer": "ابحث عن المشتري أو أدخل اسمه", "seller": "الموظف", "phone": "رقم الهاتف",
       "city": "اختر مدينة أو منطقة", "otherCity": "أدخل المدينة أو المنطقة", "address": "عنوان التوصيل", "storage": "اختر المخزن", "priceBook": "اختر قائمة أسعار", "searchProduct": "ابحث عن المنتجات", "agent": "اختر وكيلاً"
     },
     "cities": {
@@ -5658,7 +5678,7 @@
   },
   "inventoryTransactions": {
     "pageSubtitle": "مراجعة السجلات الدائمة لحركات المخزون والنقل والتسويات والمبيعات والمرتجعات واستلام المشتريات.",
-    "subtitle": "تُسجل حركات المخزون الجديدة هنا. لم تتم إضافة الحركات التاريخية السابقة لتفعيل التدقيق إلى السجل. هذه السجلات دائمة ولا يمكن حذفها.",
+    "subtitle": "راجع حركات المخزون وتحقق من اتساق كميات المعاملات.",
     "emptyTitle": "لا توجد معاملات مخزون بعد",
     "emptyDescription": "انقل المنتجات يدوياً، أو دع قاعدة آلية تعمل، أو سجل تسوية مخزون، وستظهر السجلات هنا.",
     "increaseLabel": "زيادة",
@@ -5689,8 +5709,48 @@
       "incoming": "الوارد",
       "outgoing": "الصادر",
       "balance": "الرصيد",
+      "loading": "جارٍ تحميل ملخص المنتجات…",
+      "loadError": "تعذر تحميل ملخص المنتجات. يرجى المحاولة مرة أخرى.",
+      "exportError": "تعذر تجهيز ملخص المنتجات. يرجى المحاولة مرة أخرى.",
       "emptyTitle": "لا توجد حركة منتجات في هذه الفترة",
       "emptyDescription": "غيّر نطاق التاريخ أو سجل حركة مخزون لرؤية ملخص المنتجات."
+    },
+    "integrityAudit": {
+      "action": "تدقيق سلامة المعاملات",
+      "runningTitle": "جارٍ تدقيق المعاملات",
+      "issuesTitle": "وُجدت تناقضات حسابية",
+      "completeTitle": "اكتمل التدقيق",
+      "cancelledTitle": "أُلغي التدقيق",
+      "errorTitle": "تعذّر إكمال التدقيق",
+      "progress": "تم فحص {{checked}} من أصل {{total}} معاملة…",
+      "progressLabel": "تقدم التدقيق",
+      "issuesDescription": "راجع المعاملات أدناه؛ قارن التدقيق كل رصيد مسجل بالرصيد السابق مضافًا إليه التغيير.",
+      "cleanDescription": "لم تُكتشف تناقضات حسابية في المعاملات ذات لقطات الكمية المسجلة.",
+      "cancelledDescription": "توقف التدقيق قبل فحص جميع المعاملات المطابقة.",
+      "errorDescription": "تعذّر فحص جميع المعاملات المطابقة. يُرجى المحاولة مرة أخرى.",
+      "cancel": "إلغاء التدقيق",
+      "retry": "إعادة التدقيق",
+      "noIssues": "لا توجد تناقضات حسابية للمراجعة.",
+      "notAvailable": "—",
+      "stats": {
+        "checked": "المعاملات المفحوصة",
+        "arithmeticChecked": "تم فحصها حسابيًا",
+        "consistent": "متسقة",
+        "inconsistent": "غير متسقة",
+        "unverifiable": "تعذر التحقق منها"
+      },
+      "fields": {
+        "product": "معرّف المنتج",
+        "storage": "معرّف المخزن",
+        "previous": "الكمية السابقة",
+        "change": "تغيير الكمية",
+        "expected": "المتوقع بعد التغيير",
+        "recorded": "المسجل بعد التغيير"
+      }
+    },
+    "pagination": {
+      "loading": "جارٍ تحميل معاملات المخزون…",
+      "loadError": "تعذر تحميل معاملات المخزون. يرجى المحاولة مرة أخرى."
     },
     "filters": {
       "title": "الفلاتر",
