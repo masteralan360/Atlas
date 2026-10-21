@@ -1,3 +1,4 @@
+import { invalidatePartnerSummaries, stripPartnerSummaryFields } from './partnerSummaryState'
 import { useEffect, useRef } from 'react'
 import Dexie from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -17,7 +18,6 @@ import { isOnline } from '@/lib/network'
 import {
     createRemoteOrderSaveConfirmationError,
     ORDER_SAVE_PROGRESS,
-    ORDER_SUMMARY_RECOVERY_PERSISTENCE_ERROR,
     type OrderSaveProgress,
     type OrderSaveProgressStage
 } from '@/lib/orderSaveProgress'
@@ -52,7 +52,6 @@ import { queryKeys } from '@/query/queryKeys'
 import { useLiveCollection } from './liveCollection'
 import { assertStaffMinimumSellingPrices, type MinimumSellingPriceCheckItem } from './minimumSellingPrice'
 import { serializePartnerSummaryRefresh } from './partnerSummaryRefresh'
-import { enqueuePartnerSummaryJobs, processPartnerSummaryJobs, type PartnerSummaryTarget } from './partnerSummaryJobs'
 import {
     ORDER_AMOUNT_EPSILON,
     getOrderBalanceAmount,
@@ -61,7 +60,6 @@ import {
     roundOrderAmount
 } from './orderInstallments'
 import {
-    ensureBusinessPartnerSummarySource,
     ensurePartnerFacet,
     getBusinessPartnerByAnyId,
     recalculateBusinessPartnerSummary
@@ -78,6 +76,7 @@ import {
 } from './inventory'
 import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
 import { resolveReturnStorageId } from './storageUtils'
+import { readOrderReturnStockProductIds } from './orderReturnCatalog'
 import {
     canAccessOrderForStorageAccess,
     getCurrentStorageAccess,
@@ -232,7 +231,7 @@ export type OrderFormSaveOptions = {
     onProgress?: (progress: OrderSaveProgress) => void
     /** Prevents Cloud and Hybrid forms from treating an offline queue as a successful save. */
     requireRemoteConfirmation?: boolean
-    /** Confirm Cloud/Hybrid form saves before refreshing derived partner totals. */
+    /** @deprecated Cloud/Hybrid saves now always invalidate server summaries after persistence. */
     deferSummaryRefresh?: boolean
     /** Stable client identity makes a retried create an upsert of the same order. */
     orderId?: string
@@ -384,6 +383,7 @@ export function sanitizeSyncPayload(
     const snakePayload = Object.fromEntries(
         Object.entries(payload).map(([key, value]) => [key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`), value])
     )
+    stripPartnerSummaryFields(tableName, snakePayload)
 
     for (const field of options.omitFields ?? []) {
         const snakeField = field.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
@@ -700,6 +700,10 @@ async function getInitialOrderNumber(tableName: OrderTableName, workspaceId: str
 }
 
 export function recalculateCustomerSummary(workspaceId: string, customerId: string, options?: { ensureSync?: boolean }) {
+    if (shouldUseCloudBusinessData(workspaceId)) {
+        invalidatePartnerSummaries(workspaceId)
+        return db.customers.get(customerId)
+    }
     return serializePartnerSummaryRefresh('customers', workspaceId, customerId, () =>
         calculateCustomerSummary(workspaceId, customerId, options)
     )
@@ -777,6 +781,10 @@ async function calculateCustomerSummary(workspaceId: string, customerId: string,
 }
 
 export async function recalculateSupplierSummary(workspaceId: string, supplierId: string) {
+    if (shouldUseCloudBusinessData(workspaceId)) {
+        invalidatePartnerSummaries(workspaceId)
+        return db.suppliers.get(supplierId)
+    }
     const supplier = await db.suppliers.get(supplierId)
     if (!supplier || supplier.isDeleted) {
         return supplier
@@ -931,32 +939,11 @@ async function recalculateCustomerAndPartnerSummaries(workspaceId: string, custo
     await Promise.all(tasks)
 }
 
-async function refreshSavedSalesOrderSummaries(orders: SalesOrder[], options?: OrderFormSaveOptions) {
+async function refreshSavedSalesOrderSummaries(orders: SalesOrder[], _options?: OrderFormSaveOptions) {
     const counterparties = new Map(orders.map((order) => [
         `${order.workspaceId}:${order.customerId}:${order.businessPartnerId || ''}`,
         order
     ]))
-    if (options?.deferSummaryRefresh && options.requireRemoteConfirmation
-        && orders.every((order) => shouldUseCloudBusinessData(order.workspaceId))) {
-        const targets: PartnerSummaryTarget[] = []
-        for (const order of counterparties.values()) {
-            if (order.customerId) targets.push({ workspaceId: order.workspaceId, table: 'customers', entityId: order.customerId })
-            if (order.businessPartnerId) targets.push({ workspaceId: order.workspaceId, table: 'business_partners', entityId: order.businessPartnerId })
-        }
-        try {
-            await enqueuePartnerSummaryJobs(targets)
-        } catch (cause) {
-            const error = new Error(ORDER_SUMMARY_RECOVERY_PERSISTENCE_ERROR)
-            Object.defineProperty(error, 'cause', { value: cause })
-            throw error
-        }
-        for (const workspaceId of new Set(orders.map((order) => order.workspaceId))) {
-            void processPartnerSummaryJobs(workspaceId).catch((error) => {
-                console.error('[Orders] Failed to start saved sales order summary refresh:', error)
-            })
-        }
-        return
-    }
     await Promise.all(Array.from(counterparties.values()).map((order) =>
         recalculateCustomerAndPartnerSummaries(order.workspaceId, order.customerId, order.businessPartnerId)
     ))
@@ -3820,21 +3807,12 @@ async function completePaidQuickSalesOrderAtomically(
         completedOrder.id,
         completedOrder.createdBy
     )
-    // Customer/partner totals and reorder suggestions are derived projections.
-    // A Quick Order may create its customer just before checkout, so make sure
-    // the target partner is in the Hybrid mirror before deriving its summary.
-    // Keep this refresh off the checkout response path; the atomic order is
-    // already committed and must not be reported as failed if a projection is
-    // temporarily unavailable.
+    // Invalidate server summaries and refresh local reorder suggestions after
+    // checkout. The committed order must not depend on these read models.
     void Promise.all([
         recalculateCustomerSummary(order.workspaceId, completedOrder.customerId),
         (async () => {
             if (!completedOrder.businessPartnerId) return
-            await ensureBusinessPartnerSummarySource(
-                order.workspaceId,
-                completedOrder.businessPartnerId,
-                completedOrder.customerId
-            )
             await recalculateBusinessPartnerSummary(order.workspaceId, completedOrder.businessPartnerId, { ensureSync: true })
         })(),
         (async () => {
@@ -4962,7 +4940,14 @@ async function restoreInventoryForSalesOrderReturn(
     timestamp: string,
     returnId: string
 ): Promise<RestoredOrderReturnLine[]> {
+    const stockProductIds = await readOrderReturnStockProductIds(order.workspaceId, lines.map(line => line.item.productId))
     const plans = await Promise.all(lines.map(async (line) => {
+        if (!stockProductIds.has(line.item.productId)) {
+            // Services retain return quantities and refund evidence, but have
+            // no physical location, inventory movement or batch restoration.
+            return { ...line, restoredStorageId: null, restoredAllocations: [] as StockBatchAllocation[],
+                restoredBatchAllocations: [] as StockBatchAllocation[] }
+        }
         const restoredStorageId = await resolveReturnStorageId({
             workspaceId: order.workspaceId,
             productId: line.item.productId,
@@ -4989,6 +4974,7 @@ async function restoreInventoryForSalesOrderReturn(
     const applied: typeof plans = []
     try {
         for (const plan of plans) {
+            if (!plan.restoredStorageId) continue
             await adjustInventoryQuantity({
                 workspaceId: order.workspaceId,
                 productId: plan.item.productId,
@@ -5016,6 +5002,7 @@ async function restoreInventoryForSalesOrderReturn(
         }
     } catch (error) {
         for (const plan of [...applied].reverse()) {
+            if (!plan.restoredStorageId) continue
             try {
                 if (plan.restoredBatchAllocations.length > 0) {
                     await commitStockBatchAllocations(

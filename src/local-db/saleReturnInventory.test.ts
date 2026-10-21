@@ -25,6 +25,7 @@ vi.hoisted(() => {
     vi.stubGlobal('location', { hash: '', origin: 'http://localhost', pathname: '/' })
     vi.stubGlobal('addEventListener', () => undefined)
     vi.stubGlobal('removeEventListener', () => undefined)
+    vi.stubGlobal('dispatchEvent', () => true)
     vi.stubGlobal('window', globalThis)
 })
 

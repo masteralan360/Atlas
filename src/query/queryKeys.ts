@@ -123,6 +123,12 @@ export const queryKeys = {
   businessPartners: {
     all: (workspaceId: string | undefined) =>
       ['atlas', 'workspace', workspaceId ?? 'unscoped', 'business-partners'] as const,
+    summary: (workspaceId: string | undefined, partnerId: string | undefined, viewer: {
+      userId?: string | null; role?: string | null; featureEnabled: boolean; groupVisibilityScope?: string
+    }) => [
+      ...queryKeys.businessPartners.all(workspaceId), 'summary', partnerId ?? null,
+      viewer.userId ?? null, viewer.role ?? null, viewer.featureEnabled, viewer.groupVisibilityScope ?? null,
+    ] as const,
     duplicates: (
       workspaceId: string | undefined,
       input: { name: string; phone: string; excludeBusinessPartnerId?: string },

@@ -6,7 +6,7 @@ import { startPartnerSummaryRecovery } from './partnerSummaryRecovery'
 
 describe('partner summary recovery lifecycle', () => {
     afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
-    it('resumes on startup, reconnect, wake and retry, and stops after workspace cleanup', async () => {
+    it('cleans up on startup, reconnect and wake without polling summary work', async () => {
         vi.useFakeTimers()
         mocks.run.mockReset().mockResolvedValue(undefined)
         let event!: (name: string) => void
@@ -19,10 +19,10 @@ describe('partner summary recovery lifecycle', () => {
         event('wake')
         expect(mocks.run).toHaveBeenCalledTimes(3)
         await vi.advanceTimersByTimeAsync(30_000)
-        expect(mocks.run).toHaveBeenCalledTimes(4)
+        expect(mocks.run).toHaveBeenCalledTimes(3)
         stop()
         expect(mocks.unsubscribe).toHaveBeenCalledOnce()
         await vi.advanceTimersByTimeAsync(60_000)
-        expect(mocks.run).toHaveBeenCalledTimes(4)
+        expect(mocks.run).toHaveBeenCalledTimes(3)
     })
 })

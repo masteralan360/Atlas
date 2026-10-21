@@ -285,7 +285,7 @@ async function loadPartnerStatement(
   const crm = "crm"
   const [partnerResult, agentsRaw, salesByPartner, salesByCustomer, purchasesByPartner, purchasesBySupplier,
     loansRaw, installmentSalesRaw, settlementOperationsRaw, merchantProfilesRaw, storageAccess] = await Promise.all([
-    client.schema(crm).rpc("list_visible_business_partners", { p_workspace_id: workspaceId }),
+    client.schema(crm).rpc("read_business_partner_summaries", { p_workspace_id: workspaceId, p_partner_ids: [partnerId] }),
     readAll(client, crm, "agents", workspaceId, (query) => query
       .eq("business_partner_id", partnerId).eq("agent_type", "field_agent").eq("is_deleted", false)),
     readAll(client, crm, "sales_orders", workspaceId, (query) => query

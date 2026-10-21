@@ -1363,6 +1363,7 @@ export function PartnerDetailsView({
     }, [defaultCurrency, deliveryShipments, merchantProfileIds, merchantSettlementBreakdown])
 
     const receivableCurrencyTotals = useMemo<CurrencyAmountItem[]>(() => {
+        if (partner?.summarySource === 'server') return partner.receivableCurrencyTotals ?? []
         const map = new Map<string, number>()
         for (const order of customerOrders.filter((o) => (o.status === 'pending' || o.status === 'completed') && !o.linkedLoanId)) {
             const paid = Math.min(order.total, Math.max(0, order.paidAmount ?? (order.isPaid ? order.total : 0)))
@@ -1382,9 +1383,10 @@ export function PartnerDetailsView({
             map.set(item.currency, (map.get(item.currency) || 0) + item.amount)
         }
         return Array.from(map.entries()).map(([currency, amount]) => ({ currency, amount }))
-    }, [customerOrders, defaultCurrency, deliveryReceivableTotals, partnerLoans])
+    }, [customerOrders, defaultCurrency, deliveryReceivableTotals, partnerLoans, partner?.summarySource, partner?.receivableCurrencyTotals])
 
     const payableCurrencyTotals = useMemo<CurrencyAmountItem[]>(() => {
+        if (partner?.summarySource === 'server') return partner.payableCurrencyTotals ?? []
         const map = new Map<string, number>()
         for (const order of supplierOrders.filter((o) => (o.status === 'ordered' || o.status === 'received' || o.status === 'completed') && !o.linkedLoanId)) {
             const paid = Math.min(order.total, Math.max(0, order.paidAmount ?? (order.isPaid ? order.total : 0)))
@@ -1404,7 +1406,7 @@ export function PartnerDetailsView({
             map.set(item.currency, (map.get(item.currency) || 0) + item.amount)
         }
         return Array.from(map.entries()).map(([currency, amount]) => ({ currency, amount }))
-    }, [defaultCurrency, deliveryPayableTotals, partnerLoans, supplierOrders])
+    }, [defaultCurrency, deliveryPayableTotals, partnerLoans, supplierOrders, partner?.summarySource, partner?.payableCurrencyTotals])
 
     const outstandingCurrencyTotals = useMemo<CurrencyAmountItem[]>(() => {
         const map = new Map<string, number>()

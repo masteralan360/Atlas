@@ -12,6 +12,7 @@ import {
   isSyncIntegrityError,
 } from "@/sync/syncErrors";
 import { prepareRemoteMutationPayload } from "@/sync/syncPayloadContract";
+import { invalidatePartnerSummaries } from '@/local-db/partnerSummaryState';
 import {
   finishSyncProgress,
   startSyncProgress,
@@ -1955,6 +1956,15 @@ export async function processMutationQueue(
     }
   }
 
+  if (successCount > 0) {
+    const summarySources = new Set([
+      'business_partners', 'sales_orders', 'purchase_orders', 'loans', 'loan_commands',
+      'order_cancellation_commands', 'installment_sales', 'payment_transactions',
+      'delivery_merchant_profiles', 'delivery_ledger_entries', 'agents',
+    ]);
+    for (const workspaceId of new Set(orderedMutations.filter(mutation => summarySources.has(mutation.entityType))
+      .map(mutation => mutation.workspaceId))) invalidatePartnerSummaries(workspaceId);
+  }
   return {
     success: successCount,
     failed: failedCount,

@@ -137,8 +137,12 @@ export function auditSalesOrderGraph(graph: SalesOrderTransactionGraph, workspac
     if (!row.isDeleted && returnMap.get(row.returnId)?.status === 'posted') {
       const item = items.find(candidate => candidate.id === row.orderItemId)
       if (item) {
-        const key = `${item.productId}:${row.restoredStorageId || item.storageId || order.sourceStorageId || ''}`
-        returnedInventory.set(key, roundQuantity((returnedInventory.get(key) ?? 0) + amount(row.inventoryQuantity ?? row.quantity)))
+        // Service quantities still reconcile against the sold line, but never
+        // represent stock restored into the order's fallback storage.
+        if (!productMap.get(item.productId)?.isService) {
+          const key = `${item.productId}:${row.restoredStorageId || item.storageId || order.sourceStorageId || ''}`
+          returnedInventory.set(key, roundQuantity((returnedInventory.get(key) ?? 0) + amount(row.inventoryQuantity ?? row.quantity)))
+        }
         returnedByItem.set(item.id, roundQuantity((returnedByItem.get(item.id) ?? 0) + amount(row.inventoryQuantity ?? row.quantity)))
         add('inventory', 'RETURN_QUANTITY_INVALID', amount(row.inventoryQuantity ?? row.quantity) > 0 && amount(row.inventoryQuantity ?? row.quantity) <= getOrderLineInventoryQuantity(item), 'order_return_item', row.id)
         add('items', 'RETURN_BONUS_QUANTITY_MISMATCH', row.paidInventoryQuantity == null || row.freeInventoryQuantity == null || quantityEqual(amount(row.paidInventoryQuantity) + amount(row.freeInventoryQuantity), amount(row.inventoryQuantity ?? row.quantity)), 'order_return_item', row.id)
@@ -192,7 +196,7 @@ export function auditSalesOrderGraph(graph: SalesOrderTransactionGraph, workspac
     const returnedItems = active(graph.returnItems).filter(item => item.returnId === returned.id)
     for (const returnItem of returnedItems) {
       const orderItem = items.find(item => item.id === returnItem.orderItemId)
-      if (!orderItem) continue
+      if (!orderItem || productMap.get(orderItem.productId)?.isService) continue
       const storageId = returnItem.restoredStorageId || orderItem.storageId || order.sourceStorageId
       if (!storageId) {
         add('inventory', 'RETURN_RESTORATION_STORAGE_MISSING', false, 'order_return_item', returnItem.id,
@@ -342,7 +346,12 @@ export function auditSalesOrderGraph(graph: SalesOrderTransactionGraph, workspac
   }
   if (loan || !financed) {
     const paid = loan ? roundOrderValue(Math.min(order.total, orderPaid + active(graph.loanPayments).reduce((sum, row) => sum + amount(row.amount), 0))) : orderPaid
-    const fullyReturnedWithoutPayment = order.returnStatus === 'full'
+    // Financed returns clear the receivable, and refunded cash orders settle
+    // after their payment reversals. Only the never-paid cash return path
+    // preserves an unpaid status when its total reaches zero.
+    const fullyReturnedWithoutPayment = !financed
+      && !orderPayments.some(row => !row.voidId && amount(row.amount) > ORDER_AMOUNT_EPSILON)
+      && order.returnStatus === 'full'
       && order.total <= ORDER_AMOUNT_EPSILON
       && paid <= ORDER_AMOUNT_EPSILON
     const expectedStatus = fullyReturnedWithoutPayment

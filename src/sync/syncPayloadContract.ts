@@ -1,5 +1,6 @@
 import { SERVICES_VIRTUAL_STORAGE_ID } from "@/lib/catalogItem";
 import { getSchemaMismatchColumnName } from "./syncErrors";
+import { partnerSummaryRemoteFields, stripPartnerSummaryFields } from '@/local-db/partnerSummaryState';
 
 /**
  * Fields that exist in the local model but must never be included in an
@@ -126,6 +127,7 @@ export function prepareRemoteMutationPayload(
   payload: Record<string, unknown>,
 ): Record<string, unknown> {
   const remotePayload = toSnakeCase(payload);
+  stripPartnerSummaryFields(entityType, remotePayload);
   const nonRemoteFields = NON_REMOTE_FIELDS_BY_ENTITY[entityType];
 
   for (const field of COMMON_NON_REMOTE_FIELDS) {
@@ -165,6 +167,7 @@ export function inspectRemoteMutationPayload(
   const nonRemoteFields = new Set([
     ...COMMON_NON_REMOTE_FIELDS,
     ...(NON_REMOTE_FIELDS_BY_ENTITY[entityType] ?? []),
+    ...(partnerSummaryRemoteFields[entityType] ?? []),
   ]);
   const remotePayload = prepareRemoteMutationPayload(entityType, payload);
   const rejectedColumn = getSchemaMismatchColumnName(error);

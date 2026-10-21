@@ -7,6 +7,7 @@ import Dexie, {
   type Transaction
 } from 'dexie'
 import type { PartnerSummaryJob } from './partnerSummaryJobs'
+import { invalidatePartnerSummaries } from './partnerSummaryState'
 import type {
   Product,
   ProductUom,
@@ -4261,6 +4262,31 @@ export class AtlasDatabase extends Dexie {
           queueLocalModeSqliteDelete(database, tableName, obj as Record<string, unknown>)
         }
       })
+    }
+
+    // Covers mutations outside partner/order screens, remote hydration and
+    // deletions. Refresh only after the complete source transaction commits.
+    const summarySources = [
+      'sales_orders', 'purchase_orders', 'loans', 'installment_sales', 'payment_transactions',
+      'delivery_merchant_profiles', 'delivery_ledger_entries', 'agents',
+    ]
+    const scheduled = new WeakMap<Transaction, Set<string>>()
+    const invalidateOnCommit = (transaction: Transaction, record?: { workspaceId?: string }) => {
+      const workspaceId = record?.workspaceId
+      if (!workspaceId || isLocalWorkspaceMode(workspaceId)) return
+      let workspaces = scheduled.get(transaction)
+      if (!workspaces) {
+        workspaces = new Set<string>()
+        scheduled.set(transaction, workspaces)
+        transaction.on('complete', () => workspaces!.forEach(invalidatePartnerSummaries))
+      }
+      workspaces.add(workspaceId)
+    }
+    for (const source of summarySources) {
+      const table = this.table(source)
+      table.hook('creating', (_key, record, transaction) => { invalidateOnCommit(transaction, record) })
+      table.hook('updating', (_mods, _key, record, transaction) => { invalidateOnCommit(transaction, record) })
+      table.hook('deleting', (_key, record, transaction) => { invalidateOnCommit(transaction, record) })
     }
   }
 }

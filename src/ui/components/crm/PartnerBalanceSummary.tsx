@@ -2,12 +2,13 @@ import { TrendingDown, TrendingUp } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { BusinessPartner } from '@/local-db'
+import { useBusinessPartner } from '@/local-db/businessPartners'
 import { cn, formatCurrency } from '@/lib/utils'
 
 export type CurrencyAmountItem = { currency: string; amount: number }
 
 type PartnerBalanceSummaryProps = {
-    partner: Pick<BusinessPartner, 'defaultCurrency' | 'receivableBalance' | 'payableBalance'>
+    partner: Pick<BusinessPartner, 'defaultCurrency' | 'receivableBalance' | 'payableBalance'> & Partial<Pick<BusinessPartner, 'id'>>
     iqdPreference: Parameters<typeof formatCurrency>[2]
     receivableTotals?: CurrencyAmountItem[]
     payableTotals?: CurrencyAmountItem[]
@@ -135,14 +136,19 @@ export function formatMultiCurrencySummary(
  * Supports per-currency totals when available, defaulting to defaultCurrency stored balances.
  */
 export function PartnerBalanceSummary({
-    partner,
+    partner: fallbackPartner,
     iqdPreference,
-    receivableTotals,
-    payableTotals,
+    receivableTotals: fallbackReceivableTotals,
+    payableTotals: fallbackPayableTotals,
     className,
     compact = false
 }: PartnerBalanceSummaryProps) {
     const { t } = useTranslation()
+    const livePartner = useBusinessPartner(fallbackPartner.id)
+    const partner = livePartner ?? fallbackPartner
+    const confirmed = livePartner?.summarySource === 'server' ? livePartner : undefined
+    const receivableTotals = confirmed?.receivableCurrencyTotals ?? fallbackReceivableTotals
+    const payableTotals = confirmed?.payableCurrencyTotals ?? fallbackPayableTotals
 
     if (compact) {
         return (

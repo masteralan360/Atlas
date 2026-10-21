@@ -1,3 +1,4 @@
+import { queryClient } from '@/query/queryClient'
 import 'fake-indexeddb/auto'
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -140,11 +141,16 @@ import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/worksp
 import { db } from './database'
 import { createCompletedSalesOrder, createQuickSalesOrder, createSalesOrder, recalculateCustomerSummary, updateSalesOrder } from './orders'
 import { recalculateBusinessPartnerSummary } from './businessPartners'
-import { enqueuePartnerSummaryJobs, processPartnerSummaryJobs } from './partnerSummaryJobs'
+import { processPartnerSummaryJobs, type PartnerSummaryTarget } from './partnerSummaryJobs'
 import { assertOrderFinancialEffects } from '@/dev/testing/assertions/orderEffects'
 import { initialPaymentRegression } from '@/dev/testing/salesOrderResilience/scenarios/regressionScenarios'
 import { createPosServiceNameMetadata } from '@/lib/posServiceName'
 import type { CrudTraceHandle } from '@/dev/crud-debugger/trace'
+
+async function seedLegacySummaryJobs(targets: PartnerSummaryTarget[]) {
+    await db.partner_summary_jobs.bulkPut(targets.map(target => ({...target,
+        id:JSON.stringify([target.workspaceId,target.table,target.entityId]),revision:crypto.randomUUID()})))
+}
 
 const WORKSPACE_ID = '10000000-0000-4000-8000-000000000001'
 const USER_ID = '10000000-0000-4000-8000-000000000002'
@@ -719,107 +725,52 @@ describe('atomic POS Quick Order completion', () => {
 
         for (const dataMode of ['cloud', 'hybrid'] as const) {
             for (const paid of [false, true]) {
-                it(`${dataMode}: confirms a ${paid ? 'paid' : 'unpaid'} draft while summary RPCs are still pending`, async () => {
+                it(`${dataMode}: confirms a ${paid ? 'paid' : 'unpaid'} draft without calculating or uploading summaries`, async () => {
                     writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode })
                     const release = deferredSummaryWrites()
                     const progress: string[] = []
-                    let finished = false
-                    const saving = createSalesOrder(WORKSPACE_ID,
-                        paid ? quickOrderInput() : unpaidQuickOrderInput('draft'), USER_ID, {
-                            requireRemoteConfirmation: true,
-                            deferSummaryRefresh: true,
-                            onProgress: (report) => progress.push(report.stageKey)
-                        }).then((order) => { finished = true; return order })
+                    const beforePartner = await db.business_partners.get(PARTNER_ID)
+                    const beforeCustomer = await db.customers.get(CUSTOMER_ID)
+                    const invalidation = vi.spyOn(queryClient, 'invalidateQueries')
                     try {
-                        await vi.waitFor(() => {
-                            expect(finished).toBe(true)
-                            expect(supabaseMock.rpc).toHaveBeenCalledWith('sync_customer', expect.anything())
-                            expect(supabaseMock.rpc).toHaveBeenCalledWith('sync_business_partner', expect.anything())
-                        })
-                        const order = await saving
-                        expect(await db.partner_summary_jobs.count()).toBe(2)
+                        const order = await createSalesOrder(WORKSPACE_ID,
+                            paid ? quickOrderInput() : unpaidQuickOrderInput('draft'), USER_ID, {
+                                requireRemoteConfirmation: true, deferSummaryRefresh: true,
+                                onProgress: report => progress.push(report.stageKey),
+                            })
                         expect(order).toMatchObject({ orderNumber: 'SO-2026-00999', syncStatus: 'synced', status: 'draft' })
                         expect(progress.at(-1)).toBe('orders.form.saveProgressComplete')
-                        const expectedOrder = expect.objectContaining({ id: order.id, workspace_id: WORKSPACE_ID,
-                            customer_id: CUSTOMER_ID, business_partner_id: PARTNER_ID, total: 100, paid_amount: paid ? 100 : 0 })
-                        if (paid) expect(supabaseMock.rpc).toHaveBeenCalledWith('create_sales_order_with_initial_payment',
-                            expect.objectContaining({ p_order: expectedOrder,
-                                p_transaction: expect.objectContaining({ source_record_id: order.id, amount: 100 }) }))
-                        else expect(supabaseMock.upsert).toHaveBeenCalledWith([expectedOrder])
-                        expect(await assertOrderFinancialEffects(order.id, paid ? 100 : 0, paid ? 0 : 100))
-                            .toHaveLength(paid ? 1 : 0)
+                        expect(await assertOrderFinancialEffects(order.id, paid ? 100 : 0, paid ? 0 : 100)).toHaveLength(paid ? 1 : 0)
                         expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)
                         expect(await db.payment_account_movements.count()).toBe(0)
-                    } finally {
-                        release()
-                        await saving
-                        await finishSummaryRefresh()
-                    }
-                    expect(await db.customers.get(CUSTOMER_ID)).toMatchObject({ totalOrders: 1, outstandingBalance: 0, syncStatus: 'synced' })
-                    expect(await db.business_partners.get(PARTNER_ID)).toMatchObject({ totalSalesOrders: 1, receivableBalance: 0, syncStatus: 'synced' })
-                    expect(supabaseMock.rpc).toHaveBeenCalledWith('sync_customer', expect.objectContaining({
-                        p_workspace_id: WORKSPACE_ID, p_entity_id: CUSTOMER_ID,
-                        p_payload: expect.objectContaining({ total_orders: 1 })
-                    }))
-                    expect(supabaseMock.rpc).toHaveBeenCalledWith('sync_business_partner', expect.objectContaining({
-                        p_workspace_id: WORKSPACE_ID, p_entity_id: PARTNER_ID,
-                        p_payload: expect.objectContaining({ total_sales_orders: 1 })
-                    }))
+                        expect(await db.partner_summary_jobs.count()).toBe(0)
+                        expect(await db.offline_mutations.count()).toBe(0)
+                        expect(await db.business_partners.get(PARTNER_ID)).toEqual(beforePartner)
+                        expect(await db.customers.get(CUSTOMER_ID)).toEqual(beforeCustomer)
+                        expect(supabaseMock.rpc.mock.calls.some(([name]) => name === 'sync_customer' || name === 'sync_business_partner')).toBe(false)
+                        expect(invalidation).toHaveBeenCalledWith({ queryKey: ['atlas','workspace',WORKSPACE_ID,'business-partners'] })
+                    } finally { release(); invalidation.mockRestore() }
                 })
             }
 
-            it(`${dataMode}: editing the customer returns before refreshing both old and new summaries`, async () => {
+            it(`${dataMode}: moving an order to another customer invalidates the directory without overwriting either partner`, async () => {
                 writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode })
                 const order = await createSalesOrder(WORKSPACE_ID, unpaidQuickOrderInput('draft'), USER_ID)
                 const newPartnerId = crypto.randomUUID()
                 const newCustomerId = crypto.randomUUID()
-                await db.business_partners.put({ ...(await db.business_partners.get(PARTNER_ID))!, id: newPartnerId, customerFacetId: newCustomerId, totalSalesOrders: 0 })
-                await db.customers.put({ ...(await db.customers.get(CUSTOMER_ID))!, id: newCustomerId, businessPartnerId: newPartnerId, totalOrders: 0 })
-                const release = deferredSummaryWrites()
-                let finished = false
-                const saving = updateSalesOrder(order.id, {
-                    businessPartnerId: newPartnerId, customerId: newCustomerId, notes: 'Updated draft'
-                }, { requireRemoteConfirmation: true, deferSummaryRefresh: true })
-                    .then((updated) => { finished = true; return updated })
+                await db.business_partners.put({ ...(await db.business_partners.get(PARTNER_ID))!, id: newPartnerId, customerFacetId: newCustomerId })
+                await db.customers.put({ ...(await db.customers.get(CUSTOMER_ID))!, id: newCustomerId, businessPartnerId: newPartnerId })
+                const before = await db.business_partners.toArray()
+                const invalidation = vi.spyOn(queryClient, 'invalidateQueries')
                 try {
-                    await vi.waitFor(() => expect(finished).toBe(true))
-                    await saving
-                    expect(await db.sales_orders.get(order.id)).toMatchObject({
-                        customerId: newCustomerId, businessPartnerId: newPartnerId, notes: 'Updated draft', syncStatus: 'synced'
-                    })
-                    expect(await assertOrderFinancialEffects(order.id, 0, 100)).toHaveLength(0)
-                    expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)
-                } finally {
-                    release()
-                    await saving
-                    await Promise.all([finishSummaryRefresh(), finishSummaryRefresh(newCustomerId, newPartnerId)])
-                }
-                expect((await db.customers.get(CUSTOMER_ID))?.totalOrders).toBe(0)
-                expect((await db.business_partners.get(PARTNER_ID))?.totalSalesOrders).toBe(0)
-                expect((await db.customers.get(newCustomerId))?.totalOrders).toBe(1)
-                expect((await db.business_partners.get(newPartnerId))?.totalSalesOrders).toBe(1)
-            })
-
-            it(`${dataMode}: a failed summary sync queues recovery without failing or duplicating the saved order`, async () => {
-                writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode })
-                supabaseMock.rpc.mockResolvedValue({ data: null, error: new Error('Summary server unavailable') })
-                const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-                try {
-                    const order = await createSalesOrder(WORKSPACE_ID, unpaidQuickOrderInput('draft'), USER_ID,
-                        { requireRemoteConfirmation: true, deferSummaryRefresh: true })
-                    await finishSummaryRefresh()
-                    expect(await db.sales_orders.count()).toBe(1)
-                    expect(await db.sales_orders.get(order.id)).toMatchObject({ syncStatus: 'synced', orderNumber: 'SO-2026-00999' })
-                    expect(await assertOrderFinancialEffects(order.id, 0, 100)).toHaveLength(0)
-                    expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)
-                    const queued = await db.offline_mutations.toArray()
-                    expect(queued.map((row) => row.entityType).sort()).toEqual(['business_partners', 'customers'])
-                    expect(queued.every((row) => row.workspaceId === WORKSPACE_ID)).toBe(true)
-                    expect((await db.business_partners.get(PARTNER_ID))?.syncStatus).toBe('pending')
-                    expect((await db.customers.get(CUSTOMER_ID))?.syncStatus).toBe('pending')
-                } finally {
-                    log.mockRestore()
-                }
+                    const updated = await updateSalesOrder(order.id, { businessPartnerId: newPartnerId,
+                        customerId: newCustomerId, notes: 'Updated draft' }, { requireRemoteConfirmation: true })
+                    expect(updated).toMatchObject({ customerId: newCustomerId, businessPartnerId: newPartnerId, notes: 'Updated draft' })
+                    expect(await db.sales_orders.get(order.id)).toMatchObject({ syncStatus: 'synced' })
+                    expect(await db.business_partners.toArray()).toEqual(before)
+                    expect(invalidation).toHaveBeenCalledWith({ queryKey: ['atlas','workspace',WORKSPACE_ID,'business-partners'] })
+                    expect(await assertOrderFinancialEffects(order.id,0,100)).toHaveLength(0)
+                } finally { invalidation.mockRestore() }
             })
         }
 
@@ -836,109 +787,29 @@ describe('atomic POS Quick Order completion', () => {
             expect(await db.partner_summary_jobs.count()).toBe(0)
         })
 
-        it('does not report completion if the recovery job cannot be persisted and retries without duplicate payment', async () => {
-            const options = {
-                requireRemoteConfirmation: true, deferSummaryRefresh: true,
-                orderId: crypto.randomUUID(), initialPaymentTransactionId: crypto.randomUUID(),
-                onProgress: vi.fn()
-            }
-            const put = vi.spyOn(db.partner_summary_jobs, 'bulkPut').mockRejectedValueOnce(new Error('Disk full'))
+        it('confirms a paid save even if the retired summary-job storage is unavailable', async () => {
+            const options = { requireRemoteConfirmation: true, orderId: crypto.randomUUID(),
+                initialPaymentTransactionId: crypto.randomUUID(), onProgress: vi.fn() }
+            const put = vi.spyOn(db.partner_summary_jobs,'bulkPut').mockRejectedValue(new Error('Disk full'))
             try {
-                await expect(createSalesOrder(WORKSPACE_ID, quickOrderInput(), USER_ID, options))
-                    .rejects.toThrow('order_summary_recovery_persistence_failed')
-                expect(options.onProgress).not.toHaveBeenCalledWith(expect.objectContaining({ stageKey: 'orders.form.saveProgressComplete' }))
+                const order = await createSalesOrder(WORKSPACE_ID,quickOrderInput(),USER_ID,options)
+                expect(put).not.toHaveBeenCalled()
+                expect(options.onProgress).toHaveBeenCalledWith(expect.objectContaining({ stageKey:'orders.form.saveProgressComplete' }))
+                expect(await assertOrderFinancialEffects(order.id,100,0)).toHaveLength(1)
+                expect(await db.sales_orders.count()).toBe(1)
             } finally { put.mockRestore() }
-            const order = await createSalesOrder(WORKSPACE_ID, quickOrderInput(), USER_ID, options)
-            await finishSummaryRefresh()
-            expect(await db.sales_orders.count()).toBe(1)
-            expect(await assertOrderFinancialEffects(order.id, 100, 0)).toHaveLength(1)
-            expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)
-            expect(await db.payment_account_movements.count()).toBe(0)
-            expect(await db.partner_summary_jobs.count()).toBe(0)
         })
 
-        it('keeps a job when its local source is missing, then recovers when the source becomes available', async () => {
-            const customer = (await db.customers.get(CUSTOMER_ID))!
-            await enqueuePartnerSummaryJobs([{ workspaceId: WORKSPACE_ID, table: 'customers', entityId: CUSTOMER_ID }])
+        it('retires old summary intents without replaying payments or altering the offline business queue', async () => {
+            const order = await createSalesOrder(WORKSPACE_ID,unpaidQuickOrderInput('draft'),USER_ID)
+            await seedLegacySummaryJobs([{ workspaceId:WORKSPACE_ID,table:'customers',entityId:CUSTOMER_ID }])
             await db.customers.delete(CUSTOMER_ID)
-            const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-            try {
-                await processPartnerSummaryJobs(WORKSPACE_ID)
-                expect(await db.partner_summary_jobs.count()).toBe(1)
-                expect(supabaseMock.rpc).not.toHaveBeenCalled()
-                await db.customers.put(customer)
-                await processPartnerSummaryJobs(WORKSPACE_ID)
-                expect(await db.partner_summary_jobs.count()).toBe(0)
-            } finally { log.mockRestore() }
-        })
-
-        it('retains refresh jobs if the failed upload cannot be handed to the offline queue', async () => {
-            supabaseMock.rpc.mockResolvedValue({ data: null, error: new Error('Connection lost') })
-            const queueWrite = vi.spyOn(db.offline_mutations, 'add').mockRejectedValue(new Error('Storage interrupted'))
-            const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-            let orderId: string
-            try {
-                const order = await createSalesOrder(WORKSPACE_ID, unpaidQuickOrderInput('draft'), USER_ID,
-                    { requireRemoteConfirmation: true, deferSummaryRefresh: true })
-                orderId = order.id
-                await processPartnerSummaryJobs(WORKSPACE_ID)
-                expect(await db.partner_summary_jobs.count()).toBe(2)
-                expect(await db.offline_mutations.count()).toBe(0)
-            } finally { queueWrite.mockRestore(); log.mockRestore() }
-            db.close()
-            await db.open()
-            supabaseMock.rpc.mockResolvedValue({ data: null, error: null })
+            supabaseMock.rpc.mockClear()
             await processPartnerSummaryJobs(WORKSPACE_ID)
+            expect(supabaseMock.rpc).not.toHaveBeenCalled()
             expect(await db.partner_summary_jobs.count()).toBe(0)
-            expect(await assertOrderFinancialEffects(orderId, 0, 100)).toHaveLength(0)
-            expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)
-        })
-
-        for (const dataMode of ['cloud', 'hybrid'] as const) {
-            it(`${dataMode}: resumes after local summary writes but before remote upload, even if cached totals already match`, async () => {
-                writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode })
-                const order = await createSalesOrder(WORKSPACE_ID, unpaidQuickOrderInput('draft'), USER_ID)
-                // Model a process stopping after the local put: totals are current,
-                // upload is unconfirmed, and no offline mutation has been written.
-                await db.customers.update(CUSTOMER_ID, { syncStatus: 'pending', lastSyncedAt: null })
-                await db.business_partners.update(PARTNER_ID, { syncStatus: 'pending', lastSyncedAt: null })
-                await enqueuePartnerSummaryJobs([
-                    { workspaceId: WORKSPACE_ID, table: 'customers', entityId: CUSTOMER_ID },
-                    { workspaceId: WORKSPACE_ID, table: 'business_partners', entityId: PARTNER_ID }
-                ])
-                db.close()
-                await db.open()
-                supabaseMock.rpc.mockClear()
-                await processPartnerSummaryJobs(WORKSPACE_ID)
-                expect(supabaseMock.rpc).toHaveBeenCalledWith('sync_customer', expect.objectContaining({
-                    p_entity_id: CUSTOMER_ID, p_payload: expect.objectContaining({ total_orders: 1 })
-                }))
-                expect(supabaseMock.rpc).toHaveBeenCalledWith('sync_business_partner', expect.objectContaining({
-                    p_entity_id: PARTNER_ID, p_payload: expect.objectContaining({ total_sales_orders: 1 })
-                }))
-                expect((await db.customers.get(CUSTOMER_ID))?.syncStatus).toBe('synced')
-                expect((await db.business_partners.get(PARTNER_ID))?.syncStatus).toBe('synced')
-                expect(await db.partner_summary_jobs.count()).toBe(0)
-                expect(await db.offline_mutations.count()).toBe(0)
-                expect(await assertOrderFinancialEffects(order.id, 0, 100)).toHaveLength(0)
-                expect((await db.inventory.get(INVENTORY_ID))?.quantity).toBe(5)
-            })
-        }
-
-        it('still waits for summaries for callers that do not opt into form deferral', async () => {
-            const release = deferredSummaryWrites()
-            let finished = false
-            const saving = createSalesOrder(WORKSPACE_ID, unpaidQuickOrderInput('draft'), USER_ID,
-                { requireRemoteConfirmation: true }).then((order) => { finished = true; return order })
-            try {
-                await vi.waitFor(() => expect(supabaseMock.rpc).toHaveBeenCalledWith('sync_customer', expect.anything()))
-                expect(finished).toBe(false)
-            } finally {
-                release()
-                await saving
-                await finishSummaryRefresh()
-            }
-            expect(finished).toBe(true)
+            expect(await db.offline_mutations.count()).toBe(0)
+            expect(await assertOrderFinancialEffects(order.id,0,100)).toHaveLength(0)
         })
     })
 

@@ -8,6 +8,8 @@ import type { CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 import { assertOrderFinancialEffects, assertStock } from '../assertions/orderEffects'
 import { installTestBrowser } from '../fixtures/browser'
+import { SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
+import { setActiveBusinessUser, setActiveBusinessWorkspace } from '@/lib/network'
 import { saleOrderInput, TEST_TIME, TEST_WORKSPACE_ID } from '../fixtures/orderInput'
 
 vi.mock('@/auth/supabase', () => {
@@ -77,10 +79,140 @@ describe('product UoM conversion in order transactions', () => {
     await db.delete()
     await db.open()
     writeWorkspaceModeSnapshot({ workspaceId: TEST_WORKSPACE_ID, dataMode: 'local' })
+    setActiveBusinessWorkspace(TEST_WORKSPACE_ID)
+    setActiveBusinessUser('service-return-admin','admin',TEST_WORKSPACE_ID)
+    await db.users.put({id:'service-return-admin',workspaceId:TEST_WORKSPACE_ID,name:'Service return administrator',
+      email:'service-return@example.test',role:'admin',createdAt:TEST_TIME,updatedAt:TEST_TIME,
+      version:1,isDeleted:false,syncStatus:'synced',lastSyncedAt:TEST_TIME})
   })
 
-  afterEach(() => clearWorkspaceModeSnapshot(TEST_WORKSPACE_ID))
+  afterEach(() => {
+    clearWorkspaceModeSnapshot(TEST_WORKSPACE_ID)
+    setActiveBusinessUser(null)
+    setActiveBusinessWorkspace(null)
+  })
   afterAll(async () => { await db.delete() })
+
+  it('refunds partial and full service-only returns without a storage or inventory movement', async () => {
+    const customer = await createPartner('customer', 'Service return customer')
+    const { product } = await createPackagedProduct(100)
+    const service = {...product,id:crypto.randomUUID(),sku:'RETURN-SERVICE',name:'Returnable service',
+      isService:true,quantity:0,costPrice:0,storageId:null,storageName:undefined}
+    await db.products.put(service)
+    const input = saleOrderInput(customer.id,service,SERVICES_VIRTUAL_STORAGE_ID,'cash',{
+      quantity:2,unitPrice:50,paid:true,
+    })
+    const draft = await orders.createSalesOrder(TEST_WORKSPACE_ID,input)
+    await orders.updateSalesOrderStatus(draft.id,'pending')
+    const completed = await orders.updateSalesOrderStatus(draft.id,'completed')
+    await db.storages.clear()
+    const beforeStock = await db.inventory.toArray()
+    const beforeMovements = await db.inventory_transactions.toArray()
+    const request = {orderId:completed.id,idempotencyKey:crypto.randomUUID(),
+      items:[{orderItemId:completed.items[0].id,quantity:1}],reason:'customer_returned',actorRole:'admin'}
+    const first = await orders.returnSalesOrder(request)
+    expect(first.return.refundAmount).toBe(50)
+    expect(first.items[0]).toMatchObject({selectedUnitQuantity:1,restoredStorageId:null,restoredBatchAllocations:[]})
+    expect(first.order).toMatchObject({total:50,returnStatus:'partial'})
+    expect((await orders.returnSalesOrder(request)).return.id).toBe(first.return.id)
+    const last = await orders.returnSalesOrder({...request,idempotencyKey:crypto.randomUUID()})
+    expect(last.return.refundAmount).toBe(50)
+    expect(last.order).toMatchObject({total:0,returnStatus:'full'})
+    expect(await db.inventory.toArray()).toEqual(beforeStock)
+    expect(await db.inventory_transactions.toArray()).toEqual(beforeMovements)
+    expect((await db.products.get(service.id))?.quantity).toBe(0)
+    expect(await db.payment_transactions.where('sourceRecordId').equals(completed.id).toArray()).toEqual(
+      expect.arrayContaining([expect.objectContaining({amount:100}),expect.objectContaining({amount:-50})]))
+    await assertOrderFinancialEffects(completed.id,0,0)
+    await expect(orders.returnSalesOrder({...request,idempotencyKey:crypto.randomUUID()})).rejects.toThrow()
+  })
+
+  it.each([true,false])('returns mixed product/service lines with only physical restocking (separate returns: %s)', async separate => {
+    const customer = await createPartner('customer', 'Mixed return customer')
+    const {product,storage,carton} = await createPackagedProduct(100)
+    const service = {...product,id:crypto.randomUUID(),sku:'MIXED-SERVICE',name:'Mixed service',
+      isService:true,quantity:0,costPrice:0,storageId:null,storageName:undefined}
+    await db.products.put(service)
+    const input = saleOrderInput(customer.id,product,storage.id,'cash',{quantity:2,unitPrice:100,paid:true})
+    input.items[0]={...input.items[0],uomId:carton.id,unit:'carton',unitRef:'builtin:carton',
+      baseUnitRef:'builtin:sheet',baseUnitCode:'sheet',unitFactor:20,inventoryQuantity:40}
+    const serviceInput = saleOrderInput(customer.id,service,storage.id,'cash',{quantity:2,unitPrice:50,paid:true})
+    // Old orders may retain the order's physical source on their service line.
+    input.items.push(serviceInput.items[0])
+    input.total=300; input.subtotal=300; input.paidAmount=300
+    const draft = await orders.createSalesOrder(TEST_WORKSPACE_ID,input)
+    await orders.updateSalesOrderStatus(draft.id,'pending')
+    const completed = await orders.updateSalesOrderStatus(draft.id,'completed')
+    const serviceLine=completed.items.find(item=>item.productId===service.id)!
+    const productLine=completed.items.find(item=>item.productId===product.id)!
+    await assertStock(product.id,storage.id,60)
+    if (!separate) {
+      const result=await orders.returnSalesOrder({orderId:completed.id,items:[
+        {orderItemId:serviceLine.id,quantity:2},{orderItemId:productLine.id,quantity:2}],
+        reason:'customer_returned',actorRole:'admin'})
+      expect(result.return.refundAmount).toBe(300)
+      expect(result.items.find(item=>item.orderItemId===serviceLine.id)).toMatchObject({restoredStorageId:null,restoredBatchAllocations:[]})
+      await assertStock(product.id,storage.id,100)
+      expect(await db.inventory_transactions.where('referenceId').equals(result.return.id).toArray()).toEqual([
+        expect.objectContaining({productId:product.id,quantityDelta:40})])
+      expect(await db.inventory.where('productId').equals(service.id).count()).toBe(0)
+      await assertOrderFinancialEffects(completed.id,0,0)
+      return
+    }
+    const serviceReturn=await orders.returnSalesOrder({orderId:completed.id,
+      items:[{orderItemId:serviceLine.id,quantity:2}],reason:'customer_returned',actorRole:'admin'})
+    expect(serviceReturn.return.refundAmount).toBe(100)
+    expect(serviceReturn.items[0]).toMatchObject({restoredStorageId:null,restoredBatchAllocations:[]})
+    await assertStock(product.id,storage.id,60)
+    expect(await db.inventory_transactions.where('referenceId').equals(serviceReturn.return.id).count()).toBe(0)
+    const physicalReturn=await orders.returnSalesOrder({orderId:completed.id,
+      items:[{orderItemId:productLine.id,quantity:2}],reason:'customer_returned',actorRole:'admin'})
+    expect(physicalReturn.return.refundAmount).toBe(200)
+    expect(physicalReturn.items[0]).toMatchObject({restoredStorageId:storage.id,quantity:40})
+    await assertStock(product.id,storage.id,100)
+    expect(await db.inventory_transactions.where('referenceId').equals(physicalReturn.return.id).toArray()).toEqual([
+      expect.objectContaining({productId:product.id,quantityDelta:40})])
+    expect(await db.inventory.where('productId').equals(service.id).count()).toBe(0)
+    await assertOrderFinancialEffects(completed.id,0,0)
+  })
+
+  it('returns a service from a legacy unpaid completed order without creating a cash refund or stock', async () => {
+    const customer=await createPartner('customer','Legacy unpaid service customer')
+    const {product}=await createPackagedProduct(100)
+    const service={...product,id:crypto.randomUUID(),sku:'UNPAID-SERVICE',name:'Unpaid service',isService:true,quantity:0,costPrice:0}
+    await db.products.put(service)
+    const draft=await orders.createSalesOrder(TEST_WORKSPACE_ID,
+      saleOrderInput(customer.id,service,SERVICES_VIRTUAL_STORAGE_ID,'cash',{unitPrice:50}))
+    await db.sales_orders.put({...draft,status:'completed'})
+    const result=await orders.returnSalesOrder({orderId:draft.id,items:[{orderItemId:draft.items[0].id,quantity:1}],
+      reason:'customer_returned',actorRole:'admin'})
+    expect(result.order).toMatchObject({total:0,balanceAmount:0,returnStatus:'full'})
+    expect(result.items[0].restoredStorageId).toBeNull()
+    expect(await db.payment_transactions.where('sourceRecordId').equals(draft.id).count()).toBe(0)
+    expect(await db.inventory.where('productId').equals(service.id).count()).toBe(0)
+  })
+
+  it('reduces financed service debt and reverses its actual repayment on a full return without touching inventory', async () => {
+    const customer=await createPartner('customer','Financed service customer')
+    const {product}=await createPackagedProduct(100)
+    const service={...product,id:crypto.randomUUID(),sku:'FINANCED-SERVICE',name:'Financed service',isService:true,quantity:0,costPrice:0}
+    await db.products.put(service)
+    const draft=await orders.createSalesOrder(TEST_WORKSPACE_ID,
+      saleOrderInput(customer.id,service,SERVICES_VIRTUAL_STORAGE_ID,'loan',{quantity:2,unitPrice:50}))
+    await orders.updateSalesOrderStatus(draft.id,'pending')
+    const completed=await orders.updateSalesOrderStatus(draft.id,'completed')
+    await hooks.recordLoanPayment(TEST_WORKSPACE_ID,{loanId:completed.linkedLoanId!,amount:30,paymentMethod:'cash',paidAt:TEST_TIME})
+    const request={orderId:completed.id,items:[{orderItemId:completed.items[0].id,quantity:1}],reason:'customer_returned',actorRole:'admin'}
+    await orders.returnSalesOrder(request)
+    expect(await db.loans.get(completed.linkedLoanId!)).toMatchObject({principalAmount:50,totalPaidAmount:30,balanceAmount:20})
+    const last=await orders.returnSalesOrder(request)
+    expect(last.order).toMatchObject({total:0,balanceAmount:0,returnStatus:'full'})
+    expect((await db.loans.get(completed.linkedLoanId!))?.balanceAmount).toBe(0)
+    expect((await db.payment_transactions.where('sourceRecordId').equals(completed.linkedLoanId!).toArray())
+      .map(row=>row.amount).sort((a,b)=>a-b)).toEqual([-30,30])
+    expect(await db.inventory.where('productId').equals(service.id).count()).toBe(0)
+    expect(await db.inventory_transactions.where('productId').equals(service.id).count()).toBe(0)
+  })
 
   it('sells cartons, deducts sheets, and returns paid and free quantities independently', async () => {
     const customer = await createPartner('customer', 'UoM customer')

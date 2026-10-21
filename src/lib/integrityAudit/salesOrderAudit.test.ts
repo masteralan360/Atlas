@@ -45,6 +45,36 @@ function failures(value: SalesOrderTransactionGraph) {
   return auditSalesOrderGraph(value, workspaceId, orderId).checks.filter(check => check.status === 'FAIL')
 }
 
+function fullyReturnedMixedGraph(): SalesOrderTransactionGraph {
+  const value = graph()
+  value.order = { ...value.order!, sourceStorageId: 'storage-1', total: 0, subtotal: 0,
+    originalTotalAmount: 60, returnedAmount: 60, returnStatus: 'full', initialPaymentAmount: 0,
+    paidAmount: 0, balanceAmount: 0, paymentStatus: 'paid', isPaid: true,
+    items: [{ ...value.order!.items[0] }, { ...value.order!.items[1], storageId: null, fulfilledQuantity: undefined }] }
+  value.products[1].isService = true
+  value.payments = []
+  value.loanPayments = []
+  value.loans[0] = { ...value.loans[0], totalPaidAmount: 0, balanceAmount: 0, status: 'cancelled' }
+  value.returns = [
+    { id: 'return-stock', workspaceId, orderId, refundAmount: 40, status: 'posted', returnedAt: '2026-10-21T22:40:00Z' },
+    { id: 'return-service', workspaceId, orderId, refundAmount: 20, status: 'posted', returnedAt: '2026-10-21T22:41:00Z' }
+  ] as any
+  value.returnItems = [
+    { id: 'returned-stock', workspaceId, returnId: 'return-stock', orderId, orderItemId: 'item-a',
+      quantity: 5, inventoryQuantity: 5, paidInventoryQuantity: 4, freeInventoryQuantity: 1,
+      restoredStorageId: 'storage-1', refundAmount: 40 },
+    { id: 'returned-service', workspaceId, returnId: 'return-service', orderId, orderItemId: 'item-b',
+      quantity: 2, inventoryQuantity: 2, paidInventoryQuantity: 2, freeInventoryQuantity: 0,
+      restoredStorageId: null, refundAmount: 20 }
+  ] as any
+  value.inventoryMovements = [value.inventoryMovements[0], {
+    id: 'restored-stock', workspaceId, referenceId: 'return-stock', referenceType: 'sales_order_return',
+    productId: 'product-a', storageId: 'storage-1', transactionType: 'return',
+    quantityDelta: 5, previousQuantity: 5, newQuantity: 10
+  } as any]
+  return value
+}
+
 describe('Sales Order integrity reconciliation', () => {
   beforeEach(() => vi.mocked(resolveSalesOrderTransactionGraph).mockReset())
   it('reconstructs the paid value and bonus inventory from historical order evidence', () => {
@@ -248,6 +278,103 @@ describe('Sales Order integrity reconciliation', () => {
     expect(failures(value).find(check => check.code === 'ITEM_RETURNED_QUANTITY_MISMATCH')).toMatchObject({
       entityId: 'item-a', expected: 1, actual: 0
     })
+  })
+
+  it.each(['supabase', 'sqlite'] as const)('reconciles a fully returned mixed financed order from %s without service stock', source => {
+    const audit = auditSalesOrderGraph(fullyReturnedMixedGraph(), workspaceId, orderId, source)
+    expect(audit.checks.filter(check => check.status !== 'PASS')).toEqual([])
+    expect(audit.expected.inventoryNet).toEqual({ 'product-a:storage-1': 0 })
+    expect(audit.checks).toContainEqual(expect.objectContaining({
+      code: 'ORDER_PAYMENT_STATUS_MISMATCH', expected: 'paid', actual: 'paid', status: 'PASS'
+    }))
+  })
+
+  it('reconciles a service-only full return without any storage or inventory history', () => {
+    const value = fullyReturnedMixedGraph()
+    value.order = { ...value.order!, sourceStorageId: null, items: [value.order!.items[1]],
+      originalTotalAmount: 20, returnedAmount: 20 }
+    value.products = [value.products[1]]
+    value.loans[0].principalAmount = 20
+    value.returns = [value.returns[1]]
+    value.returnItems = [value.returnItems[1]]
+    value.inventoryMovements = []
+    const audit = auditSalesOrderGraph(value, workspaceId, orderId, 'supabase')
+    expect(audit.checks.filter(check => check.status !== 'PASS')).toEqual([])
+    expect(audit.expected.inventoryNet).toEqual({})
+  })
+
+  it('reconciles stock and service lines posted in the same return', () => {
+    const value = fullyReturnedMixedGraph()
+    value.returns = [{ ...value.returns[0], refundAmount: 60 }]
+    value.returnItems[1].returnId = 'return-stock'
+    const audit = auditSalesOrderGraph(value, workspaceId, orderId, 'supabase')
+    expect(audit.checks.filter(check => check.status !== 'PASS')).toEqual([])
+    expect(audit.expected.inventoryNet).toEqual({ 'product-a:storage-1': 0 })
+  })
+
+  it('keeps partial service returns in financial and returned-quantity reconciliation', () => {
+    const value = fullyReturnedMixedGraph()
+    value.order = { ...value.order!, total: 40, subtotal: 40, returnedAmount: 20,
+      returnStatus: 'partial', balanceAmount: 40, paymentStatus: 'unpaid', isPaid: false }
+    value.loans[0] = { ...value.loans[0], principalAmount: 40, balanceAmount: 40, status: 'active' }
+    value.returns = [value.returns[1]]
+    value.returnItems = [value.returnItems[1]]
+    value.inventoryMovements = [value.inventoryMovements[0]]
+    const audit = auditSalesOrderGraph(value, workspaceId, orderId, 'supabase')
+    expect(audit.checks.filter(check => check.status !== 'PASS')).toEqual([])
+    expect(audit.expected.inventoryNet).toEqual({ 'product-a:storage-1': -5 })
+    value.returnItems[0].inventoryQuantity = 3
+    value.returnItems[0].paidInventoryQuantity = 3
+    expect(failures(value).map(check => check.code)).toEqual(expect.arrayContaining([
+      'RETURN_QUANTITY_INVALID', 'RETURN_EXCEEDS_SOLD_QUANTITY'
+    ]))
+  })
+
+  it('still detects missing physical restoration in a mixed return', () => {
+    const value = fullyReturnedMixedGraph()
+    value.inventoryMovements = [value.inventoryMovements[0]]
+    const audit = auditSalesOrderGraph(value, workspaceId, orderId, 'supabase')
+    expect(audit.checks.filter(check => check.status === 'FAIL')).toEqual([
+      expect.objectContaining({ code: 'RETURN_INVENTORY_HISTORY_UNAVAILABLE', entityId: 'return-stock' }),
+      expect.objectContaining({ code: 'RETURN_INVENTORY_RESTORATION_MISMATCH', entityId: 'return-stock' })
+    ])
+  })
+
+  it('rejects an unexpected stock restoration for a service return', () => {
+    const value = fullyReturnedMixedGraph()
+    value.inventoryMovements.push({ ...value.inventoryMovements[1], id: 'service-stock',
+      referenceId: 'return-service', productId: 'product-b', quantityDelta: 2, previousQuantity: 0, newQuantity: 2 })
+    expect(failures(value)).toContainEqual(expect.objectContaining({
+      code: 'RETURN_INVENTORY_RESTORATION_MISMATCH', entityId: 'return-service'
+    }))
+  })
+
+  it.each([
+    { method: 'loan', refundedPayment: false, expectedStatus: 'paid' },
+    { method: 'installments', refundedPayment: false, expectedStatus: 'paid' },
+    { method: 'cash', refundedPayment: false, expectedStatus: 'unpaid' },
+    { method: 'cash', refundedPayment: true, expectedStatus: 'paid' }
+  ] as const)('validates a fully returned $method order with refundedPayment=$refundedPayment', ({ method, refundedPayment, expectedStatus }) => {
+    const value = fullyReturnedMixedGraph()
+    value.order = { ...value.order!, paymentMethod: method, paymentStatus: expectedStatus, isPaid: expectedStatus === 'paid' }
+    if (method === 'cash') {
+      value.order.linkedLoanId = null
+      value.loans = []
+    }
+    if (refundedPayment) {
+      value.payments = [
+        { id: 'original', workspaceId, sourceType: 'sales_order', sourceRecordId: orderId,
+          amount: 60, currency: 'usd', paymentMethod: 'cash', direction: 'incoming' },
+        { id: 'reversal', workspaceId, sourceType: 'sales_order', sourceRecordId: orderId,
+          amount: -60, currency: 'usd', paymentMethod: 'cash', direction: 'incoming', reversalOfTransactionId: 'original' }
+      ] as any
+    }
+    expect(failures(value)).toEqual([])
+    value.order.isPaid = !value.order.isPaid
+    expect(failures(value)).toContainEqual(expect.objectContaining({ code: 'ORDER_PAYMENT_STATUS_MISMATCH' }))
+    value.order.isPaid = expectedStatus === 'paid'
+    value.order.paymentStatus = expectedStatus === 'paid' ? 'unpaid' : 'paid'
+    expect(failures(value)).toContainEqual(expect.objectContaining({ code: 'ORDER_PAYMENT_STATUS_MISMATCH' }))
   })
 
   it('reports missing historical inventory evidence as a warning rather than a fabricated pass', () => {

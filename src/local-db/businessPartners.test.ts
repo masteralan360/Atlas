@@ -10,10 +10,12 @@ import {
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 
 import { db } from './database'
+import { toSnakeCase } from '@/lib/utils'
 
 const remote = vi.hoisted(() => ({
     calls: [] as Array<{ name: string; args: Record<string, unknown> }>,
-    failures: [] as Array<{ message: string; code?: string }>
+    failures: [] as Array<{ message: string; code?: string }>,
+    data: [] as Array<Record<string, unknown>>,
 }))
 
 vi.mock('@/lib/supabaseSchema', () => ({
@@ -25,7 +27,7 @@ vi.mock('@/lib/supabaseSchema', () => ({
     getSupabaseClientForTable: () => ({
         rpc: async (name: string, args: Record<string, unknown>) => {
             remote.calls.push({ name, args })
-            return { error: remote.failures.shift() ?? null }
+            return { error: remote.failures.shift() ?? null, data: remote.data }
         }
     })
 }))
@@ -36,6 +38,7 @@ let deleteBusinessPartner: typeof import('./businessPartners').deleteBusinessPar
 let mergeBusinessPartners: typeof import('./businessPartners').mergeBusinessPartners
 let replaceAgentExcludedCategories: typeof import('./businessPartners').replaceAgentExcludedCategories
 let updateBusinessPartner: typeof import('./businessPartners').updateBusinessPartner
+let fetchBusinessPartnerSummary: typeof import('./businessPartners').fetchBusinessPartnerSummary
 let canAccessBusinessPartnerInLocalCache: typeof import('./businessPartnerAccess').canAccessBusinessPartnerInLocalCache
 
 async function createAgentForExcludedCategoryTest() {
@@ -174,6 +177,7 @@ describe('business partner agent facets', () => {
         mergeBusinessPartners = businessPartners.mergeBusinessPartners
         replaceAgentExcludedCategories = businessPartners.replaceAgentExcludedCategories
         updateBusinessPartner = businessPartners.updateBusinessPartner
+        fetchBusinessPartnerSummary = businessPartners.fetchBusinessPartnerSummary
         const access = await import('./businessPartnerAccess')
         canAccessBusinessPartnerInLocalCache = access.canAccessBusinessPartnerInLocalCache
     }, 60_000)
@@ -183,6 +187,7 @@ describe('business partner agent facets', () => {
         await db.open()
         remote.calls = []
         remote.failures = []
+        remote.data = []
         setActiveBusinessUser(null)
         setNetworkStatus(true)
         writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
@@ -805,4 +810,35 @@ describe('business partner agent facets', () => {
             payload: { id: partner.id }
         })
     })
+    it('refreshes only read-model fields on a pending partner without uploading or changing its identity/version', async () => {
+        const id = await createAgentForExcludedCategoryTest()
+        const agent = await db.agents.get(id)
+        const original = (await db.business_partners.get(agent!.businessPartnerId!))!
+        writeWorkspaceModeSnapshot({ workspaceId:WORKSPACE_ID,dataMode:'cloud' })
+        await db.business_partners.update(original.id, {partnerName:'Unsent name',version:9,syncStatus:'pending'})
+        remote.data = [{...toSnakeCase(original as unknown as Record<string,unknown>), summary_source:'server',
+            receivable_balance:75,payable_balance:10,net_exposure:65,
+            receivable_currency_totals:[{currency:'USD',amount:75}],payable_currency_totals:[{currency:'USD',amount:10}]}]
+        remote.calls=[]
+        await fetchBusinessPartnerSummary(WORKSPACE_ID,original.id)
+        expect(remote.calls).toEqual([{name:'read_business_partner_summaries',args:{p_workspace_id:WORKSPACE_ID,p_partner_ids:[original.id]}}])
+        expect(await db.business_partners.get(original.id)).toMatchObject({partnerName:'Unsent name',version:9,syncStatus:'pending',
+            receivableBalance:75,payableBalance:10,netExposure:65,summarySource:'server'})
+        expect(await db.offline_mutations.count()).toBe(0)
+    })
+
+    it('does not cache an invalid or cancelled summary response', async () => {
+        const id = await createAgentForExcludedCategoryTest()
+        const agent = await db.agents.get(id)
+        const original = (await db.business_partners.get(agent!.businessPartnerId!))!
+        const signal = AbortSignal.abort()
+        await expect(fetchBusinessPartnerSummary(WORKSPACE_ID,original.id,signal)).rejects.toThrow()
+        remote.data=[{id:original.id,workspace_id:WORKSPACE_ID,summary_source:'server',receivable_balance:'not a number'}]
+        await expect(fetchBusinessPartnerSummary(WORKSPACE_ID,original.id)).rejects.toThrow('Invalid business partner summary')
+        expect(await db.business_partners.get(original.id)).toEqual(original)
+        remote.data=[{id:original.id,workspace_id:crypto.randomUUID(),summary_source:'server'}]
+        await expect(fetchBusinessPartnerSummary(WORKSPACE_ID,original.id)).rejects.toThrow('not available in this workspace')
+        expect(await db.business_partners.get(original.id)).toEqual(original)
+    })
+
 })

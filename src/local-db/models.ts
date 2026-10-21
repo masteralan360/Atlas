@@ -905,6 +905,11 @@ export interface DeliveryLedgerEntry extends BaseEntity {
 }
 
 export interface BusinessPartner extends BaseEntity {
+  /** Confirmed server read-model values; never part of a partner mutation. */
+  summarySource?: 'server'
+  summaryDefaultCurrency?: CurrencyCode
+  receivableCurrencyTotals?: Array<{ currency: string; amount: number }>
+  payableCurrencyTotals?: Array<{ currency: string; amount: number }>
   /**
    * Canonical, user-facing identity for a business partner.
    *

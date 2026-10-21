@@ -29,6 +29,7 @@ import { getSchemaMismatchError, getSyncIntegrityError } from '@/sync/syncErrors
 
 import { db } from './database'
 import { serializePartnerSummaryRefresh } from './partnerSummaryRefresh'
+import { invalidatePartnerSummaries, stripPartnerSummaryFields } from './partnerSummaryState'
 import { toLiveCollection, useLiveCollection } from './liveCollection'
 import { acquireTableHydrationFromSupabase, fetchTableFromSupabase } from './hooks'
 import { addToOfflineMutations } from './offlineMutations'
@@ -266,12 +267,12 @@ function sanitizeSyncPayload(tableName: PartnerTableName, entity: Record<string,
     delete payload.imageUrl
   }
 
-  return Object.fromEntries(
+  return stripPartnerSummaryFields(tableName, Object.fromEntries(
     Object.entries(payload).map(([key, value]) => [
       key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`),
       value
     ])
-  )
+  ))
 }
 
 async function markEntitiesSynced(tableName: PartnerTableName, ids: string[]) {
@@ -1307,41 +1308,13 @@ async function getPartnerDirectAccountEffects(workspaceId: string, partner: Busi
 }
 
 export function recalculateBusinessPartnerSummary(workspaceId: string, partnerId: string, options?: { ensureSync?: boolean }) {
+  if (shouldUseCloudBusinessData(workspaceId)) {
+    invalidatePartnerSummaries(workspaceId)
+    return db.business_partners.get(partnerId)
+  }
   return serializePartnerSummaryRefresh('business_partners', workspaceId, partnerId, () =>
     calculateBusinessPartnerSummary(workspaceId, partnerId, options)
   )
-}
-
-/**
- * Quick Order can create a customer immediately before its atomic checkout.
- * In Hybrid mode that new partner can be present remotely before the directory
- * hydrator has populated the local mirror. Load only this workspace-owned row
- * so the summary refresh can include the just-completed order.
- */
-export async function ensureBusinessPartnerSummarySource(workspaceId: string, partnerId: string, customerFacetId?: string | null) {
-  const cached = await db.business_partners.get(partnerId)
-  const hasCurrentSyncedPartner = cached && cached.workspaceId === workspaceId && !cached.isDeleted
-  const hasUnsentLocalChanges = cached?.syncStatus === 'pending' || cached?.syncStatus === 'conflict'
-  if (!shouldUseCloudBusinessData(workspaceId) || !isOnline(workspaceId) || hasUnsentLocalChanges) return cached
-
-  const readRpc = getWorkspaceScopedPartnerReadRpc('business_partners')
-  if (!readRpc) throw new Error('Workspace-scoped business partner reader is not configured')
-  const result = await runMutation('businessPartners.summary.source', () => getSupabaseClientForTable('business_partners')
-    .rpc(readRpc, { p_workspace_id: workspaceId }))
-  if (result.error) throw result.error
-  const remoteRow = (result.data ?? []).find((row: Record<string, unknown>) => row.id === partnerId)
-  if (!remoteRow) return hasCurrentSyncedPartner ? cached : null
-
-  const hydrated = {
-    ...(toCamelCase(remoteRow) as unknown as BusinessPartner),
-    syncStatus: 'synced' as const,
-    lastSyncedAt: new Date().toISOString()
-  }
-  if (customerFacetId && hydrated.customerFacetId !== customerFacetId) {
-    throw new Error('Quick Order customer and business-partner summary relationship does not match the authoritative workspace record')
-  }
-  await db.business_partners.put(hydrated)
-  return hydrated
 }
 
 async function calculateBusinessPartnerSummary(workspaceId: string, partnerId: string, options?: { ensureSync?: boolean }) {
@@ -1485,7 +1458,8 @@ async function calculateBusinessPartnerSummary(workspaceId: string, partnerId: s
     partner.payableBalance === payableBalance &&
     partner.totalLoanCount === totalLoanCount &&
     partner.loanOutstandingBalance === loanOutstandingBalance &&
-    partner.netExposure === netExposure
+    partner.netExposure === netExposure &&
+    partner.summarySource !== 'server'
   ) {
     if (options?.ensureSync) {
       await syncUpsertEntities('business_partners', [partner as unknown as SyncEntity], workspaceId)
@@ -1496,6 +1470,10 @@ async function calculateBusinessPartnerSummary(workspaceId: string, partnerId: s
   const now = new Date().toISOString()
   const updated: BusinessPartner = {
     ...partner,
+    summarySource: undefined,
+    summaryDefaultCurrency: undefined,
+    receivableCurrencyTotals: undefined,
+    payableCurrencyTotals: undefined,
     totalSalesOrders,
     totalSalesValue,
     receivableBalance,
@@ -1516,6 +1494,10 @@ async function calculateBusinessPartnerSummary(workspaceId: string, partnerId: s
 }
 
 export async function recalculateAllBusinessPartnerSummaries(workspaceId: string) {
+  if (shouldUseCloudBusinessData(workspaceId)) {
+    invalidatePartnerSummaries(workspaceId)
+    return
+  }
   const partners = await db.business_partners
     .where('workspaceId')
     .equals(workspaceId)
@@ -1912,6 +1894,7 @@ async function fetchRemoteBusinessPartnerDirectoryPage(
   const timestamp = new Date().toISOString()
   const mappedItems = rawItems.map((row) => ({
     ...(toCamelCase(row as Record<string, unknown>) as unknown as BusinessPartner),
+    summaryDefaultCurrency: (row as { default_currency: CurrencyCode }).default_currency,
     syncStatus: 'synced' as const,
     lastSyncedAt: timestamp,
   }))
@@ -2119,7 +2102,9 @@ export function useBusinessPartnerDirectoryPage(
                 || localItem?.syncStatus === 'conflict'
                 || (localItem && Number(localItem.version ?? 0) > Number(remoteItem.version ?? 0))
               ) {
-                return localItem.isDeleted ? [] : [normalizeRuntimePartnerName(localItem)]
+                return localItem.isDeleted ? [] : [normalizeRuntimePartnerName({
+                  ...localItem, ...pickPartnerSummary(remoteItem), defaultCurrency: remoteItem.defaultCurrency,
+                })]
               }
               return [remoteItem]
             }),
@@ -2376,11 +2361,6 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
           acquireTableHydrationFromSupabase('suppliers', db.suppliers, workspaceId),
           acquireTableHydrationFromSupabase('agents', db.agents, workspaceId),
           acquireTableHydrationFromSupabase('agent_excluded_categories', db.agent_excluded_categories, workspaceId),
-          acquireTableHydrationFromSupabase('sales_orders', db.sales_orders, workspaceId),
-          acquireTableHydrationFromSupabase('purchase_orders', db.purchase_orders, workspaceId),
-          acquireTableHydrationFromSupabase('loans', db.loans, workspaceId),
-          acquireTableHydrationFromSupabase('installment_sales', db.installment_sales, workspaceId),
-          acquireTableHydrationFromSupabase('payment_transactions', db.payment_transactions, workspaceId)
         ]
       : []
 
@@ -2397,15 +2377,7 @@ export function useBusinessPartners(workspaceId: string | undefined, filters?: P
         return
       }
 
-      const results = await Promise.all(leases.map((lease) => lease.promise))
-      if (disposed) return
-
-      // Recomputing partner summaries is expensive. It is only needed when a
-      // remote reader actually reconciled one of its source tables.
-      const hydrated = leases.some((lease, index) => !lease.isFresh && results[index])
-      if (!disposed && hydrated) {
-        await recalculateAllBusinessPartnerSummaries(workspaceId)
-      }
+      await Promise.all(leases.map((lease) => lease.promise))
     }
 
     void finishPartnerListHydration()
@@ -2467,9 +2439,19 @@ export function useBusinessPartner(partnerId: string | undefined) {
   const partner = useLiveQuery(async () => {
     if (!partnerId) return undefined
     const candidate = await getPartnerByAnyId(partnerId)
-    if (!candidate || !await canViewPartnerForGroupPrivacy(candidate, viewer)) return undefined
+    if (!candidate || candidate.workspaceId !== activeWorkspaceId || !await canViewPartnerForGroupPrivacy(candidate, viewer)) return undefined
     return candidate
-  }, [partnerId, viewer.featureEnabled, viewer.role, viewer.userId])
+  }, [activeWorkspaceId, partnerId, viewer.featureEnabled, viewer.role, viewer.userId])
+
+  const visibility = useBusinessPartnerGroupVisibility(activeWorkspaceId, viewer)
+  const summary = useQuery({
+    queryKey: queryKeys.businessPartners.summary(activeWorkspaceId, partner?.id, {
+      ...viewer, groupVisibilityScope: visibility.scopeKey,
+    }),
+    enabled: Boolean(partner?.id && partner.workspaceId === activeWorkspaceId && activeWorkspaceId && online
+      && shouldUseCloudBusinessData(activeWorkspaceId) && !visibility.isLoading),
+    queryFn: ({ signal }) => fetchBusinessPartnerSummary(activeWorkspaceId!, partner!.id, signal),
+  })
 
   useEffect(() => {
     if (!partnerId || !viewer.featureEnabled || !online || !shouldUseCloudBusinessData(activeWorkspaceId)) return
@@ -2483,6 +2465,59 @@ export function useBusinessPartner(partnerId: string | undefined) {
     return () => leases.forEach((lease) => lease.release())
   }, [activeWorkspaceId, online, partnerId, viewer.featureEnabled])
 
+  return useMemo(() => {
+    if (partner && partner.workspaceId !== activeWorkspaceId) return undefined
+    if (!partner || !shouldUseCloudBusinessData(activeWorkspaceId)) return partner
+    const confirmed = summary.data ?? (partner.summarySource === 'server' ? partner : undefined)
+    return confirmed ? { ...partner, ...pickPartnerSummary(confirmed),
+      defaultCurrency: confirmed.summaryDefaultCurrency ?? confirmed.defaultCurrency } : partner
+  }, [activeWorkspaceId, partner, summary.data])
+}
+
+export function pickPartnerSummary(partner: BusinessPartner): Partial<BusinessPartner> {
+  return {
+    totalSalesOrders: partner.totalSalesOrders, totalSalesValue: partner.totalSalesValue,
+    totalPurchaseOrders: partner.totalPurchaseOrders, totalPurchaseValue: partner.totalPurchaseValue,
+    receivableBalance: partner.receivableBalance, payableBalance: partner.payableBalance,
+    totalLoanCount: partner.totalLoanCount, loanOutstandingBalance: partner.loanOutstandingBalance,
+    netExposure: partner.netExposure, summarySource: partner.summarySource,
+    summaryDefaultCurrency: partner.summaryDefaultCurrency ?? partner.defaultCurrency,
+    receivableCurrencyTotals: partner.receivableCurrencyTotals, payableCurrencyTotals: partner.payableCurrencyTotals,
+  }
+}
+
+export async function fetchBusinessPartnerSummary(workspaceId: string, partnerId: string, signal?: AbortSignal) {
+  signal?.throwIfAborted()
+  const request = getSupabaseClientForTable('business_partners').rpc('read_business_partner_summaries', {
+    p_workspace_id: workspaceId, p_partner_ids: [partnerId],
+  })
+  const result = await (signal ? request.abortSignal(signal) : request)
+  if (result.error) throw result.error
+  const raw = Array.isArray(result.data) ? result.data.find((row) => row.id === partnerId) : undefined
+  if (!raw || raw.workspace_id !== workspaceId || raw.summary_source !== 'server') {
+    throw new Error('Business partner summary is not available in this workspace')
+  }
+  const partner = toCamelCase(raw) as unknown as BusinessPartner
+  partner.summaryDefaultCurrency = partner.defaultCurrency
+  for (const value of [partner.receivableBalance, partner.payableBalance, partner.netExposure,
+    partner.totalSalesOrders, partner.totalPurchaseOrders, partner.totalSalesValue, partner.totalPurchaseValue,
+    partner.totalLoanCount, partner.loanOutstandingBalance]) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error('Invalid business partner summary')
+  }
+  for (const totals of [partner.receivableCurrencyTotals, partner.payableCurrencyTotals]) {
+    if (!Array.isArray(totals) || totals.some(item => typeof item.currency !== 'string'
+      || typeof item.amount !== 'number' || !Number.isFinite(item.amount))) throw new Error('Invalid business partner currency totals')
+  }
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+  await db.transaction('rw', db.business_partners, async () => {
+    const cached = await db.business_partners.get(partnerId)
+    signal?.throwIfAborted()
+    // Only read-model fields are refreshed on pending/conflicting partners.
+    // Their identity, version and unsent business mutations remain intact.
+    if (cached && cached.workspaceId !== workspaceId) throw new Error('Business partner cache workspace mismatch')
+    if (cached) await db.business_partners.update(partnerId, pickPartnerSummary(partner))
+    else await db.business_partners.put({ ...partner, syncStatus: 'synced', lastSyncedAt: new Date().toISOString() })
+  })
   return partner
 }
 
