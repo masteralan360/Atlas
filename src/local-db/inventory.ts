@@ -12,7 +12,8 @@ import {
     runSupabaseAction
 } from '@/lib/supabaseRequest'
 import { generateId, toCamelCase } from '@/lib/utils'
-import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { getWorkspaceDataMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import type { CrudTraceHandle } from '@/dev/crud-debugger/trace'
 
 import { db } from './database'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
@@ -117,6 +118,7 @@ export interface InventorySnapshotExpectedVersion {
 }
 
 export interface InventorySnapshotSyncOptions {
+  trace?: CrudTraceHandle
   operationId?: string
   operationKind?: string
   expectedVersions?: ReadonlyArray<InventorySnapshotExpectedVersion>
@@ -403,13 +405,17 @@ export async function syncInventoryRowsBestEffort(
             })
     )
 
-    let response = await execute()
+    const executeMeasured = () => options.trace
+        ? options.trace.measure('crudDebugger.stages.productInventoryRemote', 'network', execute, 'crudDebugger.details.supabaseRoundTrip')
+        : execute()
+    let response = await executeMeasured()
     if (response.error && isRetriableWebRequestError(response.error)) {
         // The first request may have committed before its response was lost.
         // Reusing the same operation id makes this retry safe.
-        response = await execute()
+        response = await executeMeasured()
     }
 
+    const processResponse = async () => {
     if (response.error) {
         if ((response.error as { code?: string }).code === '40001') {
             const conflictReason: InventorySnapshotConflictReason = (
@@ -484,6 +490,11 @@ export async function syncInventoryRowsBestEffort(
     }
 
     return { inventoryTransactions: remoteTransactions }
+    }
+
+    return options.trace
+        ? options.trace.measure('crudDebugger.stages.productInventoryResponse', 'response', processResponse)
+        : processResponse()
 }
 
 async function evaluateReorderRulesIfNeeded(input: {
@@ -1022,6 +1033,7 @@ export async function setProductInventoryFromLegacyInput(input: {
     syncSource?: InventorySyncSource
     skipRemoteSync?: boolean
     skipReorderCheck?: boolean
+    trace?: CrudTraceHandle
 }) {
     const timestamp = input.timestamp || new Date().toISOString()
     const syncSource = input.syncSource || 'local'
@@ -1037,7 +1049,7 @@ export async function setProductInventoryFromLegacyInput(input: {
     const changedRows: Array<Inventory | null> = []
     const movements: InventoryTransaction[] = []
 
-    const updatedProduct = await db.transaction('rw', [db.inventory, db.inventory_transactions, db.products, db.storages], async () => {
+    const persistInventory = () => db.transaction('rw', [db.inventory, db.inventory_transactions, db.products, db.storages], async () => {
         const activeRows = await getInventoryRowsForProduct(input.productId)
 
         const recordOpeningStock = async (
@@ -1183,6 +1195,14 @@ export async function setProductInventoryFromLegacyInput(input: {
         }
         return syncProductStockSnapshot(input.productId, timestamp, syncSource)
     })
+    const localPersistenceDetails = input.trace
+        ? (getWorkspaceDataMode(input.workspaceId) === 'local'
+            ? 'crudDebugger.details.localModePersistence'
+            : 'crudDebugger.details.dexiePersistence')
+        : undefined
+    const updatedProduct = input.trace
+        ? await input.trace.measure('crudDebugger.stages.productInventory', 'persistence', persistInventory, localPersistenceDetails)
+        : await persistInventory()
 
     if (!input.skipRemoteSync && syncSource !== 'remote') {
         await syncInventoryRowsBestEffort(changedRows, input.workspaceId, {
@@ -1191,15 +1211,18 @@ export async function setProductInventoryFromLegacyInput(input: {
                 operationKind: 'inventory_movement',
                 inventoryTransactions: movements,
             } : {}),
+            trace: input.trace,
         })
     }
 
-    await evaluateReorderRulesIfNeeded({
+    const evaluateReorderRules = () => evaluateReorderRulesIfNeeded({
         workspaceId: input.workspaceId,
         productId: input.productId,
         syncSource,
         skipReorderCheck: input.skipReorderCheck
     })
+    if (input.trace) await input.trace.measure('crudDebugger.stages.productInventoryReorder', 'application', evaluateReorderRules)
+    else await evaluateReorderRules()
 
     return updatedProduct
 }
@@ -1417,27 +1440,33 @@ export async function deleteInventoryForProduct(
     options?: {
         syncSource?: InventorySyncSource
         skipRemoteSync?: boolean
+        trace?: CrudTraceHandle
     }
 ) {
-    const product = await db.products.get(productId)
-    if (!product) {
-        return
-    }
-
-    const syncSource = options?.syncSource || 'local'
-    const syncMetadata = getSyncMetadata(product.workspaceId, timestamp, syncSource)
-    const rows = await db.inventory.where('productId').equals(productId).and((row) => !row.isDeleted).toArray()
-    const deletedRows = rows.map((row) => ({
+    const readInventoryState = async () => {
+        const product = await db.products.get(productId)
+        if (!product) return null
+        const syncSource = options?.syncSource || 'local'
+        const syncMetadata = getSyncMetadata(product.workspaceId, timestamp, syncSource)
+        const rows = await db.inventory.where('productId').equals(productId).and((row) => !row.isDeleted).toArray()
+        const deletedRows = rows.map((row) => ({
         ...row,
         quantity: 0,
         isDeleted: true,
         updatedAt: timestamp,
         version: syncSource === 'remote' ? row.version : row.version + 1,
         ...syncMetadata
-    }))
+        }))
+        return { product, syncSource, rows, deletedRows }
+    }
+    const inventoryState = options?.trace
+        ? await options.trace.measure('crudDebugger.stages.productLocalRead', 'data', readInventoryState)
+        : await readInventoryState()
+    if (!inventoryState) return
+    const { product, syncSource, rows, deletedRows } = inventoryState
 
     const localMovements: InventoryTransaction[] = []
-    await db.transaction('rw', [db.inventory, db.inventory_transactions], async () => {
+    const persistInventory = () => db.transaction('rw', [db.inventory, db.inventory_transactions], async () => {
         for (const row of deletedRows) {
             await db.inventory.put(row)
             if (syncSource !== 'remote' && isLocalWorkspaceMode(product.workspaceId)) {
@@ -1463,6 +1492,14 @@ export async function deleteInventoryForProduct(
             }
         }
     })
+    const localPersistenceDetails = options?.trace
+        ? (getWorkspaceDataMode(product.workspaceId) === 'local'
+            ? 'crudDebugger.details.localModePersistence'
+            : 'crudDebugger.details.dexiePersistence')
+        : undefined
+    if (options?.trace) {
+        await options.trace.measure('crudDebugger.stages.productInventoryCleanup', 'persistence', persistInventory, localPersistenceDetails)
+    } else await persistInventory()
 
     if (!options?.skipRemoteSync && syncSource !== 'remote') {
         const movements = deletedRows.map((row) => {
@@ -1495,6 +1532,7 @@ export async function deleteInventoryForProduct(
             }
         }).filter((movement) => Math.abs(movement.quantityDelta) > QUANTITY_EPSILON)
         await syncInventoryRowsBestEffort(deletedRows, product.workspaceId, {
+            trace: options?.trace,
             ...(movements.length > 0 ? {
                 operationId: generateId(),
                 operationKind: 'product_archive',

@@ -55,10 +55,24 @@ export const queryKeys = {
   businessPartners: {
     all: (workspaceId: string | undefined) =>
       ['atlas', 'workspace', workspaceId ?? 'unscoped', 'business-partners'] as const,
+    duplicates: (
+      workspaceId: string | undefined,
+      input: { name: string; phone: string; excludeBusinessPartnerId?: string },
+      viewer: { featureEnabled: boolean; role?: string | null; userId?: string | null },
+    ) => [
+      ...queryKeys.businessPartners.all(workspaceId),
+      'duplicates',
+      input.name,
+      input.phone,
+      input.excludeBusinessPartnerId ?? null,
+      viewer.featureEnabled,
+      viewer.role ?? null,
+      viewer.userId ?? null,
+    ] as const,
     directoryPage: (
       workspaceId: string | undefined,
       options: Record<string, unknown>,
-      viewer: { featureEnabled: boolean; role?: string | null; userId?: string | null },
+      viewer: { featureEnabled: boolean; role?: string | null; userId?: string | null; groupVisibilityScope?: string },
     ) => [
       ...queryKeys.businessPartners.all(workspaceId),
       'directory-page',
@@ -66,6 +80,7 @@ export const queryKeys = {
       viewer.featureEnabled,
       viewer.role ?? null,
       viewer.userId ?? null,
+      viewer.groupVisibilityScope ?? null,
     ] as const,
   },
 } as const

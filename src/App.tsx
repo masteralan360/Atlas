@@ -53,6 +53,10 @@ import {
 import { checkForTauriUpdate } from "@/lib/tauriUpdater";
 import { QueryScopeBoundary } from "@/query/QueryScopeBoundary";
 
+const CrudPerformanceDebugger = import.meta.env.DEV
+  ? lazy(() => import("@/dev/crud-debugger/CrudPerformanceDebugger"))
+  : null;
+
 // @ts-ignore
 const isTauri = !!window.__TAURI_INTERNALS__;
 
@@ -2585,6 +2589,11 @@ function App() {
             </ExchangeRateProvider>
               )}
               <Toaster />
+              {CrudPerformanceDebugger && (
+                <Suspense fallback={null}>
+                  <CrudPerformanceDebugger />
+                </Suspense>
+              )}
               {isTauri && currentPatch && (
                 <PatchNoteModal
                   isOpen={showModal}

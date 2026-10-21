@@ -10,6 +10,7 @@ import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
 import { findPartnerProductPriceBookItem } from '@/lib/priceBooks'
 import { normalizePriceBookColor } from '@/lib/priceBookColor'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import type { CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import {
     cancelWorkspaceDataHydration,
     completeWorkspaceDataHydration,
@@ -768,7 +769,8 @@ export async function replaceProductPriceBookItems(
     workspaceId: string,
     productId: string,
     inputs: PriceBookItemInput[],
-    createdBy?: string | null
+    createdBy?: string | null,
+    trace?: CrudTraceHandle
 ) {
     const normalizedInputs = normalizeItemInputs(inputs)
     const product = await db.products.get(productId)
@@ -836,21 +838,27 @@ export async function replaceProductPriceBookItems(
     }
 
     if (shouldUseCloudData(workspaceId) && isOnline(workspaceId)) {
-        const { data: remoteExistingData, error: remoteExistingError } = await runSupabaseAction(
-            'priceBookItems.loadExistingProductItems',
-            () => supabase
-                .from('price_book_items')
-                .select('*')
-                .eq('workspace_id', workspaceId)
-                .eq('product_id', productId)
-        )
-        if (remoteExistingError) {
-            throw normalizeSupabaseActionError(remoteExistingError)
+        const loadRemoteExisting = async () => {
+            const { data, error } = await runSupabaseAction(
+                'priceBookItems.loadExistingProductItems',
+                () => supabase
+                    .from('price_book_items')
+                    .select('*')
+                    .eq('workspace_id', workspaceId)
+                    .eq('product_id', productId)
+            )
+            if (error) throw normalizeSupabaseActionError(error)
+            return data ?? []
         }
-
-        const remoteExistingRows = (remoteExistingData ?? []).map((row) => (
+        const remoteExistingData = trace
+            ? await trace.measure('crudDebugger.stages.productRemote', 'network', loadRemoteExisting, 'crudDebugger.details.supabaseRoundTrip')
+            : await loadRemoteExisting()
+        const normalizeRemoteExisting = () => remoteExistingData.map((row) => (
             toCamelCase(row as Record<string, unknown>) as unknown as PriceBookItem
         ))
+        const remoteExistingRows = trace
+            ? await trace.measure('crudDebugger.stages.productResponse', 'response', normalizeRemoteExisting)
+            : normalizeRemoteExisting()
         const remoteExistingByBookId = new Map(remoteExistingRows.map((row) => [row.priceBookId, row]))
         const canonicalRows = nextRows.map((row) => {
             const remoteExisting = remoteExistingByBookId.get(row.priceBookId)
@@ -864,72 +872,88 @@ export async function replaceProductPriceBookItems(
                 version: Math.max(row.version, Number(remoteExisting.version ?? 0) + 1)
             }
         })
-        const { data, error } = await runSupabaseAction(
-            'priceBookItems.replaceProduct',
-            () => supabase
-                .from('price_book_items')
-                .upsert(canonicalRows.map(toRemotePayload), { onConflict: 'price_book_id,product_id' })
-                .select('*')
-        )
-        if (error) {
-            throw normalizeSupabaseActionError(error)
+        const saveRemote = async () => {
+            const { data, error } = await runSupabaseAction(
+                'priceBookItems.replaceProduct',
+                () => supabase
+                    .from('price_book_items')
+                    .upsert(canonicalRows.map(toRemotePayload), { onConflict: 'price_book_id,product_id' })
+                    .select('*')
+            )
+            if (error) throw normalizeSupabaseActionError(error)
+            return data ?? []
         }
-
-        const syncedAt = new Date().toISOString()
-        const remoteRows = (data ?? []).map((row) => ({
-            ...(toCamelCase(row as Record<string, unknown>) as unknown as PriceBookItem),
-            syncStatus: 'synced' as const,
-            lastSyncedAt: syncedAt
-        }))
-        const conflictsToRekey: Array<{ previousId: string; canonicalId: string }> = []
-        for (const remoteRow of remoteRows) {
-            const conflict = await db.price_book_items
-                .where('[priceBookId+productId]')
-                .equals([remoteRow.priceBookId, remoteRow.productId])
-                .first()
-            if (conflict && conflict.id !== remoteRow.id) {
-                conflictsToRekey.push({ previousId: conflict.id, canonicalId: remoteRow.id })
-            }
+        const data = trace
+            ? await trace.measure('crudDebugger.stages.productRemote', 'network', saveRemote, 'crudDebugger.details.supabaseRoundTrip')
+            : await saveRemote()
+        const normalizeRemoteRows = () => {
+            const syncedAt = new Date().toISOString()
+            return data.map((row) => ({
+                ...(toCamelCase(row as Record<string, unknown>) as unknown as PriceBookItem),
+                syncStatus: 'synced' as const,
+                lastSyncedAt: syncedAt
+            }))
         }
-        for (const conflict of conflictsToRekey) {
-            await rekeyPriceBookItemReferences(conflict.previousId, conflict.canonicalId)
-        }
-        await db.transaction('rw', db.price_book_items, async () => {
+        const remoteRows = trace
+            ? await trace.measure('crudDebugger.stages.productResponse', 'response', normalizeRemoteRows)
+            : normalizeRemoteRows()
+        const persistRemoteRows = async () => {
+            const conflictsToRekey: Array<{ previousId: string; canonicalId: string }> = []
             for (const remoteRow of remoteRows) {
                 const conflict = await db.price_book_items
                     .where('[priceBookId+productId]')
                     .equals([remoteRow.priceBookId, remoteRow.productId])
                     .first()
                 if (conflict && conflict.id !== remoteRow.id) {
-                    await db.price_book_items.delete(conflict.id)
+                    conflictsToRekey.push({ previousId: conflict.id, canonicalId: remoteRow.id })
                 }
             }
-            await db.price_book_items.bulkPut(remoteRows)
-        })
-        const savedNaturalKeys = new Set(canonicalRows.map((row) => `${row.priceBookId}:${row.productId}`))
-        await retireQueuedPriceBookMutations(
-            'price_book_items',
-            now,
-            (mutation) => {
-                const priceBookId = mutation.payload.priceBookId ?? mutation.payload.price_book_id
-                const queuedProductId = mutation.payload.productId ?? mutation.payload.product_id
-                return typeof priceBookId === 'string'
-                    && typeof queuedProductId === 'string'
-                    && savedNaturalKeys.has(`${priceBookId}:${queuedProductId}`)
+            for (const conflict of conflictsToRekey) {
+                await rekeyPriceBookItemReferences(conflict.previousId, conflict.canonicalId)
             }
-        )
+            await db.transaction('rw', db.price_book_items, async () => {
+                for (const remoteRow of remoteRows) {
+                    const conflict = await db.price_book_items
+                        .where('[priceBookId+productId]')
+                        .equals([remoteRow.priceBookId, remoteRow.productId])
+                        .first()
+                    if (conflict && conflict.id !== remoteRow.id) {
+                        await db.price_book_items.delete(conflict.id)
+                    }
+                }
+                await db.price_book_items.bulkPut(remoteRows)
+            })
+            const savedNaturalKeys = new Set(canonicalRows.map((row) => `${row.priceBookId}:${row.productId}`))
+            await retireQueuedPriceBookMutations(
+                'price_book_items',
+                now,
+                (mutation) => {
+                    const priceBookId = mutation.payload.priceBookId ?? mutation.payload.price_book_id
+                    const queuedProductId = mutation.payload.productId ?? mutation.payload.product_id
+                    return typeof priceBookId === 'string'
+                        && typeof queuedProductId === 'string'
+                        && savedNaturalKeys.has(`${priceBookId}:${queuedProductId}`)
+                }
+            )
+        }
+        if (trace) await trace.measure('crudDebugger.stages.productLocalWrite', 'persistence', persistRemoteRows, 'crudDebugger.details.dexiePersistence')
+        else await persistRemoteRows()
         return remoteRows.filter((row) => !row.isDeleted)
     }
 
-    await db.price_book_items.bulkPut(nextRows)
+    const persistLocalRows = () => db.price_book_items.bulkPut(nextRows)
+    if (trace) await trace.measure('crudDebugger.stages.productLocalWrite', 'persistence', persistLocalRows, 'crudDebugger.details.dexiePersistence')
+    else await persistLocalRows()
     if (shouldUseCloudData(workspaceId)) {
-        await Promise.all(nextRows.map((row) => addToOfflineMutations(
+        const queueMutations = () => Promise.all(nextRows.map((row) => addToOfflineMutations(
             'price_book_items',
             row.id,
             existingIds.has(row.id) ? 'update' : 'create',
             row as unknown as Record<string, unknown>,
             workspaceId
         )))
+        if (trace) await trace.measure('crudDebugger.stages.productOfflineQueue', 'data', queueMutations)
+        else await queueMutations()
     }
 
     return nextRows.filter((row) => !row.isDeleted)

@@ -9,6 +9,7 @@ import { generateId } from '@/lib/utils'
 import { isOnline } from '@/lib/network'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { isCrudDebuggerEnabled, runCrudOperation, type CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import { fetchAccessibleServiceIds, useServiceAccessIds } from './serviceAccess'
 import {
   completeWorkspaceDataHydration,
@@ -608,12 +609,12 @@ export async function searchProductAutocompleteSuggestions(
     : suggestions.filter((product) => !isService(product) || accessibleServiceIds.has(product.id))
 }
 
-async function readProductCatalogPage(query: ProductCatalogPageQuery): Promise<ProductCatalogPage> {
+async function readProductCatalogPage(query: ProductCatalogPageQuery, trace?: CrudTraceHandle): Promise<ProductCatalogPage> {
   const workspaceId = query.workspaceId
   if (!workspaceId) return EMPTY_PAGE
 
   const fetchStartedAt = new Date().toISOString()
-  const response = await runSupabaseAction('products.catalogPage', () =>
+  const fetchRemotePage = () => runSupabaseAction('products.catalogPage', () =>
     getSupabaseClientForTable('products').rpc('get_products_catalog_page', {
       p_search: query.search.trim(),
       p_catalog_type: query.catalogType,
@@ -630,76 +631,89 @@ async function readProductCatalogPage(query: ProductCatalogPageQuery): Promise<P
       p_page_size: query.pageSize
     })
   )
+  const response = trace
+    ? await trace.measure('crudDebugger.stages.productRemote', 'network', fetchRemotePage, 'crudDebugger.details.supabaseRoundTrip')
+    : await fetchRemotePage()
 
-  if (response.error) throw normalizeSupabaseActionError(response.error)
-  const result = response.data as {
-    products?: unknown[]
-    inventory?: unknown[]
-    matched_product_ids?: unknown[]
-    available_currencies?: unknown[]
-    has_multi_storage_stock?: unknown
-    total_count?: number | string
-    family_count?: number | string
-    page_count?: number | string
-  } | null
-  if (!result || !Array.isArray(result.products)) {
-    throw new Error('The product catalog page response was invalid.')
-  }
+  const normalizeResponse = () => {
+    if (response.error) throw normalizeSupabaseActionError(response.error)
+    const result = response.data as {
+      products?: unknown[]
+      inventory?: unknown[]
+      matched_product_ids?: unknown[]
+      available_currencies?: unknown[]
+      has_multi_storage_stock?: unknown
+      total_count?: number | string
+      family_count?: number | string
+      page_count?: number | string
+    } | null
+    if (!result || !Array.isArray(result.products)) {
+      throw new Error('The product catalog page response was invalid.')
+    }
 
-  const syncedAt = new Date().toISOString()
-  const products = result.products.map((row) => normalizeRemoteProduct(row, workspaceId, syncedAt))
-  const inventoryRows = (Array.isArray(result.inventory) ? result.inventory : []).map((value) => {
-    const inventory = toCamelCase(value as Record<string, unknown>) as unknown as Inventory
-    inventory.workspaceId = workspaceId
-    inventory.syncStatus = 'synced'
-    inventory.lastSyncedAt = syncedAt
-    inventory.isDeleted = false
-    inventory.quantity = Number(inventory.quantity ?? 0)
-    return inventory
-  })
-  if (products.some((product) => product.workspaceId !== workspaceId || !product.id)) {
-    throw new Error('The product catalog page returned a product outside the active workspace.')
+    const syncedAt = new Date().toISOString()
+    const products = result.products.map((row) => normalizeRemoteProduct(row, workspaceId, syncedAt))
+    const inventoryRows = (Array.isArray(result.inventory) ? result.inventory : []).map((value) => {
+      const inventory = toCamelCase(value as Record<string, unknown>) as unknown as Inventory
+      inventory.workspaceId = workspaceId
+      inventory.syncStatus = 'synced'
+      inventory.lastSyncedAt = syncedAt
+      inventory.isDeleted = false
+      inventory.quantity = Number(inventory.quantity ?? 0)
+      return inventory
+    })
+    if (products.some((product) => product.workspaceId !== workspaceId || !product.id)) {
+      throw new Error('The product catalog page returned a product outside the active workspace.')
+    }
+    if (inventoryRows.some((row) => row.workspaceId !== workspaceId || !row.id)) {
+      throw new Error('The product catalog page returned inventory outside the active workspace.')
+    }
+    return { result, products, inventoryRows }
   }
-  if (inventoryRows.some((row) => row.workspaceId !== workspaceId || !row.id)) {
-    throw new Error('The product catalog page returned inventory outside the active workspace.')
-  }
+  const { result, products, inventoryRows } = trace
+    ? await trace.measure('crudDebugger.stages.productResponse', 'response', normalizeResponse)
+    : normalizeResponse()
 
   // Keep rows that the user has browsed available to detail forms and offline
   // reads without reconciling or deleting the rest of the local catalog.
-  if (products.length > 0) {
-    const existingRows = await db.products.bulkGet(products.map((product) => product.id))
-    const rowsToCache = products.filter((product, index) => {
-      const existing = existingRows[index]
-      if (!existing || existing.syncStatus !== 'synced') return !existing
+  const syncDexieCache = async () => {
+    if (products.length > 0) {
+      const existingRows = await db.products.bulkGet(products.map((product) => product.id))
+      const rowsToCache = products.filter((product, index) => {
+        const existing = existingRows[index]
+        if (!existing || existing.syncStatus !== 'synced') return !existing
 
-      const localUpdatedAt = Date.parse(existing.updatedAt || '')
-      const remoteUpdatedAt = Date.parse(product.updatedAt || '')
-      const localChangedDuringFetch = Number.isFinite(localUpdatedAt)
-        && localUpdatedAt > Date.parse(fetchStartedAt)
-      const localIsNewer = Number.isFinite(localUpdatedAt)
-        && Number.isFinite(remoteUpdatedAt)
-        && localUpdatedAt > remoteUpdatedAt
-      return !localChangedDuringFetch && !localIsNewer
-    })
-    if (rowsToCache.length > 0) await db.products.bulkPut(rowsToCache)
-  }
-  if (inventoryRows.length > 0) {
-    const existingRows = await db.inventory.bulkGet(inventoryRows.map((row) => row.id))
-    const rowsToCache = inventoryRows.filter((row, index) => {
-      const existing = existingRows[index]
-      if (!existing || existing.syncStatus !== 'synced') return !existing
+        const localUpdatedAt = Date.parse(existing.updatedAt || '')
+        const remoteUpdatedAt = Date.parse(product.updatedAt || '')
+        const localChangedDuringFetch = Number.isFinite(localUpdatedAt)
+          && localUpdatedAt > Date.parse(fetchStartedAt)
+        const localIsNewer = Number.isFinite(localUpdatedAt)
+          && Number.isFinite(remoteUpdatedAt)
+          && localUpdatedAt > remoteUpdatedAt
+        return !localChangedDuringFetch && !localIsNewer
+      })
+      if (rowsToCache.length > 0) await db.products.bulkPut(rowsToCache)
+    }
+    if (inventoryRows.length > 0) {
+      const existingRows = await db.inventory.bulkGet(inventoryRows.map((row) => row.id))
+      const rowsToCache = inventoryRows.filter((row, index) => {
+        const existing = existingRows[index]
+        if (!existing || existing.syncStatus !== 'synced') return !existing
 
-      const localUpdatedAt = Date.parse(existing.updatedAt || '')
-      const remoteUpdatedAt = Date.parse(row.updatedAt || '')
-      const localChangedDuringFetch = Number.isFinite(localUpdatedAt)
-        && localUpdatedAt > Date.parse(fetchStartedAt)
-      const localIsNewer = Number.isFinite(localUpdatedAt)
-        && Number.isFinite(remoteUpdatedAt)
-        && localUpdatedAt > remoteUpdatedAt
-      return !localChangedDuringFetch && !localIsNewer
-    })
-    if (rowsToCache.length > 0) await db.inventory.bulkPut(rowsToCache)
+        const localUpdatedAt = Date.parse(existing.updatedAt || '')
+        const remoteUpdatedAt = Date.parse(row.updatedAt || '')
+        const localChangedDuringFetch = Number.isFinite(localUpdatedAt)
+          && localUpdatedAt > Date.parse(fetchStartedAt)
+        const localIsNewer = Number.isFinite(localUpdatedAt)
+          && Number.isFinite(remoteUpdatedAt)
+          && localUpdatedAt > remoteUpdatedAt
+        return !localChangedDuringFetch && !localIsNewer
+      })
+      if (rowsToCache.length > 0) await db.inventory.bulkPut(rowsToCache)
+    }
   }
+  if (trace) await trace.measure('crudDebugger.stages.productCacheSync', 'data', syncDexieCache)
+  else await syncDexieCache()
 
   return {
     products,
@@ -715,13 +729,13 @@ async function readProductCatalogPage(query: ProductCatalogPageQuery): Promise<P
   }
 }
 
-export async function fetchProductCatalogPage(query: ProductCatalogPageQuery): Promise<ProductCatalogPage> {
+async function loadProductCatalogPage(query: ProductCatalogPageQuery, trace?: CrudTraceHandle): Promise<ProductCatalogPage> {
   if (!query.workspaceId) return EMPTY_PAGE
 
   const operationId = generateId()
   startWorkspaceDataHydration(query.workspaceId, 'supabase', 'products', operationId)
   try {
-    const result = await readProductCatalogPage(query)
+    const result = await readProductCatalogPage(query, trace)
     updateWorkspaceDataHydrationProgress(
       query.workspaceId,
       'supabase',
@@ -737,6 +751,13 @@ export async function fetchProductCatalogPage(query: ProductCatalogPageQuery): P
     failWorkspaceDataHydration(query.workspaceId, 'supabase', 'products', undefined, operationId)
     throw error
   }
+}
+
+export function fetchProductCatalogPage(query: ProductCatalogPageQuery): Promise<ProductCatalogPage> {
+  if (!query.workspaceId || !isCrudDebuggerEnabled()) return loadProductCatalogPage(query)
+  return runCrudOperation({ action: 'read', entityKey: 'product', workspaceId: query.workspaceId }, (trace) => (
+    loadProductCatalogPage(query, trace)
+  ))
 }
 
 async function fetchAllProductCatalogData(

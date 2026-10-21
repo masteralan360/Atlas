@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Loader2, UserRound, Users } from 'lucide-react'
 
 import { cacheBusinessPartnerAutocompleteSelection, searchBusinessPartnerAutocompleteSuggestions } from '@/local-db/businessPartners'
+import { useBusinessPartnerGroupVisibility } from '@/local-db/businessPartnerGroups'
 import type { BusinessPartner, BusinessPartnerRole } from '@/local-db/models'
 import { useAuth } from '@/auth/AuthContext'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
@@ -113,6 +114,7 @@ export function PartnerAutocompleteInput({
         role: user?.role,
         featureEnabled: groupPrivacyEnabled,
     }), [groupPrivacyEnabled, user?.id, user?.role])
+    const groupVisibility = useBusinessPartnerGroupVisibility(workspaceId, viewer)
     const searchOptions = useMemo(() => ({
         roles: normalizedRoles,
         includeRealEstateRoles,
@@ -134,24 +136,26 @@ export function PartnerAutocompleteInput({
     ), [searchConstraints, searchOptions, viewer, workspaceId])
     const remoteSearch = useDebouncedAutocompleteSearch(
         query,
-        isFocused && !justSelected && Boolean(workspaceId),
+        isFocused && !justSelected && Boolean(workspaceId) && !groupVisibility.isLoading,
         searchPartners,
         250,
         3,
+        JSON.stringify([groupVisibility.scopeKey, searchOptions, searchConstraints]),
     )
     const partners = remoteSearch.items
-    const isSearchLoading = remoteSearch.isLoading
+    const isSearchLoading = remoteSearch.isLoading || (groupVisibility.isLoading && isFocused && query.length >= 3)
     const searchError = remoteSearch.error
 
     const filtered = useMemo(() => {
         const eligiblePartners = partners
+            .filter((p) => groupVisibility.visiblePartnerIds === null || groupVisibility.visiblePartnerIds.has(p.id))
             .filter((p) => !partnerOptionIds || partnerOptionIds.has(p.id))
             .filter((p) => !excludedPartnerIds.has(p.id))
             .filter((p) => p.role !== 'agent' || !eligibleAgentPartnerIdSet || eligibleAgentPartnerIdSet.has(p.id))
         if (normalizedQuery.length < 3) return []
         return eligiblePartners
             .slice(0, 8)
-    }, [eligibleAgentPartnerIdSet, excludedPartnerIds, normalizedQuery, partnerOptionIds, partners])
+    }, [eligibleAgentPartnerIdSet, excludedPartnerIds, groupVisibility.visiblePartnerIds, normalizedQuery, partnerOptionIds, partners])
 
     const filteredAdditionalOptions = useMemo(() => {
         if (normalizedQuery.length < 1) return []
@@ -169,6 +173,7 @@ export function PartnerAutocompleteInput({
     )
 
     const handleSelect = useCallback((partner: BusinessPartner) => {
+        if (groupVisibility.isLoading || (groupVisibility.visiblePartnerIds !== null && !groupVisibility.visiblePartnerIds.has(partner.id))) return
         void cacheBusinessPartnerAutocompleteSelection(partner).catch((error) => {
             console.error('[BusinessPartners] Failed to cache selected autocomplete result:', error)
         })
@@ -176,7 +181,7 @@ export function PartnerAutocompleteInput({
         setIsFocused(false)
         onChange(partner.partnerName)
         onSelectPartner(partner)
-    }, [onChange, onSelectPartner])
+    }, [groupVisibility.isLoading, groupVisibility.visiblePartnerIds, onChange, onSelectPartner])
 
     const handleSelectAdditionalOption = useCallback((option: PartnerAutocompleteAdditionalOption) => {
         setJustSelected(true)

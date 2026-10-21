@@ -480,7 +480,8 @@ export function Products() {
     const products = useProducts(user?.workspaceId, {
         enabled: !remoteCatalogPageEnabled || Boolean(productCatalogPage.error) || isCameraSearchScannerOpen,
         syncRemote: false,
-        syncBarcodeCache: false
+        syncBarcodeCache: false,
+        debugTraceRead: true
     })
     const lastCatalogErrorRef = useRef<unknown>(null)
     useEffect(() => {

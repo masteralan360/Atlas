@@ -7,9 +7,16 @@ vi.mock('react-i18next', () => ({
     })
 }))
 
-vi.mock('@/local-db', () => ({
-    useBusinessPartners: () => []
+vi.mock('@/local-db/businessPartnerDuplicates', () => ({
+    useBusinessPartnerDuplicateMatches: () => ({ name: false, phone: false })
 }))
+
+vi.mock('@/local-db', () => ({}))
+vi.mock('@/auth', () => ({ useOptionalAuth: () => null }))
+vi.mock('@/ui/components/input', async () => {
+    const React = await import('react')
+    return { Input: (props: React.InputHTMLAttributes<HTMLInputElement>) => React.createElement('input', props) }
+})
 
 vi.mock('@/lib/utils', () => ({
     convertArabicIndicToLatin: (value: string) => value

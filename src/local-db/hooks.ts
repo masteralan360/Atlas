@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Dexie from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useViewOwnRecordScope, type ViewOwnRecordScope } from '@/permissions/useViewOwnRecordScope'
@@ -105,7 +105,8 @@ import { convertCurrencyAmountWithAvailableSnapshot, getEffectiveExchangeRatesSn
 import { salesExchangeRowsToSnapshots } from '@/lib/salesExchange'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { getSupabaseClientForTable, getSupabaseRemoteTableName, getWorkspaceScopedPartnerReadRpc } from '@/lib/supabaseSchema'
-import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { getWorkspaceDataMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { isCrudDebuggerEnabled, runCrudOperation, type CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import { persistLoanAggregateRpcResult } from './loanTransactions'
 import {
     cancelWorkspaceDataHydration,
@@ -342,7 +343,7 @@ export function useCategories(workspaceId: string | undefined) {
     return categories ?? []
 }
 
-export async function createCategory(workspaceId: string, data: Omit<Category, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>): Promise<Category> {
+async function createCategoryInternal(workspaceId: string, data: Omit<Category, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>): Promise<Category> {
     const now = new Date().toISOString()
     const id = generateId()
     const session = isOnline() ? await getMutationSession('categories.create') : null
@@ -381,10 +382,20 @@ export async function createCategory(workspaceId: string, data: Omit<Category, '
     return category
 }
 
-export async function updateCategory(id: string, data: Partial<Category>): Promise<void> {
+export function createCategory(workspaceId: string, data: Omit<Category, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>): Promise<Category> {
+    if (!isCrudDebuggerEnabled()) return createCategoryInternal(workspaceId, data)
+    return runCrudOperation({ action: 'create', entityKey: 'category', workspaceId }, (trace) => (
+        trace
+            ? trace.measure('crudDebugger.stages.combinedOperation', 'unknown', () => createCategoryInternal(workspaceId, data), 'crudDebugger.details.combinedBoundary')
+            : createCategoryInternal(workspaceId, data)
+    ))
+}
+
+async function updateCategoryInternal(id: string, data: Partial<Category>, trace?: CrudTraceHandle): Promise<void> {
     const now = new Date().toISOString()
     const existing = await db.categories.get(id)
     if (!existing) throw new Error('Category not found')
+    trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
 
     const updated = {
         ...existing,
@@ -410,10 +421,20 @@ export async function updateCategory(id: string, data: Partial<Category>): Promi
     }
 }
 
-export async function deleteCategory(id: string): Promise<void> {
+export function updateCategory(id: string, data: Partial<Category>): Promise<void> {
+    if (!isCrudDebuggerEnabled()) return updateCategoryInternal(id, data)
+    return runCrudOperation({ action: 'update', entityKey: 'category', entityId: id }, (trace) => (
+        trace
+            ? trace.measure('crudDebugger.stages.combinedOperation', 'unknown', () => updateCategoryInternal(id, data, trace), 'crudDebugger.details.combinedBoundary')
+            : updateCategoryInternal(id, data)
+    ))
+}
+
+async function deleteCategoryInternal(id: string, trace?: CrudTraceHandle): Promise<void> {
     const now = new Date().toISOString()
     const existing = await db.categories.get(id)
     if (!existing) return
+    trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
 
     const attachedProductsById = await db.products.where('categoryId').equals(id).toArray()
     const legacyAttachedProducts = existing.name
@@ -495,6 +516,15 @@ export async function deleteCategory(id: string): Promise<void> {
     }
 }
 
+export function deleteCategory(id: string): Promise<void> {
+    if (!isCrudDebuggerEnabled()) return deleteCategoryInternal(id)
+    return runCrudOperation({ action: 'delete', entityKey: 'category', entityId: id }, (trace) => (
+        trace
+            ? trace.measure('crudDebugger.stages.combinedOperation', 'unknown', () => deleteCategoryInternal(id, trace), 'crudDebugger.details.combinedBoundary')
+            : deleteCategoryInternal(id)
+    ))
+}
+
 // ===================
 // UNITS HOOKS
 // ===================
@@ -564,7 +594,7 @@ function assertCustomUnitCode(code: string): void {
     }
 }
 
-export async function createUnit(workspaceId: string, data: Omit<Unit, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>): Promise<Unit> {
+async function createUnitInternal(workspaceId: string, data: Omit<Unit, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>): Promise<Unit> {
     const code = normalizeUnitCode(data.code)
     assertCustomUnitCode(code)
     const now = new Date().toISOString()
@@ -606,10 +636,20 @@ export async function createUnit(workspaceId: string, data: Omit<Unit, 'id' | 'w
     return unit
 }
 
-export async function updateUnit(id: string, data: Partial<Unit>): Promise<void> {
+export function createUnit(workspaceId: string, data: Omit<Unit, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>): Promise<Unit> {
+    if (!isCrudDebuggerEnabled()) return createUnitInternal(workspaceId, data)
+    return runCrudOperation({ action: 'create', entityKey: 'unit', workspaceId }, (trace) => (
+        trace
+            ? trace.measure('crudDebugger.stages.combinedOperation', 'unknown', () => createUnitInternal(workspaceId, data), 'crudDebugger.details.combinedBoundary')
+            : createUnitInternal(workspaceId, data)
+    ))
+}
+
+async function updateUnitInternal(id: string, data: Partial<Unit>, trace?: CrudTraceHandle): Promise<void> {
     const now = new Date().toISOString()
     const existing = await db.units.get(id)
     if (!existing) throw new Error('Unit not found')
+    trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
     const nextCode = data.code !== undefined ? normalizeUnitCode(data.code) : undefined
     if (nextCode !== undefined) assertCustomUnitCode(nextCode)
     const oldCode = existing.code
@@ -646,6 +686,15 @@ export async function updateUnit(id: string, data: Partial<Unit>): Promise<void>
         await migrateProductUnitsToRenamedUnit(existing.workspaceId, oldCode, nextCode as string)
         await migrateProductUomsToRenamedUnit(existing.workspaceId, id, nextCode as string)
     }
+}
+
+export function updateUnit(id: string, data: Partial<Unit>): Promise<void> {
+    if (!isCrudDebuggerEnabled()) return updateUnitInternal(id, data)
+    return runCrudOperation({ action: 'update', entityKey: 'unit', entityId: id }, (trace) => (
+        trace
+            ? trace.measure('crudDebugger.stages.combinedOperation', 'unknown', () => updateUnitInternal(id, data, trace), 'crudDebugger.details.combinedBoundary')
+            : updateUnitInternal(id, data)
+    ))
 }
 
 async function migrateProductUomsToRenamedUnit(workspaceId: string, unitId: string, newCode: string) {
@@ -688,13 +737,14 @@ async function migrateProductUnitsToRenamedUnit(workspaceId: string, oldCode: st
         .toArray()
 
     for (const product of affectedProducts) {
-        await updateProduct(product.id, { unit: newCode })
+        await updateProductInternal(product.id, { unit: newCode })
     }
 }
 
-export async function deleteUnit(id: string): Promise<void> {
+async function deleteUnitInternal(id: string, trace?: CrudTraceHandle): Promise<void> {
     const existing = await db.units.get(id)
     if (!existing) return
+    trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
 
     const usedCount = await db.products
         .where('workspaceId')
@@ -730,6 +780,15 @@ export async function deleteUnit(id: string): Promise<void> {
     }
 }
 
+export function deleteUnit(id: string): Promise<void> {
+    if (!isCrudDebuggerEnabled()) return deleteUnitInternal(id)
+    return runCrudOperation({ action: 'delete', entityKey: 'unit', entityId: id }, (trace) => (
+        trace
+            ? trace.measure('crudDebugger.stages.combinedOperation', 'unknown', () => deleteUnitInternal(id, trace), 'crudDebugger.details.combinedBoundary')
+            : deleteUnitInternal(id)
+    ))
+}
+
 // ===================
 // PRODUCTS HOOKS
 // ===================
@@ -738,6 +797,8 @@ export interface UseProductsOptions {
     syncRemote?: boolean
     syncBarcodeCache?: boolean
     enabled?: boolean
+    /** Trace the first local catalog read for a user-visible Products view in development. */
+    debugTraceRead?: boolean
 }
 
 export function useProducts(workspaceId: string | undefined, options: UseProductsOptions = {}) {
@@ -747,26 +808,37 @@ export function useProducts(workspaceId: string | undefined, options: UseProduct
     const syncRemote = options.syncRemote ?? true
     const syncBarcodeCache = options.syncBarcodeCache ?? true
     const serviceAccess = useServiceAccessIds(workspaceId, enabled)
+    const didTraceRead = useRef(false)
 
     const products = useLiveQuery(
         async () => {
             if (!enabled || !workspaceId) return []
 
-            const rows = await db.products.where('workspaceId').equals(workspaceId).and(p => !p.isDeleted).toArray()
-            const accessFilteredRows = serviceAccess.ids === null
-                ? rows
-                : rows.filter((product) => !isService(product) || serviceAccess.ids?.has(product.id) === true)
-            if (storageAccess.isReady !== false
-                && (storageAccess.isAdmin || storageAccess.excludedStorageIds.size === 0)) return accessFilteredRows
+            const readLocalProducts = async () => {
+                const rows = await db.products.where('workspaceId').equals(workspaceId).and(p => !p.isDeleted).toArray()
+                const accessFilteredRows = serviceAccess.ids === null
+                    ? rows
+                    : rows.filter((product) => !isService(product) || serviceAccess.ids?.has(product.id) === true)
+                if (storageAccess.isReady !== false
+                    && (storageAccess.isAdmin || storageAccess.excludedStorageIds.size === 0)) return accessFilteredRows
 
-            const inventoryRows = await db.inventory
-                .where('workspaceId')
-                .equals(workspaceId)
-                .and((row) => !row.isDeleted)
-                .toArray()
-            return filterProductsByStorageAccess(accessFilteredRows, inventoryRows, storageAccess)
+                const inventoryRows = await db.inventory
+                    .where('workspaceId')
+                    .equals(workspaceId)
+                    .and((row) => !row.isDeleted)
+                    .toArray()
+                return filterProductsByStorageAccess(accessFilteredRows, inventoryRows, storageAccess)
+            }
+
+            if (!options.debugTraceRead || !isCrudDebuggerEnabled() || didTraceRead.current) return readLocalProducts()
+            didTraceRead.current = true
+            return runCrudOperation({ action: 'read', entityKey: 'product', workspaceId }, (trace) => (
+                trace
+                    ? trace.measure('crudDebugger.stages.productLocalRead', 'data', readLocalProducts)
+                    : readLocalProducts()
+            ))
         },
-        [enabled, serviceAccess.ids, storageAccess.signature, workspaceId]
+        [enabled, options.debugTraceRead, serviceAccess.ids, storageAccess.signature, workspaceId]
     )
 
     useEffect(() => {
@@ -945,38 +1017,55 @@ export async function unlinkProductVariant(variantProductId: string) {
     await updateProduct(variant.id, { parentProductId: null })
 }
 
-export async function createProduct(workspaceId: string, data: Omit<Product, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>): Promise<Product> {
-    const now = new Date().toISOString()
+export function createProduct(workspaceId: string, data: Omit<Product, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>): Promise<Product> {
+    if (!isCrudDebuggerEnabled()) return createProductInternal(workspaceId, data)
     const id = generateId()
+    return runCrudOperation({ action: 'create', entityKey: 'product', entityId: id, workspaceId }, (trace) => (
+        createProductInternal(workspaceId, data, id, trace)
+    ))
+}
+
+async function createProductInternal(
+    workspaceId: string,
+    data: Omit<Product, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>,
+    idOverride?: string,
+    trace?: CrudTraceHandle
+): Promise<Product> {
+    const now = new Date().toISOString()
+    const id = idOverride ?? generateId()
     const service = isService(data)
     const sku = trimProductSku(data.sku)
     const isSavingOnline = isOnline(workspaceId)
     const initialQuantity = service ? 0 : Number(data.quantity)
     const initialStorageId = service ? null : data.storageId ?? null
 
-    if (initialStorageId) {
-        await assertCurrentUserCanAccessStorage(workspaceId, initialStorageId)
-    }
+    const validateAndPrepare = async () => {
+        if (initialStorageId) {
+            await assertCurrentUserCanAccessStorage(workspaceId, initialStorageId)
+        }
 
-    if (!service && !isValidNewInventoryQuantity(initialQuantity)) {
-        throw new Error(i18n.t('inventory.errors.invalidQuantity'))
-    }
-    if (!service && initialQuantity > 0) {
-        assertInventoryMutationConnectivity(workspaceId)
-    }
+        if (!service && !isValidNewInventoryQuantity(initialQuantity)) {
+            throw new Error(i18n.t('inventory.errors.invalidQuantity'))
+        }
+        if (!service && initialQuantity > 0) {
+            assertInventoryMutationConnectivity(workspaceId)
+        }
 
-    if (service && data.parentProductId) {
-        throw new ProductVariantRelationshipError('Services cannot be variant parents or variants.')
-    }
+        if (service && data.parentProductId) {
+            throw new ProductVariantRelationshipError('Services cannot be variant parents or variants.')
+        }
 
-    if (data.parentProductId) {
-        await assertCanUseProductAsVariantParent(workspaceId, data.parentProductId)
-    }
+        if (data.parentProductId) {
+            await assertCanUseProductAsVariantParent(workspaceId, data.parentProductId)
+        }
 
-    await ensureProductSkuIsAvailable(workspaceId, sku, {
-        productId: id,
-        parentProductId: service ? null : data.parentProductId ?? null
-    })
+        await ensureProductSkuIsAvailable(workspaceId, sku, {
+            productId: id,
+            parentProductId: service ? null : data.parentProductId ?? null
+        })
+    }
+    if (trace) await trace.measure('crudDebugger.stages.productPreparation', 'application', validateAndPrepare)
+    else await validateAndPrepare()
 
     const product: Product = {
         ...data,
@@ -1001,13 +1090,23 @@ export async function createProduct(workspaceId: string, data: Omit<Product, 'id
         version: 1,
         isDeleted: false
     }
+    const localPersistenceDetails = trace
+        ? (getWorkspaceDataMode(workspaceId) === 'local'
+            ? 'crudDebugger.details.localModePersistence'
+            : 'crudDebugger.details.dexiePersistence')
+        : undefined
 
     if (isSavingOnline) {
         // ONLINE
         const payload = toSupabaseProductPayload(product)
-        const { error } = await runMutation('products.create', () => supabase.from('products').insert(payload))
-
-        if (error) {
+        const writeRemote = async () => {
+            const response = await runMutation('products.create', () => supabase.from('products').insert(payload))
+            if (response.error) throw response.error
+        }
+        try {
+            if (trace) await trace.measure('crudDebugger.stages.productRemote', 'network', writeRemote, 'crudDebugger.details.supabaseRoundTrip')
+            else await writeRemote()
+        } catch (error) {
             if (isDuplicateProductSkuMutationError(error)) {
                 throw new DuplicateProductSkuError()
             }
@@ -1015,36 +1114,68 @@ export async function createProduct(workspaceId: string, data: Omit<Product, 'id
             throw normalizeSupabaseActionError(error)
         }
 
-        await db.products.add(product)
+        if (trace) await trace.measure('crudDebugger.stages.productLocalWrite', 'persistence', () => db.products.add(product), localPersistenceDetails)
+        else await db.products.add(product)
     } else {
         // OFFLINE
-        await db.transaction('rw', db.products, async () => {
-            await db.products.add(product)
-        })
-        await addToOfflineMutations('products', id, 'create', product as unknown as Record<string, unknown>, workspaceId)
+        const persistLocally = async () => {
+            await db.transaction('rw', db.products, async () => {
+                await db.products.add(product)
+            })
+        }
+        if (trace) await trace.measure('crudDebugger.stages.productLocalWrite', 'persistence', persistLocally, localPersistenceDetails)
+        else await persistLocally()
+        const queueMutation = () => addToOfflineMutations('products', id, 'create', product as unknown as Record<string, unknown>, workspaceId)
+        if (trace) {
+            await trace.measure('crudDebugger.stages.productOfflineQueue', 'data', queueMutation)
+            if (!isLocalWorkspaceMode(workspaceId)) {
+                trace.addPendingStage('crudDebugger.stages.productSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
+            }
+        } else await queueMutation()
     }
 
-    const normalizedProduct = service
-        ? product
-        : await setProductInventoryFromLegacyInput({
+    const setupInventory = () => service
+        ? Promise.resolve(product)
+        : setProductInventoryFromLegacyInput({
             workspaceId,
             productId: id,
             storageId: initialStorageId,
             quantity: initialQuantity,
-            timestamp: now
+            timestamp: now,
+            trace
         })
+    const normalizedProduct = await setupInventory()
 
     return normalizedProduct || product
 }
 
-export async function updateProduct(id: string, data: Partial<Product>): Promise<void> {
+export function updateProduct(id: string, data: Partial<Product>): Promise<void> {
+    if (!isCrudDebuggerEnabled()) return updateProductInternal(id, data)
+    return runCrudOperation({ action: 'update', entityKey: 'product', entityId: id }, (trace) => (
+        updateProductInternal(id, data, trace)
+    ))
+}
+
+async function updateProductInternal(id: string, data: Partial<Product>, trace?: CrudTraceHandle): Promise<void> {
     const now = new Date().toISOString()
-    const existing = await db.products.get(id)
+    const readProduct = () => db.products.get(id)
+    const existing = trace
+        ? await trace.measure('crudDebugger.stages.productLocalRead', 'data', readProduct)
+        : await readProduct()
     if (!existing) throw new Error('Product not found')
-    const [storageAccess, inventoryRows] = await Promise.all([
+    trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
+    const localPersistenceDetails = trace
+        ? (getWorkspaceDataMode(existing.workspaceId) === 'local'
+            ? 'crudDebugger.details.localModePersistence'
+            : 'crudDebugger.details.dexiePersistence')
+        : undefined
+    const readProductRestrictions = () => Promise.all([
         getCurrentStorageAccess(existing.workspaceId),
         db.inventory.where('productId').equals(id).and((row) => !row.isDeleted).toArray()
     ])
+    const [storageAccess, inventoryRows] = trace
+        ? await trace.measure('crudDebugger.stages.productLocalRead', 'data', readProductRestrictions)
+        : await readProductRestrictions()
     if (filterProductsByStorageAccess([existing], inventoryRows, storageAccess).length === 0) {
         throw new Error(i18n.t('storages.permissions.errors.accessDenied'))
     }
@@ -1071,12 +1202,14 @@ export async function updateProduct(id: string, data: Partial<Product>): Promise
     }
 
     if (hasParentProductIdUpdate && productData.parentProductId) {
-        await assertCanUseProductAsVariantParent(
+        const validateParent = () => assertCanUseProductAsVariantParent(
             existing.workspaceId,
-            productData.parentProductId,
+            productData.parentProductId!,
             existing.id,
             existing.parentProductId
         )
+        if (trace) await trace.measure('crudDebugger.stages.productPreparation', 'application', validateParent)
+        else await validateParent()
     }
 
     const parentProductId = hasParentProductIdUpdate
@@ -1085,10 +1218,12 @@ export async function updateProduct(id: string, data: Partial<Product>): Promise
 
     const remainsActive = hasIsDeletedUpdate ? !productData.isDeleted : !existing.isDeleted
     if (remainsActive && (hasSkuUpdate || hasParentProductIdUpdate || (hasIsDeletedUpdate && productData.isDeleted === false))) {
-        await ensureProductSkuIsAvailable(existing.workspaceId, sku, {
+        const validateSku = () => ensureProductSkuIsAvailable(existing.workspaceId, sku, {
             productId: id,
             parentProductId
         })
+        if (trace) await trace.measure('crudDebugger.stages.productPreparation', 'application', validateSku)
+        else await validateSku()
     }
 
     const updated = {
@@ -1117,26 +1252,45 @@ export async function updateProduct(id: string, data: Partial<Product>): Promise
             ...(hasSkuUpdate ? { sku } : {}),
             updatedAt: now
         })
-        const { error } = await runMutation('products.update', () => supabase.from('products').update(payload).eq('id', id))
-
-        if (error) {
+        const writeRemote = async () => {
+            const response = await runMutation('products.update', () => supabase.from('products').update(payload).eq('id', id))
+            if (response.error) throw response.error
+        }
+        try {
+            if (trace) await trace.measure('crudDebugger.stages.productRemote', 'network', writeRemote, 'crudDebugger.details.supabaseRoundTrip')
+            else await writeRemote()
+        } catch (error) {
             if (isDuplicateProductSkuMutationError(error)) {
                 throw new DuplicateProductSkuError()
             }
             throw normalizeSupabaseActionError(error)
         }
 
-        await db.products.put(updated)
+        if (trace) await trace.measure('crudDebugger.stages.productLocalWrite', 'persistence', () => db.products.put(updated), localPersistenceDetails)
+        else await db.products.put(updated)
     } else {
         // OFFLINE
-        await db.transaction('rw', db.products, async () => {
+        const persistLocally = () => db.transaction('rw', db.products, async () => {
             await db.products.put(updated)
         })
-        await addToOfflineMutations('products', id, 'update', updated as unknown as Record<string, unknown>, existing.workspaceId)
+        if (trace) await trace.measure('crudDebugger.stages.productLocalWrite', 'persistence', persistLocally, localPersistenceDetails)
+        else await persistLocally()
+        const queueMutation = () => addToOfflineMutations('products', id, 'update', updated as unknown as Record<string, unknown>, existing.workspaceId)
+        if (trace) {
+            await trace.measure('crudDebugger.stages.productOfflineQueue', 'data', queueMutation)
+            if (!isLocalWorkspaceMode(existing.workspaceId)) {
+                trace.addPendingStage('crudDebugger.stages.productSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
+            }
+        } else await queueMutation()
     }
 }
 
-async function softDeleteProductBarcodesForDeletedProduct(productId: string, workspaceId: string, now: string) {
+async function softDeleteProductBarcodesForDeletedProduct(
+    productId: string,
+    workspaceId: string,
+    now: string,
+    trace?: CrudTraceHandle
+) {
     const activeRows = await db.product_barcodes.where('productId').equals(productId).and((row) => !row.isDeleted).toArray()
     if (activeRows.length === 0) {
         return
@@ -1156,12 +1310,14 @@ async function softDeleteProductBarcodesForDeletedProduct(productId: string, wor
 
     if (usesCloud && isOnline(workspaceId)) {
         try {
-            const { error } = await runMutation('product_barcodes.cascadeDelete', () =>
-                supabase.from('product_barcodes').upsert(deletedRows.map(toSupabaseProductBarcodePayload))
-            )
-            if (error) {
-                throw normalizeSupabaseActionError(error)
+            const writeRemote = async () => {
+                const { error } = await runMutation('product_barcodes.cascadeDelete', () =>
+                    supabase.from('product_barcodes').upsert(deletedRows.map(toSupabaseProductBarcodePayload))
+                )
+                if (error) throw normalizeSupabaseActionError(error)
             }
+            if (trace) await trace.measure('crudDebugger.stages.productRemote', 'network', writeRemote, 'crudDebugger.details.supabaseRoundTrip')
+            else await writeRemote()
         } catch (error) {
             if (!shouldUseOfflineMutationFallback(error)) {
                 throw normalizeSupabaseActionError(error)
@@ -1176,12 +1332,16 @@ async function softDeleteProductBarcodesForDeletedProduct(productId: string, wor
         }
     }
 
-    await putProductBarcodeRowsAndRefreshCache(deletedRows)
+    const persistBarcodeRows = () => putProductBarcodeRowsAndRefreshCache(deletedRows)
+    if (trace) await trace.measure('crudDebugger.stages.productLocalWrite', 'persistence', persistBarcodeRows)
+    else await persistBarcodeRows()
 
     if (usesCloud && shouldQueueOffline) {
-        await Promise.all(deletedRows.map((row) =>
+        const queueBarcodeMutations = () => Promise.all(deletedRows.map((row) =>
             addToOfflineMutations('product_barcodes', row.id, 'update', row as unknown as Record<string, unknown>, row.workspaceId)
         ))
+        if (trace) await trace.measure('crudDebugger.stages.productOfflineQueue', 'data', queueBarcodeMutations)
+        else await queueBarcodeMutations()
     }
 }
 
@@ -1189,13 +1349,17 @@ async function detachProductVariantsAfterParentDeletion(
     parentProductId: string,
     workspaceId: string,
     timestamp: string,
-    savedOnline: boolean
+    savedOnline: boolean,
+    trace?: CrudTraceHandle
 ) {
-    const variants = await db.products
+    const readVariants = () => db.products
         .where('parentProductId')
         .equals(parentProductId)
         .and((product) => !product.isDeleted)
         .toArray()
+    const variants = trace
+        ? await trace.measure('crudDebugger.stages.productLocalRead', 'data', readVariants)
+        : await readVariants()
 
     if (variants.length === 0) {
         return
@@ -1210,12 +1374,16 @@ async function detachProductVariantsAfterParentDeletion(
         version: savedOnline ? variant.version : variant.version + 1
     }))
 
-    await db.products.bulkPut(detachedVariants)
+    const persistVariants = () => db.products.bulkPut(detachedVariants)
+    if (trace) await trace.measure('crudDebugger.stages.productLocalWrite', 'persistence', persistVariants)
+    else await persistVariants()
 
     if (!savedOnline && shouldUseCloudBusinessData(workspaceId)) {
-        await Promise.all(detachedVariants.map((variant) =>
+        const queueDetachedVariants = () => Promise.all(detachedVariants.map((variant) =>
             addToOfflineMutations('products', variant.id, 'update', variant as unknown as Record<string, unknown>, workspaceId)
         ))
+        if (trace) await trace.measure('crudDebugger.stages.productOfflineQueue', 'data', queueDetachedVariants)
+        else await queueDetachedVariants()
     }
 }
 
@@ -1241,25 +1409,49 @@ async function assertVariantsCanBecomeIndependentAfterParentDeletion(parentProdu
     }
 }
 
-export async function deleteProduct(id: string): Promise<void> {
+export function deleteProduct(id: string): Promise<void> {
+    if (!isCrudDebuggerEnabled()) return deleteProductInternal(id)
+    return runCrudOperation({ action: 'delete', entityKey: 'product', entityId: id }, (trace) => (
+        deleteProductInternal(id, trace)
+    ))
+}
+
+async function deleteProductInternal(id: string, trace?: CrudTraceHandle): Promise<void> {
     const now = new Date().toISOString()
-    const existing = await db.products.get(id)
+    const readProduct = () => db.products.get(id)
+    const existing = trace
+        ? await trace.measure('crudDebugger.stages.productLocalRead', 'data', readProduct)
+        : await readProduct()
     if (!existing) return
-    const [storageAccess, inventoryRows] = await Promise.all([
+    trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
+    const localPersistenceDetails = trace
+        ? (getWorkspaceDataMode(existing.workspaceId) === 'local'
+            ? 'crudDebugger.details.localModePersistence'
+            : 'crudDebugger.details.dexiePersistence')
+        : undefined
+    const readRelatedData = () => Promise.all([
         getCurrentStorageAccess(existing.workspaceId),
         db.inventory.where('productId').equals(id).and((row) => !row.isDeleted).toArray()
     ])
-    if (filterProductsByStorageAccess([existing], inventoryRows, storageAccess).length === 0) {
-        throw new Error(i18n.t('storages.permissions.errors.accessDenied'))
+    const [storageAccess, inventoryRows] = trace
+        ? await trace.measure('crudDebugger.stages.productLocalRead', 'data', readRelatedData)
+        : await readRelatedData()
+    const validateDeleteAccess = () => {
+        if (filterProductsByStorageAccess([existing], inventoryRows, storageAccess).length === 0) {
+            throw new Error(i18n.t('storages.permissions.errors.accessDenied'))
+        }
+        assertInventoryMutationConnectivity(existing.workspaceId)
     }
-    assertInventoryMutationConnectivity(existing.workspaceId)
+    if (trace) await trace.measure('crudDebugger.stages.productPreparation', 'application', validateDeleteAccess)
+    else validateDeleteAccess()
     const isSavingOnline = isOnline(existing.workspaceId)
 
     if (!existing.parentProductId) {
-        await assertVariantsCanBecomeIndependentAfterParentDeletion(id)
+        if (trace) await trace.measure('crudDebugger.stages.productPreparation', 'application', () => assertVariantsCanBecomeIndependentAfterParentDeletion(id))
+        else await assertVariantsCanBecomeIndependentAfterParentDeletion(id)
     }
 
-    await replaceProductPriceBookItems(existing.workspaceId, id, [])
+    await replaceProductPriceBookItems(existing.workspaceId, id, [], undefined, trace)
 
     const updated = {
         ...existing,
@@ -1271,21 +1463,34 @@ export async function deleteProduct(id: string): Promise<void> {
 
     if (isSavingOnline) {
         // ONLINE
-        const { error } = await runMutation('products.delete', () => supabase.from('products').update({ is_deleted: true, updated_at: now }).eq('id', id))
-        if (error) throw normalizeSupabaseActionError(error)
+        const writeRemote = async () => {
+            const { error } = await runMutation('products.delete', () => supabase.from('products').update({ is_deleted: true, updated_at: now }).eq('id', id))
+            if (error) throw normalizeSupabaseActionError(error)
+        }
+        if (trace) await trace.measure('crudDebugger.stages.productRemote', 'network', writeRemote, 'crudDebugger.details.supabaseRoundTrip')
+        else await writeRemote()
 
-        await db.products.put(updated)
+        if (trace) await trace.measure('crudDebugger.stages.productLocalWrite', 'persistence', () => db.products.put(updated), localPersistenceDetails)
+        else await db.products.put(updated)
     } else {
         // OFFLINE
-        await db.products.put(updated)
-        await addToOfflineMutations('products', id, 'delete', { id }, existing.workspaceId)
+        if (trace) await trace.measure('crudDebugger.stages.productLocalWrite', 'persistence', () => db.products.put(updated), localPersistenceDetails)
+        else await db.products.put(updated)
+        const queueMutation = () => addToOfflineMutations('products', id, 'delete', { id }, existing.workspaceId)
+        if (trace) {
+            await trace.measure('crudDebugger.stages.productOfflineQueue', 'data', queueMutation)
+            if (!isLocalWorkspaceMode(existing.workspaceId)) {
+                trace.addPendingStage('crudDebugger.stages.productSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
+            }
+        } else await queueMutation()
     }
 
-    await detachProductVariantsAfterParentDeletion(id, existing.workspaceId, now, isSavingOnline)
+    const detachVariants = () => detachProductVariantsAfterParentDeletion(id, existing.workspaceId, now, isSavingOnline, trace)
+    await detachVariants()
 
-    await softDeleteProductBarcodesForDeletedProduct(id, existing.workspaceId, now)
+    await softDeleteProductBarcodesForDeletedProduct(id, existing.workspaceId, now, trace)
 
-    await deleteInventoryForProduct(id, now)
+    await deleteInventoryForProduct(id, now, { trace })
 }
 
 interface UseProductBarcodeTableOptions {

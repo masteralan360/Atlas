@@ -1,13 +1,16 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { getActiveBusinessUserId, getActiveBusinessUserRole, hasBusinessPartnerGroupPrivacyAccess, isOnline } from '@/lib/network'
 import { generateId } from '@/lib/utils'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { acquireTableHydrationFromSupabase } from './hooks'
 import { addToOfflineMutations } from './offlineMutations'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
-import { getCreatorBusinessPartnerGroupIds } from '@/lib/businessPartnerGroupPrivacy'
+import { getCreatorBusinessPartnerGroupIds, getVisibleBusinessPartnerIdsByGroup, type BusinessPartnerGroupPrivacyViewer } from '@/lib/businessPartnerGroupPrivacy'
+import { queryClient } from '@/query/queryClient'
+import { queryKeys } from '@/query/queryKeys'
 import type {
   BaseEntity,
   BusinessPartnerGroup,
@@ -98,6 +101,7 @@ async function saveGroupRows(tableName: GroupTableName, rows: GroupEntity[], wor
   const table = (db as unknown as Record<string, { bulkPut: (items: GroupEntity[]) => Promise<unknown> }>)[tableName]
   await table.bulkPut(rows)
   await syncGroupRows(tableName, rows, workspaceId)
+  void queryClient.invalidateQueries({ queryKey: queryKeys.businessPartners.all(workspaceId) })
 }
 
 function updatedEntity<T extends BaseEntity>(entity: T, changes: Partial<T>): T {
@@ -112,28 +116,36 @@ function updatedEntity<T extends BaseEntity>(entity: T, changes: Partial<T>): T 
   }
 }
 
+const EMPTY_GROUP_DATA = {
+  groups: [] as BusinessPartnerGroup[],
+  groupUsers: [] as BusinessPartnerGroupUser[],
+  groupPartners: [] as BusinessPartnerGroupPartner[],
+}
+
+async function readBusinessPartnerGroups(workspaceId: string) {
+  // Read one consistent permission snapshot; never mix memberships and
+  // assignments from different local transactions during a refresh.
+  return db.transaction('r', db.business_partner_groups, db.business_partner_group_users, db.business_partner_group_partners, async () => {
+    const [groups, groupUsers, groupPartners] = await Promise.all([
+      db.business_partner_groups.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray(),
+      db.business_partner_group_users.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray(),
+      db.business_partner_group_partners.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray(),
+    ])
+    return { groups, groupUsers, groupPartners }
+  })
+}
+
 export function useBusinessPartnerGroups(workspaceId: string | undefined, featureEnabled: boolean) {
-  const groups = useLiveQuery(
-    () => workspaceId
-      ? db.business_partner_groups.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray()
-      : [],
-    [workspaceId],
-  )
-  const groupUsers = useLiveQuery(
-    () => workspaceId
-      ? db.business_partner_group_users.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray()
-      : [],
-    [workspaceId],
-  )
-  const groupPartners = useLiveQuery(
-    () => workspaceId
-      ? db.business_partner_group_partners.where('workspaceId').equals(workspaceId).and((row) => !row.isDeleted).toArray()
-      : [],
-    [workspaceId],
-  )
+  const online = useNetworkStatus()
+  const scopeKey = JSON.stringify([workspaceId ?? null, featureEnabled])
+  const result = useLiveQuery(async () => ({
+    scopeKey,
+    ...(workspaceId && featureEnabled ? await readBusinessPartnerGroups(workspaceId) : EMPTY_GROUP_DATA),
+  }), [featureEnabled, scopeKey, workspaceId])
+  const current = result?.scopeKey === scopeKey ? result : undefined
 
   useEffect(() => {
-    if (!workspaceId || !featureEnabled || isLocalWorkspaceMode(workspaceId) || !isOnline(workspaceId)) {
+    if (!workspaceId || !featureEnabled || isLocalWorkspaceMode(workspaceId) || !online) {
       return
     }
 
@@ -143,14 +155,46 @@ export function useBusinessPartnerGroups(workspaceId: string | undefined, featur
       workspaceId,
     ))
     return () => leases.forEach((lease) => lease.release())
-  }, [featureEnabled, workspaceId])
+  }, [featureEnabled, online, workspaceId])
 
   return {
-    groups: groups ?? [],
-    groupUsers: groupUsers ?? [],
-    groupPartners: groupPartners ?? [],
-    isLoading: Boolean(workspaceId) && (groups === undefined || groupUsers === undefined || groupPartners === undefined),
+    groups: current?.groups ?? EMPTY_GROUP_DATA.groups,
+    groupUsers: current?.groupUsers ?? EMPTY_GROUP_DATA.groupUsers,
+    groupPartners: current?.groupPartners ?? EMPTY_GROUP_DATA.groupPartners,
+    isLoading: Boolean(workspaceId && featureEnabled) && current === undefined,
   }
+}
+
+/** Keep cached pages, maps, and suggestions scoped to the current group access. */
+export function useBusinessPartnerGroupVisibility(
+  workspaceId: string | undefined,
+  viewer: BusinessPartnerGroupPrivacyViewer,
+) {
+  const { featureEnabled, role, userId } = viewer
+  const restricted = featureEnabled && role !== 'admin'
+  const { groups, groupUsers, groupPartners, isLoading } = useBusinessPartnerGroups(workspaceId, restricted)
+  const visiblePartnerIds = useMemo(() => restricted
+    ? getVisibleBusinessPartnerIdsByGroup(groups, groupUsers, groupPartners, { featureEnabled, role, userId })
+    : null,
+  [groups, groupUsers, groupPartners, restricted, featureEnabled, role, userId])
+  const scopeKey = useMemo(() => JSON.stringify([
+    workspaceId ?? null,
+    viewer.userId ?? null,
+    viewer.role ?? null,
+    viewer.featureEnabled,
+    isLoading ? 'loading' : visiblePartnerIds === null ? null : [...visiblePartnerIds].sort(),
+  ]), [isLoading, visiblePartnerIds, viewer.featureEnabled, viewer.role, viewer.userId, workspaceId])
+
+  return { visiblePartnerIds, scopeKey, isLoading }
+}
+
+export async function readBusinessPartnerGroupVisibility(
+  workspaceId: string,
+  viewer: BusinessPartnerGroupPrivacyViewer,
+) {
+  if (!viewer.featureEnabled || viewer.role === 'admin') return null
+  const { groups, groupUsers, groupPartners } = await readBusinessPartnerGroups(workspaceId)
+  return getVisibleBusinessPartnerIdsByGroup(groups, groupUsers, groupPartners, viewer)
 }
 
 export async function createBusinessPartnerGroup(
@@ -170,6 +214,7 @@ export async function createBusinessPartnerGroup(
   }) as BusinessPartnerGroup
   await db.business_partner_groups.put(group)
   await syncGroupRows('business_partner_groups', [group], workspaceId)
+  void queryClient.invalidateQueries({ queryKey: queryKeys.businessPartners.all(workspaceId) })
   return group
 }
 
@@ -189,6 +234,7 @@ export async function updateBusinessPartnerGroup(
   const updated = updatedEntity(current, { name, accessType })
   await db.business_partner_groups.put(updated)
   await syncGroupRows('business_partner_groups', [updated], workspaceId)
+  void queryClient.invalidateQueries({ queryKey: queryKeys.businessPartners.all(workspaceId) })
 }
 
 async function updateGroupUsers(
@@ -275,6 +321,7 @@ export async function deleteBusinessPartnerGroup(workspaceId: string, groupId: s
   const deleted = updatedEntity(current, { isDeleted: true })
   await db.business_partner_groups.put(deleted)
   await syncGroupRows('business_partner_groups', [deleted], workspaceId)
+  void queryClient.invalidateQueries({ queryKey: queryKeys.businessPartners.all(workspaceId) })
 }
 
 export function getBusinessPartnerGroupPartnerId(groupId: string, businessPartnerId: string) {

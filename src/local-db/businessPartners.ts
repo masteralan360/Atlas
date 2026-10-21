@@ -16,9 +16,11 @@ import {
 } from '@/lib/agentProductSelection'
 import { roundOrderValue } from '@/lib/orderPrecision'
 import { generateId, toCamelCase } from '@/lib/utils'
-import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { getWorkspaceDataMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { isCrudDebuggerEnabled, runCrudOperation, type CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import { queryKeys } from '@/query/queryKeys'
-import { assignNewBusinessPartnerToCreatorGroups } from './businessPartnerGroups'
+import { queryClient as appQueryClient } from '@/query/queryClient'
+import { assignNewBusinessPartnerToCreatorGroups, readBusinessPartnerGroupVisibility, useBusinessPartnerGroupVisibility } from './businessPartnerGroups'
 import { getVisibleBusinessPartnerIdsByGroup, type BusinessPartnerGroupPrivacyViewer } from '@/lib/businessPartnerGroupPrivacy'
 import { useAuth } from '@/auth/AuthContext'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
@@ -146,6 +148,13 @@ function shouldUseCloudBusinessData(workspaceId?: string | null) {
   return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
 }
 
+function invalidateBusinessPartnerDirectory(workspaceId?: string | null) {
+  if (!workspaceId) return
+  void appQueryClient.invalidateQueries({
+    queryKey: queryKeys.businessPartners.all(workspaceId),
+  })
+}
+
 async function runMutation<T>(label: string, promiseFactory: () => PromiseLike<T>): Promise<T> {
   return runSupabaseAction(label, promiseFactory)
 }
@@ -266,16 +275,22 @@ function sanitizeSyncPayload(tableName: PartnerTableName, entity: Record<string,
 }
 
 async function markEntitiesSynced(tableName: PartnerTableName, ids: string[]) {
+  const uniqueIds = [...new Set(ids)]
+  if (uniqueIds.length === 0) return
+
   const syncedAt = new Date().toISOString()
   const table = (
     db as unknown as Record<
       string,
       {
-        update: (id: string, changes: Record<string, unknown>) => Promise<number>
+        bulkUpdate: (updates: Array<{ key: string; changes: Record<string, unknown> }>) => Promise<number>
       }
     >
   )[tableName]
-  await Promise.all(ids.map((id) => table.update(id, { syncStatus: 'synced', lastSyncedAt: syncedAt })))
+  await table.bulkUpdate(uniqueIds.map((id) => ({
+    key: id,
+    changes: { syncStatus: 'synced', lastSyncedAt: syncedAt }
+  })))
 }
 
 async function queueOfflineUpserts(tableName: PartnerTableName, entities: SyncEntity[], workspaceId: string) {
@@ -309,51 +324,66 @@ async function markRejectedPartnerUpsertsFailed(
   await Promise.all(entities.map((entity) => table.update(entity.id, { syncStatus: 'conflict' })))
 }
 
-async function syncUpsertEntities(tableName: PartnerTableName, entities: SyncEntity[], workspaceId: string): Promise<boolean> {
+async function requestPartnerUpsert(tableName: PartnerTableName, entities: SyncEntity[], workspaceId: string) {
+  const client = getSupabaseClientForTable(tableName)
+  const payload = entities.map((entity) => sanitizeSyncPayload(tableName, entity))
+  const partnerSyncWriteRpc = getPartnerSyncWriteRpc(tableName)
+
+  if (partnerSyncWriteRpc) {
+    for (const entity of payload) {
+      const { error } = await runMutation(`${tableName}.sync`, () =>
+        client.rpc(partnerSyncWriteRpc, {
+          p_operation: 'upsert',
+          p_entity_id: entity.id,
+          p_workspace_id: workspaceId,
+          p_payload: entity
+        })
+      )
+      if (error) throw error
+    }
+    return
+  }
+
+  const { error } = await runMutation(`${tableName}.sync`, () => client.from(tableName).upsert(payload))
+  if (error) throw error
+}
+
+async function syncUpsertEntities(
+  tableName: PartnerTableName,
+  entities: SyncEntity[],
+  workspaceId: string,
+  trace?: CrudTraceHandle
+): Promise<boolean> {
   if (!entities.length || !shouldUseCloudBusinessData(workspaceId)) {
     return true
   }
 
   if (!isOnline(workspaceId)) {
     await queueOfflineUpserts(tableName, entities, workspaceId)
+    trace?.addPendingStage('crudDebugger.stages.remoteSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
     return false
   }
 
   try {
-    const client = getSupabaseClientForTable(tableName)
-    const payload = entities.map((entity) => sanitizeSyncPayload(tableName, entity))
-    const partnerSyncWriteRpc = getPartnerSyncWriteRpc(tableName)
-
-    if (partnerSyncWriteRpc) {
-      for (const entity of payload) {
-        const { error } = await runMutation(`${tableName}.sync`, () =>
-          client.rpc(partnerSyncWriteRpc, {
-            p_operation: 'upsert',
-            p_entity_id: entity.id,
-            p_workspace_id: workspaceId,
-            p_payload: entity
-          })
-        )
-        if (error) {
-          throw error
-        }
-      }
+    if (trace) {
+      await trace.measure('crudDebugger.stages.businessPartnerRemote', 'network', () => requestPartnerUpsert(tableName, entities, workspaceId), 'crudDebugger.details.businessPartnerSupabaseRoundTrip')
+      await trace.measure('crudDebugger.stages.businessPartnerResponse', 'response', () => markEntitiesSynced(
+        tableName,
+        entities.map((entity) => entity.id)
+      ), 'crudDebugger.details.businessPartnerSyncAcknowledgement')
     } else {
-      const { error } = await runMutation(`${tableName}.sync`, () => client.from(tableName).upsert(payload))
-      if (error) {
-        throw error
-      }
+      await requestPartnerUpsert(tableName, entities, workspaceId)
+      await markEntitiesSynced(
+        tableName,
+        entities.map((entity) => entity.id)
+      )
     }
-
-    await markEntitiesSynced(
-      tableName,
-      entities.map((entity) => entity.id)
-    )
     return true
   } catch (error) {
     console.error(`[BusinessPartners] Failed to sync ${tableName}:`, error)
     await queueOfflineUpserts(tableName, entities, workspaceId)
     await markRejectedPartnerUpsertsFailed(tableName, entities, error)
+    trace?.addPendingStage('crudDebugger.stages.remoteSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
     return false
   }
 }
@@ -378,7 +408,8 @@ async function syncSoftDelete(
   tableName: PartnerTableName,
   entityId: string,
   workspaceId: string,
-  payload: Record<string, unknown> = {}
+  payload: Record<string, unknown> = {},
+  trace?: CrudTraceHandle
 ) {
   if (!shouldUseCloudBusinessData(workspaceId)) {
     return
@@ -386,13 +417,14 @@ async function syncSoftDelete(
 
   if (!isOnline(workspaceId)) {
     await addToOfflineMutations(tableName, entityId, 'delete', { ...payload, id: entityId }, workspaceId)
+    trace?.addPendingStage('crudDebugger.stages.remoteSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
     return
   }
 
   try {
     const client = getSupabaseClientForTable(tableName)
     const partnerSyncWriteRpc = getPartnerSyncWriteRpc(tableName)
-    const { error } = await runMutation(`${tableName}.delete`, () =>
+    const executeDeleteRequest = () => runMutation(`${tableName}.delete`, () =>
       partnerSyncWriteRpc
         ? client.rpc(partnerSyncWriteRpc, {
             p_operation: 'soft_delete',
@@ -402,30 +434,43 @@ async function syncSoftDelete(
           })
         : client.from(tableName).update({ is_deleted: true, updated_at: new Date().toISOString() }).eq('id', entityId)
     )
+    const { error } = trace
+      ? await trace.measure('crudDebugger.stages.businessPartnerRemote', 'network', executeDeleteRequest, 'crudDebugger.details.businessPartnerSupabaseRoundTrip')
+      : await executeDeleteRequest()
     if (error) {
       throw error
     }
 
-    await markEntitiesSynced(tableName, [entityId])
+    if (trace) {
+      await trace.measure('crudDebugger.stages.businessPartnerResponse', 'response', () => markEntitiesSynced(tableName, [entityId]), 'crudDebugger.details.businessPartnerSyncAcknowledgement')
+    } else {
+      await markEntitiesSynced(tableName, [entityId])
+    }
   } catch (error) {
     console.error(`[BusinessPartners] Failed to delete ${tableName}:`, error)
     await addToOfflineMutations(tableName, entityId, 'delete', { ...payload, id: entityId }, workspaceId)
+    trace?.addPendingStage('crudDebugger.stages.remoteSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
   }
 }
 
-async function retireSupplierFacet(partner: BusinessPartner, timestamp: string) {
+async function retireSupplierFacet(partner: BusinessPartner, timestamp: string, trace?: CrudTraceHandle) {
   const supplierId = partner.supplierFacetId
   if (!supplierId) return
 
   const supplier = await db.suppliers.get(supplierId)
   if (supplier && !supplier.isDeleted) {
-    await db.suppliers.put({
+    const retiredSupplier = {
       ...supplier,
       isDeleted: true,
       updatedAt: timestamp,
       version: supplier.version + 1,
       ...getSyncMetadata(partner.workspaceId, timestamp)
-    })
+    }
+    if (trace) {
+      await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', () => db.suppliers.put(retiredSupplier), 'crudDebugger.details.dexiePersistence')
+    } else {
+      await db.suppliers.put(retiredSupplier)
+    }
   }
 
   // A failed update from an older client must not replay after the supplier
@@ -434,7 +479,7 @@ async function retireSupplierFacet(partner: BusinessPartner, timestamp: string) 
   await removeOfflineMutationsForEntityIds('suppliers', [supplierId])
   await syncSoftDelete('suppliers', supplierId, partner.workspaceId, {
     businessPartnerId: partner.id
-  })
+  }, trace)
 }
 
 async function syncHardDelete(tableName: PartnerTableName, entityId: string, workspaceId: string) {
@@ -598,60 +643,89 @@ export async function getBusinessPartnerByAnyId(id: string) {
   return await canViewPartnerForGroupPrivacy(partner, viewer) ? partner : undefined
 }
 
-async function syncCustomerFacet(customer: Customer) {
-  await db.customers.put(customer)
-  await syncUpsertEntities('customers', [customer as unknown as SyncEntity], customer.workspaceId)
+async function syncCustomerFacet(customer: Customer, trace?: CrudTraceHandle) {
+  if (trace) {
+    await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', () => db.customers.put(customer), 'crudDebugger.details.dexiePersistence')
+  } else {
+    await db.customers.put(customer)
+  }
+  await syncUpsertEntities('customers', [customer as unknown as SyncEntity], customer.workspaceId, trace)
 }
 
-async function syncSupplierFacet(supplier: Supplier) {
-  await db.suppliers.put(supplier)
-  await syncUpsertEntities('suppliers', [supplier as unknown as SyncEntity], supplier.workspaceId)
+async function syncSupplierFacet(supplier: Supplier, trace?: CrudTraceHandle) {
+  if (trace) {
+    await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', () => db.suppliers.put(supplier), 'crudDebugger.details.dexiePersistence')
+  } else {
+    await db.suppliers.put(supplier)
+  }
+  await syncUpsertEntities('suppliers', [supplier as unknown as SyncEntity], supplier.workspaceId, trace)
 }
 
-async function mirrorPartnerToFacets(partner: BusinessPartner) {
+function isPartnerFacetInSync(facet: Customer | Supplier, partner: BusinessPartner, creditLimit: number) {
+  return facet.syncStatus === 'synced'
+    && Boolean(facet.lastSyncedAt)
+    && facet.businessPartnerId === partner.id
+    && facet.partnerName === partner.partnerName
+    && facet.phone === partner.phone
+    && facet.address === partner.address
+    && facet.city === partner.city
+    && facet.defaultCurrency === partner.defaultCurrency
+    && facet.notes === partner.notes
+    && facet.creditLimit === creditLimit
+    && (facet.isEcommerce ?? false) === (partner.isEcommerce ?? facet.isEcommerce ?? false)
+    && !facet.isDeleted
+}
+
+async function mirrorPartnerToFacets(partner: BusinessPartner, trace?: CrudTraceHandle) {
   const updates: Promise<void>[] = []
 
   if (partner.customerFacetId) {
     const customer = await db.customers.get(partner.customerFacetId)
     if (customer && !customer.isDeleted) {
-      const mirroredCustomer: Customer = {
-        ...customer,
-        businessPartnerId: partner.id,
-        partnerName: partner.partnerName,
-        phone: partner.phone,
-        address: partner.address,
-        city: partner.city,
-        defaultCurrency: partner.defaultCurrency,
-        notes: partner.notes,
-        creditLimit: partner.receivableCreditLimit ?? partner.creditLimit ?? 0,
-        isEcommerce: partner.isEcommerce ?? customer.isEcommerce ?? false,
-        updatedAt: partner.updatedAt,
-        version: Math.max(customer.version + 1, partner.version),
-        ...getSyncMetadata(partner.workspaceId, partner.updatedAt)
+      const creditLimit = partner.receivableCreditLimit ?? partner.creditLimit ?? 0
+      if (!isPartnerFacetInSync(customer, partner, creditLimit)) {
+        const mirroredCustomer: Customer = {
+          ...customer,
+          businessPartnerId: partner.id,
+          partnerName: partner.partnerName,
+          phone: partner.phone,
+          address: partner.address,
+          city: partner.city,
+          defaultCurrency: partner.defaultCurrency,
+          notes: partner.notes,
+          creditLimit,
+          isEcommerce: partner.isEcommerce ?? customer.isEcommerce ?? false,
+          updatedAt: partner.updatedAt,
+          version: Math.max(customer.version + 1, partner.version),
+          ...getSyncMetadata(partner.workspaceId, partner.updatedAt)
+        }
+        updates.push(syncCustomerFacet(mirroredCustomer, trace))
       }
-      updates.push(syncCustomerFacet(mirroredCustomer))
     }
   }
 
   if (roleIncludesSupplier(partner.role) && partner.supplierFacetId) {
     const supplier = await db.suppliers.get(partner.supplierFacetId)
     if (supplier && !supplier.isDeleted) {
-      const mirroredSupplier: Supplier = {
-        ...supplier,
-        businessPartnerId: partner.id,
-        partnerName: partner.partnerName,
-        phone: partner.phone,
-        address: partner.address,
-        city: partner.city,
-        defaultCurrency: partner.defaultCurrency,
-        notes: partner.notes,
-        creditLimit: partner.payableCreditLimit ?? partner.creditLimit ?? 0,
-        isEcommerce: partner.isEcommerce ?? supplier.isEcommerce ?? false,
-        updatedAt: partner.updatedAt,
-        version: Math.max(supplier.version + 1, partner.version),
-        ...getSyncMetadata(partner.workspaceId, partner.updatedAt)
+      const creditLimit = partner.payableCreditLimit ?? partner.creditLimit ?? 0
+      if (!isPartnerFacetInSync(supplier, partner, creditLimit)) {
+        const mirroredSupplier: Supplier = {
+          ...supplier,
+          businessPartnerId: partner.id,
+          partnerName: partner.partnerName,
+          phone: partner.phone,
+          address: partner.address,
+          city: partner.city,
+          defaultCurrency: partner.defaultCurrency,
+          notes: partner.notes,
+          creditLimit,
+          isEcommerce: partner.isEcommerce ?? supplier.isEcommerce ?? false,
+          updatedAt: partner.updatedAt,
+          version: Math.max(supplier.version + 1, partner.version),
+          ...getSyncMetadata(partner.workspaceId, partner.updatedAt)
+        }
+        updates.push(syncSupplierFacet(mirroredSupplier, trace))
       }
-      updates.push(syncSupplierFacet(mirroredSupplier))
     }
   }
 
@@ -713,9 +787,13 @@ async function getPartnerLoans(partner: BusinessPartner) {
   return rows as Loan[]
 }
 
-async function syncAgentFacet(agent: Agent) {
-  await db.agents.put(agent)
-  await syncUpsertEntities('agents', [agent as unknown as SyncEntity], agent.workspaceId)
+async function syncAgentFacet(agent: Agent, trace?: CrudTraceHandle) {
+  if (trace) {
+    await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', () => db.agents.put(agent), 'crudDebugger.details.dexiePersistence')
+  } else {
+    await db.agents.put(agent)
+  }
+  await syncUpsertEntities('agents', [agent as unknown as SyncEntity], agent.workspaceId, trace)
 }
 
 export function useAgentExcludedCategories(workspaceId: string | undefined, agentId?: string | null) {
@@ -999,7 +1077,7 @@ async function assertAgentLinkedUserAvailable(
   }
 }
 
-async function createOrUpdateAgentFacet(partner: BusinessPartner, input?: Partial<AgentFacetInput>) {
+async function createOrUpdateAgentFacet(partner: BusinessPartner, input?: Partial<AgentFacetInput>, trace?: CrudTraceHandle) {
   const existing = partner.agentFacetId
     ? await db.agents.get(partner.agentFacetId)
     : await db.agents.where('businessPartnerId').equals(partner.id).first()
@@ -1007,6 +1085,23 @@ async function createOrUpdateAgentFacet(partner: BusinessPartner, input?: Partia
   await assertAgentLinkedUserAvailable(partner.workspaceId, agentData.linkedUserId, existing?.id)
 
   if (existing) {
+    const agentFieldsUnchanged = existing.syncStatus === 'synced'
+      && Boolean(existing.lastSyncedAt)
+      && !existing.isDeleted
+      && existing.businessPartnerId === partner.id
+      && existing.zone === agentData.zone
+      && existing.agentType === agentData.agentType
+      && existing.carModel === agentData.carModel
+      && existing.plateNumber === agentData.plateNumber
+      && existing.linkedUserId === agentData.linkedUserId
+      && existing.salesAccountEnabled === agentData.salesAccountEnabled
+      && existing.status === agentData.status
+      && existing.courierDeliveryFee === agentData.courierDeliveryFee
+    if (agentFieldsUnchanged) {
+      await ensureDriverFleetAssignment(existing)
+      return existing
+    }
+
     const now = new Date().toISOString()
     const updated: Agent = {
       ...existing,
@@ -1017,7 +1112,7 @@ async function createOrUpdateAgentFacet(partner: BusinessPartner, input?: Partia
       version: existing.version + 1,
       ...getSyncMetadata(partner.workspaceId, now)
     }
-    await syncAgentFacet(updated)
+    await syncAgentFacet(updated, trace)
     await ensureDriverFleetAssignment(updated)
     return updated
   }
@@ -1026,12 +1121,12 @@ async function createOrUpdateAgentFacet(partner: BusinessPartner, input?: Partia
     businessPartnerId: partner.id,
     ...agentData
   }) as Agent
-  await syncAgentFacet(agent)
+  await syncAgentFacet(agent, trace)
   await ensureDriverFleetAssignment(agent)
   return agent
 }
 
-async function setAgentFacetInactive(partner: BusinessPartner) {
+async function setAgentFacetInactive(partner: BusinessPartner, trace?: CrudTraceHandle) {
   if (!partner.agentFacetId) {
     return
   }
@@ -1048,7 +1143,7 @@ async function setAgentFacetInactive(partner: BusinessPartner) {
     updatedAt: now,
     version: agent.version + 1,
     ...getSyncMetadata(agent.workspaceId, now)
-  })
+  }, trace)
   await endActiveFleetAssignmentsForAgent(agent.id)
 }
 
@@ -1456,7 +1551,7 @@ async function assertRoleRemovalAllowed(partner: BusinessPartner, nextRole: Busi
   }
 }
 
-async function createFacetFromPartner(partner: BusinessPartner, facetType: PartnerFacetType) {
+async function createFacetFromPartner(partner: BusinessPartner, facetType: PartnerFacetType, trace?: CrudTraceHandle) {
   const base = buildBaseEntity(partner.workspaceId, {
     businessPartnerId: partner.id,
     partnerName: partner.partnerName,
@@ -1479,7 +1574,7 @@ async function createFacetFromPartner(partner: BusinessPartner, facetType: Partn
       totalSpent: 0,
       outstandingBalance: 0
     }
-    await syncCustomerFacet(customer)
+    await syncCustomerFacet(customer, trace)
     return customer
   }
 
@@ -1488,7 +1583,7 @@ async function createFacetFromPartner(partner: BusinessPartner, facetType: Partn
     totalPurchases: 0,
     totalSpent: 0
   }
-  await syncSupplierFacet(supplier)
+  await syncSupplierFacet(supplier, trace)
   return supplier
 }
 export async function ensurePartnerFacet(partnerId: string, facetType: PartnerFacetType) {
@@ -1525,6 +1620,7 @@ export async function ensurePartnerFacet(partnerId: string, facetType: PartnerFa
 
   await db.business_partners.put(updatedPartner)
   await syncUpsertEntities('business_partners', [updatedPartner as unknown as SyncEntity], partner.workspaceId)
+  invalidateBusinessPartnerDirectory(partner.workspaceId)
   return facet
 }
 
@@ -1822,9 +1918,11 @@ async function fetchRemoteBusinessPartnerDirectoryPage(
 
   if (cacheResults && mappedItems.length) {
     const cachedItems = await db.business_partners.bulkGet(mappedItems.map((item) => item.id))
-    const cacheUpdates = mappedItems.filter((_, index) => {
+    const cacheUpdates = mappedItems.filter((item, index) => {
       const cached = cachedItems[index]
-      return cached?.syncStatus !== 'pending' && cached?.syncStatus !== 'conflict'
+      return cached?.syncStatus !== 'pending'
+        && cached?.syncStatus !== 'conflict'
+        && (!cached || Number(cached.version ?? 0) <= Number(item.version ?? 0))
     })
     if (cacheUpdates.length) await db.business_partners.bulkPut(cacheUpdates)
   }
@@ -1872,20 +1970,7 @@ export async function searchBusinessPartnerAutocompleteSuggestions(
   }
 
   if (isOnline(workspaceId) && shouldUseCloudBusinessData(workspaceId)) {
-    const visiblePartnerIds = await (
-      viewer.featureEnabled && viewer.role !== 'admin'
-        ? Promise.all([
-          db.business_partner_groups.where('workspaceId').equals(workspaceId).toArray(),
-          db.business_partner_group_users.where('workspaceId').equals(workspaceId).toArray(),
-          db.business_partner_group_partners.where('workspaceId').equals(workspaceId).toArray(),
-        ]).then(([groups, groupUsers, groupPartners]) => getVisibleBusinessPartnerIdsByGroup(
-          groups,
-          groupUsers,
-          groupPartners,
-          viewer,
-        ))
-        : Promise.resolve(null)
-    )
+    const visiblePartnerIds = await readBusinessPartnerGroupVisibility(workspaceId, viewer)
     const remoteItems: BusinessPartner[] = []
     const remoteItemIds = new Set<string>()
     const localPendingItemsPromise = readLocalBusinessPartnerAutocompleteSuggestions(
@@ -1984,6 +2069,7 @@ export function useBusinessPartnerDirectoryPage(
     role: user?.role,
     featureEnabled: hasCapability('businessPartnerGroupPrivacy'),
   }), [hasCapability, user?.id, user?.role])
+  const groupVisibility = useBusinessPartnerGroupVisibility(workspaceId, viewer)
   const optionsKey = JSON.stringify(options)
   useEffect(() => {
     const timeout = window.setTimeout(() => setSettledSearch(options.search ?? ''), 250)
@@ -1991,37 +2077,60 @@ export function useBusinessPartnerDirectoryPage(
   }, [options.search])
   const requestOptions = useMemo(() => ({ ...options, search: settledSearch }), [optionsKey, settledSearch])
   const requestOptionsKey = JSON.stringify(requestOptions)
-  const queryKey = JSON.stringify([workspaceId, requestOptionsKey, viewer.featureEnabled, viewer.role, viewer.userId])
+  const queryKey = JSON.stringify([workspaceId, requestOptionsKey, groupVisibility.scopeKey])
   const enabled = options.enabled !== false
   const useRemote = Boolean(enabled && online && shouldUseCloudBusinessData(workspaceId))
   const remotePageQuery = useQuery({
-    queryKey: queryKeys.businessPartners.directoryPage(workspaceId, requestOptions, viewer),
+    queryKey: queryKeys.businessPartners.directoryPage(workspaceId, requestOptions, {
+      ...viewer,
+      groupVisibilityScope: groupVisibility.scopeKey,
+    }),
     queryFn: ({ signal }) => fetchRemoteBusinessPartnerDirectoryPage(workspaceId!, requestOptions, true, true, signal),
-    enabled: useRemote,
+    enabled: useRemote && !groupVisibility.isLoading,
   })
-  const matchingRemotePage = useRemote ? remotePageQuery.data ?? null : null
+  const matchingRemotePage = useMemo(() => {
+    if (!useRemote || !remotePageQuery.data || groupVisibility.isLoading) return null
+    return {
+      ...remotePageQuery.data,
+      items: remotePageQuery.data.items.filter((partner) => (
+        groupVisibility.visiblePartnerIds === null || groupVisibility.visiblePartnerIds.has(partner.id)
+      )),
+    }
+  }, [groupVisibility.isLoading, groupVisibility.visiblePartnerIds, remotePageQuery.data, useRemote])
   const remoteErrorKey = remotePageQuery.isError ? queryKey : null
 
-  const localOrCachedPage = useLiveQuery(async () => {
-    if (!enabled || !workspaceId) return { items: [], totalCount: 0, summary: { ...EMPTY_BUSINESS_PARTNER_DIRECTORY_SUMMARY } }
+  const localPageResult = useLiveQuery(async () => {
+    if (groupVisibility.isLoading) return undefined
+    if (!enabled || !workspaceId) return {
+      scopeKey: queryKey,
+      page: { items: [], totalCount: 0, summary: { ...EMPTY_BUSINESS_PARTNER_DIRECTORY_SUMMARY } },
+    }
     if (useRemote) {
       if (matchingRemotePage) {
         const cachedRows = await db.business_partners.bulkGet(matchingRemotePage.items.map((item) => item.id))
         return {
-          ...matchingRemotePage,
-          items: matchingRemotePage.items.flatMap((remoteItem, index) => {
-            const localItem = cachedRows[index]
-            if (localItem?.syncStatus === 'pending' || localItem?.syncStatus === 'conflict') {
-              return localItem.isDeleted ? [] : [normalizeRuntimePartnerName(localItem)]
-            }
-            return [remoteItem]
-          }),
+          scopeKey: queryKey,
+          page: {
+            ...matchingRemotePage,
+            items: matchingRemotePage.items.flatMap((remoteItem, index) => {
+              const localItem = cachedRows[index]
+              if (
+                localItem?.syncStatus === 'pending'
+                || localItem?.syncStatus === 'conflict'
+                || (localItem && Number(localItem.version ?? 0) > Number(remoteItem.version ?? 0))
+              ) {
+                return localItem.isDeleted ? [] : [normalizeRuntimePartnerName(localItem)]
+              }
+              return [remoteItem]
+            }),
+          },
         }
       }
       if (remoteErrorKey !== queryKey) return undefined
     }
-    return readLocalBusinessPartnerDirectoryPage(workspaceId, requestOptions, viewer)
-  }, [enabled, requestOptionsKey, queryKey, matchingRemotePage?.items.map((item) => item.id).join(','), remoteErrorKey, useRemote, viewer.featureEnabled, viewer.role, viewer.userId, workspaceId])
+    return { scopeKey: queryKey, page: await readLocalBusinessPartnerDirectoryPage(workspaceId, requestOptions, viewer) }
+  }, [enabled, groupVisibility.isLoading, requestOptionsKey, queryKey, matchingRemotePage, remoteErrorKey, useRemote, viewer.featureEnabled, viewer.role, viewer.userId, workspaceId])
+  const localOrCachedPage = localPageResult?.scopeKey === queryKey ? localPageResult.page : undefined
 
   const page = localOrCachedPage ?? matchingRemotePage
   const items = page?.items ?? []
@@ -2140,6 +2249,8 @@ export function useBusinessPartnerDirectoryPage(
     isLoading,
     isHydrating: useRemote && isLoading,
     hydrationFailed: useRemote && remotePageQuery.isError,
+    visibilityScopeKey: groupVisibility.scopeKey,
+    isVisibilityLoading: groupVisibility.isLoading,
     refresh,
   }
 }
@@ -2156,11 +2267,12 @@ export async function loadAllBusinessPartnerDirectoryRows(
     includeEcommerce: options.includeEcommerce ?? true,
   }
   if (isOnline(workspaceId) && shouldUseCloudBusinessData(workspaceId)) {
+    const visiblePartnerIds = await readBusinessPartnerGroupVisibility(workspaceId, viewer)
     const rows: BusinessPartner[] = []
     let page = 1
     while (true) {
       const result = await fetchRemoteBusinessPartnerDirectoryPage(workspaceId, { ...directoryOptions, page }, false)
-      rows.push(...result.items)
+      rows.push(...result.items.filter((partner) => visiblePartnerIds === null || visiblePartnerIds.has(partner.id)))
       if (result.items.length < directoryOptions.pageSize) break
       page += 1
     }
@@ -2414,12 +2526,17 @@ export function useAgent(agentId: string | null | undefined) {
   }, [agentId])
 }
 
-export async function createBusinessPartner(
+async function createBusinessPartnerInternal(
   workspaceId: string,
   data: BusinessPartnerCreateInput,
-  options?: BusinessPartnerRoleAccessOptions
+  options?: BusinessPartnerRoleAccessOptions,
+  trace?: CrudTraceHandle
 ) {
-  assertBusinessPartnerRoleAllowed(data.role, options)
+  if (trace) {
+    await trace.measure('crudDebugger.stages.businessPartnerPreparation', 'application', () => assertBusinessPartnerRoleAllowed(data.role, options))
+  } else {
+    assertBusinessPartnerRoleAllowed(data.role, options)
+  }
   const {
     agent: agentInput,
     email: _email,
@@ -2437,9 +2554,15 @@ export async function createBusinessPartner(
     staff_visibility?: unknown
     owner_user_id?: unknown
   }
-  const partnerName = normalizeRequiredPartnerName(partnerData.partnerName)
+  const partnerName = trace
+    ? await trace.measure('crudDebugger.stages.businessPartnerPreparation', 'application', () => normalizeRequiredPartnerName(partnerData.partnerName))
+    : normalizeRequiredPartnerName(partnerData.partnerName)
   const normalizedAgentInput = roleIncludesAgent(data.role) ? normalizeAgentFacetInput(agentInput) : undefined
-  await assertAgentLinkedUserAvailable(workspaceId, normalizedAgentInput?.linkedUserId)
+  if (trace) {
+    await trace.measure('crudDebugger.stages.businessPartnerLookup', 'data', () => assertAgentLinkedUserAvailable(workspaceId, normalizedAgentInput?.linkedUserId))
+  } else {
+    await assertAgentLinkedUserAvailable(workspaceId, normalizedAgentInput?.linkedUserId)
+  }
   const legacyLimit = partnerData.creditLimit && partnerData.creditLimit > 0 ? partnerData.creditLimit : null
   const partner = buildBaseEntity(workspaceId, {
     ...partnerData,
@@ -2473,28 +2596,34 @@ export async function createBusinessPartner(
     latitude: partnerData.latitude ?? null,
     longitude: partnerData.longitude ?? null
   }) as BusinessPartner
+  trace?.setEntityId(partner.id)
 
-  await db.business_partners.put(partner)
-  await assignNewBusinessPartnerToCreatorGroups(workspaceId, partner.id)
-  let partnerSyncSucceeded = await syncUpsertEntities('business_partners', [partner as unknown as SyncEntity], workspaceId)
+  if (trace) {
+    await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', () => db.business_partners.put(partner), 'crudDebugger.details.dexiePersistence')
+    await trace.measure('crudDebugger.stages.businessPartnerGroupAssignment', 'data', () => assignNewBusinessPartnerToCreatorGroups(workspaceId, partner.id), 'crudDebugger.details.businessPartnerGroupAssignment')
+  } else {
+    await db.business_partners.put(partner)
+    await assignNewBusinessPartnerToCreatorGroups(workspaceId, partner.id)
+  }
+  let partnerSyncSucceeded = await syncUpsertEntities('business_partners', [partner as unknown as SyncEntity], workspaceId, trace)
 
   let workingPartner = partner
   if (roleIncludesCustomer(partner.role)) {
-    const customer = await createFacetFromPartner(workingPartner, 'customer')
+    const customer = await createFacetFromPartner(workingPartner, 'customer', trace)
     workingPartner = {
       ...workingPartner,
       customerFacetId: customer.id
     }
   }
   if (roleIncludesSupplier(partner.role)) {
-    const supplier = await createFacetFromPartner(workingPartner, 'supplier')
+    const supplier = await createFacetFromPartner(workingPartner, 'supplier', trace)
     workingPartner = {
       ...workingPartner,
       supplierFacetId: supplier.id
     }
   }
   if (roleIncludesAgent(partner.role)) {
-    const agent = await createOrUpdateAgentFacet(workingPartner, normalizedAgentInput)
+    const agent = await createOrUpdateAgentFacet(workingPartner, normalizedAgentInput, trace)
     workingPartner = {
       ...workingPartner,
       agentFacetId: agent.id
@@ -2513,29 +2642,45 @@ export async function createBusinessPartner(
       version: workingPartner.version + 1,
       ...getSyncMetadata(workspaceId, now)
     }
-    await db.business_partners.put(workingPartner)
-    partnerSyncSucceeded = await syncUpsertEntities('business_partners', [workingPartner as unknown as SyncEntity], workspaceId)
+    if (trace) {
+      await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', () => db.business_partners.put(workingPartner), 'crudDebugger.details.dexiePersistence')
+    } else {
+      await db.business_partners.put(workingPartner)
+    }
+    partnerSyncSucceeded = await syncUpsertEntities('business_partners', [workingPartner as unknown as SyncEntity], workspaceId, trace)
   }
 
   if (partner.priceBookId && shouldUseCloudBusinessData(workspaceId) && isOnline(workspaceId) && !partnerSyncSucceeded) {
     notifyPriceBookAssignmentSyncFailure()
   }
 
+  invalidateBusinessPartnerDirectory(workspaceId)
   return workingPartner
 }
 
-export async function updateBusinessPartner(
+export function createBusinessPartner(
+  workspaceId: string,
+  data: BusinessPartnerCreateInput,
+  options?: BusinessPartnerRoleAccessOptions
+): Promise<BusinessPartner> {
+  if (!isCrudDebuggerEnabled()) return createBusinessPartnerInternal(workspaceId, data, options)
+  return runCrudOperation({ action: 'create', entityKey: 'businessPartner', workspaceId }, (trace) => createBusinessPartnerInternal(workspaceId, data, options, trace))
+}
+
+async function updateBusinessPartnerInternal(
   id: string,
   data: BusinessPartnerUpdateInput,
-  options?: BusinessPartnerRoleAccessOptions
+  options?: BusinessPartnerRoleAccessOptions,
+  trace?: CrudTraceHandle
 ) {
-  const visiblePartner = await getPartnerByAnyId(id)
+  const visiblePartner = trace
+    ? await trace.measure('crudDebugger.stages.businessPartnerLookup', 'data', () => getPartnerByAnyId(id))
+    : await getPartnerByAnyId(id)
   if (!visiblePartner || visiblePartner.isDeleted) {
     throw new Error('Business partner not found')
   }
-  const storedPartner = await db.business_partners.get(visiblePartner.id)
-  const existing =
-    storedPartner && !storedPartner.isDeleted ? normalizeRuntimePartnerName(storedPartner) : visiblePartner
+  trace?.setWorkspaceMode(getWorkspaceDataMode(visiblePartner.workspaceId))
+  const existing = visiblePartner
 
   if (hasBusinessPartnerGroupPrivacyAccess(existing.workspaceId)) {
     const viewer: BusinessPartnerGroupPrivacyViewer = {
@@ -2577,15 +2722,24 @@ export async function updateBusinessPartner(
       partnerChanges.payableCreditLimit = partnerChanges.creditLimit
     }
   }
-  assertBusinessPartnerRoleAllowed(nextRole, options)
-  await assertRoleRemovalAllowed(existing, nextRole)
+  if (trace) {
+    await trace.measure('crudDebugger.stages.businessPartnerPreparation', 'application', () => assertBusinessPartnerRoleAllowed(nextRole, options))
+    await trace.measure('crudDebugger.stages.businessPartnerLookup', 'data', () => assertRoleRemovalAllowed(existing, nextRole))
+  } else {
+    assertBusinessPartnerRoleAllowed(nextRole, options)
+    await assertRoleRemovalAllowed(existing, nextRole)
+  }
   const existingAgent = existing.agentFacetId
     ? await db.agents.get(existing.agentFacetId)
     : await db.agents.where('businessPartnerId').equals(existing.id).first()
   const normalizedAgentInput = roleIncludesAgent(nextRole)
     ? normalizeAgentFacetInput(agentInput, existingAgent)
     : undefined
-  await assertAgentLinkedUserAvailable(existing.workspaceId, normalizedAgentInput?.linkedUserId, existingAgent?.id)
+  if (trace) {
+    await trace.measure('crudDebugger.stages.businessPartnerLookup', 'data', () => assertAgentLinkedUserAvailable(existing.workspaceId, normalizedAgentInput?.linkedUserId, existingAgent?.id))
+  } else {
+    await assertAgentLinkedUserAvailable(existing.workspaceId, normalizedAgentInput?.linkedUserId, existingAgent?.id)
+  }
 
   const now = new Date().toISOString()
   const {
@@ -2619,14 +2773,18 @@ export async function updateBusinessPartner(
   }
 
   if (!roleIncludesSupplier(nextRole) && existing.supplierFacetId) {
-    await retireSupplierFacet(existing, now)
+    await retireSupplierFacet(existing, now, trace)
   }
 
-  await db.business_partners.put(updated)
-  let partnerSyncSucceeded = await syncUpsertEntities('business_partners', [updated as unknown as SyncEntity], existing.workspaceId)
+  if (trace) {
+    await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', () => db.business_partners.put(updated), 'crudDebugger.details.dexiePersistence')
+  } else {
+    await db.business_partners.put(updated)
+  }
+  let partnerSyncSucceeded = await syncUpsertEntities('business_partners', [updated as unknown as SyncEntity], existing.workspaceId, trace)
 
   if (roleIncludesCustomer(nextRole) && !updated.customerFacetId) {
-    const customer = await createFacetFromPartner(updated, 'customer')
+    const customer = await createFacetFromPartner(updated, 'customer', trace)
     updated = {
       ...updated,
       customerFacetId: customer.id,
@@ -2635,7 +2793,7 @@ export async function updateBusinessPartner(
   }
 
   if (roleIncludesSupplier(nextRole) && !updated.supplierFacetId) {
-    const supplier = await createFacetFromPartner(updated, 'supplier')
+    const supplier = await createFacetFromPartner(updated, 'supplier', trace)
     updated = {
       ...updated,
       supplierFacetId: supplier.id,
@@ -2643,13 +2801,13 @@ export async function updateBusinessPartner(
     }
   }
   if (roleIncludesAgent(nextRole)) {
-    const agent = await createOrUpdateAgentFacet(updated, normalizedAgentInput)
+    const agent = await createOrUpdateAgentFacet(updated, normalizedAgentInput, trace)
     updated = {
       ...updated,
       agentFacetId: agent.id
     }
   } else if (roleIncludesAgent(existing.role)) {
-    await setAgentFacetInactive(existing)
+    await setAgentFacetInactive(existing, trace)
   }
 
   if (
@@ -2664,12 +2822,30 @@ export async function updateBusinessPartner(
       version: updated.version + 1,
       ...getSyncMetadata(existing.workspaceId, timestamp)
     }
-    await db.business_partners.put(updated)
-    partnerSyncSucceeded = await syncUpsertEntities('business_partners', [updated as unknown as SyncEntity], existing.workspaceId)
+    if (trace) {
+      await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', () => db.business_partners.put(updated), 'crudDebugger.details.dexiePersistence')
+    } else {
+      await db.business_partners.put(updated)
+    }
+    partnerSyncSucceeded = await syncUpsertEntities('business_partners', [updated as unknown as SyncEntity], existing.workspaceId, trace)
   }
 
-  await mirrorPartnerToFacets(updated)
-  await recalculateBusinessPartnerSummary(existing.workspaceId, updated.id)
+  await mirrorPartnerToFacets(updated, trace)
+  // Contact details, limits and Price Book assignments do not change ledger
+  // totals. Transaction mutations already refresh their affected summaries.
+  const summaryInputsChanged = updated.defaultCurrency !== existing.defaultCurrency
+    || updated.role !== existing.role
+    || updated.customerFacetId !== existing.customerFacetId
+    || updated.supplierFacetId !== existing.supplierFacetId
+    || updated.agentFacetId !== existing.agentFacetId
+  if (summaryInputsChanged) {
+    if (trace) {
+      await trace.measure('crudDebugger.stages.businessPartnerSummary', 'unknown', () => recalculateBusinessPartnerSummary(existing.workspaceId, updated.id), 'crudDebugger.details.businessPartnerSummaryBoundary')
+    } else {
+      await recalculateBusinessPartnerSummary(existing.workspaceId, updated.id)
+    }
+  }
+  invalidateBusinessPartnerDirectory(existing.workspaceId)
   if (priceBookAssignmentChanged && shouldUseCloudBusinessData(existing.workspaceId) && isOnline(existing.workspaceId) && !partnerSyncSucceeded) {
     // Keep the edit dialog open and let its submit handler surface the failure.
     // The generic sync helper queues failed online writes, so returning here
@@ -2681,17 +2857,32 @@ export async function updateBusinessPartner(
   return updated
 }
 
-export async function deleteBusinessPartner(id: string) {
-  const partner = await getBusinessPartnerByAnyId(id)
+export function updateBusinessPartner(
+  id: string,
+  data: BusinessPartnerUpdateInput,
+  options?: BusinessPartnerRoleAccessOptions
+): Promise<BusinessPartner> {
+  if (!isCrudDebuggerEnabled()) return updateBusinessPartnerInternal(id, data, options)
+  return runCrudOperation({ action: 'update', entityKey: 'businessPartner', entityId: id }, (trace) => updateBusinessPartnerInternal(id, data, options, trace))
+}
+
+async function deleteBusinessPartnerInternal(id: string, trace?: CrudTraceHandle) {
+  const partner = trace
+    ? await trace.measure('crudDebugger.stages.businessPartnerLookup', 'data', () => getBusinessPartnerByAnyId(id))
+    : await getBusinessPartnerByAnyId(id)
   if (!partner || partner.isDeleted) {
     return
   }
+  trace?.setWorkspaceMode(getWorkspaceDataMode(partner.workspaceId))
 
-  const [salesOrders, purchaseOrders, loans] = await Promise.all([
+  const loadRelatedHistory = () => Promise.all([
     getPartnerSalesOrders(partner),
     getPartnerPurchaseOrders(partner),
     getPartnerLoans(partner)
   ])
+  const [salesOrders, purchaseOrders, loans] = trace
+    ? await trace.measure('crudDebugger.stages.businessPartnerLookup', 'data', loadRelatedHistory)
+    : await loadRelatedHistory()
 
   if (salesOrders.length > 0 || purchaseOrders.length > 0 || loans.length > 0) {
     throw new Error('Business partner with transaction history cannot be deleted')
@@ -2705,75 +2896,103 @@ export async function deleteBusinessPartner(id: string) {
     version: partner.version + 1,
     ...getSyncMetadata(partner.workspaceId, now)
   }
-  await db.business_partners.put(deletedPartner)
+  if (trace) {
+    await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', () => db.business_partners.put(deletedPartner), 'crudDebugger.details.dexiePersistence')
+  } else {
+    await db.business_partners.put(deletedPartner)
+  }
 
   if (partner.customerFacetId) {
     const customer = await db.customers.get(partner.customerFacetId)
     if (customer && !customer.isDeleted) {
-      await db.customers.put({
+      const deletedCustomer = {
         ...customer,
         isDeleted: true,
         updatedAt: now,
         version: customer.version + 1,
         ...getSyncMetadata(customer.workspaceId, now)
-      })
-      await syncSoftDelete('customers', customer.id, customer.workspaceId)
+      }
+      if (trace) {
+        await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', () => db.customers.put(deletedCustomer), 'crudDebugger.details.dexiePersistence')
+      } else {
+        await db.customers.put(deletedCustomer)
+      }
+      await syncSoftDelete('customers', customer.id, customer.workspaceId, {}, trace)
     }
   }
 
   if (partner.supplierFacetId) {
     const supplier = await db.suppliers.get(partner.supplierFacetId)
     if (supplier && !supplier.isDeleted) {
-      await db.suppliers.put({
+      const deletedSupplier = {
         ...supplier,
         isDeleted: true,
         updatedAt: now,
         version: supplier.version + 1,
         ...getSyncMetadata(supplier.workspaceId, now)
-      })
-      await syncSoftDelete('suppliers', supplier.id, supplier.workspaceId)
+      }
+      if (trace) {
+        await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', () => db.suppliers.put(deletedSupplier), 'crudDebugger.details.dexiePersistence')
+      } else {
+        await db.suppliers.put(deletedSupplier)
+      }
+      await syncSoftDelete('suppliers', supplier.id, supplier.workspaceId, {}, trace)
     }
   }
 
   if (partner.agentFacetId) {
     const agent = await db.agents.get(partner.agentFacetId)
     if (agent && !agent.isDeleted) {
-      await db.agents.put({
+      const deletedAgent = {
         ...agent,
         isDeleted: true,
         updatedAt: now,
         version: agent.version + 1,
         ...getSyncMetadata(agent.workspaceId, now)
-      })
+      }
+      if (trace) {
+        await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', () => db.agents.put(deletedAgent), 'crudDebugger.details.dexiePersistence')
+      } else {
+        await db.agents.put(deletedAgent)
+      }
       await syncSoftDelete('agents', agent.id, agent.workspaceId, {
         businessPartnerId: deletedPartner.id
-      })
+      }, trace)
     }
   }
 
   // Retire dependent facets before their business partner. This preserves
   // the database relationship while both deletes are queued or uploaded.
-  await syncSoftDelete('business_partners', deletedPartner.id, deletedPartner.workspaceId)
+  await syncSoftDelete('business_partners', deletedPartner.id, deletedPartner.workspaceId, {}, trace)
+  invalidateBusinessPartnerDirectory(deletedPartner.workspaceId)
 }
 
-export async function mergeBusinessPartners(primaryPartnerId: string, secondaryPartnerId: string) {
-  const [primary, secondary] = await Promise.all([
+export function deleteBusinessPartner(id: string): Promise<void> {
+  if (!isCrudDebuggerEnabled()) return deleteBusinessPartnerInternal(id)
+  return runCrudOperation({ action: 'delete', entityKey: 'businessPartner', entityId: id }, (trace) => deleteBusinessPartnerInternal(id, trace))
+}
+
+async function mergeBusinessPartnersInternal(primaryPartnerId: string, secondaryPartnerId: string, trace?: CrudTraceHandle) {
+  const loadPartners = () => Promise.all([
     getBusinessPartnerByAnyId(primaryPartnerId),
     getBusinessPartnerByAnyId(secondaryPartnerId)
   ])
+  const [primary, secondary] = trace
+    ? await trace.measure('crudDebugger.stages.businessPartnerLookup', 'data', loadPartners)
+    : await loadPartners()
   if (!primary || !secondary || primary.isDeleted || secondary.isDeleted) {
     throw new Error('Business partner not found')
   }
   if (primary.workspaceId !== secondary.workspaceId) {
     throw new Error('Partners must belong to the same workspace')
   }
+  trace?.setWorkspaceMode(getWorkspaceDataMode(primary.workspaceId))
   if (roleIncludesAgent(primary.role) !== roleIncludesAgent(secondary.role)) {
     throw new Error('Agents can only be merged with other agents')
   }
   if (primary.defaultCurrency !== secondary.defaultCurrency) {
     throw new Error('Cannot merge business partners with different default currencies. Align the currencies first.')
   }
-
   const now = new Date().toISOString()
   const mergedRole: BusinessPartnerRole = primary.role === secondary.role ? primary.role : 'both'
   const mergedPrimary: BusinessPartner = {
@@ -2803,11 +3022,16 @@ export async function mergeBusinessPartners(primaryPartnerId: string, secondaryP
     ...getSyncMetadata(secondary.workspaceId, now)
   }
 
-  await db.business_partners.bulkPut([mergedPrimary, mergedSecondary])
+  if (trace) {
+    await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', () => db.business_partners.bulkPut([mergedPrimary, mergedSecondary]), 'crudDebugger.details.dexiePersistence')
+  } else {
+    await db.business_partners.bulkPut([mergedPrimary, mergedSecondary])
+  }
   await syncUpsertEntities(
     'business_partners',
     [mergedPrimary as unknown as SyncEntity, mergedSecondary as unknown as SyncEntity],
-    primary.workspaceId
+    primary.workspaceId,
+    trace
   )
 
   if (secondary.customerFacetId) {
@@ -2819,7 +3043,7 @@ export async function mergeBusinessPartners(primaryPartnerId: string, secondaryP
         updatedAt: now,
         version: customer.version + 1,
         ...getSyncMetadata(primary.workspaceId, now)
-      })
+      }, trace)
     }
   }
 
@@ -2832,7 +3056,7 @@ export async function mergeBusinessPartners(primaryPartnerId: string, secondaryP
         updatedAt: now,
         version: supplier.version + 1,
         ...getSyncMetadata(primary.workspaceId, now)
-      })
+      }, trace)
     }
   }
 
@@ -2846,7 +3070,7 @@ export async function mergeBusinessPartners(primaryPartnerId: string, secondaryP
         updatedAt: now,
         version: agent.version + 1,
         ...getSyncMetadata(primary.workspaceId, now)
-      })
+      }, trace)
     }
   }
 
@@ -2870,34 +3094,51 @@ export async function mergeBusinessPartners(primaryPartnerId: string, secondaryP
     .and((item) => !item.isDeleted && item.linkedPartyId === secondary.id)
     .toArray()
 
-  await Promise.all(
-    salesOrders.map((order) =>
-      db.sales_orders.update(order.id, {
-        businessPartnerId: primary.id,
-        customerId: mergedPrimary.customerFacetId || order.customerId
-      })
+  const remapRelatedRecords = async () => {
+    await Promise.all(
+      salesOrders.map((order) =>
+        db.sales_orders.update(order.id, {
+          businessPartnerId: primary.id,
+          customerId: mergedPrimary.customerFacetId || order.customerId
+        })
+      )
     )
-  )
-  await Promise.all(
-    purchaseOrders.map((order) =>
-      db.purchase_orders.update(order.id, {
-        businessPartnerId: primary.id,
-        supplierId: mergedPrimary.supplierFacetId || order.supplierId
-      })
+    await Promise.all(
+      purchaseOrders.map((order) =>
+        db.purchase_orders.update(order.id, {
+          businessPartnerId: primary.id,
+          supplierId: mergedPrimary.supplierFacetId || order.supplierId
+        })
+      )
     )
-  )
-  await Promise.all(
-    loans.map((loan) =>
-      db.loans.update(loan.id, {
-        linkedPartyId: primary.id,
-        linkedPartyType: 'business_partner'
-      })
+    await Promise.all(
+      loans.map((loan) =>
+        db.loans.update(loan.id, {
+          linkedPartyId: primary.id,
+          linkedPartyType: 'business_partner'
+        })
+      )
     )
-  )
+  }
+  if (trace) {
+    await trace.measure('crudDebugger.stages.businessPartnerLocalWrite', 'persistence', remapRelatedRecords, 'crudDebugger.details.dexiePersistence')
+  } else {
+    await remapRelatedRecords()
+  }
 
-  await mirrorPartnerToFacets(mergedPrimary)
-  await recalculateBusinessPartnerSummary(primary.workspaceId, primary.id)
+  await mirrorPartnerToFacets(mergedPrimary, trace)
+  if (trace) {
+    await trace.measure('crudDebugger.stages.businessPartnerSummary', 'unknown', () => recalculateBusinessPartnerSummary(primary.workspaceId, primary.id), 'crudDebugger.details.businessPartnerSummaryBoundary')
+  } else {
+    await recalculateBusinessPartnerSummary(primary.workspaceId, primary.id)
+  }
+  invalidateBusinessPartnerDirectory(primary.workspaceId)
   return mergedPrimary
+}
+
+export function mergeBusinessPartners(primaryPartnerId: string, secondaryPartnerId: string): Promise<BusinessPartner> {
+  if (!isCrudDebuggerEnabled()) return mergeBusinessPartnersInternal(primaryPartnerId, secondaryPartnerId)
+  return runCrudOperation({ action: 'update', entityKey: 'businessPartner', entityId: primaryPartnerId }, (trace) => mergeBusinessPartnersInternal(primaryPartnerId, secondaryPartnerId, trace))
 }
 
 export function useCustomers(workspaceId: string | undefined) {

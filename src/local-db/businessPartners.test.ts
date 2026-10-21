@@ -2,6 +2,11 @@ import 'fake-indexeddb/auto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { setActiveBusinessUser, setNetworkStatus } from '@/lib/network'
+import {
+    clearCrudTrace,
+    getCrudTraceSnapshot,
+    setCrudDebuggerEnabled,
+} from '@/dev/crud-debugger/trace'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 
 import { db } from './database'
@@ -209,6 +214,44 @@ describe('business partner agent facets', () => {
         })).rejects.toThrow('Agent roles require workspace Agents module access')
     })
 
+    it('shows only the layers executed by Local and Cloud business-partner creates', async () => {
+        clearCrudTrace()
+        setCrudDebuggerEnabled(true)
+        try {
+            const localPartner = await createBusinessPartner(WORKSPACE_ID, {
+                partnerName: 'Local traced partner',
+                phone: '07500000101',
+                defaultCurrency: 'iqd',
+                creditLimit: 0,
+                role: 'customer'
+            })
+            const localTrace = getCrudTraceSnapshot()
+            expect(localTrace).toMatchObject({ action: 'create', entityKey: 'businessPartner', status: 'success', workspaceMode: 'local' })
+            expect(localTrace?.entityId).toBe(localPartner.id)
+            expect(localTrace?.stages.map((stage) => stage.layer)).toEqual(expect.arrayContaining(['application', 'data', 'persistence']))
+            expect(localTrace?.stages.some((stage) => stage.layer === 'network')).toBe(false)
+
+            clearCrudTrace()
+            writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
+            const cloudPartner = await createBusinessPartner(WORKSPACE_ID, {
+                partnerName: 'Cloud traced partner',
+                phone: '07500000102',
+                defaultCurrency: 'iqd',
+                creditLimit: 0,
+                role: 'customer'
+            })
+            const cloudTrace = getCrudTraceSnapshot()
+            expect(cloudTrace).toMatchObject({ action: 'create', entityKey: 'businessPartner', entityId: cloudPartner.id, status: 'success', workspaceMode: 'cloud' })
+            expect(localPartner.id).not.toBe(cloudPartner.id)
+            expect(cloudTrace?.stages.some((stage) => stage.layer === 'network' && stage.status === 'success')).toBe(true)
+            expect(cloudTrace?.stages.some((stage) => stage.layer === 'response' && stage.status === 'success')).toBe(true)
+        } finally {
+            setCrudDebuggerEnabled(false)
+            clearCrudTrace()
+            writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
+        }
+    })
+
     it('uses partnerName as the only active identity across commercial facets', async () => {
         const partner = await createBusinessPartner(WORKSPACE_ID, {
             partnerName: 'Northwind Trading',
@@ -231,6 +274,26 @@ describe('business partner agent facets', () => {
         await updateBusinessPartner(partner.id, { partnerName: 'Northwind Group' })
         expect((await db.customers.get(partner.customerFacetId!))?.partnerName).toBe('Northwind Group')
         expect((await db.suppliers.get(partner.supplierFacetId!))?.partnerName).toBe('Northwind Group')
+    })
+
+    it('preserves financial summaries on contact edits and recalculates them when the currency changes', async () => {
+        const partner = await createBusinessPartner(WORKSPACE_ID, {
+            partnerName: 'Fast contact edit', phone: '07500000301', defaultCurrency: 'usd', creditLimit: 0, role: 'customer'
+        })
+        await db.business_partners.update(partner.id, { totalSalesValue: 120, receivableBalance: 40, netExposure: 40 })
+        clearCrudTrace()
+        setCrudDebuggerEnabled(true)
+        try {
+            await updateBusinessPartner(partner.id, { partnerName: 'Updated contact', phone: '07500000302' })
+            expect(getCrudTraceSnapshot()?.stages.some((stage) => stage.labelKey === 'crudDebugger.stages.businessPartnerSummary')).toBe(false)
+            expect(await db.business_partners.get(partner.id)).toMatchObject({ totalSalesValue: 120, receivableBalance: 40, netExposure: 40 })
+            expect(await db.customers.get(partner.customerFacetId!)).toMatchObject({ partnerName: 'Updated contact', phone: '07500000302' })
+            await updateBusinessPartner(partner.id, { defaultCurrency: 'iqd' })
+            expect(await db.business_partners.get(partner.id)).toMatchObject({ defaultCurrency: 'iqd', totalSalesValue: 0, receivableBalance: 0, netExposure: 0 })
+        } finally {
+            setCrudDebuggerEnabled(false)
+            clearCrudTrace()
+        }
     })
 
     it('retires a removed supplier facet before syncing the customer-only partner in Cloud', async () => {

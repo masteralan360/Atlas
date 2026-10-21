@@ -102,7 +102,6 @@ export function Customers() {
 
             setDialogOpen(false)
             setEditingPartner(null)
-            customers.refresh()
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
@@ -120,7 +119,6 @@ export function Customers() {
             await deleteBusinessPartner(deleteTarget.id)
             toast({ title: t('customers.messages.deleteSuccess') || 'Customer deleted successfully' })
             setDeleteTarget(null)
-            customers.refresh()
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',

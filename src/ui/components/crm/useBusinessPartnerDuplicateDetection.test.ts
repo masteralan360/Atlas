@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/local-db', () => ({
-    useBusinessPartners: () => []
+vi.mock('@/local-db/businessPartnerDuplicates', () => ({
+    useBusinessPartnerDuplicateMatches: () => ({ name: false, phone: false })
 }))
 
 import {

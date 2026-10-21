@@ -98,7 +98,6 @@ export function Suppliers() {
 
             setDialogOpen(false)
             setEditingPartner(null)
-            suppliers.refresh()
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
@@ -116,7 +115,6 @@ export function Suppliers() {
             await deleteBusinessPartner(deleteTarget.id)
             toast({ title: t('suppliers.messages.deleteSuccess') || 'Supplier deleted successfully' })
             setDeleteTarget(null)
-            suppliers.refresh()
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',

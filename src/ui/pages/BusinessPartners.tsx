@@ -186,8 +186,7 @@ export function BusinessPartners() {
         isLoading: directoryPage.isLoading,
     })
     const [activeTab, setActiveTab] = useState<'partners' | 'maps'>('partners')
-    const [mapPartners, setMapPartners] = useState<BusinessPartner[] | null>(null)
-    const [isLoadingMap, setIsLoadingMap] = useState(false)
+    const [mapResult, setMapResult] = useState<{ scopeKey: string; items: BusinessPartner[] } | null>(null)
     const [mapPartnerSearch, setMapPartnerSearch] = useState('')
     const [focusedMapPartnerId, setFocusedMapPartnerId] = useState<string | null>(null)
     const [dialogOpen, setDialogOpen] = useState(false)
@@ -204,28 +203,27 @@ export function BusinessPartners() {
         role: user?.role,
         featureEnabled: hasCapability('businessPartnerGroupPrivacy'),
     }), [hasCapability, user?.id, user?.role])
+    const mapScopeKey = JSON.stringify([directoryPage.visibilityScopeKey, features.agents, features.real_estate])
+    const mapPartners = mapResult?.scopeKey === mapScopeKey ? mapResult.items : null
+    const isLoadingMap = activeTab === 'maps' && mapPartners === null
 
     useEffect(() => {
-        if (activeTab !== 'maps' || !user?.workspaceId || mapPartners !== null) return
+        if (activeTab !== 'maps' || !user?.workspaceId || directoryPage.isVisibilityLoading || mapPartners !== null) return
         let disposed = false
-        setIsLoadingMap(true)
         void loadAllBusinessPartnerDirectoryRows(user.workspaceId, {
             includeRealEstateRoles: features.real_estate,
             includeAgentRoles: features.agents,
             includeEcommerce: true,
         }, privacyViewer)
             .then((rows) => {
-                if (!disposed) setMapPartners(rows)
+                if (!disposed) setMapResult({ scopeKey: mapScopeKey, items: rows })
             })
             .catch((error) => {
                 console.error('[BusinessPartners] Failed to load map markers:', error)
-                if (!disposed) setMapPartners([])
-            })
-            .finally(() => {
-                if (!disposed) setIsLoadingMap(false)
+                if (!disposed) setMapResult({ scopeKey: mapScopeKey, items: [] })
             })
         return () => { disposed = true }
-    }, [activeTab, features.agents, features.real_estate, mapPartners, privacyViewer, user?.workspaceId])
+    }, [activeTab, directoryPage.isVisibilityLoading, features.agents, features.real_estate, mapPartners, mapScopeKey, privacyViewer, user?.workspaceId])
 
     useEffect(() => {
         if (!showGroupManagementTab && scope === 'groups') setScope('all')
@@ -305,8 +303,7 @@ export function BusinessPartners() {
 
             setDialogOpen(false)
             setEditingPartner(null)
-            directoryPage.refresh()
-            setMapPartners(null)
+            setMapResult(null)
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
@@ -327,8 +324,7 @@ export function BusinessPartners() {
             await deleteBusinessPartner(deleteTarget.id)
             toast({ title: t('businessPartners.messages.deleteSuccess') || 'Business partner deleted successfully' })
             setDeleteTarget(null)
-            directoryPage.refresh()
-            setMapPartners(null)
+            setMapResult(null)
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
@@ -622,7 +618,7 @@ export function BusinessPartners() {
                                     includeAgentRoles={features.agents}
                                     partnerOptions={mapPartners ?? []}
                                     excludePartnerIds={partnerIdsWithoutLocations}
-                                    disabled={!user?.workspaceId || isLoadingMap}
+                                    disabled={!user?.workspaceId || isLoadingMap || mapPartners === null}
                                     placeholder={t('businessPartners.searchMapPlaceholder', { defaultValue: 'Search a partner on the map...' })}
                                 />
                                 <div className="shrink-0 rounded-full bg-primary/10 px-3 py-1 text-sm font-semibold text-primary">

@@ -1,19 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
-import { convertArabicIndicToLatin } from '@/lib/utils'
-import { useBusinessPartners, type BusinessPartner } from '@/local-db'
+import { useBusinessPartnerDuplicateMatches } from '@/local-db/businessPartnerDuplicates'
+import {
+    normalizeBusinessPartnerName,
+    normalizeBusinessPartnerPhone,
+    type BusinessPartnerDuplicateField,
+    type BusinessPartnerDuplicateStatuses,
+} from '@/lib/businessPartnerDuplicates'
+
+export {
+    getBusinessPartnerDuplicateStatuses,
+    normalizeBusinessPartnerName,
+    normalizeBusinessPartnerPhone,
+    type BusinessPartnerDuplicateStatus,
+    type BusinessPartnerDuplicateField,
+    type BusinessPartnerDuplicateStatuses,
+} from '@/lib/businessPartnerDuplicates'
 
 const DUPLICATE_CHECK_DELAY_MS = 250
-
-export type BusinessPartnerDuplicateStatus = 'unchecked' | 'available' | 'duplicate'
-export type BusinessPartnerDuplicateField = 'name' | 'phone'
-
-type DuplicateCandidate = Pick<BusinessPartner, 'id' | 'partnerName' | 'phone'>
-
-export interface BusinessPartnerDuplicateStatuses {
-    name: BusinessPartnerDuplicateStatus
-    phone: BusinessPartnerDuplicateStatus
-}
 
 export function shouldInterruptDuplicateSave(
     firstDuplicateField: BusinessPartnerDuplicateField | null,
@@ -21,44 +25,6 @@ export function shouldInterruptDuplicateSave(
     duplicateStateKey: string
 ): firstDuplicateField is BusinessPartnerDuplicateField {
     return Boolean(firstDuplicateField && acknowledgedDuplicateStateKey !== duplicateStateKey)
-}
-
-export function normalizeBusinessPartnerName(value: string): string {
-    return value.trim().toLocaleLowerCase()
-}
-
-export function normalizeBusinessPartnerPhone(value: string): string {
-    return convertArabicIndicToLatin(value).replace(/\D/g, '')
-}
-
-export function getBusinessPartnerDuplicateStatuses(
-    partners: readonly DuplicateCandidate[],
-    {
-        name,
-        phone,
-        excludeBusinessPartnerId
-    }: {
-        name: string
-        phone: string
-        excludeBusinessPartnerId?: string
-    }
-): BusinessPartnerDuplicateStatuses {
-    const normalizedName = normalizeBusinessPartnerName(name)
-    const normalizedPhone = normalizeBusinessPartnerPhone(phone)
-    const candidates = partners.filter((partner) => partner.id !== excludeBusinessPartnerId)
-
-    return {
-        name: normalizedName
-            ? candidates.some((partner) => normalizeBusinessPartnerName(partner.partnerName) === normalizedName)
-                ? 'duplicate'
-                : 'available'
-            : 'unchecked',
-        phone: normalizedPhone
-            ? candidates.some((partner) => normalizeBusinessPartnerPhone(partner.phone || '') === normalizedPhone)
-                ? 'duplicate'
-                : 'available'
-            : 'unchecked'
-    }
 }
 
 function getFirstDuplicateField(statuses: BusinessPartnerDuplicateStatuses): BusinessPartnerDuplicateField | null {
@@ -95,11 +61,11 @@ export function useBusinessPartnerDuplicateDetection({
 }) {
     const normalizedName = normalizeBusinessPartnerName(name)
     const normalizedPhone = normalizeBusinessPartnerPhone(phone)
-    const partners = useBusinessPartners(
-        isOpen ? workspaceId : undefined,
-        { includeAgentRoles: true, includeRealEstateRoles: true }
-    )
     const [checkedValues, setCheckedValues] = useState({ name: '', phone: '' })
+    const matches = useBusinessPartnerDuplicateMatches(isOpen ? workspaceId : undefined, {
+        ...checkedValues,
+        excludeBusinessPartnerId,
+    })
 
     useEffect(() => {
         if (!isOpen || !workspaceId) {
@@ -107,8 +73,8 @@ export function useBusinessPartnerDuplicateDetection({
             return
         }
 
-        // Partner data is already live in the local cache. Debouncing the
-        // comparison keeps status changes out of the user's typing path.
+        // Only check the entered identity; opening a form must not hydrate
+        // orders, payments, facets, or every business partner summary.
         const timeoutId = window.setTimeout(() => {
             setCheckedValues({ name: normalizedName, phone: normalizedPhone })
         }, DUPLICATE_CHECK_DELAY_MS)
@@ -116,14 +82,10 @@ export function useBusinessPartnerDuplicateDetection({
         return () => window.clearTimeout(timeoutId)
     }, [isOpen, normalizedName, normalizedPhone, workspaceId])
 
-    const detectedStatuses = useMemo(
-        () => getBusinessPartnerDuplicateStatuses(partners, {
-            name: normalizedName,
-            phone: normalizedPhone,
-            excludeBusinessPartnerId
-        }),
-        [excludeBusinessPartnerId, normalizedName, normalizedPhone, partners]
-    )
+    const detectedStatuses: BusinessPartnerDuplicateStatuses = {
+        name: checkedValues.name && matches ? matches.name ? 'duplicate' : 'available' : 'unchecked',
+        phone: checkedValues.phone && matches ? matches.phone ? 'duplicate' : 'available' : 'unchecked',
+    }
     const statuses: BusinessPartnerDuplicateStatuses = {
         name: checkedValues.name === normalizedName ? detectedStatuses.name : 'unchecked',
         phone: checkedValues.phone === normalizedPhone ? detectedStatuses.phone : 'unchecked'
@@ -134,8 +96,8 @@ export function useBusinessPartnerDuplicateDetection({
 
     return {
         statuses,
-        firstDuplicateField: getFirstDuplicateField(detectedStatuses),
-        duplicateStateKey: getDuplicateStateKey(detectedStatuses, normalizedName, normalizedPhone),
+        firstDuplicateField: getFirstDuplicateField(statuses),
+        duplicateStateKey: getDuplicateStateKey(statuses, normalizedName, normalizedPhone),
         checkNow
     }
 }
