@@ -48,6 +48,7 @@ import {
 } from "lucide-react";
 import type { WorkspaceFeatures } from "@/workspace";
 import type { ModuleFeatureKey } from "@/workspace/WorkspaceContext";
+import type { PlanCapabilityKey } from "@/plans/workspacePlans";
 import type { WorkspacePermissionKey } from "@/permissions";
 import type { ClinicalRegistryType } from "@/local-db/models";
 import { supportsClinicalPatientsAndServicePresets } from "@/i18n/clinicalRegistry";
@@ -88,6 +89,7 @@ interface BuildWorkspaceNavigationOptions {
   t: TFunction;
   role?: string;
   hasFeature: (feature: ModuleFeatureKey) => boolean;
+  hasCapability?: (capability: PlanCapabilityKey) => boolean;
   hasPermission?: (permission: WorkspacePermissionKey) => boolean;
   features: WorkspaceFeatures;
   clinicalRegistryType?: ClinicalRegistryType;
@@ -106,6 +108,7 @@ export function buildWorkspaceNavigation({
   t,
   role,
   hasFeature,
+  hasCapability = () => false,
   hasPermission,
   features,
   clinicalRegistryType = "medical",
@@ -686,6 +689,17 @@ export function buildWorkspaceNavigation({
           }),
           href: "/stock-adjustments",
           icon: Boxes,
+          ...(hasCapability("stockBatches")
+            ? {
+                children: [
+                  {
+                    name: t("stockAdjustments.tabs.batches", { defaultValue: "Stock Batches" }),
+                    href: "/stock-adjustments/batches",
+                    icon: PackageCheck,
+                  },
+                ],
+              }
+            : {}),
         },
       ]
       : []),

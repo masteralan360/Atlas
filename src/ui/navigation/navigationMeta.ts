@@ -384,6 +384,11 @@ export const moduleMetaByHref: Record<string, ModuleMeta> = {
       "Adjust stock levels, review manual changes, and manage product batches.",
     badge: "Audit",
   },
+  "/stock-adjustments/batches": {
+    section: "stock-and-supply",
+    description: "Review product batches, quantities, expiry dates, and batch pricing.",
+    badge: "Batches",
+  },
   "/ledger": {
     section: "cash-and-control",
     description: "Inspect cross-module inflows, outflows, and payment trails.",

@@ -69,6 +69,7 @@ import { STANDARD_PAYMENT_METHODS, type PaymentMethodOption } from '@/lib/paymen
 
 type CommerceSection = 'social' | 'wholesale' | 'data' | 'coaches'
 type OrderChannel = 'social' | 'wholesale'
+type OrderSectionTab = 'recent' | 'newOrder'
 type DataRecordKind = Extract<CommerceOperationRecordType, 'ad_spend' | 'dm_funnel' | 'city_market' | 'competitor'>
 type OrderLineDraft = { id: string; product: Product | null; productQuery: string; quantity: string; price: number; costPrice: number; currency?: CurrencyCode; priceBookItemId?: string }
 
@@ -207,8 +208,7 @@ export function CommerceOperations() {
   const [, navigate] = useLocation()
   const { dateRange, customDates } = useDateRange()
   const [section, setSection] = useState<CommerceSection>('social')
-  const [orderChannel, setOrderChannel] = useState<OrderChannel>('social')
-  const [orderDialogOpen, setOrderDialogOpen] = useState(false)
+  const [orderSectionTabs, setOrderSectionTabs] = useState<Record<OrderChannel, OrderSectionTab>>({ social: 'recent', wholesale: 'recent' })
   const [dataDialogOpen, setDataDialogOpen] = useState(false)
   const [editingDataRecord, setEditingDataRecord] = useState<CommerceOperationRecord | null>(null)
   const [coachDialogOpen, setCoachDialogOpen] = useState(false)
@@ -307,30 +307,78 @@ export function CommerceOperations() {
         <Button variant={section === 'coaches' ? 'default' : 'outline'} className="justify-start gap-2" onClick={() => setSection('coaches')}><UsersRound className="h-4 w-4" />{t('commerceOperations.tabs.coaches')}</Button>
       </div>
 
-      {section === 'social' ? (
+      <div hidden={section !== 'social'}>
         <OrdersSection
           channel="social"
           records={socialOrders}
           orderMap={orderMap}
           canCreate={canCreateOrders}
-          onCreate={() => { setOrderChannel('social'); setOrderDialogOpen(true) }}
+          activeTab={orderSectionTabs.social}
+          onTabChange={(tab) => setOrderSectionTabs((current) => ({ ...current, social: tab }))}
           onOpenOrder={(id) => navigate(`/orders/${id}`)}
           t={t}
           currencyPreference={features.iqd_display_preference}
+          orderForm={(
+            <OrderIntakeForm
+              channel="social"
+              active={orderSectionTabs.social === 'newOrder'}
+              workspaceId={workspaceId}
+              defaultCurrency={features.default_currency}
+              userId={user?.id}
+              userName={user?.name || ''}
+              userRole={user?.role}
+              products={products}
+              storages={storages}
+              priceBooks={priceBooks}
+              priceBookItems={priceBookItems}
+              agents={agents}
+              agentsLoaded={agentsQuery !== undefined}
+              businessPartners={businessPartners}
+              available={canCreateOrders}
+              maxDiscountPercent={features.max_discount_percent}
+              iqdPreference={features.iqd_display_preference}
+              onSaved={() => { if (workspaceId) void refreshCommerceOperationRecords(workspaceId) }}
+              t={t}
+            />
+          )}
         />
-      ) : null}
-      {section === 'wholesale' ? (
+      </div>
+      <div hidden={section !== 'wholesale'}>
         <OrdersSection
           channel="wholesale"
           records={wholesaleOrders}
           orderMap={orderMap}
           canCreate={canCreateOrders}
-          onCreate={() => { setOrderChannel('wholesale'); setOrderDialogOpen(true) }}
+          activeTab={orderSectionTabs.wholesale}
+          onTabChange={(tab) => setOrderSectionTabs((current) => ({ ...current, wholesale: tab }))}
           onOpenOrder={(id) => navigate(`/orders/${id}`)}
           t={t}
           currencyPreference={features.iqd_display_preference}
+          orderForm={(
+            <OrderIntakeForm
+              channel="wholesale"
+              active={orderSectionTabs.wholesale === 'newOrder'}
+              workspaceId={workspaceId}
+              defaultCurrency={features.default_currency}
+              userId={user?.id}
+              userName={user?.name || ''}
+              userRole={user?.role}
+              products={products}
+              storages={storages}
+              priceBooks={priceBooks}
+              priceBookItems={priceBookItems}
+              agents={agents}
+              agentsLoaded={agentsQuery !== undefined}
+              businessPartners={businessPartners}
+              available={canCreateOrders}
+              maxDiscountPercent={features.max_discount_percent}
+              iqdPreference={features.iqd_display_preference}
+              onSaved={() => { if (workspaceId) void refreshCommerceOperationRecords(workspaceId) }}
+              t={t}
+            />
+          )}
         />
-      ) : null}
+      </div>
       {section === 'data' ? (
         <DataCenterSection
           records={dataRecords}
@@ -360,28 +408,6 @@ export function CommerceOperations() {
         />
       ) : null}
 
-      <OrderIntakeDialog
-        open={orderDialogOpen}
-        onOpenChange={(next) => setOrderDialogOpen(next)}
-        channel={orderChannel}
-        workspaceId={workspaceId}
-        defaultCurrency={features.default_currency}
-        userId={user?.id}
-        userName={user?.name || ''}
-        userRole={user?.role}
-        products={products}
-        storages={storages}
-        priceBooks={priceBooks}
-        priceBookItems={priceBookItems}
-        agents={agents}
-        agentsLoaded={agentsQuery !== undefined}
-        businessPartners={businessPartners}
-        available={canCreateOrders}
-        maxDiscountPercent={features.max_discount_percent}
-        iqdPreference={features.iqd_display_preference}
-        onSaved={() => { if (workspaceId) void refreshCommerceOperationRecords(workspaceId) }}
-        t={t}
-      />
       <DataRecordDialog
         open={dataDialogOpen}
         onOpenChange={(next) => { setDataDialogOpen(next); if (!next) setEditingDataRecord(null) }}
@@ -408,14 +434,16 @@ export function CommerceOperations() {
 }
 
 function OrdersSection({
-  channel, records, orderMap, canCreate, onCreate, onOpenOrder, t, currencyPreference,
+  channel, records, orderMap, canCreate, activeTab, onTabChange, onOpenOrder, orderForm, t, currencyPreference,
 }: {
   channel: OrderChannel
   records: CommerceOperationRecord[]
   orderMap: Map<string, SalesOrder>
   canCreate: boolean
-  onCreate: () => void
+  activeTab: OrderSectionTab
+  onTabChange: (tab: OrderSectionTab) => void
   onOpenOrder: (id: string) => void
+  orderForm: ReactNode
   t: (key: string, options?: Record<string, unknown>) => string
   currencyPreference: 'IQD' | 'د.ع'
 }) {
@@ -436,45 +464,49 @@ function OrdersSection({
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div><h2 className="flex items-center gap-2 text-xl font-semibold">{channel === 'social' ? <Instagram className="h-5 w-5 text-primary" /> : <Store className="h-5 w-5 text-primary" />}{t(channel === 'social' ? 'commerceOperations.social.title' : 'commerceOperations.wholesale.title')}</h2><p className="mt-1 text-sm text-muted-foreground">{t('commerceOperations.orders.unpaidHint')}</p></div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" className="gap-2" onClick={() => navigate('/products')}><Package className="h-4 w-4" />{t('commerceOperations.actions.products')}</Button>
-          <Button className="gap-2" onClick={onCreate} disabled={!canCreate}><Plus className="h-4 w-4" />{t('commerceOperations.actions.newOrder')}</Button>
-        </div>
+        <Button variant="outline" className="gap-2" onClick={() => navigate('/products')}><Package className="h-4 w-4" />{t('commerceOperations.actions.products')}</Button>
       </div>
       {!canCreate ? <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-muted-foreground">{t('commerceOperations.orders.prerequisite')}</div> : null}
-      <div className="grid gap-3 sm:grid-cols-3">
-        <MetricCard title={t('commerceOperations.metrics.intakeOrders')} value={records.length} icon={ClipboardList} />
-        <MetricCard title={t('commerceOperations.metrics.waitingCollection')} value={openCount} icon={Wallet} />
-        <MetricCard title={t('commerceOperations.metrics.orderValue')} value={currencySummary(orderValues, currencyPreference)} icon={TrendingUp} />
+      <div className="flex gap-2 border-b" role="tablist" aria-label={t(channel === 'social' ? 'commerceOperations.social.title' : 'commerceOperations.wholesale.title')}>
+        <Button type="button" id={`${channel}-recent-tab`} role="tab" aria-controls={`${channel}-recent-panel`} aria-selected={activeTab === 'recent'} variant={activeTab === 'recent' ? 'default' : 'ghost'} className="-mb-px gap-2 rounded-b-none" onClick={() => onTabChange('recent')}><Activity className="h-4 w-4" />{t('commerceOperations.orders.recent')}</Button>
+        <Button type="button" id={`${channel}-new-order-tab`} role="tab" aria-controls={`${channel}-new-order-panel`} aria-selected={activeTab === 'newOrder'} variant={activeTab === 'newOrder' ? 'default' : 'ghost'} className="-mb-px gap-2 rounded-b-none" onClick={() => onTabChange('newOrder')}><Plus className="h-4 w-4" />{t('commerceOperations.actions.newOrder')}</Button>
       </div>
-      <DateRangeFilters label={t('commerceOperations.filters.orderDate')} />
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-3"><CardTitle className="flex items-center gap-2"><Activity className="h-5 w-5" />{t('commerceOperations.orders.recent')}</CardTitle><Badge variant="secondary">{records.length}</Badge></CardHeader>
-        <CardContent>
-          {records.length === 0 ? <EmptyState icon={Search} title={t('commerceOperations.orders.emptyTitle')} body={t('commerceOperations.orders.emptyBody')} /> : (
-            <div className="space-y-3">
-              {records.map((record) => {
-                const order = record.relatedOrderId ? orderMap.get(record.relatedOrderId) : undefined
-                const payload = record.payload
-                const currency = (payload.currency as CurrencyCode) || order?.currency || 'usd'
-                return (
-                  <div key={record.id} className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0 space-y-1">
-                      <div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{record.title}</p><Badge variant="outline">{t(`commerceOperations.platforms.${String(payload.platform || 'other')}`)}</Badge><Badge variant={order?.isPaid ? 'default' : 'secondary'}>{t(order?.isPaid ? 'commerceOperations.orders.paid' : 'commerceOperations.orders.unpaid')}</Badge></div>
-                      <p className="truncate text-sm text-muted-foreground">{String(payload.buyerName || '')} · {String(payload.buyerPhone || '')}{payload.city ? ` · ${String(payload.city)}` : ''}</p>
-                      <p className="text-xs text-muted-foreground">{new Date(record.recordDate).toLocaleString()} · {String(payload.seller || t('commerceOperations.orders.sellerUnavailable'))}</p>
+      <div id={`${channel}-recent-panel`} role="tabpanel" aria-labelledby={`${channel}-recent-tab`} tabIndex={0} hidden={activeTab !== 'recent'} className="space-y-5">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <MetricCard title={t('commerceOperations.metrics.intakeOrders')} value={records.length} icon={ClipboardList} />
+          <MetricCard title={t('commerceOperations.metrics.waitingCollection')} value={openCount} icon={Wallet} />
+          <MetricCard title={t('commerceOperations.metrics.orderValue')} value={currencySummary(orderValues, currencyPreference)} icon={TrendingUp} />
+        </div>
+        <DateRangeFilters label={t('commerceOperations.filters.orderDate')} />
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-3"><CardTitle className="flex items-center gap-2"><Activity className="h-5 w-5" />{t('commerceOperations.orders.recent')}</CardTitle><Badge variant="secondary">{records.length}</Badge></CardHeader>
+          <CardContent>
+            {records.length === 0 ? <EmptyState icon={Search} title={t('commerceOperations.orders.emptyTitle')} body={t('commerceOperations.orders.emptyBody')} /> : (
+              <div className="space-y-3">
+                {records.map((record) => {
+                  const order = record.relatedOrderId ? orderMap.get(record.relatedOrderId) : undefined
+                  const payload = record.payload
+                  const currency = (payload.currency as CurrencyCode) || order?.currency || 'usd'
+                  return (
+                    <div key={record.id} className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{record.title}</p><Badge variant="outline">{t(`commerceOperations.platforms.${String(payload.platform || 'other')}`)}</Badge><Badge variant={order?.isPaid ? 'default' : 'secondary'}>{t(order?.isPaid ? 'commerceOperations.orders.paid' : 'commerceOperations.orders.unpaid')}</Badge></div>
+                        <p className="truncate text-sm text-muted-foreground">{String(payload.buyerName || '')} · {String(payload.buyerPhone || '')}{payload.city ? ` · ${String(payload.city)}` : ''}</p>
+                        <p className="text-xs text-muted-foreground">{new Date(record.recordDate).toLocaleString()} · {String(payload.seller || t('commerceOperations.orders.sellerUnavailable'))}</p>
+                      </div>
+                      <div className="flex items-center justify-between gap-3 sm:justify-end">
+                        <div className="text-end"><p className="font-bold">{amountLabel(Number(payload.total || order?.total || 0), currency, currencyPreference)}</p><p className="text-xs text-muted-foreground">{String(payload.orderNumber || order?.orderNumber || '')}</p></div>
+                        {record.relatedOrderId && order ? <Button variant="outline" size="sm" className="gap-2" onClick={() => onOpenOrder(record.relatedOrderId!)}>{t('commerceOperations.actions.openOrder')}<ArrowUpRight className="h-4 w-4" /></Button> : null}
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between gap-3 sm:justify-end">
-                      <div className="text-end"><p className="font-bold">{amountLabel(Number(payload.total || order?.total || 0), currency, currencyPreference)}</p><p className="text-xs text-muted-foreground">{String(payload.orderNumber || order?.orderNumber || '')}</p></div>
-                      {record.relatedOrderId && order ? <Button variant="outline" size="sm" className="gap-2" onClick={() => onOpenOrder(record.relatedOrderId!)}>{t('commerceOperations.actions.openOrder')}<ArrowUpRight className="h-4 w-4" /></Button> : null}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                  )
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+      <div id={`${channel}-new-order-panel`} role="tabpanel" aria-labelledby={`${channel}-new-order-tab`} tabIndex={0} hidden={activeTab !== 'newOrder'}>{orderForm}</div>
     </div>
   )
 }
@@ -608,9 +640,8 @@ function recordSummary(record: CommerceOperationRecord, t: (key: string, options
   }
 }
 
-function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCurrency, userId, userName, userRole, products, storages, priceBooks, priceBookItems, agents, agentsLoaded, businessPartners, available, maxDiscountPercent, iqdPreference, onSaved, t }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId, userName, userRole, products, storages, priceBooks, priceBookItems, agents, agentsLoaded, businessPartners, available, maxDiscountPercent, iqdPreference, onSaved, t }: {
+  active: boolean
   channel: OrderChannel
   workspaceId?: string
   defaultCurrency: CurrencyCode
@@ -670,7 +701,7 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
     [exchangeData, eurRates, tryRates],
   )
   const storageInventory = useInventory(workspaceId, {
-    enabled: open && Boolean(workspaceId && storageId),
+    enabled: active && Boolean(workspaceId && storageId),
     storageId,
   })
   const stockByProductId = useMemo(() => {
@@ -748,10 +779,10 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
   )
 
   useEffect(() => {
-    if (!open) {
-      setCreateCustomerOpen(false)
-      return
-    }
+    if (!storageId && storages[0]) setStorageId(storages[0].id)
+  }, [storageId, storages])
+
+  function resetForm() {
     setBuyerName('')
     setBuyerPhone('')
     setBuyerPartner(null)
@@ -769,10 +800,10 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
     setPriceBookId('')
     setLines([])
     setBrowseLineId(null)
+    setProductsModalOpen(false)
     setDeliveryFee('')
     setDeliveryFeeTouched(false)
     setDiscount('')
-    setSaving(false)
     setPaymentDialogOpen(false)
     setPreparingPayment(false)
     setPaymentFeeExchangeRates(null)
@@ -782,11 +813,6 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
     setOrderId(generateId())
     setAttempted(false)
     setDate(new Date())
-  }, [open, storages, userName])
-
-  function close(next: boolean) {
-    if ((saving || preparingPayment || paymentDialogOpen) && !next) return
-    onOpenChange(next)
   }
 
   async function continueToPayment() {
@@ -1014,7 +1040,7 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
       })
       setPaymentDialogOpen(false)
       onSaved()
-      onOpenChange(false)
+      resetForm()
     } catch {
       toast({ title: t('commerceOperations.toast.orderFailed'), description: t('commerceOperations.toast.tryAgain'), variant: 'destructive' })
     } finally {
@@ -1025,10 +1051,9 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
   const selectedBook = priceBooks.find((book) => book.id === priceBookId)
   return (
     <>
-    <AppDialog open={open} onOpenChange={close}>
-      <AppDialogContent className="max-w-4xl" onPointerDownOutside={(event) => (saving || preparingPayment || paymentDialogOpen) && event.preventDefault()} onEscapeKeyDown={(event) => (saving || preparingPayment || paymentDialogOpen) && event.preventDefault()}>
-        <AppDialogHeader><AppDialogTitle className="flex items-center gap-2"><ShoppingBag className="h-5 w-5 text-primary" />{t(channel === 'social' ? 'commerceOperations.order.socialTitle' : 'commerceOperations.order.wholesaleTitle')}</AppDialogTitle></AppDialogHeader>
-        <AppDialogBody>
+    <Card className="overflow-hidden">
+      <CardHeader><CardTitle className="flex items-center gap-2"><ShoppingBag className="h-5 w-5 text-primary" />{t(channel === 'social' ? 'commerceOperations.order.socialTitle' : 'commerceOperations.order.wholesaleTitle')}</CardTitle></CardHeader>
+      <CardContent className="space-y-5">
           {!available ? <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-muted-foreground">{t('commerceOperations.orders.prerequisite')}</div> : null}
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -1229,9 +1254,14 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
           </div>
           <div className="mt-4 rounded-xl bg-primary/5 p-4"><div className="flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.subtotal')}</span><span>{totalCurrency ? amountLabel(lineSubtotal, totalCurrency, iqdPreference) : '—'}</span></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.deliveryFee')}</span><span>{amountLabel(fee, 'iqd', iqdPreference)}</span></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.discount')}</span><span>{totalCurrency ? amountLabel(discountAmount, totalCurrency, iqdPreference) : '—'}</span></div><div className="mt-3 flex justify-between gap-3 border-t pt-3 text-lg font-bold"><span>{t('commerceOperations.order.total')}</span><span>{totalCurrency && total !== null ? amountLabel(total, totalCurrency, iqdPreference) : '—'}</span></div></div>
           <p className="mt-3 text-xs text-muted-foreground">{t('commerceOperations.order.paymentAtIntakeHint')}</p>
-        </AppDialogBody>
-        <AppDialogFooter><Button type="button" variant="outline" disabled={saving || preparingPayment || paymentDialogOpen} onClick={() => close(false)}>{t('common.cancel')}</Button><Button type="button" className="gap-2" disabled={!canSave || saving || preparingPayment || paymentDialogOpen} onClick={() => void continueToPayment()}><Wallet className="h-4 w-4" />{t('commerceOperations.actions.continueToPayment')}</Button></AppDialogFooter>
-      </AppDialogContent>
+        <div className="flex justify-end border-t pt-4">
+          <Button type="button" className="gap-2" disabled={!canSave || saving || preparingPayment || paymentDialogOpen} onClick={() => void continueToPayment()}>
+            {preparingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
+            {preparingPayment ? t('commerceOperations.actions.preparingPayment') : t('commerceOperations.actions.continueToPayment')}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
       <ProductsViewModal
         key={storageId}
         open={productsModalOpen}
@@ -1269,7 +1299,6 @@ function OrderIntakeDialog({ open, onOpenChange, channel, workspaceId, defaultCu
           onSubmit={createAndSelectCustomer}
         />
       ) : null}
-    </AppDialog>
     <AppDialog open={paymentDialogOpen} onOpenChange={(next) => { if (!saving && !preparingPayment) setPaymentDialogOpen(next) }}>
       <AppDialogContent className="max-w-lg" onPointerDownOutside={(event) => (saving || preparingPayment) && event.preventDefault()} onEscapeKeyDown={(event) => (saving || preparingPayment) && event.preventDefault()}>
         <AppDialogHeader><AppDialogTitle className="flex items-center gap-2">{paymentRequired ? <Wallet className="h-5 w-5 text-primary" /> : <ShoppingBag className="h-5 w-5 text-primary" />}{t(paymentRequired ? 'commerceOperations.order.paymentTitle' : 'orders.status.completed')}</AppDialogTitle></AppDialogHeader>

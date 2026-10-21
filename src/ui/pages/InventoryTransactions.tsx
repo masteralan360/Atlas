@@ -9,7 +9,6 @@ import {
   History,
   Link2,
   RotateCcw,
-  ShieldCheck,
   SlidersHorizontal,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -715,37 +714,6 @@ export function InventoryTransactionsPage() {
     return null;
   };
 
-  const transactionStats = useMemo(() => {
-    const manualCount = filteredActivityRecords.filter(
-      (record) =>
-        record.kind === "adjustment" ||
-        (record.kind === "transfer" && record.sourceKind === "manual") ||
-        (record.kind === "ledger" && (
-          record.movementSource === "stock-adjustment" ||
-          (record.movementSource === "transfer" && record.sourceKind === "manual")
-        )),
-    ).length;
-    const automationCount = filteredActivityRecords.filter(
-      (record) => (record.kind === "transfer" && record.sourceKind === "automation")
-        || (record.kind === "ledger" && record.movementSource === "transfer" && record.sourceKind === "automation"),
-    ).length;
-    const totalUnits = filteredActivityRecords.reduce(
-      (sum, record) =>
-        sum +
-        (record.kind === "ledger"
-          ? Math.abs(record.quantityDelta)
-          : record.quantity),
-      0,
-    );
-
-    return {
-      totalCount: filteredActivityRecords.length,
-      manualCount,
-      automationCount,
-      totalUnits,
-    };
-  }, [filteredActivityRecords]);
-
   if (isProductSummaryExportOpen) {
     return (
       <ExportPreviewModal
@@ -773,7 +741,7 @@ export function InventoryTransactionsPage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,2fr)_320px]">
+      <div className="grid grid-cols-1 gap-6">
         <Card className="rounded-3xl border shadow-sm">
           <CardHeader className="border-b bg-muted/20 p-6">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -1429,88 +1397,6 @@ export function InventoryTransactionsPage() {
             </Tabs>
           </CardContent>
         </Card>
-
-        <div className="grid gap-4">
-          <Card className="rounded-3xl border shadow-sm">
-            <CardHeader className="space-y-1 p-6">
-              <CardTitle className="text-lg">
-                {t(
-                  "inventoryTransfer.transactions.summaryTitle",
-                  "Transfer Summary",
-                )}
-              </CardTitle>
-              <CardDescription>
-                {t(
-                  "inventoryTransactions.summaryDescription",
-                  "A live count of permanent inventory movement records for this workspace.",
-                )}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4 p-6 pt-0">
-              <div className="rounded-2xl bg-muted/30 p-4">
-                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                  {t(
-                    "inventoryTransfer.transactions.totalTransactions",
-                    "Total Transactions",
-                  )}
-                </div>
-                <div className="mt-2 text-3xl font-semibold">
-                  {transactionStats.totalCount}
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="rounded-2xl bg-muted/30 p-4">
-                  <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                    {t("inventoryTransfer.transactions.manualCount", "Manual")}
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold">
-                    {transactionStats.manualCount}
-                  </div>
-                </div>
-                <div className="rounded-2xl bg-muted/30 p-4">
-                  <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                    {t(
-                      "inventoryTransfer.transactions.automationCount",
-                      "Automation",
-                    )}
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold">
-                    {transactionStats.automationCount}
-                  </div>
-                </div>
-              </div>
-              <div className="rounded-2xl bg-muted/30 p-4">
-                <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                  {t(
-                    "inventoryTransfer.transactions.totalUnits",
-                    "Units Moved",
-                  )}
-                </div>
-                <div className="mt-2 text-3xl font-semibold">
-                  {transactionStats.totalUnits}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="rounded-3xl border-0 bg-[linear-gradient(180deg,#0f4c81,#0b3254)] text-white shadow-xl">
-            <CardHeader className="space-y-3 p-6">
-              <CardTitle className="flex items-center gap-2 text-2xl">
-                <ShieldCheck className="h-5 w-5" />
-                {t(
-                  "inventoryTransfer.transactions.permanentTitle",
-                  "Permanent Log",
-                )}
-              </CardTitle>
-              <CardDescription className="text-sky-100/85">
-                {t(
-                  "inventoryTransfer.transactions.permanentDescription",
-                  "Inventory transaction records are append-only. You can review them here, but they are intentionally not editable or deletable.",
-                )}
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        </div>
       </div>
 
       <Dialog

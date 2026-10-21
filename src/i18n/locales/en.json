@@ -1292,6 +1292,10 @@
         "description": "Record manual stock changes, manage batches, and review inventory logs.",
         "badge": "Adjust"
       },
+      "/stock-adjustments/batches": {
+        "description": "Review product batches, quantities, expiry dates, and batch pricing.",
+        "badge": "Batches"
+      },
       "/ledger": {
         "description": "Inspect cross-module inflows, outflows, and payment trails.",
         "badge": "Flow"

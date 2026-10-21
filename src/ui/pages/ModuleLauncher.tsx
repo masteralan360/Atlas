@@ -27,7 +27,7 @@ import {
 export function ModuleLauncher() {
     const { t } = useTranslation()
     const { user } = useAuth()
-    const { workspaceName, hasFeature, features } = useWorkspace()
+    const { workspaceName, hasFeature, hasCapability, features } = useWorkspace()
     const { hasPermission } = useWorkspacePermissions()
     const clinicalRegistryType = useClinicalRegistryType(user?.workspaceId)
     const [query, setQuery] = useState('')
@@ -49,11 +49,12 @@ export function ModuleLauncher() {
         t,
         role: user?.role,
         hasFeature,
+        hasCapability,
         hasPermission,
         features,
         clinicalRegistryType,
         isDesktopDevice: isDesktop()
-    }), [clinicalRegistryType, features, hasFeature, hasPermission, t, user?.role])
+    }), [clinicalRegistryType, features, hasCapability, hasFeature, hasPermission, t, user?.role])
 
     const sections = useMemo(() => {
         const visibleSidebarItems = flattenWorkspaceNavigation(navigation).filter((item) => !item.mobileOnly || isMobile())

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "wouter";
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness';
 import {
   AlertTriangle,
@@ -184,6 +185,7 @@ function mapTransactionLabel(
 }
 
 export function StockAdjustments() {
+  const [location, setLocation] = useLocation();
   const { t } = useTranslation();
   const { user } = useAuth();
   const { hasCapability } = useWorkspace();
@@ -205,7 +207,9 @@ export function StockAdjustments() {
 
   const reasonOptions = useMemo(() => getAdjustmentReasonOptions(t), [t]);
 
-  const [activeTab, setActiveTab] = useState<ActiveTab>("adjustments");
+  const [activeTab, setActiveTab] = useState<ActiveTab>(
+    location === "/stock-adjustments/batches" ? "batches" : "adjustments",
+  );
   const [productFilter, setProductFilter] = useState("all");
   const [storageFilter, setStorageFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState<"all" | StockAdjustmentType>(
@@ -230,10 +234,14 @@ export function StockAdjustments() {
   const batchAutoStorageIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!canManageStockBatches && activeTab === "batches") {
+    if (location === "/stock-adjustments/batches" && !canManageStockBatches) {
+      setLocation("/stock-adjustments");
       setActiveTab("adjustments");
+      return;
     }
-  }, [activeTab, canManageStockBatches]);
+
+    setActiveTab(location === "/stock-adjustments/batches" ? "batches" : "adjustments");
+  }, [canManageStockBatches, location, setLocation]);
 
   const productsById = useMemo(
     () => new Map(products.map((product) => [product.id, product] as const)),
@@ -533,7 +541,9 @@ export function StockAdjustments() {
         value={activeTab}
         onValueChange={(value) => {
           if (value === "batches" && !canManageStockBatches) return;
-          setActiveTab(value as ActiveTab);
+          const nextTab = value as ActiveTab;
+          setActiveTab(nextTab);
+          setLocation(nextTab === "batches" ? "/stock-adjustments/batches" : "/stock-adjustments");
         }}
         className="space-y-6"
       >

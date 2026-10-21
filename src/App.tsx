@@ -2385,6 +2385,13 @@ function App() {
                           </Layout>
                         </ProtectedRoute>
                       </Route>
+                      <Route path="/stock-adjustments/batches">
+                        <ProtectedRoute requiredFeature="stock_adjustments" requiredPermission="stockAdjustments.access">
+                          <Layout>
+                            <StockAdjustments />
+                          </Layout>
+                        </ProtectedRoute>
+                      </Route>
                       <Route path="/stock-adjustments">
                         <ProtectedRoute requiredFeature="stock_adjustments" requiredPermission="stockAdjustments.access">
                           <Layout>
