@@ -79,7 +79,8 @@ function installBrowserStorage() {
             location: { origin: 'http://localhost', hash: '', pathname: '/' },
             URL: { createObjectURL: () => 'blob:test', revokeObjectURL: () => undefined },
             addEventListener: () => undefined,
-            removeEventListener: () => undefined
+            removeEventListener: () => undefined,
+            dispatchEvent: () => true
         }
     })
     Object.defineProperty(globalThis, 'document', {

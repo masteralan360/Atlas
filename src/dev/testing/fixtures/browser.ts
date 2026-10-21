@@ -17,7 +17,8 @@ export function installTestBrowser() {
             localStorage: storage, sessionStorage: storage,
             location: { origin: 'http://localhost', hash: '', pathname: '/' },
             URL: globalThis.URL,
-            addEventListener: () => undefined, removeEventListener: () => undefined
+            addEventListener: () => undefined, removeEventListener: () => undefined,
+            dispatchEvent: () => true
         }
     })
     Object.defineProperty(globalThis, 'document', {

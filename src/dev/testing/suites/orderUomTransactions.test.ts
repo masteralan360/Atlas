@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { db } from '@/local-db/database'
 import type { PurchaseOrderItem } from '@/local-db/models'
+import type { CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 import { assertOrderFinancialEffects, assertStock } from '../assertions/orderEffects'
 import { installTestBrowser } from '../fixtures/browser'
@@ -240,6 +241,50 @@ describe('product UoM conversion in order transactions', () => {
     )
     expect((await db.sales_orders.get(blockedOrder.id))?.status).toBe('draft')
     await assertStock(product.id, storage.id, 50)
+  })
+
+  it('validates stock with a constant number of reads as pending reservation lines grow', async () => {
+    const customer = await createPartner('customer', 'Batch reservation customer')
+    const { product, storage } = await createPackagedProduct(1_000)
+    const input = saleOrderInput(customer.id, product, storage.id, 'cash', { quantity: 1, paid: true })
+    const draft = await orders.createSalesOrder(TEST_WORKSPACE_ID, input)
+    // Repeated relevant lines reproduce the old per-line product-read delay.
+    // Other statuses and workspaces must never reduce this order's stock.
+    const reservations = Array.from({ length: 40 }, (_, index) => ({
+      ...draft, id: `reservation-${index}`, orderNumber: `RES-${index}`, status: 'pending' as const,
+      items: Array.from({ length: 20 }, (_, line) => ({ ...draft.items[0], id: `line-${index}-${line}` })),
+    }))
+    await db.sales_orders.bulkPut([
+      ...reservations,
+      { ...draft, id: 'cancelled-order', status: 'cancelled', items: [{ ...draft.items[0], quantity: 10_000 }] },
+      { ...draft, id: 'foreign-order', workspaceId: 'other-workspace', status: 'pending', items: [{ ...draft.items[0], quantity: 10_000 }] },
+    ])
+    let checkedStock = false
+    const trace: CrudTraceHandle = {
+      id: 'reservation-batch-test',
+      setEntityId: () => undefined,
+      setWorkspaceMode: () => undefined,
+      addPendingStage: () => undefined,
+      measure: async (label, _layer, work) => {
+        if (label !== 'crudDebugger.stages.salesOrderStockAvailability') return work()
+        checkedStock = true
+        const productReads = vi.spyOn(db.products, 'get')
+        const inventoryQueries = vi.spyOn(db.inventory, 'where')
+        try {
+          const result = await work()
+          expect(productReads).not.toHaveBeenCalled()
+          expect(inventoryQueries).toHaveBeenCalledTimes(1)
+          return result
+        } finally {
+          productReads.mockRestore()
+          inventoryQueries.mockRestore()
+        }
+      },
+    }
+
+    expect((await orders.updateSalesOrderStatus(draft.id, 'pending', { trace })).status).toBe('pending')
+    expect(checkedStock).toBe(true)
+    await assertStock(product.id, storage.id, 1_000)
   })
 
   it('receives cartons and free cartons as sheets while spreading paid cost across all received stock', async () => {

@@ -46,6 +46,9 @@ import type { WorkspacePermissionKey } from '@/permissions/workspacePermissionDe
 import i18n from '@/i18n/config'
 
 import { db } from './database'
+import { hydrateOrderFinancingFromSupabase } from './orderFinancingHydration'
+import { queryClient } from '@/query/queryClient'
+import { queryKeys } from '@/query/queryKeys'
 import { useLiveCollection } from './liveCollection'
 import { assertStaffMinimumSellingPrices, type MinimumSellingPriceCheckItem } from './minimumSellingPrice'
 import { serializePartnerSummaryRefresh } from './partnerSummaryRefresh'
@@ -269,8 +272,13 @@ async function assertSalesOrderMinimumPrices(
     order: Pick<SalesOrder, 'workspaceId' | 'items' | 'exchangeRates'>,
     options?: Pick<OrderFormSaveOptions, 'actingUserRole' | 'minimumPriceValidationItems'>
 ) {
-    const items = options?.minimumPriceValidationItems ?? await Promise.all(order.items.map(async (item) => {
-        const product = await db.products.get(item.productId)
+    const productIds = Array.from(new Set(order.items.map((item) => item.productId)))
+    const products = options?.minimumPriceValidationItems
+        ? []
+        : await db.products.bulkGet(productIds)
+    const productMap = new Map(products.filter((product): product is Product => !!product).map((product) => [product.id, product]))
+    const items = options?.minimumPriceValidationItems ?? order.items.map((item) => {
+        const product = productMap.get(item.productId)
         if (!product) return null
         const effectiveSellingPrice = item.originalCurrency === product.currency
             ? item.originalUnitPrice
@@ -297,7 +305,7 @@ async function assertSalesOrderMinimumPrices(
             sellingUomId: item.uomId ?? null,
             currency: product.currency
         }
-    }))
+    })
     await assertStaffMinimumSellingPrices({
         workspaceId: order.workspaceId,
         actingUserRole: options?.actingUserRole,
@@ -449,6 +457,8 @@ type SyncUpsertOptions = {
     throwOnError?: boolean
     /** The caller must wait for remote order and payment-reference acknowledgement. */
     requireRemoteConfirmation?: boolean
+    /** New drafts with no initial payment have no payment references to repair. Retries must still repair them. */
+    skipOrderPaymentReferenceSync?: boolean
     /** Fields intentionally kept server-authoritative during narrow updates. */
     omitFields?: readonly string[]
     /** Optional trace propagated only for a user-initiated sales order operation. */
@@ -566,17 +576,19 @@ async function syncUpsertEntities(
                     syncStatus: 'synced',
                     lastSyncedAt: syncedAt
                 })
-                if (orderNumber) {
-                    await synchronizeOrderPaymentReferences(
-                        workspaceId,
-                        tableName === 'sales_orders' ? 'sales' : 'purchase',
-                        entity.id,
-                        orderNumber,
-                        { requireRemoteConfirmation: options.requireRemoteConfirmation }
-                    )
-                }
             }))
         }, 'crudDebugger.details.salesOrderAtomicResponse')
+        if (!options.skipOrderPaymentReferenceSync) {
+            await measureSalesOrderStage(options.trace, 'crudDebugger.stages.salesOrderPaymentReferences', 'response', () =>
+                Promise.all(entities.map((entity) => synchronizeOrderPaymentReferences(
+                    workspaceId,
+                    tableName === 'sales_orders' ? 'sales' : 'purchase',
+                    entity.id,
+                    orderNumbers.get(entity.id),
+                    { requireRemoteConfirmation: options.requireRemoteConfirmation }
+                )))
+            )
+        }
     } catch (error) {
         console.error(`[Orders] Failed to sync ${tableName}:`, error)
 
@@ -1084,11 +1096,12 @@ async function assertOrderStorageAccess(order: SalesOrder | PurchaseOrder) {
     }
 }
 
-async function getReservedQuantityMaps(workspaceId: string, excludeOrderId?: string) {
+async function getReservedQuantityMaps(workspaceId: string, products: ReadonlyMap<string, Product>, excludeOrderId?: string) {
     const orders = await db.sales_orders
-        .where('workspaceId')
-        .equals(workspaceId)
-        .and((item) => !item.isDeleted && item.status === 'pending' && item.id !== excludeOrderId)
+        .where('[workspaceId+status]')
+        .equals([workspaceId, 'pending'])
+        .and((order) => !order.isDeleted && order.id !== excludeOrderId
+            && order.items.some((item) => products.has(item.productId)))
         .toArray()
 
     const reservedByStorage = new Map<string, number>()
@@ -1103,8 +1116,11 @@ async function getReservedQuantityMaps(workspaceId: string, excludeOrderId?: str
     }>()
     for (const order of orders) {
         for (const item of order.items) {
-            const product = await db.products.get(item.productId)
-            if (isService(product)) continue
+            // Only the advancing order's physical products affect its stock.
+            // Reuse its validated catalog rows instead of reading a product
+            // for every line of every pending order.
+            const product = products.get(item.productId)
+            if (!product || isService(product)) continue
             const storageId = resolveSalesOrderItemStorageId(order, item)
             const reservedQuantity = getOrderLineInventoryQuantity(item)
             const detailKey = `${order.id}:${item.productId}:${storageId || ''}`
@@ -1157,11 +1173,6 @@ function formatOrderInventoryQuantity(quantity: number, unitLabel: string) {
 
 async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: string) {
     assertInventoryMutationConnectivity(order.workspaceId)
-    const {
-        reservedByStorage,
-        reservedWithoutStorage,
-        reservationDetails
-    } = await getReservedQuantityMaps(order.workspaceId, excludeOrderId)
     const productIds = Array.from(new Set(order.items.map((item) => item.productId)))
     const products = await db.products.where('id').anyOf(productIds).toArray()
     const productMap = new Map(products.map((product) => [product.id, product]))
@@ -1204,11 +1215,26 @@ async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: str
         })
     }
 
+    if (requiredByPosition.size === 0) return
+
+    const [reservations, inventoryRows] = await Promise.all([
+        getReservedQuantityMaps(order.workspaceId, productMap, excludeOrderId),
+        db.inventory.where('[productId+storageId]')
+            .anyOf(Array.from(requiredByPosition.values(), ({ productId, storageId }) => [productId, storageId]))
+            .and((row) => row.workspaceId === order.workspaceId && !row.isDeleted)
+            .toArray()
+    ])
+    const { reservedByStorage, reservedWithoutStorage, reservationDetails } = reservations
+    const quantityByPosition = new Map<string, number>()
+    for (const row of inventoryRows) {
+        const key = buildInventoryReservationKey(row.productId, row.storageId)
+        if (!quantityByPosition.has(key)) quantityByPosition.set(key, row.quantity)
+    }
+
     for (const requirement of requiredByPosition.values()) {
-        const storageQuantity = await getInventoryQuantityForProductStorage(
-            requirement.productId,
-            requirement.storageId
-        )
+        const storageQuantity = quantityByPosition.get(
+            buildInventoryReservationKey(requirement.productId, requirement.storageId)
+        ) ?? 0
         const storageReserved = reservedByStorage.get(
             buildInventoryReservationKey(requirement.productId, requirement.storageId)
         ) || 0
@@ -1293,8 +1319,9 @@ async function assertSalesProductsHaveCosts(order: SalesOrder) {
     }
 
     const priceBookItems = await db.price_book_items
-        .where('priceBookId')
-        .equals(priceBook.id)
+        .where('[priceBookId+productId]')
+        .anyOf(productIds.map((productId) => [priceBook.id, productId]))
+        .and((item) => item.workspaceId === order.workspaceId)
         .toArray()
     const itemsByProductId = new Map(
         priceBookItems
@@ -3453,6 +3480,7 @@ async function createSalesOrderInternal(
                         : {})
                 })
             }
+            void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all(workspaceId, 'sales') })
             await measureSalesOrderStage(
                 options.trace,
                 'crudDebugger.stages.salesOrderSummary',
@@ -3473,20 +3501,29 @@ async function createSalesOrderInternal(
     options?.trace?.setEntityId(order.id)
     const status = order.status
 
-    await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', async () => {
-        await assertSalesOrderMinimumPrices(order, options)
-        await assertSalesProductsHaveCosts(order)
+    await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderMinimumPrices', 'application', () => assertSalesOrderMinimumPrices(order, options))
+    // The hosted write checks current products, service access and assigned
+    // Price Book costs atomically. A confirmed draft save need not wait on a
+    // catalog-wide IndexedDB hydration before submitting that same validation.
+    // Other paths must validate locally before any financial/inventory effect
+    // or before accepting a write for offline replay.
+    const validatesCostsWithHostedDraft = status === 'draft'
+        && options?.requireRemoteConfirmation
+        && shouldUseCloudBusinessData(workspaceId)
+        && isOnline(workspaceId)
+    if (!validatesCostsWithHostedDraft) {
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderProductCosts', 'data', () => assertSalesProductsHaveCosts(order))
+    }
 
-        if (status === 'pending' || status === 'completed') {
-            if (isOrderFinancingMethod(order.paymentMethod)) {
-                throw new Error('Financed orders must be activated from draft')
-            }
-            if (!order.isPaid) {
-                throw new Error('non_financed_order_must_be_paid')
-            }
-            await assertSalesStockAvailable(order)
+    if (status === 'pending' || status === 'completed') {
+        if (isOrderFinancingMethod(order.paymentMethod)) {
+            throw new Error('Financed orders must be activated from draft')
         }
-    })
+        if (!order.isPaid) {
+            throw new Error('non_financed_order_must_be_paid')
+        }
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderStockAvailability', 'data', () => assertSalesStockAvailable(order))
+    }
 
     // The hosted parent and initial payment must commit together: payment
     // guards require the parent, and account rejection must roll back both.
@@ -3553,7 +3590,17 @@ async function createSalesOrderInternal(
         'sales_orders',
         [order as unknown as Record<string, unknown> & { id: string; version: number }],
         workspaceId,
-        { requireRemoteConfirmation: options?.requireRemoteConfirmation, trace: options?.trace }
+        {
+            requireRemoteConfirmation: options?.requireRemoteConfirmation,
+            // A new unpaid/simple-loan draft has never posted an order
+            // payment. Do not join unrelated payment-table hydration just
+            // to discover that there are no references to update. The saved
+            // draft retry branch above deliberately keeps the repair path.
+            skipOrderPaymentReferenceSync: status === 'draft' && (isOrderApprovalRequested(order)
+                || isSimpleOrderLoan(order)
+                || (isOrderFinancingMethod(order.paymentMethod) ? order.initialPaymentAmount || 0 : order.paidAmount) <= 0),
+            trace: options?.trace
+        }
     )
     reportOrderSaveProgress(options, 'confirming')
     await synchronizeSalesAccountCommissionBeneficiaryBestEffort(workspaceId, order.id, createdBy)
@@ -3579,6 +3626,7 @@ async function createSalesOrderInternal(
         await reconcileSalesOrderCommissionBestEffort(workspaceId, createdOrder.id, createdBy)
     }
 
+    void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all(workspaceId, 'sales') })
     await measureSalesOrderStage(
         options?.trace,
         'crudDebugger.stages.salesOrderSummary',
@@ -4135,12 +4183,14 @@ async function activateOrderFinancing(
         if (!loanId) {
             throw new Error('Linked loan was not created')
         }
-        await Promise.all([
-            fetchTableFromSupabase('loans', db.loans, order.workspaceId),
-            fetchTableFromSupabase('loan_installments', db.loan_installments, order.workspaceId),
-            fetchTableFromSupabase('loan_payments', db.loan_payments, order.workspaceId),
-            fetchTableFromSupabase('payment_transactions', db.payment_transactions, order.workspaceId)
-        ])
+        try {
+            await hydrateOrderFinancingFromSupabase(order.workspaceId, order.id, loanId)
+        } catch (error) {
+            // The RPC has already committed the loan, payment and status.
+            // A failed cache read must not turn that success into a retry
+            // that could repeat a financial operation.
+            console.error('[Orders] Activated financing could not be refreshed locally:', error)
+        }
         if (isSimpleOrderLoan(order)) {
             const initialRepaymentTransactions = (await db.payment_transactions
                 .where('[workspaceId+sourceType+sourceRecordId]')
@@ -4374,14 +4424,14 @@ async function updateSalesOrderStatusOnce(
     // Status changes synchronize the entire order document. Check the raw
     // record before making any financial or inventory side effect, because a
     // details view may contain only its permitted lines.
-    await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertOrderStorageAccess(existing))
+    await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderStorageAccess', 'application', () => assertOrderStorageAccess(existing))
 
     if (status !== 'cancelled') {
-        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id))
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderCancellationGuard', 'application', () => assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id))
     }
 
     if (status === 'pending' || status === 'completed') {
-        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesOrderMinimumPrices(existing, options))
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderMinimumPrices', 'application', () => assertSalesOrderMinimumPrices(existing, options))
     }
 
     if (status === 'cancelled' && shouldUseCloudBusinessData(existing.workspaceId)
@@ -4399,11 +4449,11 @@ async function updateSalesOrderStatusOnce(
     let workingOrder = existing
     let linkedLoanId = existing.linkedLoanId || null
     if (status === 'pending') {
-        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesProductsHaveCosts(existing))
-        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesStockAvailable(existing, existing.id))
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderProductCosts', 'application', () => assertSalesProductsHaveCosts(existing))
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderStockAvailability', 'data', () => assertSalesStockAvailable(existing, existing.id))
         linkedLoanId = await measureSalesOrderStage(
             options?.trace,
-            'crudDebugger.stages.salesOrderPayment',
+            'crudDebugger.stages.salesOrderFinancing',
             'unknown',
             () => activateOrderFinancing('sales', existing, options),
             'crudDebugger.details.salesOrderFinanceBoundary'
@@ -4475,6 +4525,7 @@ async function updateSalesOrderStatusOnce(
     if (!completedRemotely) {
         await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId, { trace: options?.trace })
     }
+    void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all(existing.workspaceId, 'sales') })
     await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderSummary', 'response', () => Promise.all(
         Array.from(new Set([
             `${workingOrder.customerId}::${workingOrder.businessPartnerId || ''}`,

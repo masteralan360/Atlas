@@ -24,6 +24,7 @@ const browser = vi.hoisted(() => {
     Object.defineProperty(globalThis, 'window', { configurable: true, value: globalThis })
     Object.defineProperty(globalThis, 'addEventListener', { configurable: true, value: () => undefined })
     Object.defineProperty(globalThis, 'removeEventListener', { configurable: true, value: () => undefined })
+    Object.defineProperty(globalThis, 'dispatchEvent', { configurable: true, value: () => true })
     Object.defineProperty(globalThis, 'document', {
         configurable: true,
         value: {
@@ -75,6 +76,7 @@ const browser = vi.hoisted(() => {
 
 const supabaseMock = vi.hoisted(() => {
     const rpc = vi.fn()
+    const minimumPrices = vi.fn<(...args: unknown[]) => Promise<{ data: unknown[]; error: unknown }>>(async () => ({ data: [], error: null }))
     const upsert = vi.fn((payload: unknown) => {
         const rows = Array.isArray(payload) ? payload : [payload]
         const response = { data: [], error: null }
@@ -108,12 +110,12 @@ const supabaseMock = vi.hoisted(() => {
     }
     const select = vi.fn(() => createSelectQuery())
     const from = vi.fn(() => ({ upsert, insert, select }))
-    return { rpc, upsert, insert, createSelectQuery, select, from }
+    return { rpc, minimumPrices, upsert, insert, createSelectQuery, select, from }
 })
 
 vi.mock('@/auth/supabase', () => {
     const rpc = (name: string, args: Record<string, unknown>) => name === 'validate_staff_minimum_selling_prices'
-        ? Promise.resolve({ data: [], error: null })
+        ? supabaseMock.minimumPrices(name, args)
         : supabaseMock.rpc(name, args)
     return {
         supabase: {
@@ -142,6 +144,7 @@ import { enqueuePartnerSummaryJobs, processPartnerSummaryJobs } from './partnerS
 import { assertOrderFinancialEffects } from '@/dev/testing/assertions/orderEffects'
 import { initialPaymentRegression } from '@/dev/testing/salesOrderResilience/scenarios/regressionScenarios'
 import { createPosServiceNameMetadata } from '@/lib/posServiceName'
+import type { CrudTraceHandle } from '@/dev/crud-debugger/trace'
 
 const WORKSPACE_ID = '10000000-0000-4000-8000-000000000001'
 const USER_ID = '10000000-0000-4000-8000-000000000002'
@@ -437,6 +440,7 @@ describe('atomic POS Quick Order completion', () => {
         setActiveBusinessWorkspace(WORKSPACE_ID)
         setActiveBusinessUser(USER_ID, 'admin', WORKSPACE_ID)
         vi.clearAllMocks()
+        supabaseMock.minimumPrices.mockReset().mockResolvedValue({ data: [], error: null })
         supabaseMock.rpc.mockReset().mockImplementation(async (name, args) => successfulInitialOrderResponse(name, args))
 
         await db.users.put({
@@ -502,6 +506,159 @@ describe('atomic POS Quick Order completion', () => {
     })
 
     describe('sales order form summary refresh', () => {
+        for (const dataMode of ['cloud', 'hybrid'] as const) {
+            for (const paymentMethod of ['cash', 'loan'] as const) {
+                it(`${dataMode}: creates a ${paymentMethod} draft without waiting for catalog or payment-reference reads`, async () => {
+                    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode })
+                    const input = { ...unpaidQuickOrderInput('draft'), paymentMethod }
+                    const stages: string[] = []
+                    const trace: CrudTraceHandle = {
+                        id: 'draft-creation-performance',
+                        setEntityId: () => undefined, setWorkspaceMode: () => undefined, addPendingStage: () => undefined,
+                        measure: async (label, _layer, work) => { stages.push(label); return work() }
+                    }
+                    const catalogRead = vi.spyOn(db.products, 'bulkGet').mockRejectedValue(new Error('Unrelated catalog hydration is blocked'))
+                    try {
+                        const order = await createSalesOrder(WORKSPACE_ID, input, USER_ID, {
+                            requireRemoteConfirmation: true, deferSummaryRefresh: true, trace,
+                            minimumPriceValidationItems: [{ productId: PRODUCT_ID, effectiveSellingPrice: 100, currency: 'usd' }]
+                        })
+                        expect(order).toMatchObject({ status: 'draft', paymentMethod, orderNumber: 'SO-2026-00999', syncStatus: 'synced' })
+                        expect(catalogRead).not.toHaveBeenCalled()
+                        expect(stages).toContain('crudDebugger.stages.salesOrderMinimumPrices')
+                        expect(stages).not.toContain('crudDebugger.stages.salesOrderProductCosts')
+                        expect(stages).not.toContain('crudDebugger.stages.salesOrderPaymentReferences')
+                        expect(supabaseMock.minimumPrices).toHaveBeenCalledWith('validate_staff_minimum_selling_prices', expect.objectContaining({
+                            p_workspace_id: WORKSPACE_ID,
+                            p_items: [expect.objectContaining({ product_id: PRODUCT_ID, effective_selling_price: 100 })]
+                        }))
+                        expect(await db.payment_transactions.count()).toBe(0)
+                    } finally {
+                        catalogRead.mockRestore()
+                        await finishSummaryRefresh()
+                    }
+                })
+            }
+
+            it(`${dataMode}: still rejects a server minimum-price violation before saving the order`, async () => {
+                writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode })
+                supabaseMock.minimumPrices.mockResolvedValueOnce({ data: [{
+                    line_index: 0, product_id: PRODUCT_ID, product_name: 'Fast Checkout Product', minimum_selling_price: 120
+                }], error: null })
+                await expect(createSalesOrder(WORKSPACE_ID, unpaidQuickOrderInput('draft'), USER_ID, {
+                    requireRemoteConfirmation: true,
+                    minimumPriceValidationItems: [{ productId: PRODUCT_ID, effectiveSellingPrice: 100, currency: 'usd' }]
+                })).rejects.toMatchObject({ name: 'MinimumSellingPriceViolationError' })
+                expect(await db.sales_orders.count()).toBe(0)
+                expect(supabaseMock.upsert).not.toHaveBeenCalled()
+                expect(await db.payment_transactions.count()).toBe(0)
+            })
+
+            for (const paid of [false, true]) {
+                it(`${dataMode}: a server cost rejection cannot confirm a ${paid ? 'paid' : 'unpaid'} draft`, async () => {
+                    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode })
+                    const rejection = new Error('Fast Checkout Product cannot be sold until a cost is added.')
+                    if (paid) supabaseMock.rpc.mockResolvedValueOnce({ data: null, error: rejection })
+                    else supabaseMock.upsert.mockImplementationOnce(() => ({
+                        select: async () => ({ data: null, error: rejection })
+                    }) as unknown as ReturnType<typeof supabaseMock.upsert>)
+                    const progress = vi.fn()
+                    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+                    try {
+                        await expect(createSalesOrder(WORKSPACE_ID, paid ? quickOrderInput() : unpaidQuickOrderInput('draft'), USER_ID, {
+                            requireRemoteConfirmation: true, deferSummaryRefresh: true, onProgress: progress,
+                            minimumPriceValidationItems: [{ productId: PRODUCT_ID, effectiveSellingPrice: 100, currency: 'usd' }]
+                        })).rejects.toThrow('remote_order_save_confirmation_failed')
+                        expect(progress).not.toHaveBeenCalledWith(expect.objectContaining({ stageKey: 'orders.form.saveProgressComplete' }))
+                        expect((await db.sales_orders.toArray()).every((order) => order.syncStatus !== 'synced')).toBe(true)
+                        expect(await db.payment_transactions.count()).toBe(0)
+                        expect(await db.payment_account_movements.count()).toBe(0)
+                        expect(await db.partner_summary_jobs.count()).toBe(0)
+                    } finally { log.mockRestore() }
+                })
+            }
+        }
+
+        it.each([
+            { dataMode: 'local' as const, online: true, requireRemoteConfirmation: true },
+            { dataMode: 'cloud' as const, online: false, requireRemoteConfirmation: true },
+            { dataMode: 'cloud' as const, online: true, requireRemoteConfirmation: false }
+        ])('keeps local cost validation for $dataMode / online=$online / confirmed=$requireRemoteConfirmation', async ({ dataMode, online, requireRemoteConfirmation }) => {
+            writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode })
+            setNetworkStatus(online)
+            await db.products.update(PRODUCT_ID, { costPrice: null })
+            await expect(createSalesOrder(WORKSPACE_ID, unpaidQuickOrderInput('draft'), USER_ID, {
+                requireRemoteConfirmation,
+                minimumPriceValidationItems: [{ productId: PRODUCT_ID, effectiveSellingPrice: 100, currency: 'usd' }]
+            })).rejects.toThrow('cannot be sold until a cost is added')
+            expect(await db.sales_orders.count()).toBe(0)
+            expect(supabaseMock.upsert).not.toHaveBeenCalled()
+            expect(await db.payment_transactions.count()).toBe(0)
+        })
+
+        it('checks only this order\'s Price Book items through their compound index', async () => {
+            writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
+            const priceBookId = crypto.randomUUID()
+            await db.price_books.put({ ...baseEntity(priceBookId), name: 'Large customer price book' })
+            await db.business_partners.update(PARTNER_ID, { priceBookId })
+            await db.price_book_items.bulkPut([
+                { ...baseEntity('relevant-book-item'), priceBookId, productId: PRODUCT_ID, costPrice: 40, price: 100, currency: 'usd' },
+                ...Array.from({ length: 1_000 }, (_, index) => ({
+                    ...baseEntity(`unrelated-book-item-${index}`), priceBookId, productId: `unrelated-product-${index}`,
+                    costPrice: null, price: 1, currency: 'usd' as const
+                }))
+            ])
+            const bookReads = vi.spyOn(db.price_book_items, 'where')
+            try {
+                const order = await createSalesOrder(WORKSPACE_ID, unpaidQuickOrderInput('draft'), USER_ID)
+                expect(order.status).toBe('draft')
+                expect(bookReads).toHaveBeenCalledWith('[priceBookId+productId]')
+                expect(bookReads).not.toHaveBeenCalledWith('priceBookId')
+                await db.price_book_items.update('relevant-book-item', { costPrice: null })
+                await expect(createSalesOrder(WORKSPACE_ID, unpaidQuickOrderInput('draft'), USER_ID))
+                    .rejects.toThrow('Price Book cost is added')
+            } finally { bookReads.mockRestore() }
+        })
+
+        it('batches fallback minimum-price product reads and preserves repeated line validation', async () => {
+            const input = unpaidQuickOrderInput('draft')
+            input.items = Array.from({ length: 20 }, () => ({ ...input.items[0], id: crypto.randomUUID() }))
+            input.subtotal = input.total = input.balanceAmount = 2_000
+            const individualRead = vi.spyOn(db.products, 'get')
+            const batchRead = vi.spyOn(db.products, 'bulkGet')
+            try {
+                await createSalesOrder(WORKSPACE_ID, input, USER_ID, { requireRemoteConfirmation: true, deferSummaryRefresh: true })
+                expect(individualRead).not.toHaveBeenCalled()
+                expect(batchRead).toHaveBeenCalledWith([PRODUCT_ID])
+                expect(supabaseMock.minimumPrices).toHaveBeenCalledWith('validate_staff_minimum_selling_prices', expect.objectContaining({
+                    p_items: Array.from({ length: 20 }, () => expect.objectContaining({ product_id: PRODUCT_ID, effective_selling_price: 100 }))
+                }))
+            } finally {
+                individualRead.mockRestore()
+                batchRead.mockRestore()
+                await finishSummaryRefresh()
+            }
+        })
+
+        it('still repairs an existing payment reference when retrying creation of a saved draft', async () => {
+            const input = { ...unpaidQuickOrderInput('draft'), paymentMethod: 'loan' as const }
+            const options = { orderId: crypto.randomUUID(), requireRemoteConfirmation: true, deferSummaryRefresh: true }
+            const order = await createSalesOrder(WORKSPACE_ID, input, USER_ID, options)
+            await finishSummaryRefresh()
+            await db.payment_transactions.put({
+                ...baseEntity('legacy-down-payment'), sourceModule: 'orders', sourceType: 'sales_order',
+                sourceRecordId: order.id, direction: 'incoming', amount: 20, currency: 'usd', paymentMethod: 'cash',
+                paidAt: order.createdAt, referenceLabel: 'SO-PENDING-OLD-REFERENCE'
+            })
+            await createSalesOrder(WORKSPACE_ID, input, USER_ID, options)
+            await finishSummaryRefresh()
+            expect(await db.payment_transactions.get('legacy-down-payment')).toMatchObject({
+                referenceLabel: 'SO-2026-00999', amount: 20, direction: 'incoming', syncStatus: 'synced'
+            })
+            expect(await db.sales_orders.count()).toBe(1)
+            expect(await db.payment_transactions.count()).toBe(1)
+        })
+
         it('keeps database-normalized UoM snapshots in the local order cache after save', async () => {
             const uomId = crypto.randomUUID()
             let selectedColumns = ''
