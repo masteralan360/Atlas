@@ -508,7 +508,7 @@ async function syncUpsertEntities(
         }
 
         const shouldReceiveOrderNumber = tableName === 'sales_orders' || tableName === 'purchase_orders'
-        const request = () => shouldReceiveOrderNumber
+        const request = async () => shouldReceiveOrderNumber
             ? runMutation(`${tableName}.sync`, () => client.from(tableName).upsert(payload).select('id, order_number, items'))
             : runMutation(`${tableName}.sync`, () => client.from(tableName).upsert(payload))
         const result = await measureSalesOrderStage(

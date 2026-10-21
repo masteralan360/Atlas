@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Loader2, UserRound, Users } from 'lucide-react'
+import { Loader2, Plus, UserRound, Users } from 'lucide-react'
 
 import { cacheBusinessPartnerAutocompleteSelection, searchBusinessPartnerAutocompleteSuggestions } from '@/local-db/businessPartners'
 import { useBusinessPartnerGroupVisibility } from '@/local-db/businessPartnerGroups'
@@ -11,6 +11,10 @@ import { Input } from '@/ui/components/input'
 import { cn } from '@/lib/utils'
 import { AutocompletePopover } from '@/ui/components/AutocompletePopover'
 import { useDebouncedAutocompleteSearch } from '@/ui/components/useDebouncedAutocompleteSearch'
+import { activatePartnerCreation, canDisplayPartnerAutocompleteResults, type PartnerAutocompleteAddPartnerConfig } from './partnerAutocompleteAddPartner'
+import { PartnerCreationTrigger } from './PartnerCreationTrigger'
+
+export type { PartnerAutocompleteAddPartnerConfig } from './partnerAutocompleteAddPartner'
 
 export interface PartnerAutocompleteAdditionalOption {
     id: string
@@ -39,6 +43,8 @@ interface PartnerAutocompleteInputProps {
     roles?: BusinessPartnerRole[]
     additionalOptions?: PartnerAutocompleteAdditionalOption[]
     onSelectAdditionalOption?: (option: PartnerAutocompleteAdditionalOption) => void
+    /** Opt in to the inline add-partner action when a completed search has no matches. */
+    addPartner?: PartnerAutocompleteAddPartnerConfig
     /** Restrict suggestions to this caller's eligible records, while searching the data source. */
     partnerOptions?: BusinessPartner[]
 }
@@ -59,6 +65,7 @@ export function PartnerAutocompleteInput({
     roles,
     additionalOptions = EMPTY_ADDITIONAL_OPTIONS,
     onSelectAdditionalOption,
+    addPartner,
     partnerOptions
 }: PartnerAutocompleteInputProps) {
     const { t } = useTranslation()
@@ -136,7 +143,9 @@ export function PartnerAutocompleteInput({
     ), [searchConstraints, searchOptions, viewer, workspaceId])
     const remoteSearch = useDebouncedAutocompleteSearch(
         query,
-        isFocused && !justSelected && Boolean(workspaceId) && !groupVisibility.isLoading,
+        canDisplayPartnerAutocompleteResults(isFocused, justSelected, Boolean(addPartner?.active))
+            && Boolean(workspaceId)
+            && !groupVisibility.isLoading,
         searchPartners,
         250,
         3,
@@ -164,7 +173,19 @@ export function PartnerAutocompleteInput({
             .slice(0, 8)
     }, [additionalOptions, normalizedQuery])
 
-    const showDropdown = isFocused && !justSelected && (
+    const hasNoPartnerMatches = Boolean(workspaceId)
+        && normalizedQuery.length >= 3
+        && !isSearchLoading
+        && !searchError
+        && filtered.length === 0
+    const showNoResults = hasNoPartnerMatches
+        && (filteredAdditionalOptions.length === 0 || Boolean(addPartner))
+    const showAddPartner = hasNoPartnerMatches
+        && Boolean(addPartner && addPartner.canCreate !== false)
+        && !disabled
+    const showAddPartnerTrigger = Boolean(addPartner && addPartner.canCreate !== false && !addPartner.active)
+
+    const showDropdown = canDisplayPartnerAutocompleteResults(isFocused, justSelected, Boolean(addPartner?.active)) && (
         isSearchLoading
         || Boolean(searchError)
         || filtered.length > 0
@@ -190,6 +211,12 @@ export function PartnerAutocompleteInput({
         onSelectAdditionalOption?.(option)
     }, [onChange, onSelectAdditionalOption])
 
+    const handleAddPartner = useCallback(() => {
+        if (!activatePartnerCreation(addPartner, value, Boolean(disabled))) return
+        setJustSelected(true)
+        setIsFocused(false)
+    }, [addPartner, disabled, value])
+
     useEffect(() => {
         if (justSelected) {
             const timeout = setTimeout(() => setJustSelected(false), 200)
@@ -197,14 +224,21 @@ export function PartnerAutocompleteInput({
         }
     }, [justSelected])
 
-    return (
+    const autocomplete = (
         <AutocompletePopover
             open={showDropdown}
             onOpenChange={(open) => {
                 setIsFocused(open)
             }}
             anchor={(
-                <div data-autocomplete-popover-anchor className={cn('w-full', className)}>
+                <div data-autocomplete-popover-anchor className={cn('flex min-w-0 w-full items-center', className)}>
+                    {showAddPartnerTrigger ? (
+                        <PartnerCreationTrigger
+                            onClick={handleAddPartner}
+                            label={t('businessPartners.addPartner')}
+                            disabled={Boolean(disabled)}
+                        />
+                    ) : null}
                     <Input
                         ref={inputRef}
                         value={value}
@@ -219,7 +253,11 @@ export function PartnerAutocompleteInput({
                         disabled={Boolean(disabled)}
                         aria-busy={isSearchLoading || undefined}
                         required={required}
-                        className="flex-1"
+                        className={cn(
+                            'min-w-0 flex-1',
+                            showAddPartnerTrigger && 'rounded-s-none',
+                            addPartner?.active && 'border-primary ring-2 ring-primary/20'
+                        )}
                     />
                 </div>
             )}
@@ -293,12 +331,25 @@ export function PartnerAutocompleteInput({
                             ) : null}
                         </button>
                     ))}
-                    {!isSearchLoading && !searchError && filtered.length === 0 && filteredAdditionalOptions.length === 0 && normalizedQuery.length >= 2 ? (
+                    {showNoResults ? (
                         <div role="status" className="px-3 py-4 text-center text-sm text-muted-foreground">
                             {t('common.autocomplete.noResults')}
                         </div>
                     ) : null}
+                    {showAddPartner ? (
+                        <button
+                            type="button"
+                            className="flex w-full items-center gap-2.5 border-t px-3 py-2.5 text-left text-sm font-medium text-primary transition-colors hover:bg-accent focus:bg-accent focus:outline-none"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={handleAddPartner}
+                        >
+                            <Plus className="h-4 w-4 shrink-0" />
+                            <span>{t('businessPartners.addPartner')}</span>
+                        </button>
+                    ) : null}
                 </div>
         </AutocompletePopover>
     )
+
+    return autocomplete
 }

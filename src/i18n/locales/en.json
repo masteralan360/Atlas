@@ -166,7 +166,7 @@
       "currencyMismatch": "Choose products that use the same currency.", "deliveryFeeRateFailed": "The delivery fee could not be converted to the order currency. Check exchange rates and try again.", "tryAgain": "Please try again."
     },
     "validation": {
-      "buyerRequired": "Enter or select a buyer.", "phoneRequired": "Enter a buyer phone number.", "sellerRequired": "Enter the staff member taking the order.",
+      "buyerRequired": "Enter or select a buyer.", "partnerNameRequired": "Enter a partner name.", "phoneRequired": "Enter a buyer phone number.", "partnerPhoneRequired": "Enter a partner phone number.", "sellerRequired": "Enter the staff member taking the order.",
       "storageRequired": "Choose a storage location.", "productRequired": "Add at least one product.", "discountLimit": "Discount cannot exceed {{percent}}%.",
       "amountRequired": "Enter a valid amount.", "cityRequired": "Enter a city.", "otherCityRequired": "Enter the city or region.", "nameRequired": "Enter a name.", "coachRequired": "Select an existing agent.",
       "coachExists": "This agent is already linked as a coach.",
@@ -2886,8 +2886,13 @@
     "form": {
       "role": "Role",
       "contactName": "Contact Name",
-      "partnerName": "Partner Name"
+      "partnerName": "Partner Name",
+      "partnerPhone": "Partner Phone Number",
+      "phoneForPartner": "{{name}}'s Phone Number",
+      "partnerAddress": "Partner Address",
+      "addressForPartner": "{{name}}'s Address"
     },
+    "stopPartnerCreation": "Stop partner creation",
     "duplicateDetection": {
       "nameAvailable": "No business partner with this name was found",
       "phoneAvailable": "No business partner with this phone number was found",

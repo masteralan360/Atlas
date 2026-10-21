@@ -21,7 +21,7 @@ import { createCommerceOperationRecord, refreshCommerceOperationRecords, updateC
 import { useProducts, useStorages, usePriceBooks, usePriceBookItems, useInventory, usePaymentAccountsState } from '@/local-db'
 import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
-import { CompactBusinessPartnerFormDialog, type CompactBusinessPartnerFormPayload } from '@/ui/components/crm/CompactBusinessPartnerFormDialog'
+import { PartnerCreationModeControl } from '@/ui/components/crm/PartnerCreationModeControl'
 import { ProductsViewModal, ProductsViewModalTrigger } from '@/ui/components/ProductsViewModal'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
@@ -66,12 +66,17 @@ import { formatCurrency, formatNumericInput, generateId, sanitizeNumericInput } 
 import { useDateRange } from '@/context/DateRangeContext'
 import { isOnline } from '@/lib/network'
 import { STANDARD_PAYMENT_METHODS, type PaymentMethodOption } from '@/lib/paymentMethods'
+import { getCommerceOperationsPartnerLabels } from './commerceOperationsPartnerLabels'
 
 type CommerceSection = 'social' | 'wholesale' | 'data' | 'coaches'
 type OrderChannel = 'social' | 'wholesale'
 type OrderSectionTab = 'recent' | 'newOrder'
 type DataRecordKind = Extract<CommerceOperationRecordType, 'ad_spend' | 'dm_funnel' | 'city_market' | 'competitor'>
 type OrderLineDraft = { id: string; product: Product | null; productQuery: string; quantity: string; price: number; costPrice: number; currency?: CurrencyCode; priceBookItemId?: string }
+
+function createEmptyOrderLine(): OrderLineDraft {
+  return { id: generateId(), product: null, productQuery: '', quantity: '1', price: 0, costPrice: 0 }
+}
 
 const PLATFORM_OPTIONS = ['instagram', 'tiktok', 'whatsapp', 'messenger', 'coach', 'other'] as const
 const COMMERCE_CITY_OPTIONS = [
@@ -208,7 +213,7 @@ export function CommerceOperations() {
   const [, navigate] = useLocation()
   const { dateRange, customDates } = useDateRange()
   const [section, setSection] = useState<CommerceSection>('social')
-  const [orderSectionTabs, setOrderSectionTabs] = useState<Record<OrderChannel, OrderSectionTab>>({ social: 'recent', wholesale: 'recent' })
+  const [orderSectionTabs, setOrderSectionTabs] = useState<Record<OrderChannel, OrderSectionTab>>({ social: 'newOrder', wholesale: 'newOrder' })
   const [dataDialogOpen, setDataDialogOpen] = useState(false)
   const [editingDataRecord, setEditingDataRecord] = useState<CommerceOperationRecord | null>(null)
   const [coachDialogOpen, setCoachDialogOpen] = useState(false)
@@ -323,7 +328,6 @@ export function CommerceOperations() {
               channel="social"
               active={orderSectionTabs.social === 'newOrder'}
               workspaceId={workspaceId}
-              defaultCurrency={features.default_currency}
               userId={user?.id}
               userName={user?.name || ''}
               userRole={user?.role}
@@ -359,7 +363,6 @@ export function CommerceOperations() {
               channel="wholesale"
               active={orderSectionTabs.wholesale === 'newOrder'}
               workspaceId={workspaceId}
-              defaultCurrency={features.default_currency}
               userId={user?.id}
               userName={user?.name || ''}
               userRole={user?.role}
@@ -465,8 +468,8 @@ function OrdersSection({
       {!canCreate ? <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-muted-foreground">{t('commerceOperations.orders.prerequisite')}</div> : null}
       <div className="flex flex-wrap items-center justify-between gap-2 border-b">
         <div className="flex min-w-0 gap-2" role="tablist" aria-label={t(channel === 'social' ? 'commerceOperations.social.title' : 'commerceOperations.wholesale.title')}>
-          <Button type="button" id={`${channel}-recent-tab`} role="tab" aria-controls={`${channel}-recent-panel`} aria-selected={activeTab === 'recent'} variant={activeTab === 'recent' ? 'default' : 'ghost'} className="-mb-px gap-2 rounded-b-none" onClick={() => onTabChange('recent')}><Activity className="h-4 w-4" />{t('commerceOperations.orders.recent')}</Button>
           <Button type="button" id={`${channel}-new-order-tab`} role="tab" aria-controls={`${channel}-new-order-panel`} aria-selected={activeTab === 'newOrder'} variant={activeTab === 'newOrder' ? 'default' : 'ghost'} className="-mb-px gap-2 rounded-b-none" onClick={() => onTabChange('newOrder')}><Plus className="h-4 w-4" />{t('commerceOperations.actions.newOrder')}</Button>
+          <Button type="button" id={`${channel}-recent-tab`} role="tab" aria-controls={`${channel}-recent-panel`} aria-selected={activeTab === 'recent'} variant={activeTab === 'recent' ? 'default' : 'ghost'} className="-mb-px gap-2 rounded-b-none" onClick={() => onTabChange('recent')}><Activity className="h-4 w-4" />{t('commerceOperations.orders.recent')}</Button>
         </div>
         <Button variant="outline" className="mb-1 shrink-0 gap-2" onClick={() => navigate('/products')}><Package className="h-4 w-4" />{t('commerceOperations.actions.products')}</Button>
       </div>
@@ -639,11 +642,10 @@ function recordSummary(record: CommerceOperationRecord, t: (key: string, options
   }
 }
 
-function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId, userName, userRole, products, storages, priceBooks, priceBookItems, agents, agentsLoaded, businessPartners, available, maxDiscountPercent, iqdPreference, onSaved, t }: {
+function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userRole, products, storages, priceBooks, priceBookItems, agents, agentsLoaded, businessPartners, available, maxDiscountPercent, iqdPreference, onSaved, t }: {
   active: boolean
   channel: OrderChannel
   workspaceId?: string
-  defaultCurrency: CurrencyCode
   userId?: string
   userName: string
   userRole?: 'admin' | 'staff' | 'viewer'
@@ -665,8 +667,7 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
   const [buyerName, setBuyerName] = useState('')
   const [buyerPhone, setBuyerPhone] = useState('')
   const [buyerPartner, setBuyerPartner] = useState<BusinessPartner | null>(null)
-  const [createCustomerOpen, setCreateCustomerOpen] = useState(false)
-  const [creatingCustomer, setCreatingCustomer] = useState(false)
+  const [isEnteringNewBuyer, setIsEnteringNewBuyer] = useState(false)
   const [platform, setPlatform] = useState<(typeof PLATFORM_OPTIONS)[number]>('instagram')
   const [agentId, setAgentId] = useState('')
   const [agentNameSnapshot, setAgentNameSnapshot] = useState('')
@@ -677,7 +678,7 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
   const [notes, setNotes] = useState('')
   const [storageId, setStorageId] = useState('')
   const [priceBookId, setPriceBookId] = useState('')
-  const [lines, setLines] = useState<OrderLineDraft[]>([])
+  const [lines, setLines] = useState<OrderLineDraft[]>(() => [createEmptyOrderLine()])
   const [browseLineId, setBrowseLineId] = useState<string | null>(null)
   const [deliveryFee, setDeliveryFee] = useState('')
   const [deliveryFeeTouched, setDeliveryFeeTouched] = useState(false)
@@ -775,6 +776,12 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
     && (city !== 'other' || otherCity.trim()) && !deliveryFeeInvalid && !discountInvalid && totalCurrency
     && (!agentId || (platform === 'coach' && agentsLoaded && selectedAgentAvailable)),
   )
+  const isCreatingBuyer = isEnteringNewBuyer
+  const partnerCreationLabels = getCommerceOperationsPartnerLabels(buyerName, t)
+  const partnerCreationHighlightClass = 'rounded-lg border border-primary/40 bg-primary/5 p-3 ring-2 ring-primary/10'
+  const buyerNameLabel = isCreatingBuyer ? partnerCreationLabels.name : t('commerceOperations.fields.buyer')
+  const buyerPhoneLabel = isCreatingBuyer ? partnerCreationLabels.phone : t('commerceOperations.fields.phone')
+  const buyerAddressLabel = isCreatingBuyer ? partnerCreationLabels.address : t('commerceOperations.fields.address')
 
   useEffect(() => {
     if (!storageId && storages[0]) setStorageId(storages[0].id)
@@ -784,7 +791,7 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
     setBuyerName('')
     setBuyerPhone('')
     setBuyerPartner(null)
-    setCreateCustomerOpen(false)
+    setIsEnteringNewBuyer(false)
     setPlatform('instagram')
     setAgentId('')
     setAgentNameSnapshot('')
@@ -795,7 +802,7 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
     setNotes('')
     setStorageId(storages[0]?.id || '')
     setPriceBookId('')
-    setLines([])
+    setLines([createEmptyOrderLine()])
     setBrowseLineId(null)
     setProductsModalOpen(false)
     setDeliveryFee('')
@@ -810,6 +817,27 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
     setOrderId(generateId())
     setAttempted(false)
     setDate(new Date())
+  }
+
+  function handleBuyerNameChange(value: string) {
+    setBuyerName(value)
+    if (buyerPartner) {
+      setBuyerPartner(null)
+      setBuyerPhone('')
+    }
+  }
+
+  function handleBuyerPartnerSelected(partner: BusinessPartner) {
+    setBuyerPartner(partner)
+    setBuyerName(partner.partnerName)
+    setBuyerPhone(partner.phone || '')
+    setIsEnteringNewBuyer(false)
+  }
+
+  function handleBuyerAddPartner(partnerName: string) {
+    setBuyerName(partnerName)
+    setBuyerPartner(null)
+    setIsEnteringNewBuyer(true)
   }
 
   async function continueToPayment() {
@@ -838,9 +866,7 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
   }
 
   function addLine() {
-    setLines((current) => [...current, {
-      id: generateId(), product: null, productQuery: '', quantity: '1', price: 0, costPrice: 0,
-    }])
+    setLines((current) => [...current, createEmptyOrderLine()])
   }
 
   function selectProduct(lineId: string, product: Product) {
@@ -884,27 +910,6 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
     if (browseLineId === lineId) setBrowseLineId(null)
   }
 
-  async function createAndSelectCustomer(payload: CompactBusinessPartnerFormPayload) {
-    if (!workspaceId) return
-    setCreatingCustomer(true)
-    try {
-      const partner = await createBusinessPartner(workspaceId, payload)
-      setBuyerPartner(partner)
-      setBuyerName(partner.partnerName)
-      setBuyerPhone(partner.phone || '')
-      setCreateCustomerOpen(false)
-      toast({ title: t('customers.messages.addSuccess') })
-    } catch {
-      toast({
-        title: t('common.error'),
-        description: t('customers.messages.addError'),
-        variant: 'destructive',
-      })
-    } finally {
-      setCreatingCustomer(false)
-    }
-  }
-
   async function saveCompletedPaidOrder() {
     if (!canSave || !workspaceId || !totalCurrency || !paymentDialogOpen) return
     if (paymentRequired && (!paymentMethod || !STANDARD_PAYMENT_METHODS.includes(paymentMethod as typeof STANDARD_PAYMENT_METHODS[number]))) return
@@ -937,7 +942,7 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
 
       let partner = buyerPartner
       if (!partner) {
-        partner = await createBusinessPartner(workspaceId, {
+        const createdPartner = await createBusinessPartner(workspaceId, {
           partnerName: buyerName.trim(),
           phone: buyerPhone.trim(),
           address: address.trim() || undefined,
@@ -946,6 +951,8 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
           role: 'customer',
           creditLimit: 0,
         })
+        partner = createdPartner
+        setBuyerPartner(createdPartner)
       }
       const savedAt = date.toISOString()
       const subtotal = Math.round(lineSubtotal * 100) / 100
@@ -1053,33 +1060,52 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
       <CardContent className="space-y-5">
           {!available ? <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-muted-foreground">{t('commerceOperations.orders.prerequisite')}</div> : null}
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <RequiredLabel>{t('commerceOperations.fields.buyer')}</RequiredLabel>
+            <div className={`space-y-2 ${isCreatingBuyer ? partnerCreationHighlightClass : ''}`}>
+              <RequiredLabel>{buyerNameLabel}</RequiredLabel>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <PartnerAutocompleteInput value={buyerName} onChange={(value) => { setBuyerName(value); if (buyerPartner) { setBuyerPartner(null); setBuyerPhone('') } }} onSelectPartner={(partner) => { setBuyerPartner(partner); setBuyerName(partner.partnerName); setBuyerPhone(partner.phone || '') }} workspaceId={workspaceId || ''} roles={['customer', 'both', 'online_customer']} placeholder={t('commerceOperations.placeholders.findBuyer')} disabled={saving || !workspaceId} className="min-w-0 flex-1" />
-                {channel === 'social' ? (
-                  <Button type="button" size="icon" variant="outline" className="h-10 w-10 shrink-0" aria-label={t('customers.addQuickCustomer')} title={t('customers.addQuickCustomer')} onClick={() => setCreateCustomerOpen(true)} disabled={saving || creatingCustomer || !workspaceId}>
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                ) : (
+                <PartnerAutocompleteInput
+                  value={buyerName}
+                  onChange={handleBuyerNameChange}
+                  onSelectPartner={handleBuyerPartnerSelected}
+                  workspaceId={workspaceId || ''}
+                  roles={['customer', 'both', 'online_customer']}
+                  placeholder={t('commerceOperations.placeholders.findBuyer')}
+                  disabled={saving || !workspaceId}
+                  className="min-w-0 flex-1"
+                  addPartner={{
+                    onActivate: handleBuyerAddPartner,
+                    active: isCreatingBuyer,
+                    canCreate: !buyerPartner,
+                  }}
+                />
+                {channel === 'wholesale' ? (
                   <Button type="button" size="icon" variant="outline" aria-label={t('commerceOperations.actions.unlinkBuyer')} title={t('commerceOperations.actions.unlinkBuyer')} disabled={!buyerPartner || saving} onClick={() => { setBuyerPartner(null); setBuyerName(''); setBuyerPhone('') }}><X className="h-4 w-4" /></Button>
-                )}
+                ) : null}
               </div>
+              <PartnerCreationModeControl
+                active={isCreatingBuyer}
+                onStop={() => setIsEnteringNewBuyer(false)}
+                disabled={saving}
+              />
               {buyerPartner ? channel === 'social' ? (
                 <div className="flex flex-col gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="min-w-0">
                     <Badge className="gap-1"><Check className="h-3 w-3" />{t('commerceOperations.labels.linked')}</Badge>
                     <p className="mt-1 truncate text-sm font-semibold">{buyerPartner.partnerName}</p>
                   </div>
-                  <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0 px-2 text-muted-foreground" disabled={saving} onClick={() => { setBuyerPartner(null); setBuyerName(''); setBuyerPhone('') }}>
+                  <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0 px-2 text-muted-foreground" disabled={saving} onClick={() => { setBuyerPartner(null); setBuyerName(''); setBuyerPhone(''); setIsEnteringNewBuyer(false) }}>
                     <Unlink className="h-4 w-4" />
                     {t('commerceOperations.actions.unlinkBuyer')}
                   </Button>
                 </div>
               ) : <Badge className="gap-1"><Check className="h-3 w-3" />{t('commerceOperations.labels.linked')}</Badge> : null}
-              {attempted && !buyerName.trim() ? <p className="text-xs text-destructive">{t('commerceOperations.validation.buyerRequired')}</p> : null}
+              {attempted && !buyerName.trim() ? <p className="text-xs text-destructive">{t(isCreatingBuyer ? 'commerceOperations.validation.partnerNameRequired' : 'commerceOperations.validation.buyerRequired')}</p> : null}
             </div>
-            <div className="space-y-2"><RequiredLabel htmlFor="commerce-buyer-phone">{t('commerceOperations.fields.phone')}</RequiredLabel><Input id="commerce-buyer-phone" value={buyerPhone} onChange={(event) => setBuyerPhone(event.target.value)} placeholder={t('commerceOperations.placeholders.phone')} disabled={saving} />{attempted && !buyerPhone.trim() ? <p className="text-xs text-destructive">{t('commerceOperations.validation.phoneRequired')}</p> : null}</div>
+            <div className={`space-y-2 ${isCreatingBuyer ? partnerCreationHighlightClass : ''}`}>
+              <RequiredLabel htmlFor="commerce-buyer-phone">{buyerPhoneLabel}</RequiredLabel>
+              <Input id="commerce-buyer-phone" value={buyerPhone} onChange={(event) => setBuyerPhone(event.target.value)} placeholder={t('commerceOperations.placeholders.phone')} disabled={saving} />
+              {attempted && !buyerPhone.trim() ? <p className="text-xs text-destructive">{t(isCreatingBuyer ? 'commerceOperations.validation.partnerPhoneRequired' : 'commerceOperations.validation.phoneRequired')}</p> : null}
+            </div>
             <div className="space-y-2"><RequiredLabel htmlFor="commerce-seller">{t('commerceOperations.fields.seller')}</RequiredLabel><Input id="commerce-seller" value={seller} onChange={(event) => setSeller(event.target.value)} placeholder={t('commerceOperations.placeholders.seller')} disabled={saving} />{attempted && !seller.trim() ? <p className="text-xs text-destructive">{t('commerceOperations.validation.sellerRequired')}</p> : null}</div>
             {channel === 'social' ? <div className="space-y-2"><RequiredLabel>{t('commerceOperations.fields.platform')}</RequiredLabel><Select value={platform} onValueChange={(value) => {
               const nextPlatform = value as typeof platform
@@ -1151,7 +1177,10 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
                 {attempted && !otherCity.trim() ? <p className="text-xs text-destructive">{t('commerceOperations.validation.otherCityRequired')}</p> : null}
               </div>
             ) : null}
-            <div className="space-y-2"><Label htmlFor="commerce-address">{t('commerceOperations.fields.address')}</Label><Input id="commerce-address" value={address} onChange={(event) => setAddress(event.target.value)} placeholder={t('commerceOperations.placeholders.address')} disabled={saving} /></div>
+            <div className={`space-y-2 ${isCreatingBuyer ? partnerCreationHighlightClass : ''}`}>
+              <Label htmlFor="commerce-address">{buyerAddressLabel}</Label>
+              <Input id="commerce-address" value={address} onChange={(event) => setAddress(event.target.value)} placeholder={t('commerceOperations.placeholders.address')} disabled={saving} />
+            </div>
             <div className="space-y-2"><RequiredLabel>{t('commerceOperations.fields.orderDate')}</RequiredLabel><DateTimePicker date={date} setDate={(next) => next && setDate(next)} mode="date" disabled={saving} placeholder={t('commerceOperations.fields.orderDate')} /></div>
             <div className="space-y-2"><RequiredLabel>{t('commerceOperations.fields.storage')}</RequiredLabel><Select value={storageId} onValueChange={setStorageId} disabled={saving || !storages.length}><SelectTrigger><SelectValue placeholder={t('commerceOperations.placeholders.storage')} /></SelectTrigger><SelectContent>{storages.map((storage) => <SelectItem key={storage.id} value={storage.id}>{storage.name}</SelectItem>)}</SelectContent></Select>{attempted && !storageId ? <p className="text-xs text-destructive">{t('commerceOperations.validation.storageRequired')}</p> : null}</div>
           </div>
@@ -1282,19 +1311,6 @@ function OrderIntakeForm({ active, channel, workspaceId, defaultCurrency, userId
           noProductsLabel: t('inventoryTransfer.noProductsInSource'),
         }}
       />
-      {channel === 'social' ? (
-        <CompactBusinessPartnerFormDialog
-          isOpen={createCustomerOpen}
-          onOpenChange={setCreateCustomerOpen}
-          workspaceId={workspaceId}
-          defaultCurrency={defaultCurrency}
-          role="customer"
-          title={t('customers.addQuickCustomer')}
-          submitLabel={t('common.create')}
-          isSaving={creatingCustomer}
-          onSubmit={createAndSelectCustomer}
-        />
-      ) : null}
     <AppDialog open={paymentDialogOpen} onOpenChange={(next) => { if (!saving && !preparingPayment) setPaymentDialogOpen(next) }}>
       <AppDialogContent className="max-w-lg" onPointerDownOutside={(event) => (saving || preparingPayment) && event.preventDefault()} onEscapeKeyDown={(event) => (saving || preparingPayment) && event.preventDefault()}>
         <AppDialogHeader><AppDialogTitle className="flex items-center gap-2">{paymentRequired ? <Wallet className="h-5 w-5 text-primary" /> : <ShoppingBag className="h-5 w-5 text-primary" />}{t(paymentRequired ? 'commerceOperations.order.paymentTitle' : 'orders.status.completed')}</AppDialogTitle></AppDialogHeader>

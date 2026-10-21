@@ -1,4 +1,4 @@
-import Dexie, { type Table } from "dexie";
+import Dexie, { type InsertType, type Table } from "dexie";
 import { useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useQuery } from "@tanstack/react-query";
@@ -1460,7 +1460,7 @@ type WorkspaceRelatedRecord = {
 };
 
 async function cacheInventoryTransactionRelatedRows<T extends WorkspaceRelatedRecord>(
-  table: Table<T, string>,
+  table: Table<T, string, InsertType<T, "id">>,
   rows: readonly T[],
 ) {
   if (rows.length === 0) return;
@@ -1484,15 +1484,15 @@ async function cacheInventoryTransactionRelatedRows<T extends WorkspaceRelatedRe
   if (cacheRows.length > 0) await table.bulkPut(cacheRows);
 }
 
-async function fetchInventoryTransactionRelatedRows(
+async function fetchInventoryTransactionRelatedRows<T extends WorkspaceRelatedRecord>(
   tableName: string,
   workspaceId: string,
   ids: readonly string[],
   signal: AbortSignal,
   filterColumn = "id",
-) {
+): Promise<T[]> {
   const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
-  if (uniqueIds.length === 0 || signal.aborted) return [] as WorkspaceRelatedRecord[];
+  if (uniqueIds.length === 0 || signal.aborted) return [];
   try {
     const response = await runSupabaseAction(`inventoryTransactions.pageRelations.${tableName}`, () => {
       const request = getSupabaseClientForTable(tableName)
@@ -1502,15 +1502,15 @@ async function fetchInventoryTransactionRelatedRows(
         .in(filterColumn, uniqueIds);
       return request.abortSignal(signal);
     });
-    if (response.error) return [] as WorkspaceRelatedRecord[];
+    if (response.error) return [];
     return (response.data ?? []).flatMap((value) => {
       if (!value || typeof value !== "object" || Array.isArray(value)) return [];
       const row = toCamelCase(value as Record<string, unknown>) as Record<string, unknown>;
       if (typeof row.id !== "string" || row.workspaceId !== workspaceId) return [];
-      return [row as WorkspaceRelatedRecord];
+      return [row as T];
     });
   } catch {
-    return [] as WorkspaceRelatedRecord[];
+    return [];
   }
 }
 
@@ -1536,13 +1536,13 @@ async function hydrateInventoryTransactionPageRelations(
   const purchaseOrderIds = bySource("purchase-order");
 
   const [products, storages, directSales, saleReturns, directSalesOrders, purchaseOrders, returnItems] = await Promise.all([
-    fetchInventoryTransactionRelatedRows("products", workspaceId, productIds, signal),
-    fetchInventoryTransactionRelatedRows("storages", workspaceId, storageIds, signal),
-    fetchInventoryTransactionRelatedRows("sales", workspaceId, posSaleIds, signal),
-    fetchInventoryTransactionRelatedRows("sale_returns", workspaceId, posReturnIds, signal),
-    fetchInventoryTransactionRelatedRows("sales_orders", workspaceId, salesOrderIds, signal),
-    fetchInventoryTransactionRelatedRows("purchase_orders", workspaceId, purchaseOrderIds, signal),
-    fetchInventoryTransactionRelatedRows("order_return_items", workspaceId, salesOrderReturnIds, signal, "return_id"),
+    fetchInventoryTransactionRelatedRows<Product>("products", workspaceId, productIds, signal),
+    fetchInventoryTransactionRelatedRows<Storage>("storages", workspaceId, storageIds, signal),
+    fetchInventoryTransactionRelatedRows<Sale>("sales", workspaceId, posSaleIds, signal),
+    fetchInventoryTransactionRelatedRows<SaleReturn>("sale_returns", workspaceId, posReturnIds, signal),
+    fetchInventoryTransactionRelatedRows<SalesOrder>("sales_orders", workspaceId, salesOrderIds, signal),
+    fetchInventoryTransactionRelatedRows<PurchaseOrder>("purchase_orders", workspaceId, purchaseOrderIds, signal),
+    fetchInventoryTransactionRelatedRows<OrderReturnItem>("order_return_items", workspaceId, salesOrderReturnIds, signal, "return_id"),
   ]);
   if (signal.aborted) return;
 
@@ -1552,23 +1552,23 @@ async function hydrateInventoryTransactionPageRelations(
   ]));
   const relatedSales = saleReturns.length === 0
     ? directSales
-    : await fetchInventoryTransactionRelatedRows("sales", workspaceId, saleIds, signal);
+    : await fetchInventoryTransactionRelatedRows<Sale>("sales", workspaceId, saleIds, signal);
   const relatedOrderIds = Array.from(new Set([
     ...salesOrderIds,
     ...returnItems.flatMap((item) => typeof item.orderId === "string" ? [item.orderId] : []),
   ]));
   const relatedSalesOrders = returnItems.length === 0
     ? directSalesOrders
-    : await fetchInventoryTransactionRelatedRows("sales_orders", workspaceId, relatedOrderIds, signal);
+    : await fetchInventoryTransactionRelatedRows<SalesOrder>("sales_orders", workspaceId, relatedOrderIds, signal);
 
   await Promise.all([
-    cacheInventoryTransactionRelatedRows(db.products, products as Product[]),
-    cacheInventoryTransactionRelatedRows(db.storages, storages as Storage[]),
-    cacheInventoryTransactionRelatedRows(db.sales, relatedSales as Sale[]),
-    cacheInventoryTransactionRelatedRows(db.sale_returns, saleReturns as SaleReturn[]),
-    cacheInventoryTransactionRelatedRows(db.sales_orders, relatedSalesOrders as SalesOrder[]),
-    cacheInventoryTransactionRelatedRows(db.purchase_orders, purchaseOrders as PurchaseOrder[]),
-    cacheInventoryTransactionRelatedRows(db.order_return_items, returnItems as OrderReturnItem[]),
+    cacheInventoryTransactionRelatedRows(db.products, products),
+    cacheInventoryTransactionRelatedRows(db.storages, storages),
+    cacheInventoryTransactionRelatedRows(db.sales, relatedSales),
+    cacheInventoryTransactionRelatedRows(db.sale_returns, saleReturns),
+    cacheInventoryTransactionRelatedRows(db.sales_orders, relatedSalesOrders),
+    cacheInventoryTransactionRelatedRows(db.purchase_orders, purchaseOrders),
+    cacheInventoryTransactionRelatedRows(db.order_return_items, returnItems),
   ]);
 }
 

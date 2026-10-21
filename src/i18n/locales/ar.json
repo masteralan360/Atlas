@@ -165,7 +165,7 @@
       "currencyMismatch": "اختر منتجات تستخدم العملة نفسها.", "deliveryFeeRateFailed": "تعذر تحويل رسوم التوصيل إلى عملة الطلب. تحقق من أسعار الصرف وحاول مرة أخرى.", "tryAgain": "يرجى المحاولة مرة أخرى."
     },
     "validation": {
-      "buyerRequired": "أدخل مشترياً أو اختره.", "phoneRequired": "أدخل رقم هاتف المشتري.", "sellerRequired": "أدخل اسم الموظف الذي يستلم الطلب.",
+      "buyerRequired": "أدخل مشترياً أو اختره.", "partnerNameRequired": "أدخل اسم الشريك.", "phoneRequired": "أدخل رقم هاتف المشتري.", "partnerPhoneRequired": "أدخل رقم هاتف الشريك.", "sellerRequired": "أدخل اسم الموظف الذي يستلم الطلب.",
       "storageRequired": "اختر موقع التخزين.", "productRequired": "أضف منتجاً واحداً على الأقل.", "discountLimit": "يجب ألا يتجاوز الخصم {{percent}}%.",
       "amountRequired": "أدخل مبلغاً صالحاً.", "cityRequired": "أدخل المدينة.", "otherCityRequired": "أدخل المدينة أو المنطقة.", "nameRequired": "أدخل اسماً.", "coachRequired": "اختر وكيلاً موجوداً.",
       "coachExists": "هذا الوكيل مرتبط بالفعل كمدرب.",
@@ -6603,8 +6603,13 @@
     "form": {
       "role": "الدور",
       "contactName": "اسم جهة الاتصال",
-      "partnerName": "اسم الشريك"
+      "partnerName": "اسم الشريك",
+      "partnerPhone": "رقم هاتف الشريك",
+      "phoneForPartner": "رقم هاتف {{name}}",
+      "partnerAddress": "عنوان الشريك",
+      "addressForPartner": "عنوان {{name}}"
     },
+    "stopPartnerCreation": "إيقاف إنشاء الشريك",
     "duplicateDetection": {
       "nameAvailable": "لم يتم العثور على شريك أعمال بهذا الاسم",
       "phoneAvailable": "لم يتم العثور على شريك أعمال برقم الهاتف هذا",

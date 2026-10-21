@@ -165,7 +165,7 @@
       "currencyMismatch": "بەرهەمەکان بە هەمان دراو هەڵبژێرە.", "deliveryFeeRateFailed": "نەتوانرا کرێی گەیاندن بۆ دراوی داواکاری بگۆڕدرێت. نرخی دراو بپشکنە و دووبارە هەوڵ بدەرەوە.", "tryAgain": "تکایە دووبارە هەوڵ بدەرەوە."
     },
     "validation": {
-      "buyerRequired": "کڕیار بنووسە یان هەڵبژێرە.", "phoneRequired": "ژمارەی تەلەفۆنی کڕیار بنووسە.", "sellerRequired": "ناوی کارمەندی وەرگری داواکاری بنووسە.",
+      "buyerRequired": "کڕیار بنووسە یان هەڵبژێرە.", "partnerNameRequired": "ناوی هاوبەش بنووسە.", "phoneRequired": "ژمارەی تەلەفۆنی کڕیار بنووسە.", "partnerPhoneRequired": "ژمارەی تەلەفۆنی هاوبەش بنووسە.", "sellerRequired": "ناوی کارمەندی وەرگری داواکاری بنووسە.",
       "storageRequired": "شوێنی کۆگا هەڵبژێرە.", "productRequired": "لانیکەم یەک بەرهەم زیاد بکە.", "discountLimit": "داشکاندن نابێت لە {{percent}}% زیاتر بێت.",
       "amountRequired": "بڕێکی دروست بنووسە.", "cityRequired": "شار بنووسە.", "otherCityRequired": "شار یان دەڤەر بنووسە.", "nameRequired": "ناو بنووسە.", "coachRequired": "نوێنەرێکی هەبوو هەڵبژێرە.",
       "coachExists": "ئەم نوێنەرە پێشتر وەک ڕاهێنەر بەستراوەتەوە.",
@@ -6608,8 +6608,13 @@
     "form": {
       "role": "ڕۆڵ",
       "contactName": "ناوی پەیوەندی",
-      "partnerName": "ناوی هاوبەش"
+      "partnerName": "ناوی هاوبەش",
+      "partnerPhone": "ژمارەی تەلەفۆنی هاوبەش",
+      "phoneForPartner": "ژمارەی تەلەفۆنی {{name}}",
+      "partnerAddress": "ناونیشانی هاوبەش",
+      "addressForPartner": "ناونیشانی {{name}}"
     },
+    "stopPartnerCreation": "وەستاندنی دروستکردنی هاوبەش",
     "duplicateDetection": {
       "nameAvailable": "هیچ هاوبەشێکی بازرگانی بەو ناوە نەدۆزرایەوە",
       "phoneAvailable": "هیچ هاوبەشێکی بازرگانی بەو ژمارە تەلەفۆنە نەدۆزرایەوە",
