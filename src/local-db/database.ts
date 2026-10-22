@@ -10,6 +10,7 @@ import type { PartnerSummaryJob } from './partnerSummaryJobs'
 import { invalidatePartnerSummaries } from './partnerSummaryState'
 import type {
   Product,
+  ProductStorageAssignment,
   ProductUom,
   ProductBarcode,
   PriceBook,
@@ -471,6 +472,7 @@ export class AtlasDatabase extends Dexie {
   service_access_category_members!: EntityTable<ServiceAccessCategoryMember, 'id'>
   service_access_category_services!: EntityTable<ServiceAccessCategoryService, 'id'>
   product_barcodes!: EntityTable<ProductBarcode, 'id'>
+  product_storage_assignments!: EntityTable<ProductStorageAssignment, 'id'>
   product_uoms!: EntityTable<ProductUom, 'id'>
   price_books!: EntityTable<PriceBook, 'id'>
   price_book_items!: EntityTable<PriceBookItem, 'id'>
@@ -4010,6 +4012,86 @@ export class AtlasDatabase extends Dexie {
       }
     })
 
+    this.version(146).stores({
+      product_storage_assignments:
+        'id, workspaceId, productId, storageId, updatedAt, isDeleted, syncStatus, [workspaceId+productId], [workspaceId+storageId]'
+    }).upgrade(async (tx) => {
+      const [products, inventoryRows, movements] = await Promise.all([
+        tx.table('products').toArray(),
+        tx.table('inventory').toArray(),
+        tx.table('inventory_transactions').toArray(),
+      ]) as [Product[], Inventory[], InventoryTransaction[]]
+      const storages = await tx.table('storages').toArray() as Storage[]
+      const storageWorkspaceById = new Map(storages.map((storage) => [storage.id, storage.workspaceId]))
+      const latestMovements = new Map<string, InventoryTransaction>()
+      const positionKey = (workspaceId: string, productId: string, storageId: string) =>
+        `${workspaceId}\\u001f${productId}\\u001f${storageId}`
+      for (const movement of movements) {
+        if (movement.isDeleted) continue
+        const key = positionKey(movement.workspaceId, movement.productId, movement.storageId)
+        const previous = latestMovements.get(key)
+        if (!previous
+          || movement.createdAt > previous.createdAt
+          || (movement.createdAt === previous.createdAt && movement.id > previous.id)) {
+          latestMovements.set(key, movement)
+        }
+      }
+
+      const assignments = new Map<string, ProductStorageAssignment>()
+      const productById = new Map(products.map((product) => [product.id, product]))
+      const addAssignment = (product: Product, storageId: string) => {
+        if (!storageId || storageWorkspaceById.get(storageId) !== product.workspaceId || product.isService || product.isDeleted) return
+        const id = `${product.id}:${storageId}`
+        if (assignments.has(id)) return
+        const timestamp = product.updatedAt || product.createdAt || new Date().toISOString()
+        assignments.set(id, {
+          id,
+          workspaceId: product.workspaceId,
+          productId: product.id,
+          storageId,
+          createdAt: product.createdAt || timestamp,
+          updatedAt: timestamp,
+          version: 1,
+          isDeleted: false,
+          syncStatus: 'synced',
+          lastSyncedAt: timestamp,
+        })
+      }
+
+      for (const product of products) {
+        if (product.storageId) addAssignment(product, product.storageId)
+      }
+      for (const row of inventoryRows) {
+        const product = productById.get(row.productId)
+        if (!product || product.workspaceId !== row.workspaceId || product.isService) continue
+        const latest = latestMovements.get(positionKey(row.workspaceId, row.productId, row.storageId))
+        if (!row.isDeleted || latest?.transactionType !== 'transfer_out') {
+          addAssignment(product, row.storageId)
+        }
+      }
+      for (const movement of latestMovements.values()) {
+        const product = productById.get(movement.productId)
+        if (product
+          && product.workspaceId === movement.workspaceId
+          && movement.transactionType !== 'transfer_out') {
+          addAssignment(product, movement.storageId)
+        }
+      }
+
+      const now = new Date().toISOString()
+      const productsWithAssignments = new Set(Array.from(assignments.values(), (row) => row.productId))
+      const updatedProducts = products.map((product) => {
+        const hasAssignment = productsWithAssignments.has(product.id)
+        return {
+          ...product,
+          storageScope: product.isService ? 'workspace' as const : hasAssignment ? 'storage' as const : 'unresolved' as const,
+          updatedAt: product.updatedAt || now,
+        }
+      })
+      if (assignments.size > 0) await tx.table('product_storage_assignments').bulkPut(Array.from(assignments.values()))
+      if (updatedProducts.length > 0) await tx.table('products').bulkPut(updatedProducts)
+    })
+
     const originalTransaction = this.transaction.bind(this) as (mode: string, ...args: unknown[]) => Promise<unknown>
 
     this.transaction = ((mode: string, ...args: unknown[]) => {
@@ -4056,6 +4138,7 @@ export class AtlasDatabase extends Dexie {
     const database = this
     const syncAwareTables = [
       'products',
+      'product_storage_assignments',
       'product_barcodes',
       'price_books',
       'price_book_items',
@@ -4300,6 +4383,7 @@ export async function clearDatabase(): Promise<void> {
     'rw',
     [
       db.products,
+      db.product_storage_assignments,
       db.product_barcodes,
       db.price_books,
       db.price_book_items,
@@ -4379,6 +4463,7 @@ export async function clearDatabase(): Promise<void> {
     ],
     async () => {
       await db.products.clear()
+      await db.product_storage_assignments.clear()
       await db.product_barcodes.clear()
       await db.price_books.clear()
       await db.price_book_items.clear()

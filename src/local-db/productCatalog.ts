@@ -20,7 +20,8 @@ import {
 } from '@/workspace/workspaceDataFreshness'
 
 import { db } from './database'
-import type { Category, CurrencyCode, Inventory, Product } from './models'
+import { getProductStorageAssignments } from './productStorageAssignments'
+import type { Category, CurrencyCode, Inventory, Product, ProductStorageAssignment } from './models'
 
 export interface ServicesCatalogPageQuery {
   workspaceId?: string
@@ -65,10 +66,18 @@ async function filterLocalAutocompleteProductsByStorage(
     .and((row) => !row.isDeleted && (!requirePositiveStock || Number(row.quantity) > 0))
     .toArray()
   const stockedProductIds = new Set(inventoryRows.map((row) => row.productId))
+  const assignments = await getProductStorageAssignments(workspaceId, physicalProducts.map((product) => product.id))
+  const assignedProductIds = new Set(
+    assignments.filter((row) => row.storageId === storageId).map((row) => row.productId)
+  )
 
   return physicalProducts.filter((product) => (
     stockedProductIds.has(product.id)
-    || (!requirePositiveStock && product.storageId === storageId)
+    || (!requirePositiveStock && (
+      assignedProductIds.has(product.id)
+      || product.storageScope === 'workspace'
+      || product.storageId === storageId
+    ))
   ))
 }
 
@@ -143,6 +152,7 @@ export interface ProductCatalogPageQuery {
 export interface ProductCatalogPage {
   products: Product[]
   inventoryRows: Inventory[]
+  assignmentRows: ProductStorageAssignment[]
   matchedProductIds: string[]
   availableCurrencies: CurrencyCode[]
   hasMultiStorageStock: boolean
@@ -154,6 +164,7 @@ export interface ProductCatalogPage {
 const EMPTY_PAGE: ProductCatalogPage = {
   products: [],
   inventoryRows: [],
+  assignmentRows: [],
   matchedProductIds: [],
   availableCurrencies: [],
   hasMultiStorageStock: false,
@@ -640,6 +651,7 @@ async function readProductCatalogPage(query: ProductCatalogPageQuery, trace?: Cr
     const result = response.data as {
       products?: unknown[]
       inventory?: unknown[]
+      product_storage_assignments?: unknown[]
       matched_product_ids?: unknown[]
       available_currencies?: unknown[]
       has_multi_storage_stock?: unknown
@@ -662,15 +674,28 @@ async function readProductCatalogPage(query: ProductCatalogPageQuery, trace?: Cr
       inventory.quantity = Number(inventory.quantity ?? 0)
       return inventory
     })
+    const assignmentRows = (Array.isArray(result.product_storage_assignments)
+      ? result.product_storage_assignments
+      : []).map((value) => {
+      const assignment = toCamelCase(value as Record<string, unknown>) as unknown as ProductStorageAssignment
+      assignment.workspaceId = workspaceId
+      assignment.syncStatus = 'synced'
+      assignment.lastSyncedAt = syncedAt
+      assignment.isDeleted = false
+      return assignment
+    })
     if (products.some((product) => product.workspaceId !== workspaceId || !product.id)) {
       throw new Error('The product catalog page returned a product outside the active workspace.')
     }
     if (inventoryRows.some((row) => row.workspaceId !== workspaceId || !row.id)) {
       throw new Error('The product catalog page returned inventory outside the active workspace.')
     }
-    return { result, products, inventoryRows }
+    if (assignmentRows.some((row) => row.workspaceId !== workspaceId || !row.id)) {
+      throw new Error('The product catalog page returned storage assignments outside the active workspace.')
+    }
+    return { result, products, inventoryRows, assignmentRows }
   }
-  const { result, products, inventoryRows } = trace
+  const { result, products, inventoryRows, assignmentRows } = trace
     ? await trace.measure('crudDebugger.stages.productResponse', 'response', normalizeResponse)
     : normalizeResponse()
 
@@ -711,6 +736,22 @@ async function readProductCatalogPage(query: ProductCatalogPageQuery, trace?: Cr
       })
       if (rowsToCache.length > 0) await db.inventory.bulkPut(rowsToCache)
     }
+    if (assignmentRows.length > 0) {
+      const existingRows = await db.product_storage_assignments.bulkGet(assignmentRows.map((row) => row.id))
+      const rowsToCache = assignmentRows.filter((row, index) => {
+        const existing = existingRows[index]
+        if (!existing || existing.syncStatus !== 'synced') return !existing
+        const localUpdatedAt = Date.parse(existing.updatedAt || '')
+        const remoteUpdatedAt = Date.parse(row.updatedAt || '')
+        const localChangedDuringFetch = Number.isFinite(localUpdatedAt)
+          && localUpdatedAt > Date.parse(fetchStartedAt)
+        const localIsNewer = Number.isFinite(localUpdatedAt)
+          && Number.isFinite(remoteUpdatedAt)
+          && localUpdatedAt > remoteUpdatedAt
+        return !localChangedDuringFetch && !localIsNewer
+      })
+      if (rowsToCache.length > 0) await db.product_storage_assignments.bulkPut(rowsToCache)
+    }
   }
   if (trace) await trace.measure('crudDebugger.stages.productCacheSync', 'data', syncDexieCache)
   else await syncDexieCache()
@@ -718,6 +759,7 @@ async function readProductCatalogPage(query: ProductCatalogPageQuery, trace?: Cr
   return {
     products,
     inventoryRows,
+    assignmentRows,
     matchedProductIds: Array.isArray(result.matched_product_ids)
       ? result.matched_product_ids.filter((id): id is string => typeof id === 'string')
       : [],

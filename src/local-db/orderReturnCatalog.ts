@@ -23,13 +23,18 @@ export async function readOrderReturnStockProductIds(workspaceId: string, produc
     // Cloud/Hybrid returns already require connectivity. Read the authoritative
     // type even when the local catalog is cold or contains an older service flag.
     for (let offset = 0; offset < ids.length; offset += 100) {
-      const result = await runSupabaseAction('orders.returnCatalog', () => getSupabaseClientForTable('products')
-        .from('products').select('id,workspace_id,is_service').eq('workspace_id', workspaceId)
-        .in('id', ids.slice(offset, offset + 100)))
+      const result = await runSupabaseAction('orders.returnCatalog', () => (getSupabaseClientForTable('products') as any)
+        .rpc('get_visible_products_for_current_user', {
+          p_workspace_id: workspaceId,
+          p_product_ids: ids.slice(offset, offset + 100),
+          p_offset: 0,
+          p_limit: 100
+        }))
       if (result.error) throw normalizeSupabaseActionError(result.error)
       for (const row of result.data ?? []) {
-        if (row.workspace_id === workspaceId && typeof row.is_service === 'boolean') {
-          products.set(row.id, { id: row.id, workspaceId, isService: row.is_service })
+        const product = row.product as Record<string, unknown> | null
+        if (product?.workspace_id === workspaceId && typeof product.is_service === 'boolean') {
+          products.set(row.id, { id: row.id, workspaceId, isService: product.is_service })
         }
       }
     }

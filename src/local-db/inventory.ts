@@ -16,6 +16,7 @@ import { getWorkspaceDataMode, isLocalWorkspaceMode } from '@/workspace/workspac
 import type { CrudTraceHandle } from '@/dev/crud-debugger/trace'
 
 import { db } from './database'
+import { ensureProductStorageAssignment, removeProductStorageAssignment } from './productStorageAssignments'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import { isAllowedInventoryQuantityTransition, isValidNewInventoryQuantity } from './inventoryDeficit'
 import type {
@@ -334,7 +335,28 @@ export async function syncInventoryRowsBestEffort(
         ])).values()
     )
 
-    if ((dedupedRows.length === 0 && !options.salesOrderCompletion) || !shouldUseCloudBusinessData(workspaceId)) {
+    if (!shouldUseCloudBusinessData(workspaceId)) {
+        await Promise.all(dedupedRows.map((row) => ensureProductStorageAssignment(
+            workspaceId,
+            row.productId,
+            row.storageId,
+            { remoteHydration: true },
+        )))
+        const emptyTransferOuts = (options.inventoryTransactions ?? []).filter((movement) => {
+            if (movement.transactionType !== 'transfer_out') return false
+            const row = dedupedRows.find((candidate) => (
+                candidate.productId === movement.productId && candidate.storageId === movement.storageId
+            ))
+            return !!row && (row.isDeleted || !isPositiveQuantity(row.quantity))
+        })
+        await Promise.all(emptyTransferOuts.map((movement) => removeProductStorageAssignment(
+            workspaceId,
+            movement.productId,
+            movement.storageId,
+        )))
+        return
+    }
+    if (dedupedRows.length === 0 && !options.salesOrderCompletion) {
         return
     }
 
@@ -463,6 +485,28 @@ export async function syncInventoryRowsBestEffort(
 
     const syncedAt = new Date().toISOString()
     await reconcileInventoryRowsSynced(dedupedRows, remoteRows, syncedAt)
+    await Promise.all(remoteRows.map((row) => {
+        const productId = typeof row.product_id === 'string' ? row.product_id : null
+        const storageId = typeof row.storage_id === 'string' ? row.storage_id : null
+        return productId && storageId
+            ? ensureProductStorageAssignment(workspaceId, productId, storageId, { remoteAlreadyPersisted: true })
+            : Promise.resolve(null)
+    }))
+    const emptyTransferOuts = (options.inventoryTransactions ?? []).filter((movement) => {
+        if (movement.transactionType !== 'transfer_out') return false
+        const row = remoteRows.find((candidate) => (
+            candidate.product_id === movement.productId && candidate.storage_id === movement.storageId
+        ))
+        return !!row && (row.is_deleted === true || !isPositiveQuantity(Number(row.quantity ?? 0)))
+    })
+    const assignmentRemovals = await Promise.allSettled(emptyTransferOuts.map((movement) => (
+        removeProductStorageAssignment(workspaceId, movement.productId, movement.storageId)
+    )))
+    for (const removal of assignmentRemovals) {
+        if (removal.status === 'rejected') {
+            console.error('[Inventory] Failed to retire a transferred storage assignment:', removal.reason)
+        }
+    }
     const productIds = Array.from(new Set(
         remoteRows
             .map((row) => row.product_id)
@@ -524,26 +568,39 @@ async function fetchPagedWorkspaceRows(
     const rows: Record<string, unknown>[] = []
 
     for (let from = 0; ; from += INVENTORY_FETCH_PAGE_SIZE) {
-        let query = client
-            .from(tableName)
-            .select('*')
-            .eq('workspace_id', workspaceId)
-            .eq('is_deleted', false)
+        let query = tableName === 'products'
+            ? (client as any).rpc('get_visible_products_for_current_user', {
+                p_workspace_id: workspaceId,
+                p_product_ids: null,
+                p_offset: from,
+                p_limit: INVENTORY_FETCH_PAGE_SIZE
+            })
+            : client
+                .from(tableName)
+                .select('*')
+                .eq('workspace_id', workspaceId)
+                .eq('is_deleted', false)
 
         if (applyFilters) {
             query = applyFilters(query)
         }
 
-        query = query
-            .order('id', { ascending: true })
-            .range(from, from + INVENTORY_FETCH_PAGE_SIZE - 1)
+        if (tableName !== 'products') {
+            query = query
+                .order('id', { ascending: true })
+                .range(from, from + INVENTORY_FETCH_PAGE_SIZE - 1)
+        }
 
         const { data, error } = await runSupabaseAction(`${tableName}.fetch.page`, () => query)
         if (error || !data || !await canReconcileCloudWorkspaceData(workspaceId)) {
             return null
         }
 
-        rows.push(...(data as Record<string, unknown>[]))
+        const pageRows = tableName === 'products'
+            ? (data as Array<{ product?: unknown }>).map((row: { product?: unknown }) => row.product)
+            : data
+        if (pageRows.some((row: unknown) => !row || typeof row !== 'object')) return null
+        rows.push(...(pageRows as Record<string, unknown>[]))
         if (data.length < INVENTORY_FETCH_PAGE_SIZE) {
             break
         }
@@ -605,12 +662,13 @@ async function fetchProductsForInventoryRows(
     for (let index = 0; index < productIds.length; index += INVENTORY_PRODUCT_FETCH_CHUNK_SIZE) {
         const chunk = productIds.slice(index, index + INVENTORY_PRODUCT_FETCH_CHUNK_SIZE)
         const { data, error } = await runSupabaseAction('inventory.products.fetchByIds', () =>
-            client
-                .from('products')
-                .select('*')
-                .eq('workspace_id', workspaceId)
-                .eq('is_deleted', false)
-                .in('id', chunk)
+            (client as any)
+                .rpc('get_visible_products_for_current_user', {
+                    p_workspace_id: workspaceId,
+                    p_product_ids: chunk,
+                    p_offset: 0,
+                    p_limit: chunk.length
+                })
                 .order('id', { ascending: true })
         )
 
@@ -618,7 +676,9 @@ async function fetchProductsForInventoryRows(
             return null
         }
 
-        rows.push(...(data as Record<string, unknown>[]))
+        const productRows = (data as Array<{ product?: unknown }>).map((row) => row.product)
+        if (productRows.some((row) => !row || typeof row !== 'object')) return null
+        rows.push(...(productRows as Record<string, unknown>[]))
     }
 
     return rows
@@ -1204,6 +1264,12 @@ export async function setProductInventoryFromLegacyInput(input: {
         ? await input.trace.measure('crudDebugger.stages.productInventory', 'persistence', persistInventory, localPersistenceDetails)
         : await persistInventory()
 
+    if (input.storageId && !isLocalWorkspaceMode(input.workspaceId)) {
+        await ensureProductStorageAssignment(input.workspaceId, input.productId, input.storageId)
+    } else if (input.storageId) {
+        await ensureProductStorageAssignment(input.workspaceId, input.productId, input.storageId, { remoteHydration: true })
+    }
+
     if (!input.skipRemoteSync && syncSource !== 'remote') {
         await syncInventoryRowsBestEffort(changedRows, input.workspaceId, {
             ...(movements.length > 0 ? {
@@ -1313,6 +1379,8 @@ export async function adjustInventoryQuantity(input: {
             nextQuantity: computedNextQuantity,
         }
     })
+
+    await ensureProductStorageAssignment(input.workspaceId, input.productId, input.storageId)
 
     if (!input.skipRemoteSync && syncSource !== 'remote') {
         try {

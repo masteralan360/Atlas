@@ -19,6 +19,7 @@ import { addToOfflineMutations } from './offlineMutations'
 import type {
   Inventory,
   Product,
+  ProductStorageAssignment,
   PurchaseOrder,
   Sale,
   SaleItem,
@@ -113,36 +114,95 @@ export function canAccessOrderForStorageAccess(
 }
 
 /**
- * Products remain global catalog entries, but non-admins only see a stock
- * product when it is assigned to at least one storage they can access.
+ * A product assigned to several storages remains visible when at least one of
+ * those storages is accessible. Return only the stock and location metadata
+ * that belongs to the current member's accessible storages.
  */
 export function filterProductsByStorageAccess<T extends Product>(
   products: readonly T[],
   inventoryRows: readonly Inventory[],
-  access: StorageAccess
+  access: StorageAccess,
+  assignmentRows: readonly ProductStorageAssignment[] = [],
 ) {
   if (access.isReady === false) {
     return []
   }
 
-  if (access.isAdmin || access.excludedStorageIds.size === 0) {
+  if (access.isAdmin) {
     return [...products]
   }
 
-  const accessibleProductIds = new Set(
-    inventoryRows
-      .filter((row) => !row.isDeleted && canAccessStorage(row.storageId, access))
-      .map((row) => row.productId)
-  )
+  const inventoryByProductId = new Map<string, Inventory[]>()
+  const assignmentsByProductId = new Map<string, ProductStorageAssignment[]>()
+  for (const row of inventoryRows) {
+    if (row.isDeleted) continue
+    const rows = inventoryByProductId.get(row.productId) ?? []
+    rows.push(row)
+    inventoryByProductId.set(row.productId, rows)
+  }
+  for (const row of assignmentRows) {
+    if (row.isDeleted) continue
+    const rows = assignmentsByProductId.get(row.productId) ?? []
+    rows.push(row)
+    assignmentsByProductId.set(row.productId, rows)
+  }
 
-  return products.filter((product) => {
-    // Services and unassigned catalog entries have no location-specific stock.
-    if (product.isService || !product.storageId) {
-      return true
+  const visibleProducts: T[] = []
+  for (const product of products) {
+    if (product.isService) {
+      visibleProducts.push(product)
+      continue
     }
 
-    return canAccessStorage(product.storageId, access) || accessibleProductIds.has(product.id)
-  })
+    const positions = inventoryByProductId.get(product.id) ?? []
+    const assignments = assignmentsByProductId.get(product.id) ?? []
+    const accessiblePositions = positions.filter((row) => canAccessStorage(row.storageId, access))
+    const accessibleAssignments = assignments.filter((row) => canAccessStorage(row.storageId, access))
+    const hasAccessiblePrimaryStorage = canAccessStorage(product.storageId, access)
+    const hasVisiblePrimaryStorage = !!product.storageId && hasAccessiblePrimaryStorage
+
+    if (product.storageScope === 'unresolved') continue
+
+    if (product.storageScope === 'storage') {
+      const hasAccessibleMembership = accessibleAssignments.length > 0
+        || accessiblePositions.length > 0
+        || (
+          assignments.length === 0
+          && positions.length === 0
+          && !!product.storageId
+          && hasAccessiblePrimaryStorage
+        )
+      // Preserve the product's visibility rule: a storage-scoped product is
+      // visible only through a storage the current member can access.
+      if (!hasAccessibleMembership) continue
+    } else if (product.storageScope === 'workspace') {
+      // Workspace-scoped products retain their existing all-or-nothing
+      // boundary. Partial visibility applies to durable storage assignments.
+      if (!hasAccessiblePrimaryStorage || accessiblePositions.length !== positions.length) continue
+    } else {
+      // Legacy rows without an explicit scope fail closed when any known
+      // primary or inventory location is restricted.
+      if (!hasAccessiblePrimaryStorage || accessiblePositions.length !== positions.length) continue
+    }
+
+    const visibleQuantity = accessiblePositions.reduce((total, row) => {
+      const quantity = Number(row.quantity)
+      return total + (Number.isFinite(quantity) ? quantity : 0)
+    }, 0)
+
+    // A storage-scoped row's `quantity` is a workspace-wide snapshot. It must
+    // never survive when no accessible inventory positions were returned.
+    const safeQuantity = product.storageScope === 'storage' || accessiblePositions.length > 0
+      ? visibleQuantity
+      : Number(product.quantity) || 0
+    visibleProducts.push({
+      ...product,
+      quantity: safeQuantity,
+      ...(hasVisiblePrimaryStorage ? {} : { storageId: null, storageName: undefined })
+    })
+  }
+
+  return visibleProducts
 }
 
 function roundVisibleAmount(value: number) {
@@ -516,8 +576,11 @@ export function useStorageAccess(workspaceId: string | undefined, userId?: strin
     canAccessStorage: (storageId: string | null | undefined) => canAccessStorage(storageId, effectiveAccess),
     filterStorageScopedRows: <T extends { storageId?: string | null }>(rows: readonly T[]) =>
       filterStorageScopedRows(rows, effectiveAccess),
-    filterProducts: (products: readonly Product[], inventoryRows: readonly Inventory[]) =>
-      filterProductsByStorageAccess(products, inventoryRows, effectiveAccess)
+    filterProducts: (
+      products: readonly Product[],
+      inventoryRows: readonly Inventory[],
+      assignmentRows: readonly ProductStorageAssignment[] = [],
+    ) => filterProductsByStorageAccess(products, inventoryRows, effectiveAccess, assignmentRows)
   }), [effectiveAccess, signature])
 }
 

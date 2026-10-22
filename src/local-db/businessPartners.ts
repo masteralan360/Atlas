@@ -38,6 +38,7 @@ import { getOrderBalanceAmount } from './orderInstallments'
 import { isDirectTransactionPartnerAccountEffect } from './payments'
 import { endActiveFleetAssignmentsForAgent, ensureDriverFleetAssignment } from './fleet'
 import { filterProductsByStorageAccess, useStorageAccess } from './storagePermissions'
+import { getProductStorageAssignments } from './productStorageAssignments'
 import { useServiceAccessIds } from './serviceAccess'
 import { isService } from '@/lib/catalogItem'
 import type {
@@ -835,9 +836,7 @@ export function useProductSelectionAccess(
   const online = useNetworkStatus()
   const storageAccess = useStorageAccess(workspaceId, userId)
   const serviceAccess = useServiceAccessIds(workspaceId)
-  const needsInventoryRows = storageAccess.isReady !== false
-    && !storageAccess.isAdmin
-    && storageAccess.excludedStorageIds.size > 0
+  const needsStorageRows = storageAccess.isReady !== false && !storageAccess.isAdmin
   const candidateProductIdsKey = options.candidateProductIds === undefined
     ? null
     : [...new Set(options.candidateProductIds.filter(Boolean))].sort().join('|')
@@ -861,7 +860,7 @@ export function useProductSelectionAccess(
   const inventoryRows = useLiveQuery<Inventory[]>(
     () => {
       if (!workspaceId || options.storageId === null) return []
-      if (!needsInventoryRows) return []
+      if (!needsStorageRows) return []
       if (candidateProductIdsKey !== null) {
         if (candidateProductIds.length === 0) return []
         return db.inventory
@@ -875,7 +874,17 @@ export function useProductSelectionAccess(
         : db.inventory.where('workspaceId').equals(workspaceId)
       return query.and((row) => !row.isDeleted).toArray()
     },
-    [candidateProductIdsKey, candidateProductIds, needsInventoryRows, options.storageId, storageId, workspaceId]
+    [candidateProductIdsKey, candidateProductIds, needsStorageRows, options.storageId, storageId, workspaceId]
+  )
+  const assignmentRows = useLiveQuery(
+    () => {
+      if (!workspaceId || options.storageId === null || !needsStorageRows) return []
+      return getProductStorageAssignments(
+        workspaceId,
+        candidateProductIdsKey === null ? undefined : candidateProductIds,
+      )
+    },
+    [candidateProductIdsKey, candidateProductIds, needsStorageRows, options.storageId, workspaceId]
   )
 
   useEffect(() => {
@@ -885,6 +894,13 @@ export function useProductSelectionAccess(
 
     void fetchTableFromSupabase('agents', db.agents, workspaceId).catch((error) => {
       console.error('[Agents] Failed to hydrate product selection access:', error)
+    })
+    void fetchTableFromSupabase(
+      'product_storage_assignments',
+      db.product_storage_assignments,
+      workspaceId,
+    ).catch((error) => {
+      console.error('[Products] Failed to hydrate storage assignments:', error)
     })
   }, [online, workspaceId])
 
@@ -897,9 +913,9 @@ export function useProductSelectionAccess(
       (serviceAccess.ids === null || !isService(product) || serviceAccess.ids.has(product.id))
       &&
       canSelectProductForExcludedCategories(product, excludedCategoryIds)
-      && filterProductsByStorageAccess([product], inventoryRows ?? [], storageAccess).length > 0
+      && filterProductsByStorageAccess([product], inventoryRows ?? [], storageAccess, assignmentRows ?? []).length > 0
     ),
-    [excludedCategoryIds, inventoryRows, serviceAccess.ids, storageAccess]
+    [assignmentRows, excludedCategoryIds, inventoryRows, serviceAccess.ids, storageAccess]
   )
   const filterProducts = useCallback(
     <T extends Product>(products: readonly T[]) =>
@@ -911,16 +927,17 @@ export function useProductSelectionAccess(
           excludedCategoryIds
         ),
         inventoryRows ?? [],
-        storageAccess
+        storageAccess,
+        assignmentRows ?? []
       ),
-    [excludedCategoryIds, inventoryRows, serviceAccess.ids, storageAccess]
+    [assignmentRows, excludedCategoryIds, inventoryRows, serviceAccess.ids, storageAccess]
   )
   const canSelectServiceId = useCallback(
     (serviceId: string) => serviceAccess.ids === null || (serviceAccess.isReady && serviceAccess.ids.has(serviceId)),
     [serviceAccess.ids, serviceAccess.isReady]
   )
 
-  const inventoryLoading = needsInventoryRows
+  const inventoryLoading = needsStorageRows
     && candidateProductIdsKey !== null
     && candidateProductIds.length > 0
     && inventoryRows === undefined

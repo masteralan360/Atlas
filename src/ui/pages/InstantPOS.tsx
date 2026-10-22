@@ -919,7 +919,7 @@ export function InstantPOS() {
     const productUoms = useProductUoms(user?.workspaceId)
     const customUnits = useUnits(user?.workspaceId)
     const uomDescriptors = useMemo(() => getUomDescriptors(customUnits), [customUnits])
-    const { canSelectProduct, canSelectServiceId, serviceAccessReady, filterProducts: filterSelectableProducts } = useProductSelectionAccess(
+    const { canSelectProduct, canSelectServiceId, serviceAccessReady, storageAccess, filterProducts: filterSelectableProducts } = useProductSelectionAccess(
         user?.workspaceId,
         user?.id,
         { storageId: selectedStorageId && !isServicesStorage ? selectedStorageId : null }
@@ -1319,34 +1319,33 @@ export function InstantPOS() {
     }, [catalogGridColumns, filteredProducts])
 
     useEffect(() => {
-        if (!serviceAccessReady) return
+        if (!serviceAccessReady || storageAccess.isReady === false) return
         const excludedProductIds = new Set(
-            ticketProducts
+            products
                 .filter((product) => !canSelectProduct(product))
                 .map((product) => product.id)
         )
 
-        if (excludedProductIds.size === 0) {
-            return
-        }
-
-        const removeExcludedItems = (current: InstantPosTicket[]) => current.map((ticket) => {
-            const items = ticket.items.filter((item) => (
-                item.storageId === SERVICES_VIRTUAL_STORAGE_ID
-                    ? canSelectServiceId(item.productId)
-                    : !excludedProductIds.has(item.productId)
-            ))
+        const removeExcludedItems = (current: InstantPosTicket[], removeRestrictedStorageItems = true) => current.map((ticket) => {
+            const items = ticket.items.filter((item) => {
+                if (item.storageId === SERVICES_VIRTUAL_STORAGE_ID) return canSelectServiceId(item.productId)
+                const itemStorageId = item.storageId || selectedStorageId
+                return (!removeRestrictedStorageItems || (!!itemStorageId && storageAccess.canAccessStorage(itemStorageId)))
+                    && !excludedProductIds.has(item.productId)
+            })
             return items.length === ticket.items.length ? ticket : { ...ticket, items }
         })
         if (restaurantMode) {
-            const nextTickets = removeExcludedItems(restaurantTickets)
+            // Restaurant tickets are shared server records. Do not delete their
+            // storage-restricted lines just because this staff member cannot view them.
+            const nextTickets = removeExcludedItems(restaurantTickets, false)
             if (nextTickets.some((ticket, index) => ticket !== restaurantTickets[index])) {
                 persistRestaurantTickets(nextTickets)
             }
             return
         }
         setLocalTickets(removeExcludedItems)
-    }, [canSelectProduct, canSelectServiceId, persistRestaurantTickets, restaurantMode, restaurantTickets, serviceAccessReady, ticketProducts])
+    }, [canSelectProduct, canSelectServiceId, persistRestaurantTickets, products, restaurantMode, restaurantTickets, selectedStorageId, serviceAccessReady, storageAccess])
 
     const activeTicketTotals = useMemo(() => {
         if (!activeTicket) {
@@ -1963,13 +1962,24 @@ export function InstantPOS() {
         }
 
         const restrictedItem = activeTicket.items.find((item) => {
-            const product = products.find((candidate) => candidate.id === item.productId && candidate.storageId === item.storageId)
-            return product ? !canSelectProduct(product) : false
+            if (item.storageId === SERVICES_VIRTUAL_STORAGE_ID) return false
+            const itemStorageId = item.storageId || selectedStorageId
+            if (!itemStorageId || !storageAccess.canAccessStorage(itemStorageId)) return true
+            const product = products.find((candidate) => candidate.id === item.productId && candidate.storageId === itemStorageId)
+            return !product || !canSelectProduct(product)
         })
         if (restrictedItem) {
+            const itemStorageId = restrictedItem.storageId || selectedStorageId
+            const restrictedProductExists = !!itemStorageId
+                && storageAccess.canAccessStorage(itemStorageId)
+                && products.some((candidate) => candidate.id === restrictedItem.productId && candidate.storageId === itemStorageId)
             toast({
                 title: t('common.error') || 'Error',
-                description: t('businessPartners.agent.productCategoryExcluded', { defaultValue: 'This product category is not available to this user.' }),
+                description: !itemStorageId || !storageAccess.canAccessStorage(itemStorageId)
+                    ? t('storages.permissions.errors.accessDenied')
+                    : restrictedProductExists
+                        ? t('businessPartners.agent.productCategoryExcluded', { defaultValue: 'This product category is not available to this user.' })
+                        : t('orders.form.errors.productNotFound', { defaultValue: 'Selected product was not found.' }),
                 variant: 'destructive'
             })
             setIsCheckoutLoading(false)

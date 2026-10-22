@@ -2051,6 +2051,8 @@
     },
     "table": {
       "image": "Image",
+      "showZeroStockImagesInColor": "Show zero-stock images in color",
+      "grayOutZeroStockImages": "Show zero-stock images in grayscale",
       "name": "Name",
       "sku": "SKU",
       "price": "Price",
@@ -2249,7 +2251,9 @@
       "webUploadDesc": "Images are validated, optimized, and securely stored in cloud storage.",
       "productDetailsTitle": "Product Details",
       "productDetailsDesc": "Capture the core identity, description, unit, category, and storage location for this product.",
-      "mixedStorages": "Mixed Storages"
+      "mixedStorages": "Mixed Storages",
+      "storageAssignmentNeedsReview": "Storage assignment needs review",
+      "workspaceWideStorage": "All storages"
     },
     "minimumSellingPrice": {
       "staffViolation": "Price for {{productName}} cannot be lower than the minimum selling price of {{minimumPrice}}.",
@@ -5690,8 +5694,8 @@
       "manualEntryTemplatesAccessDescription": "Access manual entry template management.",
       "posAccess": "POS",
       "posAccessDescription": "Access the point-of-sale checkout flow.",
-      "posHideModifyPriceButton": "Hide Modify price button",
-      "posHideModifyPriceButtonDescription": "Hide the pencil icon to modify item prices in the POS cart.",
+      "posHideModifyPriceButton": "Hide Price Currency and Negotiated Price fields",
+      "posHideModifyPriceButtonDescription": "Hide the Price Currency selector and Negotiated Price input in the POS item editor. Keep the pencil button, modal, and other fields available, including the additional service name.",
       "posHidePriceBelowCostIndicator": "Hide \"Price is Below cost\" indicator",
       "posHidePriceBelowCostIndicatorDescription": "Hide the warning indicator when the negotiated price is below cost inside the Modify Price modal.",
       "instantPosAccess": "Instant POS",
@@ -7562,6 +7566,11 @@
     "decreaseLabel": "Decrease",
     "adjustmentLabel": "Stock Adjustment",
     "transferLabel": "Inventory Transfer",
+    "transferRoute": {
+      "source": "Source",
+      "destination": "Destination",
+      "restrictedStorage": "Restricted storage"
+    },
     "initialStockLabel": "Initial Stock",
     "inventoryChangeLabel": "Inventory Change",
     "exchangeOutLabel": "Exchange Replacement",

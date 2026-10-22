@@ -622,7 +622,7 @@ export function POS() {
             : isActivitiesStorage
                 ? undefined
                 : null
-    const { canSelectProduct, canSelectServiceId, serviceAccessReady, filterProducts: filterSelectableProducts } = useProductSelectionAccess(
+    const { canSelectProduct, canSelectServiceId, serviceAccessReady, storageAccess, filterProducts: filterSelectableProducts } = useProductSelectionAccess(
         user?.workspaceId,
         user?.id,
         { storageId: productAccessStorageId }
@@ -875,7 +875,7 @@ export function POS() {
     ))
 
     useEffect(() => {
-        if (!serviceAccessReady) return
+        if (!serviceAccessReady || storageAccess.isReady === false) return
         const excludedProductIds = new Set(
             products
                 .filter((product) => !canSelectProduct(product))
@@ -885,21 +885,29 @@ export function POS() {
             if (item.is_service || item.storageId === SERVICES_VIRTUAL_STORAGE_ID) {
                 return canSelectServiceId(item.product_id)
             }
+            if (item.storageId === ACTIVITIES_STORAGE_ID) return true
+            if (item.storageId && !storageAccess.canAccessStorage(item.storageId)) return false
             return !excludedProductIds.has(item.product_id)
         })
         if (nextCart.length === cart.length) return
 
         const restrictedServiceRemoved = cart.some((item) => (item.is_service || item.storageId === SERVICES_VIRTUAL_STORAGE_ID)
             && !canSelectServiceId(item.product_id))
+        const restrictedStorageRemoved = cart.some((item) => item.storageId
+            && item.storageId !== ACTIVITIES_STORAGE_ID
+            && item.storageId !== SERVICES_VIRTUAL_STORAGE_ID
+            && !storageAccess.canAccessStorage(item.storageId))
         setCart(nextCart)
         toast({
             variant: 'destructive',
             title: t('messages.error'),
             description: restrictedServiceRemoved
                 ? t('services.access.restrictedCartRemoved')
+                : restrictedStorageRemoved
+                    ? t('storages.permissions.errors.accessDenied')
                 : t('businessPartners.agent.excludedProductsRemoved', { defaultValue: 'Products from excluded categories were removed from the cart.' })
         })
-    }, [canSelectProduct, canSelectServiceId, cart, products, serviceAccessReady, t, toast])
+    }, [canSelectProduct, canSelectServiceId, cart, products, serviceAccessReady, storageAccess, t, toast])
 
     useEffect(() => {
         // Keep an explicitly selected Activities storage while workspace features
@@ -1265,7 +1273,7 @@ export function POS() {
     const [priceEditNoteInput, setPriceEditNoteInput] = useState('')
     const [isPriceEditNoteVisible, setIsPriceEditNoteVisible] = useState(false)
     const isAdmin = user?.role === 'admin'
-    const isModifyPriceHidden = !isAdmin && permissionKeys.includes('pos.hideModifyPriceButton' as any)
+    const arePriceEditFieldsHidden = !isAdmin && permissionKeys.includes('pos.hideModifyPriceButton' as any)
     const isPriceBelowCostHidden = hideCosts || (!isAdmin && permissionKeys.includes('pos.hidePriceBelowCostIndicator' as any))
 
     const [paymentType, setPaymentType] = useState<PosPaymentType>(() => quickOrderEnabled ? 'order' : 'cash')
@@ -1432,7 +1440,7 @@ export function POS() {
     }, [heldSales])
 
     useEffect(() => {
-        if (!serviceAccessReady) return
+        if (!serviceAccessReady || storageAccess.isReady === false) return
         const excludedProductIds = new Set(
             products
                 .filter((product) => !canSelectProduct(product))
@@ -1444,12 +1452,14 @@ export function POS() {
                 if (item.is_service || item.storageId === SERVICES_VIRTUAL_STORAGE_ID) {
                     return canSelectServiceId(item.product_id)
                 }
+                if (item.storageId === ACTIVITIES_STORAGE_ID) return true
+                if (item.storageId && !storageAccess.canAccessStorage(item.storageId)) return false
                 return !excludedProductIds.has(item.product_id)
             })
             return items.length === sale.items.length ? sale : { ...sale, items }
         })
         if (nextHeldSales.some((sale, index) => sale !== heldSales[index])) setHeldSales(nextHeldSales)
-    }, [canSelectProduct, canSelectServiceId, heldSales, products, serviceAccessReady])
+    }, [canSelectProduct, canSelectServiceId, heldSales, products, serviceAccessReady, storageAccess])
 
     // Cart resizing state
     const [cartWidth, setCartWidth] = useState<number>(() => {
@@ -2828,11 +2838,33 @@ export function POS() {
 
     const savePriceEdit = () => {
         if (!editingPriceItemKey) return
+        const editingItem = cart.find((item) => getCartItemKey(item) === editingPriceItemKey)
+        if (!editingItem) return
+
+        const serviceNameSuffix = normalizePosServiceNameSuffix(serviceNameSuffixInput)
+        if (arePriceEditFieldsHidden) {
+            setCart((current) => current.map((item) => {
+                if (getCartItemKey(item) !== editingPriceItemKey) return item
+                return {
+                    ...item,
+                    note: priceEditNoteInput.trim() || undefined,
+                    ...(item.is_service ? { service_name_suffix: serviceNameSuffix || undefined } : {}),
+                }
+            }))
+            setEditingPriceItemKey(null)
+            setNegotiatedPriceInput('')
+            setPriceEditCurrency(null)
+            setPriceEditExchangeSnapshots([])
+            setServiceNameSuffixInput('')
+            setPriceEditNoteInput('')
+            setIsPriceEditNoteVisible(false)
+            priceEditSessionRef.current = null
+            return
+        }
+
         const newPrice = parseFormattedNumber(negotiatedPriceInput)
         if (!Number.isFinite(newPrice) || newPrice < 0) return
 
-        const editingItem = cart.find((item) => getCartItemKey(item) === editingPriceItemKey)
-        if (!editingItem) return
         const product = findStockProduct(editingItem.product_id, editingItem.storageId)
         const sourceCurrency = (editingItem.effective_currency
             ?? (product ? getEffectiveProductCurrency(product) : 'usd')) as CurrencyCode
@@ -2865,7 +2897,6 @@ export function POS() {
             return
         }
 
-        const serviceNameSuffix = normalizePosServiceNameSuffix(serviceNameSuffixInput)
         setCart((current) => current.map((item) => {
             if (getCartItemKey(item) !== editingPriceItemKey) return item
 
@@ -3439,14 +3470,25 @@ export function POS() {
         }
 
         const restrictedCartItem = cart.find((item) => {
-            const product = products.find((candidate) => candidate.id === item.product_id && candidate.storageId === item.storageId)
-            return product ? !canSelectProduct(product) : false
+            if (item.is_service || item.storageId === SERVICES_VIRTUAL_STORAGE_ID || item.storageId === ACTIVITIES_STORAGE_ID) return false
+            const itemStorageId = item.storageId || selectedStorageId
+            if (!itemStorageId || !storageAccess.canAccessStorage(itemStorageId)) return true
+            const product = products.find((candidate) => candidate.id === item.product_id && candidate.storageId === itemStorageId)
+            return !product || !canSelectProduct(product)
         })
         if (restrictedCartItem) {
+            const itemStorageId = restrictedCartItem.storageId || selectedStorageId
+            const productExistsInAccessibleStorage = !!itemStorageId
+                && storageAccess.canAccessStorage(itemStorageId)
+                && products.some((candidate) => candidate.id === restrictedCartItem.product_id && candidate.storageId === itemStorageId)
             toast({
                 variant: 'destructive',
                 title: t('messages.error'),
-                description: t('businessPartners.agent.productCategoryExcluded', { defaultValue: 'This product category is not available to this user.' })
+                description: !itemStorageId || !storageAccess.canAccessStorage(itemStorageId)
+                    ? t('storages.permissions.errors.accessDenied')
+                    : productExistsInAccessibleStorage
+                        ? t('businessPartners.agent.productCategoryExcluded', { defaultValue: 'This product category is not available to this user.' })
+                        : t('orders.form.errors.productNotFound', { defaultValue: 'Selected product was not found.' })
             })
             return
         }
@@ -3905,13 +3947,24 @@ export function POS() {
         }
 
         const restrictedCartItem = cart.find((item) => {
-            const product = products.find((candidate) => candidate.id === item.product_id && candidate.storageId === item.storageId)
-            return product ? !canSelectProduct(product) : false
+            if (item.is_service || item.storageId === SERVICES_VIRTUAL_STORAGE_ID || item.storageId === ACTIVITIES_STORAGE_ID) return false
+            const itemStorageId = item.storageId || selectedStorageId
+            if (!itemStorageId || !storageAccess.canAccessStorage(itemStorageId)) return true
+            const product = products.find((candidate) => candidate.id === item.product_id && candidate.storageId === itemStorageId)
+            return !product || !canSelectProduct(product)
         })
         if (restrictedCartItem) {
-            throw new Error(t('businessPartners.agent.productCategoryExcluded', {
-                defaultValue: 'This product category is not available to this user.'
-            }))
+            const itemStorageId = restrictedCartItem.storageId || selectedStorageId
+            const productExistsInAccessibleStorage = !!itemStorageId
+                && storageAccess.canAccessStorage(itemStorageId)
+                && products.some((candidate) => candidate.id === restrictedCartItem.product_id && candidate.storageId === itemStorageId)
+            throw new Error(!itemStorageId || !storageAccess.canAccessStorage(itemStorageId)
+                ? t('storages.permissions.errors.accessDenied')
+                : productExistsInAccessibleStorage
+                    ? t('businessPartners.agent.productCategoryExcluded', {
+                        defaultValue: 'This product category is not available to this user.'
+                    })
+                    : t('orders.form.errors.productNotFound', { defaultValue: 'Selected product was not found.' }))
         }
 
         setQuickOrderProgressStage('preparing')
@@ -4273,7 +4326,6 @@ export function POS() {
                                 hasMinimumSellingPriceViolation={hasMinimumSellingPriceViolation}
                                 convertPrice={convertPrice}
                                 openPriceEdit={openPriceEdit}
-                                isModifyPriceHidden={isModifyPriceHidden}
                                 clearNegotiatedPrice={clearNegotiatedPrice}
                                 discountValue={discountValue}
                                 setDiscountValue={setDiscountValue}
@@ -4753,21 +4805,18 @@ export function POS() {
                                                     <div className="flex flex-col items-end gap-1">
                                                         <div className="font-bold flex items-center gap-1">
                                                             <span>{formatCurrency(convertedPrice * item.quantity, settlementCurrency, features.iqd_display_preference)}</span>
-                                                            {/* Admin-only Pencil icon */}
-                                                            {!isModifyPriceHidden && (
-                                                                <button
-                                                                    onClick={() => openPriceEdit(item)}
-                                                                    className={cn(
-                                                                        'transition-opacity p-1 hover:bg-muted rounded bg-muted/30 border',
-                                                                        item.note?.trim()
-                                                                            ? 'border-primary ring-2 ring-primary/20'
-                                                                            : 'border-border/50'
-                                                                    )}
-                                                                    title={t('pos.modifyPrice') || 'Modify Price'}
-                                                                >
-                                                                    <Pencil className="w-3.5 h-3.5 text-primary" />
-                                                                </button>
-                                                            )}
+                                                            <button
+                                                                onClick={() => openPriceEdit(item)}
+                                                                className={cn(
+                                                                    'transition-opacity p-1 hover:bg-muted rounded bg-muted/30 border',
+                                                                    item.note?.trim()
+                                                                        ? 'border-primary ring-2 ring-primary/20'
+                                                                        : 'border-border/50'
+                                                                )}
+                                                                title={t('pos.modifyPrice') || 'Modify Price'}
+                                                            >
+                                                                <Pencil className="w-3.5 h-3.5 text-primary" />
+                                                            </button>
                                                             {unitRegistry.isDynamicUnit(item.unit) && (
                                                                 <button
                                                                     onClick={() => {
@@ -5668,11 +5717,11 @@ export function POS() {
                             && minimumPriceForLine != null
                             && (minimumPriceCurrencyUnavailable || hasMinimumPriceError)
 
-                        const canSavePrice = selectedCurrencyAllowed
+                        const canSavePrice = arePriceEditFieldsHidden || (selectedCurrencyAllowed
                             && !priceCurrencyRateUnavailable
                             && Number.isFinite(editedPrice)
                             && editedPrice >= 0
-                            && !shouldShowMinimumPriceError
+                            && !shouldShowMinimumPriceError)
 
                         return (
                             <>
@@ -5738,7 +5787,7 @@ export function POS() {
                                         </div>
                                     </div>
 
-                                    {!isActivitiesCheckout && (
+                                    {!arePriceEditFieldsHidden && !isActivitiesCheckout && (
                                         <CurrencySelector
                                             value={effectiveCurrency}
                                             onChange={changePriceEditCurrency}
@@ -5747,12 +5796,12 @@ export function POS() {
                                             allowedCurrencies={allowedPriceCurrencies}
                                         />
                                     )}
-                                    {priceCurrencyRateUnavailable && (
+                                    {!arePriceEditFieldsHidden && priceCurrencyRateUnavailable && (
                                         <p role="alert" className="text-sm font-medium text-destructive">
                                             {t('pos.priceCurrencyRateUnavailable', 'An exchange rate is unavailable for the selected currency.')}
                                         </p>
                                     )}
-                                    {!selectedCurrencyAllowed && (
+                                    {!arePriceEditFieldsHidden && !selectedCurrencyAllowed && (
                                         <p role="alert" className="text-sm font-medium text-destructive">
                                             {t('pos.priceCurrencyUnavailable', 'This currency is no longer available in the workspace.')}
                                         </p>
@@ -5760,32 +5809,36 @@ export function POS() {
 
                                     {/* Negotiated Price - Editable */}
                                     <div>
-                                        <Label htmlFor="pos-negotiated-price">
-                                            {t('pos.negotiatedPrice') || 'Negotiated Price'} <span className="text-destructive">*</span>
-                                        </Label>
-                                        <div className="relative mt-1">
-                                            <Input
-                                                id="pos-negotiated-price"
-                                                type="text"
-                                                inputMode="decimal"
-                                                value={negotiatedPriceInput}
-                                                onChange={(e) => {
-                                                    const raw = e.target.value.replace(/[^0-9.,]/g, '')
-                                                    if (priceEditSessionRef.current) priceEditSessionRef.current.manuallyEdited = true
-                                                    setNegotiatedPriceInput(formatNumberWithCommas(raw))
-                                                }}
-                                                placeholder="0"
-                                                aria-invalid={shouldShowMinimumPriceError}
-                                                className={cn(
-                                                    'text-lg py-5 font-mono pr-14',
-                                                    shouldShowMinimumPriceError && 'border-destructive bg-destructive/5 text-destructive focus-visible:ring-destructive/25'
-                                                )}
-                                                autoFocus
-                                            />
-                                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold uppercase tracking-wider text-muted-foreground/60">
-                                                {effectiveCurrency === 'iqd' ? features.iqd_display_preference : effectiveCurrency === 'usd' ? '$' : effectiveCurrency.toUpperCase()}
-                                            </span>
-                                        </div>
+                                        {!arePriceEditFieldsHidden && (
+                                            <>
+                                                <Label htmlFor="pos-negotiated-price">
+                                                    {t('pos.negotiatedPrice') || 'Negotiated Price'} <span className="text-destructive">*</span>
+                                                </Label>
+                                                <div className="relative mt-1">
+                                                    <Input
+                                                        id="pos-negotiated-price"
+                                                        type="text"
+                                                        inputMode="decimal"
+                                                        value={negotiatedPriceInput}
+                                                        onChange={(e) => {
+                                                            const raw = e.target.value.replace(/[^0-9.,]/g, '')
+                                                            if (priceEditSessionRef.current) priceEditSessionRef.current.manuallyEdited = true
+                                                            setNegotiatedPriceInput(formatNumberWithCommas(raw))
+                                                        }}
+                                                        placeholder="0"
+                                                        aria-invalid={shouldShowMinimumPriceError}
+                                                        className={cn(
+                                                            'text-lg py-5 font-mono pr-14',
+                                                            shouldShowMinimumPriceError && 'border-destructive bg-destructive/5 text-destructive focus-visible:ring-destructive/25'
+                                                        )}
+                                                        autoFocus
+                                                    />
+                                                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold uppercase tracking-wider text-muted-foreground/60">
+                                                        {effectiveCurrency === 'iqd' ? features.iqd_display_preference : effectiveCurrency === 'usd' ? '$' : effectiveCurrency.toUpperCase()}
+                                                    </span>
+                                                </div>
+                                            </>
+                                        )}
                                         {/* Live Conversion Display */}
                                         {editingProduct && effectiveCurrency !== features.default_currency && negotiatedPriceInput && !isNaN(parseFormattedNumber(negotiatedPriceInput)) && (
                                             <div className="mt-2 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 animate-in fade-in slide-in-from-top-1 duration-200">
@@ -7030,7 +7083,6 @@ interface MobileCartProps {
     convertPrice: (amount: number, from: CurrencyCode, to: CurrencyCode) => number
     openPriceEdit: (item: CartItem) => void
     clearNegotiatedPrice: (item: CartItem) => void
-    isModifyPriceHidden: boolean
     discountValue: string
     setDiscountValue: (val: string) => void
     discountType: 'percent' | 'amount'
@@ -7053,7 +7105,7 @@ function MobileCart({
     canPreprintReceipt, handlePreprintReceipt, isPreprinting, isLoadingPreprintTemplate,
     getDisplayImageUrl, products, showCartStorageLabels, getCartStorageName, fallbackStorageId,
     getCartMinimumPriceViolation, hasMinimumSellingPriceViolation, convertPrice, openPriceEdit,
-    clearNegotiatedPrice, isModifyPriceHidden,
+    clearNegotiatedPrice,
     discountValue, setDiscountValue, discountType, setDiscountType,
     hasTrulyMissingRates, hasLoadingRates, isActivitiesCheckout, t,
     setDynamicUnitModal, setExactQuantity, unitRegistry,
@@ -7229,19 +7281,17 @@ function MobileCart({
                                                 </div>
                                                 <div className="text-primary font-black text-sm whitespace-nowrap flex items-center gap-1">
                                                     {formatCurrency(convertedUnitPrice * item.quantity, settlementCurr, features.iqd_display_preference)}
-                                                    {!isModifyPriceHidden && (
-                                                        <button
-                                                            onClick={() => openPriceEdit(item)}
-                                                            className={cn(
-                                                                'p-1.5 rounded-lg bg-primary/10 text-primary border transition-colors',
-                                                                item.note?.trim()
-                                                                    ? 'border-primary ring-2 ring-primary/20'
-                                                                    : 'border-primary/20'
-                                                            )}
-                                                        >
-                                                            <Pencil className="w-3.5 h-3.5" />
-                                                        </button>
-                                                    )}
+                                                    <button
+                                                        onClick={() => openPriceEdit(item)}
+                                                        className={cn(
+                                                            'p-1.5 rounded-lg bg-primary/10 text-primary border transition-colors',
+                                                            item.note?.trim()
+                                                                ? 'border-primary ring-2 ring-primary/20'
+                                                                : 'border-primary/20'
+                                                        )}
+                                                    >
+                                                        <Pencil className="w-3.5 h-3.5" />
+                                                    </button>
                                                     {unitRegistry.isDynamicUnit(item.unit) && (
                                                         <button
                                                             onClick={() => {

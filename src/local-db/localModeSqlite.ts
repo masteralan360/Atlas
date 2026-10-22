@@ -59,6 +59,7 @@ function createTauriSqliteConnection(database: {
 
 export const LOCAL_MODE_SQLITE_TABLES = [
   "products",
+  "product_storage_assignments",
   "product_uoms",
   "product_barcodes",
   "price_books",

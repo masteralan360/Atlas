@@ -140,6 +140,12 @@ type InventoryActivityRecord =
         | "inventory-change"
         | "sale-product-exchange"
         | "sale-product-exchange-return";
+      sourceStorageId?: string | null;
+      destinationStorageId?: string | null;
+      sourceStorageName?: string | null;
+      destinationStorageName?: string | null;
+      sourceWorkspaceName?: string | null;
+      destinationWorkspaceName?: string | null;
       sourceKind?: "manual" | "automation";
       quantityDelta: number;
       previousQuantity: number | null;
@@ -372,6 +378,10 @@ export function InventoryTransactionsPage() {
     () => new Map((relations?.storages ?? []).map((storage) => [storage.id, storage] as const)),
     [relations?.storages],
   );
+  const transferBatchesById = useMemo(
+    () => new Map((relations?.transferBatches ?? []).map((batch) => [batch.id, batch] as const)),
+    [relations?.transferBatches],
+  );
 
   const activityRecords = useMemo(() => {
     const typedSales = (relations?.sales ?? []) as MirroredSale[];
@@ -395,6 +405,9 @@ export function InventoryTransactionsPage() {
         transaction.referenceType,
       );
       const referenceId = transaction.referenceId || transaction.id;
+      const transferBatch = movementSource === "transfer"
+        ? transferBatchesById.get(transaction.transferBatchId || referenceId)
+        : undefined;
       const saleId = movementSource === "pos-return"
         ? saleReturnsById.get(referenceId)?.saleId
         : undefined;
@@ -428,6 +441,18 @@ export function InventoryTransactionsPage() {
         referenceLabel,
         transactionType: transaction.transactionType,
         movementSource,
+        ...(movementSource === "transfer" ? {
+          sourceStorageId: transferBatch?.sourceStorageId ?? (
+            transaction.transactionType === "transfer_out" ? transaction.storageId : null
+          ),
+          destinationStorageId: transferBatch?.destinationStorageId ?? (
+            transaction.transactionType === "transfer_in" ? transaction.storageId : null
+          ),
+          sourceStorageName: transferBatch?.sourceStorageName,
+          destinationStorageName: transferBatch?.destinationStorageName,
+          sourceWorkspaceName: transferBatch?.sourceWorkspaceName,
+          destinationWorkspaceName: transferBatch?.destinationWorkspaceName,
+        } : {}),
         sourceKind: movementSource === "transfer" && transaction.referenceType === "reorder_transfer"
           ? "automation"
           : movementSource === "transfer"
@@ -438,7 +463,7 @@ export function InventoryTransactionsPage() {
         newQuantity: transaction.newQuantity,
       };
     });
-  }, [inventoryTransactions, relations]);
+  }, [inventoryTransactions, relations, transferBatchesById]);
 
   const productMovementSummary = summaryQuery.data?.rows ?? [];
   const activeFilterCount = [
@@ -651,6 +676,21 @@ export function InventoryTransactionsPage() {
       case "sale-product-exchange-return":
         return t("inventoryTransactions.exchangeReturnLabel", "Exchange Return");
     }
+  };
+
+  const getTransferStorageDisplayName = (
+    storageId?: string | null,
+    storageName?: string | null,
+    workspaceName?: string | null,
+  ) => {
+    if (storageId && !storageAccess.canAccessStorage(storageId)) {
+      return t("inventoryTransactions.transferRoute.restrictedStorage", "Restricted storage");
+    }
+    const name = storageName || getStorageDisplayName(
+      storageId ? storagesById.get(storageId) : undefined,
+      t,
+    );
+    return workspaceName ? `${name} (${workspaceName})` : name;
   };
 
   const getMovementFilterLabel = (source: InventoryMovementSourceFilter) => {
@@ -1019,7 +1059,7 @@ export function InventoryTransactionsPage() {
                             )}
                         </div>
 
-                        <div className="flex items-center gap-2 text-sm">
+                        <div className="flex flex-wrap items-center gap-2 text-sm">
                           {record.kind === "transfer" ? (
                             <>
                               <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wide">
@@ -1105,6 +1145,30 @@ export function InventoryTransactionsPage() {
                                   </span>
                                 </>
                               )}
+                            </>
+                          ) : record.movementSource === "transfer" ? (
+                            <>
+                              <span className="rounded-full bg-muted px-3 py-1 text-xs font-semibold uppercase tracking-wide">
+                                <span className="text-muted-foreground">
+                                  {t("inventoryTransactions.transferRoute.source", "Source")}: {" "}
+                                </span>
+                                {getTransferStorageDisplayName(
+                                  record.sourceStorageId,
+                                  record.sourceStorageName,
+                                  record.sourceWorkspaceName,
+                                )}
+                              </span>
+                              <ChevronRight className="h-4 w-4 text-muted-foreground rtl:rotate-180" />
+                              <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-800">
+                                <span className="text-emerald-700">
+                                  {t("inventoryTransactions.transferRoute.destination", "Destination")}: {" "}
+                                </span>
+                                {getTransferStorageDisplayName(
+                                  record.destinationStorageId,
+                                  record.destinationStorageName,
+                                  record.destinationWorkspaceName,
+                                )}
+                              </span>
                             </>
                           ) : (
                             <>

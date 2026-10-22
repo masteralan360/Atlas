@@ -65,6 +65,8 @@ export interface Product extends BaseEntity {
   categoryId?: string | null
   category?: string | null
   storageId?: string | null
+  /** Durable catalog boundary, independent from current stock positions. */
+  storageScope?: 'workspace' | 'storage' | 'unresolved'
   storageName?: string
   price: number
   /** Staff-only selling floor; NULL means staff have no configured minimum. */
@@ -82,6 +84,12 @@ export interface Product extends BaseEntity {
   canBeReturned: boolean
   returnRules?: string
   createdBy?: string | null
+}
+
+/** Product membership in a storage remains after its inventory reaches zero. */
+export interface ProductStorageAssignment extends BaseEntity {
+  productId: string
+  storageId: string
 }
 
 export interface ServiceAccessCategory extends BaseEntity {
@@ -2920,6 +2928,7 @@ export interface SyncQueueItem {
   id: string
   entityType:
     | 'products'
+    | 'product_storage_assignments'
     | 'product_uoms'
     | 'product_barcodes'
     | 'price_books'
@@ -3169,6 +3178,7 @@ export interface OfflineMutation {
   workspaceId: string
   entityType:
     | 'products'
+    | 'product_storage_assignments'
     | 'product_uoms'
     | 'product_barcodes'
     | 'price_books'

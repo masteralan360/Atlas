@@ -47,8 +47,7 @@ import i18n from '@/i18n/config'
 
 import { db } from './database'
 import { hydrateOrderFinancingFromSupabase } from './orderFinancingHydration'
-import { queryClient } from '@/query/queryClient'
-import { queryKeys } from '@/query/queryKeys'
+import { invalidateOrdersList } from '@/query/invalidateOrdersList'
 import { useLiveCollection } from './liveCollection'
 import { assertStaffMinimumSellingPrices, type MinimumSellingPriceCheckItem } from './minimumSellingPrice'
 import { serializePartnerSummaryRefresh } from './partnerSummaryRefresh'
@@ -3182,6 +3181,8 @@ export async function rebuildOrderPaymentState(
         )
     ])
 
+    if (!options.deferOrderSync) invalidateOrdersList(order.workspaceId, orderType)
+
     if (orderType === 'sales') {
         const salesOrder = updated as SalesOrder
         if (!options.skipCommissionReconcile) {
@@ -3467,7 +3468,7 @@ async function createSalesOrderInternal(
                         : {})
                 })
             }
-            void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all(workspaceId, 'sales') })
+            invalidateOrdersList(workspaceId, 'sales')
             await measureSalesOrderStage(
                 options.trace,
                 'crudDebugger.stages.salesOrderSummary',
@@ -3613,7 +3614,7 @@ async function createSalesOrderInternal(
         await reconcileSalesOrderCommissionBestEffort(workspaceId, createdOrder.id, createdBy)
     }
 
-    void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all(workspaceId, 'sales') })
+    invalidateOrdersList(workspaceId, 'sales')
     await measureSalesOrderStage(
         options?.trace,
         'crudDebugger.stages.salesOrderSummary',
@@ -3825,6 +3826,7 @@ async function completePaidQuickSalesOrderAtomically(
         console.error('[Orders] Failed to refresh Quick Order projections:', projectionError)
     })
 
+    invalidateOrdersList(order.workspaceId, 'sales')
     return completedOrder
 }
 
@@ -4093,6 +4095,7 @@ async function updateSalesOrderInternal(id: string, data: Partial<SalesOrder>, o
         existing.workspaceId,
         { requireRemoteConfirmation: options?.requireRemoteConfirmation, trace: options?.trace }
     )
+    invalidateOrdersList(existing.workspaceId, 'sales')
     reportOrderSaveProgress(options, 'confirming')
     await synchronizeSalesAccountCommissionBeneficiaryBestEffort(existing.workspaceId, updated.id, updated.createdBy)
 
@@ -4415,13 +4418,15 @@ async function updateSalesOrderStatusOnce(
     if (status === 'cancelled' && shouldUseCloudBusinessData(existing.workspaceId)
         && (isOrderFinancingMethod(existing.paymentMethod) || existing.linkedLoanId)) {
         const { cancelFinancedOrder } = await import('./orderCancellation')
-        return (await measureSalesOrderStage(
+        const result = await measureSalesOrderStage(
             options?.trace,
             'crudDebugger.stages.salesOrderPayment',
             'unknown',
             () => cancelFinancedOrder('sales', existing),
             'crudDebugger.details.salesOrderFinanceBoundary'
-        )).order as SalesOrder
+        )
+        invalidateOrdersList(existing.workspaceId, 'sales')
+        return result.order as SalesOrder
     }
 
     let workingOrder = existing
@@ -4503,7 +4508,7 @@ async function updateSalesOrderStatusOnce(
     if (!completedRemotely) {
         await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId, { trace: options?.trace })
     }
-    void queryClient.invalidateQueries({ queryKey: queryKeys.orders.all(existing.workspaceId, 'sales') })
+    invalidateOrdersList(existing.workspaceId, 'sales')
     await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderSummary', 'response', () => Promise.all(
         Array.from(new Set([
             `${workingOrder.customerId}::${workingOrder.businessPartnerId || ''}`,
@@ -4547,6 +4552,7 @@ async function approveSalesOrderRequestInternal(id: string, reviewedBy: string |
     await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderLocalWrite', 'persistence', () => db.sales_orders.put(updated), 'crudDebugger.details.dexiePersistence')
     await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId, { trace })
     await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderPayment', 'unknown', () => appendInitialOrderPaymentTransaction('sales', updated), 'crudDebugger.details.salesOrderPaymentBoundary')
+    invalidateOrdersList(existing.workspaceId, 'sales')
     return updated
 }
 
@@ -4601,6 +4607,7 @@ export async function setSalesOrderPaymentStatus(
 
     await db.sales_orders.put(updated)
     await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
+    invalidateOrdersList(existing.workspaceId, 'sales')
     await Promise.all(
         Array.from(new Set([
             `${existing.customerId}::${existing.businessPartnerId || ''}`,
@@ -4645,6 +4652,7 @@ async function lockSalesOrderInternal(id: string, trace?: CrudTraceHandle) {
 
     await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderLocalWrite', 'persistence', () => db.sales_orders.put(updated), 'crudDebugger.details.dexiePersistence')
     await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId, { trace })
+    invalidateOrdersList(existing.workspaceId, 'sales')
     return updated
 }
 
@@ -4776,6 +4784,7 @@ async function createPostReturnSalesOrderAdjustmentInternal(
         'crudDebugger.details.salesOrderSummaryBoundary'
     )
 
+    invalidateOrdersList(order.workspaceId, 'sales')
     return { order: updatedOrder, adjustment }
 }
 
@@ -5611,10 +5620,14 @@ async function returnUnpaidSalesOrder(order: SalesOrder, input: ReturnSalesOrder
 const salesOrderReturnRequestsInFlight = new Map<string, { fingerprint: string; task: Promise<Awaited<ReturnType<typeof returnSalesOrderOnce>>> }>()
 
 export function returnSalesOrder(input: ReturnSalesOrderInput) {
-    const execute = () => runCrudOperation(
-        { action: 'create', entityKey: 'salesOrderReturn', entityId: input.idempotencyKey || undefined },
-        (trace) => returnSalesOrderOnce(input, trace)
-    )
+    const execute = async () => {
+        const result = await runCrudOperation(
+            { action: 'create', entityKey: 'salesOrderReturn', entityId: input.idempotencyKey || undefined },
+            (trace) => returnSalesOrderOnce(input, trace)
+        )
+        invalidateOrdersList(result.order.workspaceId, 'sales')
+        return result
+    }
     if (!input.idempotencyKey) return execute()
     const key = `${input.orderId}:${input.idempotencyKey}`
     const fingerprint = JSON.stringify({ ...input, items: [...input.items].sort((left, right) => left.orderItemId.localeCompare(right.orderItemId)) })
@@ -6160,6 +6173,7 @@ async function deleteSalesOrderInternal(id: string, trace?: CrudTraceHandle) {
         'crudDebugger.details.dexiePersistence'
     )
     await syncSoftDelete('sales_orders', id, existing.workspaceId, trace)
+    invalidateOrdersList(existing.workspaceId, 'sales')
     await measureSalesOrderStage(
         trace,
         'crudDebugger.stages.salesOrderSummary',
@@ -6293,6 +6307,7 @@ export async function createPurchaseOrder(
         await appendInitialOrderPaymentTransaction('purchase', createdOrder, options)
     }
 
+    invalidateOrdersList(workspaceId, 'purchase')
     reportOrderSaveProgress(options, 'complete')
     return createdOrder
 }
@@ -6372,6 +6387,7 @@ export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrde
         existing.workspaceId,
         { requireRemoteConfirmation: options?.requireRemoteConfirmation }
     )
+    invalidateOrdersList(existing.workspaceId, 'purchase')
     reportOrderSaveProgress(options, 'confirming')
 
     await Promise.all(
@@ -6432,7 +6448,9 @@ export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrde
     if (status === 'cancelled' && shouldUseCloudBusinessData(existing.workspaceId)
         && (isOrderFinancingMethod(existing.paymentMethod) || existing.linkedLoanId)) {
         const { cancelFinancedOrder } = await import('./orderCancellation')
-        return (await cancelFinancedOrder('purchase', existing)).order as PurchaseOrder
+        const result = await cancelFinancedOrder('purchase', existing)
+        invalidateOrdersList(existing.workspaceId, 'purchase')
+        return result.order as PurchaseOrder
     }
 
     let workingOrder = existing
@@ -6516,6 +6534,7 @@ export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrde
         await syncPurchaseReceiptResult(existing.workspaceId, receiptResult)
         persistedOrder = updated
     }
+    invalidateOrdersList(existing.workspaceId, 'purchase')
     await Promise.all(
         Array.from(new Set([
             `${existing.supplierId}::${existing.businessPartnerId || ''}`,
@@ -6553,6 +6572,7 @@ export async function approvePurchaseOrderRequest(id: string, reviewedBy?: strin
     await db.purchase_orders.put(updated)
     await syncUpsertEntities('purchase_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
     await appendInitialOrderPaymentTransaction('purchase', updated)
+    invalidateOrdersList(existing.workspaceId, 'purchase')
     return updated
 }
 
@@ -6603,6 +6623,7 @@ export async function setPurchaseOrderPaymentStatus(
 
     await db.purchase_orders.put(updated)
     await syncUpsertEntities('purchase_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
+    invalidateOrdersList(existing.workspaceId, 'purchase')
     await Promise.all(
         Array.from(new Set([
             `${existing.supplierId}::${existing.businessPartnerId || ''}`,
@@ -6640,6 +6661,7 @@ export async function lockPurchaseOrder(id: string) {
 
     await db.purchase_orders.put(updated)
     await syncUpsertEntities('purchase_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId)
+    invalidateOrdersList(existing.workspaceId, 'purchase')
     return updated
 }
 
@@ -6668,4 +6690,5 @@ export async function deletePurchaseOrder(id: string) {
     await syncSoftDelete('purchase_orders', id, existing.workspaceId)
     await softDeleteOrderInstallments(id, existing.workspaceId)
     await recalculateSupplierAndPartnerSummaries(existing.workspaceId, existing.supplierId, existing.businessPartnerId)
+    invalidateOrdersList(existing.workspaceId, 'purchase')
 }

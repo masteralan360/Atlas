@@ -8,6 +8,7 @@ import { isDemoWorkspaceMode, isHybridWorkspaceMode, isLocalWorkspaceMode } from
 import { getLocalModeSqliteConnection } from './localModeSqlite'
 
 import { db } from './database'
+import { ensureProductStorageAssignment, removeProductStorageAssignment } from './productStorageAssignments'
 import {
   assertCurrentUserCanAccessStorage,
 } from './storagePermissions'
@@ -1013,6 +1014,21 @@ async function createLocalTransferBatch(input: CreateInventoryTransferBatchInput
     },
   )
 
+  await Promise.all(committed.plannedItems.flatMap((item) => [
+    ensureProductStorageAssignment(workspaceId, item.productId, sourceStorageId, { remoteHydration: true }),
+    ensureProductStorageAssignment(workspaceId, item.productId, destinationStorageId, { remoteHydration: true }),
+  ]))
+  const emptiedSourceProducts = await Promise.all(committed.plannedItems.map(async (item) => {
+    const remaining = await db.inventory
+      .where('[workspaceId+storageId+productId]')
+      .equals([workspaceId, sourceStorageId, item.productId])
+      .and((row) => !row.isDeleted && isPositiveQuantity(row.quantity))
+      .first()
+    return remaining ? null : item.productId
+  }))
+  await Promise.all(Array.from(new Set(emptiedSourceProducts.filter((productId): productId is string => !!productId)))
+    .map((productId) => removeProductStorageAssignment(workspaceId, productId, sourceStorageId)))
+
   return {
     batch: committed.batch,
     items: committed.plannedItems.map((item) => ({
@@ -1205,6 +1221,26 @@ async function createRemoteTransferBatch(input: CreateInventoryTransferBatchInpu
   } catch (error) {
     // PostgreSQL has committed the complete operation; local rows are only a cache.
     console.error('[InventoryTransfer] Failed to refresh the local transfer cache:', error)
+  }
+
+  await Promise.all(plannedItems.flatMap((item) => [
+    ensureProductStorageAssignment(workspaceId, item.productId, sourceStorageId, { remoteAlreadyPersisted: true }),
+    ensureProductStorageAssignment(workspaceId, item.productId, destinationStorageId, { remoteAlreadyPersisted: true }),
+  ]))
+  const emptiedSourceProducts = plannedItems
+    .filter((item) => {
+      const sourceRow = syncedInventory.find((row) => (
+        row.productId === item.productId && row.storageId === sourceStorageId
+      ))
+      return !!sourceRow && (sourceRow.isDeleted || !isPositiveQuantity(sourceRow.quantity))
+    })
+    .map((item) => item.productId)
+  const assignmentRemovals = await Promise.allSettled(Array.from(new Set(emptiedSourceProducts))
+    .map((productId) => removeProductStorageAssignment(workspaceId, productId, sourceStorageId)))
+  for (const removal of assignmentRemovals) {
+    if (removal.status === 'rejected') {
+      console.error('[InventoryTransfer] Failed to retire the emptied source assignment:', removal.reason)
+    }
   }
 
   return {

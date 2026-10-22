@@ -15,6 +15,7 @@ import {
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import { createInventoryTransferBatch } from './inventoryTransferBatches'
 import { addToOfflineMutations } from './offlineMutations'
+import { ensureProductStorageAssignment, getProductStorageAssignments } from './productStorageAssignments'
 import { isSyncIntegrityError } from '@/sync/syncErrors'
 import { refreshStockBatchesFromSupabase } from './stockBatches'
 import { isValidNewInventoryQuantity } from './inventoryDeficit'
@@ -819,15 +820,17 @@ export function useProducts(workspaceId: string | undefined, options: UseProduct
                 const accessFilteredRows = serviceAccess.ids === null
                     ? rows
                     : rows.filter((product) => !isService(product) || serviceAccess.ids?.has(product.id) === true)
-                if (storageAccess.isReady !== false
-                    && (storageAccess.isAdmin || storageAccess.excludedStorageIds.size === 0)) return accessFilteredRows
+                if (storageAccess.isAdmin) return accessFilteredRows
 
-                const inventoryRows = await db.inventory
-                    .where('workspaceId')
-                    .equals(workspaceId)
-                    .and((row) => !row.isDeleted)
-                    .toArray()
-                return filterProductsByStorageAccess(accessFilteredRows, inventoryRows, storageAccess)
+                const [inventoryRows, assignmentRows] = await Promise.all([
+                    db.inventory
+                        .where('workspaceId')
+                        .equals(workspaceId)
+                        .and((row) => !row.isDeleted)
+                        .toArray(),
+                    getProductStorageAssignments(workspaceId, accessFilteredRows.map((product) => product.id))
+                ])
+                return filterProductsByStorageAccess(accessFilteredRows, inventoryRows, storageAccess, assignmentRows)
             }
 
             if (!options.debugTraceRead || !isCrudDebuggerEnabled() || didTraceRead.current) return readLocalProducts()
@@ -847,6 +850,7 @@ export function useProducts(workspaceId: string | undefined, options: UseProduct
         }
 
         void fetchTableFromSupabase('products', db.products, workspaceId)
+            .then(() => fetchTableFromSupabase('product_storage_assignments', db.product_storage_assignments, workspaceId))
             .then(() => syncBarcodeCache ? syncProductBarcodeCachesForWorkspace(workspaceId) : undefined)
             .catch((error) => {
                 console.error('[Products] Failed to hydrate products:', error)
@@ -876,15 +880,17 @@ export function useProductsByIds(workspaceId: string | undefined, productIds: st
             const accessFilteredRows = serviceAccess.ids === null
                 ? rows
                 : rows.filter((product) => !isService(product) || serviceAccess.ids?.has(product.id) === true)
-            if (storageAccess.isReady !== false
-                && (storageAccess.isAdmin || storageAccess.excludedStorageIds.size === 0)) return accessFilteredRows
+            if (storageAccess.isAdmin) return accessFilteredRows
 
-            const inventoryRows = await db.inventory
-                .where('workspaceId')
-                .equals(workspaceId)
-                .and((row) => !row.isDeleted)
-                .toArray()
-            return filterProductsByStorageAccess(accessFilteredRows, inventoryRows, storageAccess)
+            const [inventoryRows, assignmentRows] = await Promise.all([
+                db.inventory
+                    .where('workspaceId')
+                    .equals(workspaceId)
+                    .and((row) => !row.isDeleted)
+                    .toArray(),
+                getProductStorageAssignments(workspaceId, accessFilteredRows.map((product) => product.id))
+            ])
+            return filterProductsByStorageAccess(accessFilteredRows, inventoryRows, storageAccess, assignmentRows)
         },
         [workspaceId, productIdKey, serviceAccess.ids, storageAccess.signature]
     )
@@ -902,12 +908,15 @@ export function useProduct(id: string | undefined) {
             const row = await db.products.get(id)
             if (!row || row.isDeleted) return undefined
             if (isService(row) && serviceAccess.ids !== null && !serviceAccess.ids.has(row.id)) return undefined
-            const inventoryRows = await db.inventory
-                .where('productId')
-                .equals(id)
-                .and((inventory) => !inventory.isDeleted)
-                .toArray()
-            return filterProductsByStorageAccess([row], inventoryRows, storageAccess)[0]
+            const [inventoryRows, assignmentRows] = await Promise.all([
+                db.inventory
+                    .where('productId')
+                    .equals(id)
+                    .and((inventory) => !inventory.isDeleted)
+                    .toArray(),
+                getProductStorageAssignments(row.workspaceId, [row.id])
+            ])
+            return filterProductsByStorageAccess([row], inventoryRows, storageAccess, assignmentRows)[0]
         },
         [id, serviceAccess.ids, storageAccess.signature]
     )
@@ -927,7 +936,10 @@ export function useProductVariants(parentProductId: string | undefined) {
             const inventoryRows = rows.length > 0
                 ? await db.inventory.where('productId').anyOf(rows.map((row) => row.id)).and((inventory) => !inventory.isDeleted).toArray()
                 : []
-            return filterProductsByStorageAccess(rows, inventoryRows, storageAccess)
+            const assignmentRows = rows.length > 0
+                ? await getProductStorageAssignments(rows[0].workspaceId, rows.map((row) => row.id))
+                : []
+            return filterProductsByStorageAccess(rows, inventoryRows, storageAccess, assignmentRows)
                 .sort((left, right) => left.name.localeCompare(right.name))
         },
         [parentProductId, storageAccess.signature]
@@ -1071,6 +1083,7 @@ async function createProductInternal(
         ...data,
         isService: service,
         serviceLegacyWorkspaceAccess: service ? false : data.serviceLegacyWorkspaceAccess,
+        storageScope: service ? 'workspace' : initialStorageId ? 'storage' : data.storageScope ?? 'unresolved',
         sku,
         skuKey: normalizeProductSku(sku),
         // The initial quantity is written as inventory below.  Keeping the
@@ -1134,6 +1147,10 @@ async function createProductInternal(
         } else await queueMutation()
     }
 
+    if (initialStorageId) {
+        await ensureProductStorageAssignment(workspaceId, id, initialStorageId)
+    }
+
     const setupInventory = () => service
         ? Promise.resolve(product)
         : setProductInventoryFromLegacyInput({
@@ -1171,13 +1188,20 @@ async function updateProductInternal(id: string, data: Partial<Product>, trace?:
         : undefined
     const readProductRestrictions = () => Promise.all([
         getCurrentStorageAccess(existing.workspaceId),
-        db.inventory.where('productId').equals(id).and((row) => !row.isDeleted).toArray()
+        db.inventory.where('productId').equals(id).and((row) => !row.isDeleted).toArray(),
+        getProductStorageAssignments(existing.workspaceId, [id])
     ])
-    const [storageAccess, inventoryRows] = trace
+    const [storageAccess, inventoryRows, assignmentRows] = trace
         ? await trace.measure('crudDebugger.stages.productLocalRead', 'data', readProductRestrictions)
         : await readProductRestrictions()
-    if (filterProductsByStorageAccess([existing], inventoryRows, storageAccess).length === 0) {
+    if (filterProductsByStorageAccess([existing], inventoryRows, storageAccess, assignmentRows).length === 0) {
         throw new Error(i18n.t('storages.permissions.errors.accessDenied'))
+    }
+    const requestedStorageId = typeof data.storageId === 'string' && data.storageId.length > 0
+        ? data.storageId
+        : null
+    if (requestedStorageId && !isService(existing)) {
+        await assertCurrentUserCanAccessStorage(existing.workspaceId, requestedStorageId)
     }
     const isSavingOnline = isOnline(existing.workspaceId)
     const {
@@ -1229,8 +1253,10 @@ async function updateProductInternal(id: string, data: Partial<Product>, trace?:
     const updated = {
         ...existing,
         ...productData,
+        ...(requestedStorageId && !nextIsService ? { storageScope: 'storage' as const } : {}),
         ...(nextIsService ? {
             isService: true,
+            storageScope: 'workspace' as const,
             unit: '',
             quantity: 0,
             minStockLevel: 0,
@@ -1249,6 +1275,7 @@ async function updateProductInternal(id: string, data: Partial<Product>, trace?:
         // ONLINE
         const payload = toSupabaseProductPayload({
             ...productData,
+            ...(requestedStorageId && !nextIsService ? { storageScope: 'storage' } : {}),
             ...(hasSkuUpdate ? { sku } : {}),
             updatedAt: now
         })
@@ -1282,6 +1309,9 @@ async function updateProductInternal(id: string, data: Partial<Product>, trace?:
                 trace.addPendingStage('crudDebugger.stages.productSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
             }
         } else await queueMutation()
+    }
+    if (requestedStorageId && !nextIsService) {
+        await ensureProductStorageAssignment(existing.workspaceId, id, requestedStorageId)
     }
 }
 
@@ -1431,13 +1461,14 @@ async function deleteProductInternal(id: string, trace?: CrudTraceHandle): Promi
         : undefined
     const readRelatedData = () => Promise.all([
         getCurrentStorageAccess(existing.workspaceId),
-        db.inventory.where('productId').equals(id).and((row) => !row.isDeleted).toArray()
+        db.inventory.where('productId').equals(id).and((row) => !row.isDeleted).toArray(),
+        getProductStorageAssignments(existing.workspaceId, [id])
     ])
-    const [storageAccess, inventoryRows] = trace
+    const [storageAccess, inventoryRows, assignmentRows] = trace
         ? await trace.measure('crudDebugger.stages.productLocalRead', 'data', readRelatedData)
         : await readRelatedData()
     const validateDeleteAccess = () => {
-        if (filterProductsByStorageAccess([existing], inventoryRows, storageAccess).length === 0) {
+        if (filterProductsByStorageAccess([existing], inventoryRows, storageAccess, assignmentRows).length === 0) {
             throw new Error(i18n.t('storages.permissions.errors.accessDenied'))
         }
         assertInventoryMutationConnectivity(existing.workspaceId)
@@ -2156,11 +2187,19 @@ async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus
     const client = getSupabaseClientForTable(tableName)
     const remoteTableName = getSupabaseRemoteTableName(tableName)
         const workspaceScopedRpc = getWorkspaceScopedPartnerReadRpc(tableName)
+    const safeProductRead = tableName === 'products'
     const remoteRows: any[] = []
 
     for (let from = 0; ; from += TABLE_FETCH_PAGE_SIZE) {
         if (signal?.aborted) return false
-        let query = workspaceScopedRpc
+        let query = safeProductRead
+            ? (client as any).rpc('get_visible_products_for_current_user', {
+                p_workspace_id: workspaceId,
+                p_product_ids: null,
+                p_offset: from,
+                p_limit: TABLE_FETCH_PAGE_SIZE
+            })
+            : workspaceScopedRpc
             ? client.rpc(workspaceScopedRpc, { p_workspace_id: workspaceId })
             : client
                 .from(remoteTableName)
@@ -2168,13 +2207,15 @@ async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus
                 .eq('workspace_id', workspaceId)
 
         // Only filter by is_deleted for tables that still have that column.
-        if (!workspaceScopedRpc && tableName !== 'workspace_contacts' && !includeDeleted) {
+        if (!safeProductRead && !workspaceScopedRpc && tableName !== 'workspace_contacts' && !includeDeleted) {
             query = query.eq('is_deleted', false)
         }
 
-        query = query
-            .order('id', { ascending: true })
-            .range(from, from + TABLE_FETCH_PAGE_SIZE - 1)
+        if (!safeProductRead) {
+            query = query
+                .order('id', { ascending: true })
+                .range(from, from + TABLE_FETCH_PAGE_SIZE - 1)
+        }
 
         if (signal) {
             query = (query as any).abortSignal(signal)
@@ -2193,7 +2234,13 @@ async function fetchTableFromSupabaseInternal<T extends { id: string, syncStatus
         }
         if (signal?.aborted) return false
 
-        remoteRows.push(...data)
+        const hydratedRows = safeProductRead
+            ? data.map((row: { product?: unknown }) => row.product).filter(Boolean)
+            : data
+        if (safeProductRead && hydratedRows.length !== data.length) {
+            throw new Error('The visible product snapshot response was invalid.')
+        }
+        remoteRows.push(...hydratedRows)
         updateWorkspaceDataHydrationProgress(
             workspaceId,
             'supabase',

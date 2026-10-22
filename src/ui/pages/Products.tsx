@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useR
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
-import { ArrowDown, ArrowUp, ArrowUpDown, Barcode, BookOpen, Boxes, Camera, ChevronDown, ChevronRight, CircleAlert, Copy, FileSpreadsheet, GitBranch, Info, LayoutGrid, List as ListIcon, Loader2, Package, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Tags, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, Barcode, BookOpen, Boxes, Camera, ChevronDown, ChevronRight, CircleAlert, Copy, FileSpreadsheet, GitBranch, Image as ImageIcon, ImageOff, Info, LayoutGrid, List as ListIcon, Loader2, Package, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Tags, Trash2 } from 'lucide-react'
 
 import { useAuth } from '@/auth'
 import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
@@ -11,18 +11,22 @@ import {
     deleteProduct,
     fetchAllProductCatalogMatches,
     fetchAllProductCatalogMatchesWithInventory,
+    filterProductsByStorageAccess,
     useCategories,
     usePriceBookCatalogState,
     useInventory,
     useInventoryProductIdsInStorages,
     useProducts,
     useProductCatalogPage,
+    useProductStorageAssignments,
+    useStorageAccess,
     useWorkspaceProductBarcodes,
     useStorages,
     type CurrencyCode,
     type Inventory,
     type PriceBook,
-    type Product
+    type Product,
+    type ProductStorageAssignment
 } from '@/local-db'
 import { isMobile, isTauri } from '@/lib/platform'
 import {
@@ -362,6 +366,9 @@ export function Products() {
     const { isAccessKeyHeld } = useUiAccess()
     const [, navigate] = useLocation()
     const workspaceId = user?.workspaceId || ''
+    const zeroStockImageColorPreferenceKey = workspaceId && user?.id
+        ? `products_zero_stock_images_color:${workspaceId}:${user.id}`
+        : null
     const isOnline = useNetworkStatus()
     const isRemoteCatalogBrowse = Boolean(workspaceId && isOnline && !isLocalWorkspaceMode(workspaceId))
     const categories = useCategories(user?.workspaceId)
@@ -410,6 +417,7 @@ export function Products() {
     }, [pagination.pageSize])
     const [isProductCategoryManagerOpen, setIsProductCategoryManagerOpen] = useState(false)
     const [isPriceBookDialogOpen, setIsPriceBookDialogOpen] = useState(false)
+    const [showZeroStockImagesInColor, setShowZeroStockImagesInColor] = useState(false)
     const [adjustmentDialogOpen, setAdjustmentDialogOpen] = useState(false)
     const [selectedProductForStock, setSelectedProductForStock] = useState<string | undefined>()
     const [stockQuantityOverrides, setStockQuantityOverrides] = useState<
@@ -432,6 +440,31 @@ export function Products() {
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => {
         return (localStorage.getItem('products_view_mode') as 'table' | 'grid') || 'table'
     })
+
+    useEffect(() => {
+        if (!zeroStockImageColorPreferenceKey) {
+            setShowZeroStockImagesInColor(false)
+            return
+        }
+
+        try {
+            setShowZeroStockImagesInColor(localStorage.getItem(zeroStockImageColorPreferenceKey) === 'true')
+        } catch {
+            setShowZeroStockImagesInColor(false)
+        }
+    }, [zeroStockImageColorPreferenceKey])
+
+    const toggleZeroStockImageColor = () => {
+        const nextValue = !showZeroStockImagesInColor
+        setShowZeroStockImagesInColor(nextValue)
+        if (!zeroStockImageColorPreferenceKey) return
+
+        try {
+            localStorage.setItem(zeroStockImageColorPreferenceKey, String(nextValue))
+        } catch {
+            // Keep the in-memory preference even when browser storage is unavailable.
+        }
+    }
     const [deleteModalOpen, setDeleteModalOpen] = useState(false)
     const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null)
     const [catalogRefreshKey, setCatalogRefreshKey] = useState(0)
@@ -451,6 +484,7 @@ export function Products() {
     const [selectedCloneTargetStorageId, setSelectedCloneTargetStorageId] = useState('')
     const [isBranchCloning, setIsBranchCloning] = useState(false)
     const canCloneToBranch = canCloneProducts && cloneTargets.length > 0
+    const storageAccess = useStorageAccess(workspaceId)
 
     const remoteCatalogPageEnabled = isRemoteCatalogBrowse
         && !isBranchCloneSelectionMode
@@ -497,6 +531,14 @@ export function Products() {
         })
     }, [productCatalogPage.error, t, toast])
     const useRemoteCatalogPage = remoteCatalogPageEnabled && !productCatalogPage.error
+    const previousStorageAccessSignature = useRef(storageAccess.signature)
+    useEffect(() => {
+        if (previousStorageAccessSignature.current === storageAccess.signature) return
+        previousStorageAccessSignature.current = storageAccess.signature
+        if (isRemoteCatalogBrowse) {
+            setCatalogRefreshKey((current) => current + 1)
+        }
+    }, [isRemoteCatalogBrowse, storageAccess.signature])
     const draftProductCatalogPreview = useProductCatalogPage({
         workspaceId,
         search: deferredSearch,
@@ -528,18 +570,27 @@ export function Products() {
         () => new Set(productCatalogPage.matchedProductIds),
         [productCatalogPage.matchedProductIds]
     )
+    const storageAccessibleCatalogProducts = useMemo(
+        () => filterProductsByStorageAccess(
+            productCatalogPage.products,
+            productCatalogPage.inventoryRows,
+            storageAccess,
+            productCatalogPage.assignmentRows
+        ),
+        [productCatalogPage.assignmentRows, productCatalogPage.inventoryRows, productCatalogPage.products, storageAccess]
+    )
     const productsForBulkActions = catalogActionProducts ?? products
     const catalogProducts = useMemo(
         () => useRemoteCatalogPage
-            ? productCatalogPage.products.filter((product) => matchedCatalogProductIds.has(product.id))
+            ? storageAccessibleCatalogProducts.filter((product) => matchedCatalogProductIds.has(product.id))
             : productsForBulkActions,
-        [matchedCatalogProductIds, productCatalogPage.products, productsForBulkActions, useRemoteCatalogPage]
+        [matchedCatalogProductIds, productsForBulkActions, storageAccessibleCatalogProducts, useRemoteCatalogPage]
     )
     const catalogSupportProducts = useMemo(
         () => useRemoteCatalogPage
-            ? productCatalogPage.products.filter((product) => !matchedCatalogProductIds.has(product.id))
+            ? storageAccessibleCatalogProducts.filter((product) => !matchedCatalogProductIds.has(product.id))
             : [],
-        [matchedCatalogProductIds, productCatalogPage.products, useRemoteCatalogPage]
+        [matchedCatalogProductIds, storageAccessibleCatalogProducts, useRemoteCatalogPage]
     )
     const priceBookProductIds = useMemo(
         () => isProductsExportOpen
@@ -616,6 +667,10 @@ export function Products() {
     const inventoryRows = isProductsExportOpen && catalogActionInventoryRows !== null
         ? catalogActionInventoryRows
         : useRemoteCatalogPage ? productCatalogPage.inventoryRows : cachedInventoryRows
+    const cachedProductStorageAssignments = useProductStorageAssignments(workspaceId)
+    const productStorageAssignments: ProductStorageAssignment[] = useRemoteCatalogPage
+        ? productCatalogPage.assignmentRows
+        : cachedProductStorageAssignments
     const productStorageMap = useMemo(() => {
         const map = new Map<string, { storageId: string; name: string; quantity: number }[]>()
         const temp = new Map<string, Map<string, { name: string; quantity: number }>>()
@@ -639,18 +694,30 @@ export function Products() {
             }
             map.set(productId, entries)
         }
+        for (const assignment of productStorageAssignments) {
+            if (!visibleProductIds.has(assignment.productId)) continue
+            const storage = storageById.get(assignment.storageId)
+            if (!storage) continue
+            const entries = map.get(assignment.productId) ?? []
+            if (!entries.some((entry) => entry.storageId === assignment.storageId)) {
+                entries.push({ storageId: assignment.storageId, name: storage.name, quantity: 0 })
+            }
+            map.set(assignment.productId, entries)
+        }
         for (const product of catalogProducts) {
-            if (map.has(product.id) || !product.storageId) continue
+            if (!product.storageId || map.get(product.id)?.some((entry) => entry.storageId === product.storageId)) continue
             const storage = storageById.get(product.storageId)
             if (!storage) continue
-            map.set(product.id, [{
+            const entries = map.get(product.id) ?? []
+            entries.push({
                 storageId: product.storageId,
                 name: product.storageName || storage.name,
                 quantity: Number(product.quantity) || 0
-            }])
+            })
+            map.set(product.id, entries)
         }
         return map
-    }, [catalogProducts, inventoryRows, storageById])
+    }, [catalogProducts, inventoryRows, productStorageAssignments, storageById])
 
     const buildCatalogQuery = (
         searchTerm: string,
@@ -915,6 +982,9 @@ export function Products() {
         return getTotalStockQuantity(product)
     }
 
+    const hasNoDisplayedStock = (product: Product) =>
+        !isService(product) && getDisplayedStockQuantity(product) <= 0
+
     const renderStockQuantity = (product: Product, serviceLabel: string) => {
         if (isService(product)) return serviceLabel
 
@@ -959,8 +1029,14 @@ export function Products() {
                 .some((override) => override.quantity <= 0)
             return hasConfirmedEmptyPosition ? '' : null
         }
-        if (entries.length === 1) return <>{entries[0].name}</>
-        const sorted = [...entries].sort((a, b) => b.quantity - a.quantity)
+        const stockedEntries = entries.filter((entry) => entry.quantity > 0)
+        if (stockedEntries.length === 0) {
+            // Suppress the assigned-storage fallback when all visible stock
+            // positions are empty.
+            return ''
+        }
+        if (stockedEntries.length === 1) return <>{stockedEntries[0].name}</>
+        const sorted = [...stockedEntries].sort((a, b) => b.quantity - a.quantity)
         return (
             <TooltipProvider>
                 <Tooltip delayDuration={200}>
@@ -1014,6 +1090,12 @@ export function Products() {
     }
 
     const getProductStorageSummary = useCallback((product: Product) => {
+        if (product.storageScope === 'unresolved') {
+            return t('products.form.storageAssignmentNeedsReview')
+        }
+        if (product.storageScope === 'workspace') {
+            return t('products.form.workspaceWideStorage')
+        }
         const allEntries = productStorageMap.get(product.id)
         const entries = filters.stockQuantitySelectedStorageOnly && filters.stockStorage.length > 0
             ? allEntries?.filter((entry) => filters.stockStorage.includes(entry.storageId))
@@ -1062,7 +1144,7 @@ export function Products() {
                 (product.name ?? '').toLowerCase().includes(searchTerm)
                 || (product.sku ?? '').toLowerCase().includes(searchTerm)
                 || getCategoryName(product.categoryId).toLowerCase().includes(searchTerm)
-                || getStorageName(product.storageId).toLowerCase().includes(searchTerm)
+                || (productStorageMap.get(product.id) ?? []).some((entry) => entry.name.toLowerCase().includes(searchTerm))
                 || productBarcodeValuesByProductId.get(product.id)?.some((barcode) => barcode.toLowerCase().includes(searchTerm))
             )
         )
@@ -1070,7 +1152,8 @@ export function Products() {
             result = result.filter((product) => !!product.categoryId && draftFilters.category.includes(product.categoryId))
         }
         if (draftFilters.storage.length > 0) {
-            result = result.filter((product) => !!product.storageId && draftFilters.storage.includes(product.storageId))
+            result = result.filter((product) => (productStorageMap.get(product.id) ?? [])
+                .some((entry) => draftFilters.storage.includes(entry.storageId)))
         }
         result = result.filter((product) => draftLocalStockProductIds.has(product.id))
         if (draftFilters.currency.length > 0) {
@@ -1096,6 +1179,7 @@ export function Products() {
         isFilterDialogOpen,
         isRemoteCatalogBrowse,
         productBarcodeValuesByProductId,
+        productStorageMap,
         products
     ])
 
@@ -1129,7 +1213,7 @@ export function Products() {
                 (product.name ?? '').toLowerCase().includes(searchTerm) ||
                 (product.sku ?? '').toLowerCase().includes(searchTerm) ||
                 getCategoryName(product.categoryId).toLowerCase().includes(searchTerm) ||
-                getStorageName(product.storageId).toLowerCase().includes(searchTerm) ||
+                (productStorageMap.get(product.id) ?? []).some((entry) => entry.name.toLowerCase().includes(searchTerm)) ||
                 productBarcodeValuesByProductId.get(product.id)?.some((barcode) => barcode.toLowerCase().includes(searchTerm))
             )
         )
@@ -1138,7 +1222,8 @@ export function Products() {
             result = result.filter((product) => !!product.categoryId && filters.category.includes(product.categoryId))
         }
         if (filters.storage.length > 0) {
-            result = result.filter((product) => !!product.storageId && filters.storage.includes(product.storageId))
+            result = result.filter((product) => (productStorageMap.get(product.id) ?? [])
+                .some((entry) => filters.storage.includes(entry.storageId)))
         }
         // The remote catalog query already applies Has Stock in. During an
         // export, trust that complete server-filtered result instead of
@@ -1186,7 +1271,7 @@ export function Products() {
         })
 
         return result
-    }, [catalogProducts, productBarcodeValuesByProductId, deferredSearch, getCategoryName, getStorageName, filters, catalogType, hasFeature, isProductsExportOpen, isRemoteCatalogBrowse, catalogActionProducts, localStockProductIds, useRemoteCatalogPage])
+    }, [catalogProducts, productBarcodeValuesByProductId, productStorageMap, deferredSearch, getCategoryName, filters, catalogType, hasFeature, isProductsExportOpen, isRemoteCatalogBrowse, catalogActionProducts, localStockProductIds, useRemoteCatalogPage])
 
     const productById = useMemo(
         () => new Map([...products, ...catalogSupportProducts, ...catalogProducts].map((product) => [product.id, product] as const)),
@@ -2316,7 +2401,7 @@ export function Products() {
                     </div>
                 </CardHeader>
                 <CardContent>
-                    {isRemoteCatalogBrowse && productCatalogPage.isLoading ? (
+                    {isRemoteCatalogBrowse && (storageAccess.isReady === false || productCatalogPage.isLoading) ? (
                         <div className="flex min-h-60 items-center justify-center gap-2 py-8 text-center text-muted-foreground">
                             <Loader2 className="h-4 w-4 animate-spin" />
                             {t('common.loading', { defaultValue: 'Loading...' })}
@@ -2399,6 +2484,7 @@ export function Products() {
                                                                                 imageUrl={product.imageUrl}
                                                                                 showImagePreviewOnHover
                                                                                 previewSide={productImagePreviewSide}
+                                                                                imageClassName={hasNoDisplayedStock(product) && !showZeroStockImagesInColor ? 'grayscale' : undefined}
                                                                                 className={cn('h-16 w-16 rounded-[1.25rem] border border-border/50 bg-muted/30', isLinkedVariant && 'h-14 w-14 rounded-2xl')}
                                                                                 fallbackIconClassName="h-8 w-8 text-muted-foreground/20"
                                                                             />
@@ -2430,13 +2516,21 @@ export function Products() {
                                                                                 <div className={cn(
                                                                                     'mt-0.5 text-[11px] font-black uppercase tracking-widest',
                                                                                     isLinkedVariant && 'text-[10px]',
-                                                                                    getTotalStockQuantity(product) <= product.minStockLevel ? 'text-amber-500' : 'text-muted-foreground/60'
+                                                                                    !isService(product) && getDisplayedStockQuantity(product) <= 0
+                                                                                        ? 'text-red-500'
+                                                                                        : getTotalStockQuantity(product) <= product.minStockLevel
+                                                                                            ? 'text-amber-500'
+                                                                                            : 'text-muted-foreground/60'
                                                                                 )}>
                                                                                     {renderStockQuantity(product, t('services.noInventory', { defaultValue: 'No inventory' }))}
                                                                                 </div>
                                                                             </div>
                                                                         </div>
-                                                                        <div className={cn('flex justify-end gap-2 border-t border-border/50 pt-3', isLinkedVariant && 'gap-1.5 pt-2')}>
+                                                                        <div className={cn(
+                                                                            'flex justify-end gap-2 border-t border-border/50 pt-3',
+                                                                            isLinkedVariant && 'gap-1.5 pt-2',
+                                                                            hasNoDisplayedStock(product) && 'grayscale'
+                                                                        )}>
                                                                             <Button
                                                                                 variant="secondary"
                                                                                 size="sm"
@@ -2541,7 +2635,10 @@ export function Products() {
                                                                     showImagePreviewOnHover
                                                                     previewSide={productImagePreviewSide}
                                                                     className="h-full w-full rounded-none border-0 bg-transparent"
-                                                                    imageClassName="transition-transform duration-500 group-hover:scale-110"
+                                                                    imageClassName={cn(
+                                                                        'transition-transform duration-500 group-hover:scale-110',
+                                                                        hasNoDisplayedStock(product) && !showZeroStockImagesInColor && 'grayscale'
+                                                                    )}
                                                                     fallbackIconClassName="h-12 w-12 text-muted-foreground/10"
                                                                 />
                                                                 {!isService(product) && <div className={cn(
@@ -2580,12 +2677,15 @@ export function Products() {
                                                                     <div className="text-lg font-black text-primary">
                                                                         {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
                                                                     </div>
-                                                                    <div className="text-[11px] font-medium text-muted-foreground">
+                                                                    <div className={cn(
+                                                                        'text-[11px] font-medium text-muted-foreground',
+                                                                        !isService(product) && getDisplayedStockQuantity(product) <= 0 && 'text-red-500'
+                                                                    )}>
                                                                         {renderStockQuantity(product, t('services.noInventory', { defaultValue: 'No inventory' }))}
                                                                     </div>
                                                                 </div>
 
-                                                                <div className="flex gap-1">
+                                                                <div className={cn('flex gap-1', hasNoDisplayedStock(product) && 'grayscale')}>
                                                                     <Button
                                                                         variant="ghost"
                                                                         size="icon"
@@ -2639,7 +2739,29 @@ export function Products() {
                                                 <TableRow>
                                                     {isProductSelectionMode && <TableHead className="w-[52px]" />}
                                                     <TableHead className="w-[44px]" aria-label="Product status" />
-                                                    <TableHead className="w-[80px]">{t('products.table.image') || 'Image'}</TableHead>
+                                                    <TableHead className="group w-[80px]">
+                                                        <span className="inline-flex items-center gap-1">
+                                                            {t('products.table.image') || 'Image'}
+                                                            <Button
+                                                                type="button"
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-5 w-5 rounded-md p-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:opacity-100 focus-visible:opacity-100"
+                                                                aria-label={t(showZeroStockImagesInColor
+                                                                    ? 'products.table.grayOutZeroStockImages'
+                                                                    : 'products.table.showZeroStockImagesInColor')}
+                                                                title={t(showZeroStockImagesInColor
+                                                                    ? 'products.table.grayOutZeroStockImages'
+                                                                    : 'products.table.showZeroStockImagesInColor')}
+                                                                aria-pressed={showZeroStockImagesInColor}
+                                                                onClick={toggleZeroStockImageColor}
+                                                            >
+                                                                {showZeroStockImagesInColor
+                                                                    ? <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                                                                    : <ImageOff className="h-3.5 w-3.5" aria-hidden="true" />}
+                                                            </Button>
+                                                        </span>
+                                                    </TableHead>
                                                     <TableHead
                                                         className="cursor-pointer select-none group/sort"
                                                         onClick={() => {
@@ -2782,6 +2904,7 @@ export function Products() {
                                                                         imageUrl={product.imageUrl}
                                                                         showImagePreviewOnHover
                                                                         previewSide={productImagePreviewSide}
+                                                                        imageClassName={hasNoDisplayedStock(product) && !showZeroStockImagesInColor ? 'grayscale' : undefined}
                                                                         className="h-10 w-10 rounded-lg border-0 bg-muted"
                                                                         fallbackIconClassName="h-5 w-5 text-muted-foreground/30"
                                                                     />
@@ -2795,13 +2918,19 @@ export function Products() {
                                                                     {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
                                                                 </TableCell>
                                                                 <TableCell className="text-right">
-                                                                    <span className={getTotalStockQuantity(product) <= product.minStockLevel ? 'font-medium text-amber-500' : ''}>
+                                                                    <span className={cn(
+                                                                        !isService(product) && getDisplayedStockQuantity(product) <= 0
+                                                                            ? 'font-medium text-red-500'
+                                                                            : getTotalStockQuantity(product) <= product.minStockLevel
+                                                                                ? 'font-medium text-amber-500'
+                                                                                : ''
+                                                                    )}>
                                                                         {renderStockQuantity(product, '—')}
                                                                     </span>
                                                                 </TableCell>
                                                                 {(canEdit || canDelete || user?.role === 'viewer') && (
                                                                     <TableCell className="text-right">
-                                                                        <div className="flex justify-end gap-2">
+                                                                        <div className={cn('flex justify-end gap-2', hasNoDisplayedStock(product) && 'grayscale')}>
                                                                             {heldStockActionProductId === product.id && canEdit && !isService(product) && (
                                                                                 <Button
                                                                                     type="button"

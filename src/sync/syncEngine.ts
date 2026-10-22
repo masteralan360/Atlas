@@ -49,6 +49,7 @@ async function deleteQueuedDeliveryVoiceReasons(paths: readonly string[]) {
 // Temporarily exclude these tables because the Garden schema migration is not deployed yet.
 const SYNC_PULL_TABLES = [
   "products",
+  "product_storage_assignments",
   "product_uoms",
   "product_barcodes",
   "price_books",
@@ -331,6 +332,10 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
   };
 
   switch (entityType) {
+    case "product_storage_assignments":
+      addParent("products", "productId", "product_id");
+      addParent("storages", "storageId", "storage_id");
+      break;
     case "product_uoms":
       addCustomUnitParent("unitRef", "unit_ref");
       addParent("products", "productId", "product_id");

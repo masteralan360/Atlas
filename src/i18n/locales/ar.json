@@ -2027,6 +2027,8 @@
     },
     "table": {
       "image": "الصورة",
+      "showZeroStockImagesInColor": "إظهار صور المنتجات ذات المخزون الصفري بالألوان",
+      "grayOutZeroStockImages": "إظهار صور المنتجات ذات المخزون الصفري بتدرج الرمادي",
       "name": "الاسم",
       "sku": "رمز المنتج (SKU)",
       "price": "السعر",
@@ -2170,7 +2172,9 @@
       "webUploadDesc": "يتم التحقق من الصور وتحسينها وحفظها بأمان في التخزين السحابي.",
       "productDetailsTitle": "تفاصيل المنتج",
       "productDetailsDesc": "التقاط الهوية الأساسية والوصف والوحدة والفئة وموقع التخزين لهذا المنتج.",
-      "mixedStorages": "مخازن مختلطة"
+      "mixedStorages": "مخازن مختلطة",
+      "storageAssignmentNeedsReview": "تحتاج تبعية المخزن إلى مراجعة",
+      "workspaceWideStorage": "جميع المخازن"
     },
     "minimumSellingPrice": {
       "staffViolation": "لا يمكن أن يكون سعر {{productName}} أقل من الحد الأدنى لسعر البيع البالغ {{minimumPrice}}.",
@@ -3849,8 +3853,8 @@
       "manualEntryTemplatesAccessDescription": "الوصول إلى إدارة قوالب المدخلات اليدوية.",
       "posAccess": "نقطة البيع",
       "posAccessDescription": "الوصول إلى تدفق الدفع في نقطة البيع.",
-      "posHideModifyPriceButton": "إخفاء زر تعديل السعر",
-      "posHideModifyPriceButtonDescription": "إخفاء أيقونة القلم لتعديل أسعار العناصر في سلة POS.",
+      "posHideModifyPriceButton": "إخفاء حقلي عملة السعر والسعر المتفاوض عليه",
+      "posHideModifyPriceButtonDescription": "إخفاء محدد عملة السعر وحقل السعر المتفاوض عليه في محرر عناصر POS. يظل زر القلم والنافذة والحقول الأخرى، بما فيها الاسم الإضافي للخدمة، متاحة.",
       "posHidePriceBelowCostIndicator": "إخفاء مؤشر \"السعر أقل من التكلفة\"",
       "posHidePriceBelowCostIndicatorDescription": "إخفاء التحذير عندما يكون السعر المتفاوض عليه أقل من التكلفة داخل نافذة تعديل السعر.",
       "instantPosAccess": "نقطة البيع السريعة",
@@ -5692,6 +5696,11 @@
     "decreaseLabel": "نقصان",
     "adjustmentLabel": "تسوية مخزون",
     "transferLabel": "نقل مخزون",
+    "transferRoute": {
+      "source": "المصدر",
+      "destination": "الوجهة",
+      "restrictedStorage": "مخزن مقيّد"
+    },
     "initialStockLabel": "المخزون الأولي",
     "inventoryChangeLabel": "تغيير المخزون",
     "exchangeOutLabel": "المنتج البديل",

@@ -6,6 +6,7 @@ import { getWorkspaceDataMode, isLocalWorkspaceMode } from '@/workspace/workspac
 import { isCrudDebuggerEnabled, runCrudOperation, type CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import { db } from './database'
 import { addToOfflineMutations } from './offlineMutations'
+import { invalidateOrdersList } from '@/query/invalidateOrdersList'
 import type { PurchaseOrder, SalesOrder } from './models'
 
 type OrderTableName = 'sales_orders' | 'purchase_orders'
@@ -75,6 +76,7 @@ async function setOrderArchivedInternal(orderId: string, kind: OrderArchiveKind,
                     syncStatus: 'synced',
                     lastSyncedAt: syncedAt
                 }))
+            invalidateOrdersList(existing.workspaceId, kind)
             return { ...existing, isArchived, syncStatus: 'synced' as const, lastSyncedAt: syncedAt }
         } catch (error) {
             if (!isRetriableWebRequestError(error)) {
@@ -105,6 +107,7 @@ async function setOrderArchivedInternal(orderId: string, kind: OrderArchiveKind,
             ? trace.measure('crudDebugger.stages.salesOrderOfflineQueue', 'data', queue, 'crudDebugger.details.queuedForSync')
             : queue())
         trace?.addPendingStage('crudDebugger.stages.remoteSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
+        invalidateOrdersList(existing.workspaceId, kind)
         return queuedOrder
     }
 
@@ -112,6 +115,7 @@ async function setOrderArchivedInternal(orderId: string, kind: OrderArchiveKind,
     await (trace
         ? trace.measure('crudDebugger.stages.salesOrderLocalWrite', 'persistence', () => table.update(orderId, { isArchived }), 'crudDebugger.details.dexiePersistence')
         : table.update(orderId, { isArchived }))
+    invalidateOrdersList(existing.workspaceId, kind)
     return { ...existing, isArchived }
 }
 

@@ -33,6 +33,7 @@ function product(id: string, storageId: string | null, isService = false) {
     workspaceId: 'workspace-1',
     storageId,
     isService,
+    quantity: 0,
     isDeleted: false
   } as Product
 }
@@ -130,19 +131,57 @@ describe('storage permissions', () => {
     expect(canAccessStorage('storage-b', { isAdmin: false, excludedStorageIds: new Set(), isReady: false })).toBe(false)
   })
 
-  it('keeps a product available when it has stock in another permitted storage', () => {
+  it('shows a mixed-storage product through accessible stock and redacts excluded locations', () => {
     const products = [
       product('only-excluded', 'storage-a'),
-      product('also-permitted', 'storage-a'),
+      product('excluded-assignment-with-permitted-stock', 'storage-a'),
+      product('permitted-assignment', 'storage-b'),
+      product('permitted-assignment-visible-stock', 'storage-b'),
+      { ...product('storage-only-excluded', 'storage-a'), storageScope: 'storage' as const, quantity: 20 },
+      { ...product('mixed-storage', 'storage-a'), storageScope: 'storage' as const, storageName: 'Restricted Main', quantity: 8 },
       product('service', null, true),
-      product('unassigned', null)
+      product('unassigned-without-inventory', null),
+      { ...product('unassigned-hidden-stock', null), quantity: 1 },
+      { ...product('unassigned-visible-stock', null), quantity: 3 },
+      { ...product('unassigned-mixed-stock', null), quantity: 7 }
     ]
     const visible = filterProductsByStorageAccess(products, [
       inventory('only-excluded', 'storage-a'),
-      inventory('also-permitted', 'storage-b')
-    ], memberAccess)
+      inventory('excluded-assignment-with-permitted-stock', 'storage-b'),
+      inventory('permitted-assignment', 'storage-a'),
+      inventory('permitted-assignment-visible-stock', 'storage-b', 2),
+      inventory('mixed-storage', 'storage-a', 4),
+      inventory('mixed-storage', 'storage-b', 4),
+      inventory('unassigned-hidden-stock', 'storage-a'),
+      inventory('unassigned-visible-stock', 'storage-b', 3),
+      inventory('unassigned-mixed-stock', 'storage-a', 6),
+      inventory('unassigned-mixed-stock', 'storage-b', 1)
+    ], memberAccess, [
+      {
+        id: 'excluded-only-main', workspaceId: 'workspace-1', productId: 'storage-only-excluded', storageId: 'storage-a',
+        createdAt: '2026-01-01', updatedAt: '2026-01-01', version: 1, syncStatus: 'synced', lastSyncedAt: null, isDeleted: false
+      },
+      {
+        id: 'mixed-main', workspaceId: 'workspace-1', productId: 'mixed-storage', storageId: 'storage-a',
+        createdAt: '2026-01-01', updatedAt: '2026-01-01', version: 1, syncStatus: 'synced', lastSyncedAt: null, isDeleted: false
+      },
+      {
+        id: 'mixed-reserve', workspaceId: 'workspace-1', productId: 'mixed-storage', storageId: 'storage-b',
+        createdAt: '2026-01-01', updatedAt: '2026-01-01', version: 1, syncStatus: 'synced', lastSyncedAt: null, isDeleted: false
+      }
+    ])
 
-    expect(visible.map((row) => row.id)).toEqual(['also-permitted', 'service', 'unassigned'])
+    expect(visible.map((row) => row.id)).toEqual([
+      'permitted-assignment-visible-stock',
+      'mixed-storage',
+      'service',
+      'unassigned-without-inventory',
+      'unassigned-visible-stock'
+    ])
+    expect(visible.find((row) => row.id === 'permitted-assignment-visible-stock')?.quantity).toBe(2)
+    expect(visible.find((row) => row.id === 'mixed-storage')).toMatchObject({ quantity: 4, storageId: null })
+    expect(visible.find((row) => row.id === 'mixed-storage')?.storageName).toBeUndefined()
+    expect(visible.find((row) => row.id === 'unassigned-visible-stock')?.quantity).toBe(3)
   })
 
   it('removes hidden sales-order lines and recomputes visible totals', () => {

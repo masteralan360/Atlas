@@ -6,6 +6,7 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { isService } from '@/lib/catalogItem'
 
 import { db } from './database'
+import { ensureProductStorageAssignment } from './productStorageAssignments'
 import { assertLocalServiceAccessInCurrentTransaction } from './serviceAccess'
 import { assertInventoryMutationConnectivity, getInventoryQuantityForProductStorage, putInventoryQuantity, syncProductStockSnapshot } from './inventory'
 import { fetchTableFromSupabase, syncSalesFromSupabase } from './hooks'
@@ -569,6 +570,10 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
         result = { ...result, cashSettlementAmount, loanCreditAmount }
     })
 
+    await Promise.all([
+        ensureProductStorageAssignment(input.workspaceId, returnItem.productId, returnStorageId),
+        ensureProductStorageAssignment(input.workspaceId, input.replacementProductId, input.replacementStorageId),
+    ])
     return result
 }
 
@@ -576,6 +581,7 @@ async function refreshAfterCloudExchange(workspaceId: string, exchangeId: string
     await Promise.all([
         syncSalesFromSupabase(workspaceId),
         fetchTableFromSupabase('inventory', db.inventory, workspaceId, { includeDeleted: true, force: true }),
+        fetchTableFromSupabase('product_storage_assignments', db.product_storage_assignments, workspaceId, { includeDeleted: true, force: true }),
         fetchTableFromSupabase('loans', db.loans, workspaceId, { includeDeleted: true, force: true }),
         fetchTableFromSupabase('loan_installments', db.loan_installments, workspaceId, { includeDeleted: true, force: true }),
         fetchTableFromSupabase('loan_payments', db.loan_payments, workspaceId, { includeDeleted: true, force: true }),
@@ -619,8 +625,7 @@ export async function processSaleProductExchange(input: ProcessSaleProductExchan
         if (error) throw error
     }
 
-    const result = await applyLocalSaleProductExchange(input, ids)
-    return result
+    return applyLocalSaleProductExchange(input, ids)
 }
 
 export function useSaleProductExchanges(workspaceId: string | undefined, saleId?: string) {

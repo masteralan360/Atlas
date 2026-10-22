@@ -34,6 +34,7 @@ import { isAllowedInventoryQuantityTransition } from "./inventoryDeficit";
 import { canAccessStorage, useStorageAccess } from "./storagePermissions";
 import type {
   Inventory,
+  InventoryTransferBatch,
   InventoryTransaction,
   InventoryTransactionType,
   OrderReturnItem,
@@ -1431,6 +1432,7 @@ export function useInventoryTransactionPagesChanged(workspaceId?: string) {
 export interface InventoryTransactionPageRelations {
   products: Product[];
   storages: Storage[];
+  transferBatches: InventoryTransferBatch[];
   sales: Sale[];
   saleReturns: SaleReturn[];
   salesOrders: SalesOrder[];
@@ -1528,22 +1530,35 @@ async function hydrateInventoryTransactionPageRelations(
       : []),
   ));
   const productIds = Array.from(new Set(transactions.map((transaction) => transaction.productId)));
-  const storageIds = Array.from(new Set(transactions.map((transaction) => transaction.storageId)));
+  const transactionStorageIds = Array.from(new Set(transactions.map((transaction) => transaction.storageId)));
+  const transferBatchIds = Array.from(new Set(transactions.flatMap((transaction) =>
+    getInventoryTransactionMovementSource(transaction.transactionType, transaction.referenceType) === "transfer"
+      ? [transaction.transferBatchId, transaction.referenceId].filter((id): id is string => Boolean(id))
+      : [],
+  )));
   const posSaleIds = bySource("pos-sale");
   const posReturnIds = bySource("pos-return");
   const salesOrderIds = bySource("sales-order");
   const salesOrderReturnIds = bySource("sales-order-return");
   const purchaseOrderIds = bySource("purchase-order");
 
-  const [products, storages, directSales, saleReturns, directSalesOrders, purchaseOrders, returnItems] = await Promise.all([
+  const [products, transferBatches, directSales, saleReturns, directSalesOrders, purchaseOrders, returnItems] = await Promise.all([
     fetchInventoryTransactionRelatedRows<Product>("products", workspaceId, productIds, signal),
-    fetchInventoryTransactionRelatedRows<Storage>("storages", workspaceId, storageIds, signal),
+    fetchInventoryTransactionRelatedRows<InventoryTransferBatch>("inventory_transfer_batches", workspaceId, transferBatchIds, signal),
     fetchInventoryTransactionRelatedRows<Sale>("sales", workspaceId, posSaleIds, signal),
     fetchInventoryTransactionRelatedRows<SaleReturn>("sale_returns", workspaceId, posReturnIds, signal),
     fetchInventoryTransactionRelatedRows<SalesOrder>("sales_orders", workspaceId, salesOrderIds, signal),
     fetchInventoryTransactionRelatedRows<PurchaseOrder>("purchase_orders", workspaceId, purchaseOrderIds, signal),
     fetchInventoryTransactionRelatedRows<OrderReturnItem>("order_return_items", workspaceId, salesOrderReturnIds, signal, "return_id"),
   ]);
+  if (signal.aborted) return;
+
+  const storageIds = Array.from(new Set([
+    ...transactionStorageIds,
+    ...transferBatches.flatMap((batch) => [batch.sourceStorageId, batch.destinationStorageId]
+      .filter((id): id is string => Boolean(id))),
+  ]));
+  const storages = await fetchInventoryTransactionRelatedRows<Storage>("storages", workspaceId, storageIds, signal);
   if (signal.aborted) return;
 
   const saleIds = Array.from(new Set([
@@ -1564,6 +1579,7 @@ async function hydrateInventoryTransactionPageRelations(
   await Promise.all([
     cacheInventoryTransactionRelatedRows(db.products, products),
     cacheInventoryTransactionRelatedRows(db.storages, storages),
+    cacheInventoryTransactionRelatedRows(db.inventory_transfer_batches, transferBatches),
     cacheInventoryTransactionRelatedRows(db.sales, relatedSales),
     cacheInventoryTransactionRelatedRows(db.sale_returns, saleReturns),
     cacheInventoryTransactionRelatedRows(db.sales_orders, relatedSalesOrders),
@@ -1581,6 +1597,7 @@ export function useInventoryTransactionPageRelations(
     transaction.id,
     transaction.productId,
     transaction.storageId,
+    transaction.transferBatchId ?? "",
     transaction.referenceId ?? "",
     transaction.referenceType ?? "",
     transaction.updatedAt,
@@ -1603,6 +1620,7 @@ export function useInventoryTransactionPageRelations(
       return {
         products: [],
         storages: [],
+        transferBatches: [],
         sales: [],
         saleReturns: [],
         salesOrders: [],
@@ -1621,16 +1639,21 @@ export function useInventoryTransactionPageRelations(
         .map((transaction) => transaction.referenceId || transaction.id),
     );
     const productIds = unique(transactions.map((transaction) => transaction.productId));
-    const storageIds = unique(transactions.map((transaction) => transaction.storageId));
+    const transactionStorageIds = unique(transactions.map((transaction) => transaction.storageId));
+    const transferBatchIds = unique(transactions.flatMap((transaction) =>
+      getInventoryTransactionMovementSource(transaction.transactionType, transaction.referenceType) === "transfer"
+        ? [transaction.transferBatchId, transaction.referenceId]
+        : [],
+    ));
     const posSaleIds = referenceIds("pos-sale");
     const posReturnIds = referenceIds("pos-return");
     const salesOrderIds = referenceIds("sales-order");
     const salesOrderReturnIds = referenceIds("sales-order-return");
     const purchaseOrderIds = referenceIds("purchase-order");
 
-    const [products, storages, directSales, saleReturns, purchaseOrders, salesOrderReturnItems] = await Promise.all([
+    const [products, transferBatches, directSales, saleReturns, purchaseOrders, salesOrderReturnItems] = await Promise.all([
       db.products.bulkGet(productIds),
-      db.storages.bulkGet(storageIds),
+      db.inventory_transfer_batches.bulkGet(transferBatchIds),
       db.sales.bulkGet(posSaleIds),
       db.sale_returns.bulkGet(posReturnIds),
       db.purchase_orders.bulkGet(purchaseOrderIds),
@@ -1638,6 +1661,11 @@ export function useInventoryTransactionPageRelations(
         ? db.order_return_items.where("returnId").anyOf(salesOrderReturnIds).toArray()
         : Promise.resolve([] as OrderReturnItem[]),
     ]);
+    const storageIds = unique([
+      ...transactionStorageIds,
+      ...transferBatches.flatMap((batch) => batch ? [batch.sourceStorageId, batch.destinationStorageId] : []),
+    ]);
+    const storages = await db.storages.bulkGet(storageIds);
     const returnedSaleIds = saleReturns.flatMap((saleReturn) => saleReturn?.saleId ? [saleReturn.saleId] : []);
     const additionalSales = returnedSaleIds.length > 0
       ? await db.sales.bulkGet(returnedSaleIds)
@@ -1653,6 +1681,7 @@ export function useInventoryTransactionPageRelations(
     return {
       products: products.filter((product): product is Product => Boolean(product)),
       storages: storages.filter((storage): storage is Storage => Boolean(storage)),
+      transferBatches: transferBatches.filter((batch): batch is InventoryTransferBatch => Boolean(batch)),
       sales: [...directSales, ...additionalSales]
         .filter((sale): sale is Sale => Boolean(sale)),
       saleReturns: saleReturns.filter((saleReturn): saleReturn is SaleReturn => Boolean(saleReturn)),

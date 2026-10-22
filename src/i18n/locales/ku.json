@@ -2030,6 +2030,8 @@
     },
     "table": {
       "image": "وێنە",
+      "showZeroStockImagesInColor": "پیشاندانی وێنەی بەرهەمە بێ‌کۆگاکان بە ڕەنگ",
+      "grayOutZeroStockImages": "پیشاندانی وێنەی بەرهەمە بێ‌کۆگاکان بە ڕەنگی خۆڵەمێشی",
       "name": "ناو",
       "sku": "SKU (کۆدی بەرهەم)",
       "price": "نرخی فرۆشتن",
@@ -2173,7 +2175,9 @@
       "webUploadDesc": "وێنەکان پشتڕاست دەکرێنەوە، باشتر دەکرێن و بە پارێزراوی لە کۆگای هەور پاشەکەوت دەکرێن.",
       "productDetailsTitle": "وردەکارییەکانی بەرهەم",
       "productDetailsDesc": "کۆکردنەوەی ناسنامەی سەرەکی، ناساندن، یەکە، جۆر و شوێنی ئەمبارکردن بۆ ئەم بەرهەمە.",
-      "mixedStorages": "کۆگای تێکەڵ"
+      "mixedStorages": "کۆگای تێکەڵ",
+      "storageAssignmentNeedsReview": "پێویستە دیاریکردنی کۆگا پێداچوونەوەی بۆ بکرێت",
+      "workspaceWideStorage": "هەموو کۆگاکان"
     },
     "minimumSellingPrice": {
       "staffViolation": "نرخی {{productName}} نابێت لە کەمترین نرخی فرۆشتن کە {{minimumPrice}} ـە کەمتر بێت.",
@@ -3865,8 +3869,8 @@
       "manualEntryTemplatesAccessDescription": "دەستگەیشتن بە بەڕێوەبردنی قاڵبەکانی تۆماری دەستی.",
       "posAccess": "خاڵی فرۆشتن",
       "posAccessDescription": "دەستگەیشتن بە قۆناغی پارەدانی خاڵی فرۆشتن.",
-      "posHideModifyPriceButton": "شاردنەوەی دوگمەی دەستکاریکردنی نرخ",
-      "posHideModifyPriceButtonDescription": "شاردنەوەی ئایکۆنی پێنووس بۆ دەستکاریکردنی نرخی کاڵاکان لە سەبەتەی POS.",
+      "posHideModifyPriceButton": "شاردنەوەی هەڵبژاردەی دراوی نرخ و نرخی ڕێککەوتوو",
+      "posHideModifyPriceButtonDescription": "شاردنەوەی هەڵبژاردەی دراوی نرخ و خانەی نرخی ڕێککەوتوو لە مۆداڵی دەستکاریکردنی POS. ئایکۆنی پێنووس، مۆداڵەکە و خانەکانی دیکە، لەوانە ناوی زیادەی خزمەتگوزاری، بەردەست دەمێننەوە.",
       "posHidePriceBelowCostIndicator": "شاردنەوەی ئاماژەی \"نرخ لە تێچوو کەمترە\"",
       "posHidePriceBelowCostIndicatorDescription": "شاردنەوەی ئاگادارکردنەوە کاتێک نرخی ڕێکخراو لە تێچوو کەمترە لە ناو دەستکاریکردنی نرخ.",
       "instantPosAccess": "خاڵی فرۆشتنی خێرا",
@@ -5690,6 +5694,11 @@
     "decreaseLabel": "کەمکردن",
     "adjustmentLabel": "ڕێکخستنی کۆگا",
     "transferLabel": "گواستنەوەی کۆگا",
+    "transferRoute": {
+      "source": "سەرچاوە",
+      "destination": "مەبەست",
+      "restrictedStorage": "کۆگای سنووردار"
+    },
     "initialStockLabel": "کۆگای سەرەتایی",
     "inventoryChangeLabel": "گۆڕینی کۆگا",
     "exchangeOutLabel": "بەرهەمی جێگرەوەی گۆڕینەوە",
