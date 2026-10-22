@@ -123,6 +123,7 @@ import type {
     StockBatchAllocation,
     Supplier
 } from './models'
+import { supportsSalesAgentWorkflows } from './models'
 import { buildInventoryMovementTransactionId, createInventoryTransaction, hydrateInventoryTransactionsForReferences } from './inventoryTransactions'
 import { appendPaymentTransaction, synchronizeOrderPaymentReferences } from './payments'
 import { mirrorPaymentAccountTransactionLocally } from './paymentAccounts'
@@ -2357,7 +2358,7 @@ export async function getSalesOrderIdsAssignedToLinkedFieldAgent(
             .equals(workspaceId)
             .and((agent) => (
                 !agent.isDeleted
-                && agent.agentType === 'field_agent'
+                && supportsSalesAgentWorkflows(agent.agentType)
                 && agent.linkedUserId === userId
             ))
             .toArray()).map((agent) => agent.id))
@@ -2453,7 +2454,7 @@ export async function getLinkedSalesAccountAgentIdsForOwnOrders(
         .equals(workspaceId)
         .and((agent) => (
             !agent.isDeleted
-            && agent.agentType === 'field_agent'
+            && supportsSalesAgentWorkflows(agent.agentType)
             && agent.linkedUserId === userId
         ))
         .toArray()

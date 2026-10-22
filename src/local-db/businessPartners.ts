@@ -43,8 +43,10 @@ import { useServiceAccessIds } from './serviceAccess'
 import { isService } from '@/lib/catalogItem'
 import type {
   Agent,
+  AgentMode,
   AgentExcludedCategory,
   AgentFacetInput,
+  CustomAgentType,
   BusinessPartner,
   BusinessPartnerRole,
   CurrencyCode,
@@ -57,9 +59,9 @@ import type {
   Supplier,
   User
 } from './models'
-import { isRealEstateBusinessPartnerRole } from './models'
+import { supportsSalesAgentWorkflows, isRealEstateBusinessPartnerRole } from './models'
 
-type PartnerTableName = 'business_partners' | 'customers' | 'suppliers' | 'agents' | 'agent_excluded_categories'
+type PartnerTableName = 'business_partners' | 'customers' | 'suppliers' | 'agents' | 'agent_types' | 'agent_excluded_categories'
 type PartnerFacetType = 'customer' | 'supplier'
 type SyncEntity = { id: string; version: number } & Record<string, unknown>
 type PartnerFilterOptions = {
@@ -133,6 +135,11 @@ export type BusinessPartnerCreateInput = Omit<
 }
 export type BusinessPartnerUpdateInput = Partial<BusinessPartner> & {
   agent?: Partial<AgentFacetInput>
+}
+
+export type CustomAgentTypeInput = {
+  name: string
+  mode: AgentMode
 }
 
 type BaseEntityPayload = {
@@ -1024,8 +1031,23 @@ export async function replaceAgentExcludedCategories(
   ])
 }
 
-function normalizeAgentFacetInput(input: Partial<AgentFacetInput> | undefined, existing?: Agent): AgentFacetInput {
-  const agentType = input?.agentType ?? existing?.agentType
+async function normalizeAgentFacetInput(
+  workspaceId: string,
+  input: Partial<AgentFacetInput> | undefined,
+  existing?: Agent
+): Promise<AgentFacetInput> {
+  const customAgentTypeId = String(input?.customAgentTypeId === undefined
+    ? (existing?.customAgentTypeId ?? '')
+    : (input.customAgentTypeId ?? '')).trim() || null
+  const customAgentType = customAgentTypeId ? await db.agent_types.get(customAgentTypeId) : undefined
+  if (customAgentTypeId && (
+    !customAgentType
+    || customAgentType.isDeleted
+    || customAgentType.workspaceId !== workspaceId
+  )) {
+    throw new Error(i18n.t('agents.agentTypes.unavailable', { defaultValue: 'The selected custom agent type is unavailable in this workspace.' }))
+  }
+  const agentType = customAgentType?.mode ?? input?.agentType ?? existing?.agentType
   const status = input?.status ?? existing?.status ?? 'active'
   const zone = String(input?.zone ?? existing?.zone ?? '').trim()
   const carModel = String(input?.carModel ?? existing?.carModel ?? '').trim() || null
@@ -1041,13 +1063,13 @@ function normalizeAgentFacetInput(input: Partial<AgentFacetInput> | undefined, e
     input?.courierDeliveryFee === undefined ? (existing?.courierDeliveryFee ?? 0) : (input.courierDeliveryFee ?? 0)
   )
 
-  if (agentType !== 'driver' && agentType !== 'field_agent' && agentType !== 'courier') {
+  if (agentType !== 'driver' && agentType !== 'field_agent' && agentType !== 'courier' && agentType !== 'seller') {
     throw new Error('Agent type is required')
   }
   // Sales accounts automatically credit the agent's commission. Commission
   // plans and Supabase integrity rules apply to field agents, so changing an
   // agent to another operational type turns the optional account off.
-  const salesAccountEnabled = agentType === 'field_agent' && salesAccountRequested
+  const salesAccountEnabled = supportsSalesAgentWorkflows(agentType) && salesAccountRequested
   if (!zone) {
     throw new Error('Agent operational territory is required')
   }
@@ -1064,6 +1086,7 @@ function normalizeAgentFacetInput(input: Partial<AgentFacetInput> | undefined, e
   return {
     zone,
     agentType,
+    customAgentTypeId,
     carModel: agentType === 'driver' ? carModel : null,
     plateNumber: agentType === 'driver' ? plateNumber : null,
     linkedUserId,
@@ -1099,7 +1122,7 @@ async function createOrUpdateAgentFacet(partner: BusinessPartner, input?: Partia
   const existing = partner.agentFacetId
     ? await db.agents.get(partner.agentFacetId)
     : await db.agents.where('businessPartnerId').equals(partner.id).first()
-  const agentData = normalizeAgentFacetInput(input, existing)
+  const agentData = await normalizeAgentFacetInput(partner.workspaceId, input, existing)
   await assertAgentLinkedUserAvailable(partner.workspaceId, agentData.linkedUserId, existing?.id)
 
   if (existing) {
@@ -1109,6 +1132,7 @@ async function createOrUpdateAgentFacet(partner: BusinessPartner, input?: Partia
       && existing.businessPartnerId === partner.id
       && existing.zone === agentData.zone
       && existing.agentType === agentData.agentType
+      && (existing.customAgentTypeId ?? null) === (agentData.customAgentTypeId ?? null)
       && existing.carModel === agentData.carModel
       && existing.plateNumber === agentData.plateNumber
       && existing.linkedUserId === agentData.linkedUserId
@@ -2568,6 +2592,120 @@ export function useAgents(workspaceId: string | undefined) {
   return useLiveCollection(agents, Boolean(workspaceId) && agents === undefined)
 }
 
+export function useCustomAgentTypes(workspaceId: string | undefined) {
+  const online = useNetworkStatus()
+  const customAgentTypes = useLiveQuery(
+    () => workspaceId
+      ? db.agent_types
+          .where('workspaceId')
+          .equals(workspaceId)
+          .and((item) => !item.isDeleted)
+          .toArray()
+      : [],
+    [workspaceId]
+  )
+
+  useEffect(() => {
+    if (!workspaceId || !online || !shouldUseCloudBusinessData(workspaceId)) return
+    void fetchTableFromSupabase('agent_types', db.agent_types, workspaceId).catch((error) => {
+      console.error('[Agents] Failed to hydrate custom agent types:', error)
+    })
+  }, [online, workspaceId])
+
+  return useLiveCollection(customAgentTypes, Boolean(workspaceId) && customAgentTypes === undefined)
+}
+
+function normalizeCustomAgentTypeInput(input: CustomAgentTypeInput): CustomAgentTypeInput {
+  const name = input.name.trim()
+  if (!name) throw new Error(i18n.t('agents.agentTypes.nameRequired', { defaultValue: 'Enter an agent type name.' }))
+  if (!['driver', 'courier', 'field_agent', 'seller'].includes(input.mode)) {
+    throw new Error(i18n.t('agents.agentTypes.modeRequired', { defaultValue: 'Select a supported agent mode.' }))
+  }
+  return { name, mode: input.mode }
+}
+
+async function assertCustomAgentTypeNameAvailable(workspaceId: string, name: string, excludedId?: string) {
+  const normalizedName = name.trim().toLocaleLowerCase()
+  const duplicate = await db.agent_types
+    .where('workspaceId')
+    .equals(workspaceId)
+    .and((item) => !item.isDeleted && item.id !== excludedId && item.name.trim().toLocaleLowerCase() === normalizedName)
+    .first()
+  if (duplicate) {
+    throw new Error(i18n.t('agents.agentTypes.duplicateName', { defaultValue: 'An agent type with this name already exists in this workspace.' }))
+  }
+}
+
+export async function createCustomAgentType(workspaceId: string, input: CustomAgentTypeInput): Promise<CustomAgentType> {
+  if (!workspaceId) throw new Error(i18n.t('agents.agentTypes.workspaceRequired', { defaultValue: 'Select a workspace before managing agent types.' }))
+  const normalized = normalizeCustomAgentTypeInput(input)
+  await assertCustomAgentTypeNameAvailable(workspaceId, normalized.name)
+  const agentType = buildBaseEntity(workspaceId, normalized) as CustomAgentType
+  await db.agent_types.put(agentType)
+  const synced = await syncUpsertEntities('agent_types', [agentType as unknown as SyncEntity], workspaceId)
+  if (!synced && shouldUseCloudBusinessData(workspaceId) && isOnline(workspaceId)) {
+    throw new Error(i18n.t('agents.agentTypes.saveFailed', { defaultValue: 'The agent type could not be saved to the workspace.' }))
+  }
+  return agentType
+}
+
+export async function updateCustomAgentType(id: string, input: CustomAgentTypeInput): Promise<CustomAgentType> {
+  const existing = await db.agent_types.get(id)
+  if (!existing || existing.isDeleted) throw new Error(i18n.t('agents.agentTypes.notFound', { defaultValue: 'This agent type is no longer available.' }))
+  const normalized = normalizeCustomAgentTypeInput(input)
+  await assertCustomAgentTypeNameAvailable(existing.workspaceId, normalized.name, id)
+  if (normalized.mode !== existing.mode) {
+    const assignedAgent = await db.agents
+      .where('customAgentTypeId')
+      .equals(id)
+      .and((agent) => agent.workspaceId === existing.workspaceId && !agent.isDeleted)
+      .first()
+    if (assignedAgent) {
+      throw new Error(i18n.t('agents.agentTypes.modeLocked', { defaultValue: 'Reassign agents before changing this type’s mode.' }))
+    }
+  }
+  const now = new Date().toISOString()
+  const updated: CustomAgentType = {
+    ...existing,
+    ...normalized,
+    updatedAt: now,
+    version: existing.version + 1,
+    ...getSyncMetadata(existing.workspaceId, now)
+  }
+  await db.agent_types.put(updated)
+  const synced = await syncUpsertEntities('agent_types', [updated as unknown as SyncEntity], existing.workspaceId)
+  if (!synced && shouldUseCloudBusinessData(existing.workspaceId) && isOnline(existing.workspaceId)) {
+    throw new Error(i18n.t('agents.agentTypes.saveFailed', { defaultValue: 'The agent type could not be saved to the workspace.' }))
+  }
+  return updated
+}
+
+export async function deleteCustomAgentType(id: string): Promise<void> {
+  const existing = await db.agent_types.get(id)
+  if (!existing || existing.isDeleted) return
+  const assignedAgent = await db.agents
+    .where('customAgentTypeId')
+    .equals(id)
+    .and((agent) => agent.workspaceId === existing.workspaceId && !agent.isDeleted)
+    .first()
+  if (assignedAgent) {
+    throw new Error(i18n.t('agents.agentTypes.assignedDeleteBlocked', { defaultValue: 'Reassign agents before deleting this agent type.' }))
+  }
+  const now = new Date().toISOString()
+  const deleted: CustomAgentType = {
+    ...existing,
+    isDeleted: true,
+    updatedAt: now,
+    version: existing.version + 1,
+    ...getSyncMetadata(existing.workspaceId, now)
+  }
+  await db.agent_types.put(deleted)
+  const synced = await syncUpsertEntities('agent_types', [deleted as unknown as SyncEntity], existing.workspaceId)
+  if (!synced && shouldUseCloudBusinessData(existing.workspaceId) && isOnline(existing.workspaceId)) {
+    throw new Error(i18n.t('agents.agentTypes.deleteFailed', { defaultValue: 'The agent type could not be deleted from the workspace.' }))
+  }
+}
+
 export function useAgent(agentId: string | null | undefined) {
   return useLiveQuery(async () => {
     if (!agentId) {
@@ -2609,7 +2747,9 @@ async function createBusinessPartnerInternal(
   const partnerName = trace
     ? await trace.measure('crudDebugger.stages.businessPartnerPreparation', 'application', () => normalizeRequiredPartnerName(partnerData.partnerName))
     : normalizeRequiredPartnerName(partnerData.partnerName)
-  const normalizedAgentInput = roleIncludesAgent(data.role) ? normalizeAgentFacetInput(agentInput) : undefined
+  const normalizedAgentInput = roleIncludesAgent(data.role)
+    ? await normalizeAgentFacetInput(workspaceId, agentInput)
+    : undefined
   if (trace) {
     await trace.measure('crudDebugger.stages.businessPartnerLookup', 'data', () => assertAgentLinkedUserAvailable(workspaceId, normalizedAgentInput?.linkedUserId))
   } else {
@@ -2785,7 +2925,7 @@ async function updateBusinessPartnerInternal(
     ? await db.agents.get(existing.agentFacetId)
     : await db.agents.where('businessPartnerId').equals(existing.id).first()
   const normalizedAgentInput = roleIncludesAgent(nextRole)
-    ? normalizeAgentFacetInput(agentInput, existingAgent)
+    ? await normalizeAgentFacetInput(existing.workspaceId, agentInput, existingAgent)
     : undefined
   if (trace) {
     await trace.measure('crudDebugger.stages.businessPartnerLookup', 'data', () => assertAgentLinkedUserAvailable(existing.workspaceId, normalizedAgentInput?.linkedUserId, existingAgent?.id))

@@ -11,6 +11,7 @@ import {
     type AgentCommissionPlan,
     type BusinessPartner
 } from '@/local-db'
+import { supportsSalesAgentWorkflows } from '@/local-db/models'
 import { getActiveAgentCommissionMembership } from './agentCommissionPresentation'
 
 export interface CommissionAgentDirectoryEntry {
@@ -45,7 +46,7 @@ export function useCommissionAgentDirectory(workspaceId?: string) {
                     name: partner?.partnerName || 'Unnamed agent',
                     membership,
                     plan: membership ? planById.get(membership.planId) : undefined,
-                    isEligible: agent.agentType === 'field_agent' && agent.status === 'active'
+                    isEligible: supportsSalesAgentWorkflows(agent.agentType) && agent.status === 'active'
                 }
             })
             .sort((left, right) => left.name.localeCompare(right.name))

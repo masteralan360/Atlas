@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { supportsSalesAgentWorkflows } from '@/local-db/models'
 import {
   db, useAgents, useAgentProductCommissionEntries, useBusinessPartner, useLoans, usePurchaseOrders,
   useAgentCommissionEntries, useSales, useSalesOrders, useSalesOrderAgentAssignments, useSalesOrderReturnsForWorkspace,
@@ -58,7 +59,7 @@ export function usePartnerProductMovements(workspaceId: string | undefined, part
   }, [refreshKey, workspaceId])
   const partner = partnerRecord && partnerRecord.workspaceId === workspaceId && !partnerRecord.isDeleted ? partnerRecord : undefined
   const statementData = useMemo<PartnerProductMovementsData | null>(() => partner && workspaceId && records && storageAccess.isReady !== false ? {
-    workspaceId, partnerId: partner.id, agentIds: agents.filter(agent => !agent.isDeleted && agent.agentType === 'field_agent' && agent.businessPartnerId === partner.id).map(agent => agent.id),
+    workspaceId, partnerId: partner.id, agentIds: agents.filter(agent => !agent.isDeleted && supportsSalesAgentWorkflows(agent.agentType) && agent.businessPartnerId === partner.id).map(agent => agent.id),
     period, salesOrders, purchaseOrders, commissions, commissionEntries, assignments, orderReturns, orderReturnItems, loans, sales, ...records, canAccessStorage: storageAccess.canAccessStorage
   } : null, [partner, workspaceId, records, agents, period, salesOrders, purchaseOrders, commissions, commissionEntries, assignments, orderReturns, orderReturnItems, loans, sales, storageAccess])
   return {

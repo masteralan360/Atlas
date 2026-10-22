@@ -35,6 +35,7 @@ import {
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import {
     useAgent,
+    useCustomAgentTypes,
     getActiveSalesOrderAgentAssignments,
     useBusinessPartner,
     useClinicalAppointments,
@@ -591,6 +592,10 @@ export function PartnerDetailsView({
     const [, navigate] = useLocation()
     const partner = useBusinessPartner(partnerId)
     const agent = useAgent(partner?.agentFacetId)
+    const customAgentTypes = useCustomAgentTypes(workspaceId)
+    const customAgentType = agent?.customAgentTypeId
+        ? customAgentTypes.find((item) => item.id === agent.customAgentTypeId)
+        : undefined
     const workspaceUsers = useWorkspaceUsers(workspaceId)
     const workspaceContacts = useWorkspaceContacts(workspaceId)
     const customerOrders = useCustomerSalesOrders(partnerId, workspaceId)
@@ -2021,11 +2026,14 @@ export function PartnerDetailsView({
                                                 {t('businessPartners.agent.type', { defaultValue: 'Agent Type' })}
                                             </div>
                                             <div className="font-medium">
-                                                {agent.agentType === 'driver'
-                                                    ? t('businessPartners.agent.types.driver', { defaultValue: 'Driver' })
-                                                    : agent.agentType === 'courier'
-                                                        ? t('businessPartners.agent.types.courier', { defaultValue: 'Courier' })
-                                                    : t('businessPartners.agent.types.fieldAgent', { defaultValue: 'Field Agent' })}
+                                                {customAgentType ? (
+                                                    <>
+                                                        {customAgentType.name}
+                                                        <div className="text-xs font-normal text-muted-foreground">
+                                                            {t(`businessPartners.agent.types.${agent.agentType}`, { defaultValue: agent.agentType })}
+                                                        </div>
+                                                    </>
+                                                ) : t(`businessPartners.agent.types.${agent.agentType}`, { defaultValue: agent.agentType })}
                                             </div>
                                         </div>
                                         {agent.agentType === 'driver' ? (

@@ -32,6 +32,7 @@ import type {
   SalesOrder,
   SalesOrderAgentAssignment
 } from './models'
+import { supportsSalesAgentWorkflows } from './models'
 
 export type OrdersListType = 'sales' | 'purchase'
 
@@ -226,7 +227,7 @@ async function readLocalOrdersListPage(
 
   if (needsAgentSearch) {
     const agents = await db.agents.where('workspaceId').equals(workspaceId)
-      .filter((agent) => !agent.isDeleted && agent.agentType === 'field_agent')
+      .filter((agent) => !agent.isDeleted && supportsSalesAgentWorkflows(agent.agentType))
       .toArray()
     let matchingAgentIds: string[] = []
     const partnerIds = [...new Set(agents.map((agent) => agent.businessPartnerId))]
@@ -413,7 +414,7 @@ async function summarizeLocalProductCommissions(
         const creatorAgent = context.agents.find((agent) => (
           !agent.isDeleted
           && agent.status === 'active'
-          && agent.agentType === 'field_agent'
+          && supportsSalesAgentWorkflows(agent.agentType)
           && agent.linkedUserId === order.createdBy
         ))
         if (creatorAgent) agentIds.add(creatorAgent.id)

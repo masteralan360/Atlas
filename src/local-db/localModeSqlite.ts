@@ -98,6 +98,7 @@ export const LOCAL_MODE_SQLITE_TABLES = [
   "suppliers",
   "customers",
   "agents",
+  "agent_types",
   "agent_excluded_categories",
   "agent_commission_plans",
   "agent_commission_memberships",

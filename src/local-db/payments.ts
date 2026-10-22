@@ -47,6 +47,7 @@ import {
 } from './partnerSettlementOperations'
 
 import { db } from './database'
+import { supportsSalesAgentWorkflows } from './models'
 import { useLiveCollection } from './liveCollection'
 import {
   getSalesOrderCommissionMode,
@@ -1317,7 +1318,7 @@ async function applySalesAccountAgentStatementCredits(
 
   const agentsByPartner = new Map<string, Agent[]>()
   agents
-    .filter((agent) => !agent.isDeleted && agent.agentType === 'field_agent')
+    .filter((agent) => !agent.isDeleted && supportsSalesAgentWorkflows(agent.agentType))
     .forEach((agent) => {
       if (!candidatePartnerIds.has(agent.businessPartnerId)) return
       const existing = agentsByPartner.get(agent.businessPartnerId) || []
@@ -2797,7 +2798,7 @@ export async function buildAgentCommissionObligations(
     agents
       .filter((agent) => (
         !agent.isDeleted
-        && agent.agentType === 'field_agent'
+        && supportsSalesAgentWorkflows(agent.agentType)
         && partnersById.has(agent.businessPartnerId)
       ))
       .map((agent) => [agent.id, agent])

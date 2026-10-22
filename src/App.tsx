@@ -1648,6 +1648,17 @@ function App() {
                           </Layout>
                         </ProtectedRoute>
                       </Route>
+                      <Route path="/agents/types">
+                        <ProtectedRoute
+                          allowedRoles={["admin", "staff", "viewer"]}
+                          requiredFeature="agents"
+                          requiredPermission="agents.access"
+                        >
+                          <Layout>
+                            <Agents initialTab="types" />
+                          </Layout>
+                        </ProtectedRoute>
+                      </Route>
                       <Route path="/agents/commission-settings">
                         <ProtectedRoute
                           allowedRoles={["admin", "staff", "viewer"]}

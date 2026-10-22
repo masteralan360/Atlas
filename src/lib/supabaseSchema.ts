@@ -14,6 +14,7 @@ const crmTables = new Set([
     'customers',
     'suppliers',
     'agents',
+    'agent_types',
     'agent_excluded_categories',
     'agent_commission_plans',
     'agent_commission_memberships',

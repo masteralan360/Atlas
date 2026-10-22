@@ -10,18 +10,21 @@ import {
     useAgent,
     useAgentExcludedCategories,
     useAgents,
+    useCustomAgentTypes,
     useCategories,
     usePriceBooks,
     useWorkspaceUsers,
     replaceAgentExcludedCategories,
     type Agent,
     type AgentFacetInput,
+    type AgentMode,
     type AgentStatus,
     type AgentType,
     type BusinessPartner,
     type BusinessPartnerRole,
     type CurrencyCode
 } from '@/local-db'
+import { supportsSalesAgentWorkflows } from '@/local-db/models'
 import { Input } from '@/ui/components/input'
 import {
   Button,
@@ -70,6 +73,7 @@ type BusinessPartnerFormState = {
     role: BusinessPartnerRole
     agentZone: string
     agentType: AgentType
+    agentCustomAgentTypeId: string
     agentCarModel: string
     agentPlateNumber: string
     agentCourierDeliveryFee: string
@@ -99,6 +103,7 @@ function createEmptyState(defaultCurrency: CurrencyCode, role: BusinessPartnerRo
         role,
         agentZone: '',
         agentType,
+        agentCustomAgentTypeId: '',
         agentCarModel: '',
         agentPlateNumber: '',
         agentCourierDeliveryFee: '',
@@ -128,6 +133,7 @@ function mapPartnerToState(partner: BusinessPartner, agent?: Agent): BusinessPar
         role: partner.role,
         agentZone: agent?.zone || '',
         agentType: agent?.agentType || 'field_agent',
+        agentCustomAgentTypeId: agent?.customAgentTypeId || '',
         agentCarModel: agent?.carModel || '',
         agentPlateNumber: agent?.plateNumber || '',
         agentCourierDeliveryFee: agent?.courierDeliveryFee === undefined ? '' : String(agent.courierDeliveryFee),
@@ -204,6 +210,7 @@ export function BusinessPartnerFormDialog({
     const acknowledgedDuplicateStateRef = useRef<string | null>(null)
     const agent = useAgent(partner?.agentFacetId)
     const agents = useAgents(workspaceId)
+    const customAgentTypes = useCustomAgentTypes(effectiveWorkspaceId)
     const workspaceUsers = useWorkspaceUsers(workspaceId)
     const { statuses: duplicateStatuses, firstDuplicateField, duplicateStateKey, checkNow } = useBusinessPartnerDuplicateDetection({
         isOpen,
@@ -360,6 +367,7 @@ export function BusinessPartnerFormDialog({
             agent: isAgent ? {
                 zone: formState.agentZone.trim(),
                 agentType: formState.agentType,
+                customAgentTypeId: formState.agentCustomAgentTypeId || null,
                 carModel: formState.agentType === 'driver' ? formState.agentCarModel.trim() : null,
                 plateNumber: formState.agentType === 'driver' ? formState.agentPlateNumber.trim() : null,
                 courierDeliveryFee: formState.agentType === 'courier'
@@ -381,7 +389,7 @@ export function BusinessPartnerFormDialog({
         : null
 
     return (
-        <Dialog open={isOpen} onOpenChange={onOpenChange}>
+        <Dialog open={isOpen} onOpenChange={(open) => { if (!isSaving) onOpenChange(open) }}>
             <DialogContent layout="structured" className="max-w-2xl">
                 <DialogHeader layout="structured">
                     <DialogTitle className="text-xl">
@@ -537,21 +545,62 @@ export function BusinessPartnerFormDialog({
                                         />
                                     </div>
                                     <div className="space-y-2">
-                                        <Label>{t('businessPartners.agent.type')}</Label>
-                                        <Select value={formState.agentType} onValueChange={(value) => setFormState((current) => ({
-                                            ...current,
-                                            agentType: value as AgentType,
-                                            agentSalesAccountEnabled: value === 'field_agent'
-                                                ? current.agentSalesAccountEnabled
-                                                : false
-                                        }))}>
+                                        <Label>{t('businessPartners.agent.type')} <span className="text-destructive">*</span></Label>
+                                        <Select
+                                            value={formState.agentCustomAgentTypeId
+                                                ? `custom:${formState.agentCustomAgentTypeId}`
+                                                : `builtin:${formState.agentType}`}
+                                            onValueChange={(value) => {
+                                                if (value.startsWith('custom:')) {
+                                                    const customType = customAgentTypes.find((item) => item.id === value.slice('custom:'.length))
+                                                    if (!customType || customType.workspaceId !== effectiveWorkspaceId || customType.isDeleted) return
+                                                    setFormState((current) => ({
+                                                        ...current,
+                                                        agentType: customType.mode,
+                                                        agentCustomAgentTypeId: customType.id,
+                                                        agentSalesAccountEnabled: supportsSalesAgentWorkflows(customType.mode)
+                                                            ? current.agentSalesAccountEnabled
+                                                            : false
+                                                    }))
+                                                    return
+                                                }
+                                                const mode = value.slice('builtin:'.length) as AgentType
+                                                if (!['driver', 'courier', 'field_agent', 'seller'].includes(mode)) return
+                                                setFormState((current) => ({
+                                                    ...current,
+                                                    agentType: mode,
+                                                    agentCustomAgentTypeId: '',
+                                                    agentSalesAccountEnabled: supportsSalesAgentWorkflows(mode)
+                                                        ? current.agentSalesAccountEnabled
+                                                        : false
+                                                }))
+                                            }}
+                                        >
                                             <SelectTrigger>
                                                 <SelectValue />
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="driver">{t('businessPartners.agent.types.driver')}</SelectItem>
-                                                <SelectItem value="courier">{t('businessPartners.agent.types.courier')}</SelectItem>
-                                                <SelectItem value="field_agent">{t('businessPartners.agent.types.field_agent')}</SelectItem>
+                                                {formState.agentCustomAgentTypeId && !customAgentTypes.some((item) => item.id === formState.agentCustomAgentTypeId) ? (
+                                                    <SelectItem value={`custom:${formState.agentCustomAgentTypeId}`} disabled>
+                                                        {t('agents.agentTypes.unavailableSelected', { defaultValue: 'Unavailable custom type' })}
+                                                    </SelectItem>
+                                                ) : null}
+                                                {([
+                                                    ['driver', t('businessPartners.agent.types.driver', { defaultValue: 'Driver' })],
+                                                    ['courier', t('businessPartners.agent.types.courier', { defaultValue: 'Courier' })],
+                                                    ['field_agent', t('businessPartners.agent.types.field_agent', { defaultValue: 'Field Agent' })],
+                                                    ['seller', t('businessPartners.agent.types.seller', { defaultValue: 'Seller' })]
+                                                ] as Array<[AgentMode, string]>).map(([mode, label]) => (
+                                                    <SelectItem key={mode} value={`builtin:${mode}`}>{label}</SelectItem>
+                                                ))}
+                                                {customAgentTypes
+                                                    .slice()
+                                                    .sort((left, right) => left.name.localeCompare(right.name))
+                                                    .map((customType) => (
+                                                        <SelectItem key={customType.id} value={`custom:${customType.id}`}>
+                                                            {customType.name} · {t(`businessPartners.agent.types.${customType.mode}`, { defaultValue: customType.mode })}
+                                                        </SelectItem>
+                                                    ))}
                                             </SelectContent>
                                         </Select>
                                     </div>
@@ -635,7 +684,7 @@ export function BusinessPartnerFormDialog({
                                             </SelectContent>
                                         </Select>
                                     </div>
-                                    {hasFeature('agent_sales_accounts') ? (
+                                    {hasFeature('agent_sales_accounts') && supportsSalesAgentWorkflows(formState.agentType) ? (
                                         <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 md:col-span-2">
                                             <div className="flex items-start justify-between gap-4">
                                                 <div className="space-y-1">
@@ -652,7 +701,8 @@ export function BusinessPartnerFormDialog({
                                                     onCheckedChange={(checked) => setFormState((current) => ({
                                                         ...current,
                                                         agentSalesAccountEnabled: checked,
-                                                        agentType: checked ? 'field_agent' : current.agentType
+                                                        agentType: checked && !supportsSalesAgentWorkflows(current.agentType) ? 'field_agent' : current.agentType,
+                                                        agentCustomAgentTypeId: checked && !supportsSalesAgentWorkflows(current.agentType) ? '' : current.agentCustomAgentTypeId
                                                     }))}
                                                 />
                                             </div>
@@ -751,7 +801,7 @@ export function BusinessPartnerFormDialog({
                     </DialogBody>
 
                     <DialogFooter layout="structured">
-                        <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)}>
+                        <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)} disabled={isSaving}>
                             {t('common.cancel') || 'Cancel'}
                         </Button>
                         <Button type="submit" className="w-full sm:w-auto" disabled={isSaving || !canSubmit}>

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { formatLocalDateValue, formatNumericInput, generateId, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
 
 import { createAgentCommissionPlan, deleteAgentCommissionPlan, setAgentCommissionMembership, updateAgentCommissionPlan, type AgentCommissionPlan, type CommissionCalculationBasis, type CommissionPlanLevel, type CommissionPlanType, type CurrencyCode, type SalesAgentCommissionSheetType } from '@/local-db'
+import { supportsSalesAgentWorkflows } from '@/local-db/models'
 import { Button } from '@/ui/components/button'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { Input } from '@/ui/components/input'
@@ -112,7 +113,7 @@ export function AgentCommissionSettingsForm({ workspaceId, userId, onCancel }: A
     const [isDeletingPlan, setIsDeletingPlan] = useState(false)
     const [planToManageAgents, setPlanToManageAgents] = useState<PlanDraft | null>(null)
     const [managedAgentIds, setManagedAgentIds] = useState<string[]>([])
-    const fieldAgents = useMemo(() => directory.agents.filter((entry) => entry.agent.agentType === 'field_agent'), [directory.agents])
+    const fieldAgents = useMemo(() => directory.agents.filter((entry) => supportsSalesAgentWorkflows(entry.agent.agentType)), [directory.agents])
 
     useEffect(() => {
         const levels = Array.from(new Set(directory.plans

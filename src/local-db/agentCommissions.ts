@@ -33,6 +33,7 @@ import type {
   SalesOrderAgentAssignmentSource,
   WorkspacePaymentMethod,
 } from "./models";
+import { supportsSalesAgentWorkflows } from "./models";
 import {
   activeProductCommissionRule,
   appendAgentProductCommissionEntry,
@@ -1157,7 +1158,7 @@ export async function setAgentCommissionMembership(
   input: SetAgentCommissionMembershipInput,
 ) {
   const agent = await db.agents.get(input.agentId);
-  if (!agent || agent.isDeleted || agent.workspaceId !== workspaceId || agent.agentType !== "field_agent") {
+  if (!agent || agent.isDeleted || agent.workspaceId !== workspaceId || !supportsSalesAgentWorkflows(agent.agentType)) {
     throw new Error("Select an active field agent from this workspace");
   }
   const requestedEffectiveAt = normalizeTimestamp(input.effectiveAt);
@@ -1445,7 +1446,7 @@ async function ensureLocalOrderCreatorProductCommissionAssignmentInternal(order:
     .and((agent) => (
       !agent.isDeleted
       && agent.status === "active"
-      && agent.agentType === "field_agent"
+      && supportsSalesAgentWorkflows(agent.agentType)
       && agent.linkedUserId === order.createdBy
     ))
     .first();
@@ -2172,7 +2173,7 @@ export async function assignSalesOrderAgent(
     !agent
     || agent.isDeleted
     || agent.workspaceId !== workspaceId
-    || agent.agentType !== "field_agent"
+    || !supportsSalesAgentWorkflows(agent.agentType)
   ) {
     throw new Error("Select a field agent from this workspace");
   }
@@ -2449,7 +2450,7 @@ async function synchronizeSalesAccountAgentCommissionAssignmentInternal(
     !salesAccountAgent
     || salesAccountAgent.isDeleted
     || salesAccountAgent.workspaceId !== workspaceId
-    || salesAccountAgent.agentType !== "field_agent"
+    || !supportsSalesAgentWorkflows(salesAccountAgent.agentType)
     || !salesAccountAgent.salesAccountEnabled
   ) {
     return null;
@@ -2836,7 +2837,7 @@ export async function recordAgentCommissionPayout(
     !agent
     || agent.isDeleted
     || agent.workspaceId !== workspaceId
-    || agent.agentType !== 'field_agent'
+    || !supportsSalesAgentWorkflows(agent.agentType)
   ) {
     throw new Error('Field sales agent not found');
   }
@@ -2992,7 +2993,7 @@ export async function recordAgentCommissionRecovery(
     db.sales_order_agent_assignments.get(input.assignmentId),
     db.sales_orders.get(input.orderId),
   ]);
-  if (!agent || agent.isDeleted || agent.workspaceId !== workspaceId || agent.agentType !== 'field_agent') {
+  if (!agent || agent.isDeleted || agent.workspaceId !== workspaceId || !supportsSalesAgentWorkflows(agent.agentType)) {
     throw new Error('Field sales agent not found');
   }
   if (!assignment || assignment.isDeleted || assignment.workspaceId !== workspaceId || assignment.agentId !== agent.id || assignment.orderId !== input.orderId) {
@@ -3350,7 +3351,7 @@ export async function recordCommissionAdjustment(
   if (!Number.isFinite(amount) || amount === 0) throw new Error("Adjustment amount cannot be zero");
   if (!normalizeText(input.notes)) throw new Error("Adjustment reason is required");
   const agent = await db.agents.get(input.agentId);
-  if (!agent || agent.isDeleted || agent.workspaceId !== workspaceId || agent.agentType !== "field_agent") {
+  if (!agent || agent.isDeleted || agent.workspaceId !== workspaceId || !supportsSalesAgentWorkflows(agent.agentType)) {
     throw new Error("Field agent not found");
   }
   if (input.relatedEntryId) {

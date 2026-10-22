@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { Activity, Bug, Check, ChevronDown, CircleAlert, Clock3, Grip, LoaderCircle, Trash2, X } from 'lucide-react'
+import { Activity, Bug, Check, ChevronDown, CircleAlert, Clock3, EyeOff, Grip, LoaderCircle, Trash2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger
+} from '@/ui/components/ui/context-menu'
 import {
   clearCrudTrace,
   getCrudTraceHistory,
@@ -86,6 +92,7 @@ export default function CrudPerformanceDebugger() {
   const [position, setPosition] = useState<Position | null>(null)
   const [size, setSize] = useState<Size | null>(null)
   const [historyOpen, setHistoryOpen] = useState(true)
+  const [debugButtonHidden, setDebugButtonHidden] = useState(false)
   const [, setElapsedTick] = useState(0)
   const dragOriginRef = useRef<DragOrigin | null>(null)
   const resizeOriginRef = useRef<ResizeOrigin | null>(null)
@@ -216,17 +223,29 @@ export default function CrudPerformanceDebugger() {
   }
 
   if (!enabled) {
+    if (debugButtonHidden) return null
+
     return (
-      <button
-        type="button"
-        onClick={() => setCrudDebuggerEnabled(true)}
-        className="fixed bottom-3 right-3 z-[10000] inline-flex items-center gap-2 rounded-full border border-slate-600 bg-slate-950/95 px-3 py-2 font-mono text-xs text-slate-100 shadow-xl hover:border-sky-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
-        aria-label={t('crudDebugger.enable')}
-        title={t('crudDebugger.enable')}
-      >
-        <Bug className="h-4 w-4 text-sky-300" aria-hidden="true" />
-        {t('crudDebugger.debugToggle')}
-      </button>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <button
+            type="button"
+            onClick={() => setCrudDebuggerEnabled(true)}
+            className="fixed bottom-3 right-3 z-[10000] inline-flex items-center gap-2 rounded-full border border-slate-600 bg-slate-950/95 px-3 py-2 font-mono text-xs text-slate-100 shadow-xl hover:border-sky-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+            aria-label={t('crudDebugger.enable')}
+            title={t('crudDebugger.enable')}
+          >
+            <Bug className="h-4 w-4 text-sky-300" aria-hidden="true" />
+            {t('crudDebugger.debugToggle')}
+          </button>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem className="gap-2" onSelect={() => setDebugButtonHidden(true)}>
+            <EyeOff className="h-4 w-4" aria-hidden="true" />
+            {t('crudDebugger.hideButton')}
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
     )
   }
 
@@ -247,16 +266,28 @@ export default function CrudPerformanceDebugger() {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setCrudDebuggerEnabled(false)}
-        className="fixed bottom-3 right-3 z-[10000] inline-flex items-center gap-2 rounded-full border border-sky-500/70 bg-slate-950/95 px-3 py-2 font-mono text-xs text-slate-100 shadow-xl hover:border-sky-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
-        aria-label={t('crudDebugger.disable')}
-        title={t('crudDebugger.disable')}
-      >
-        <Activity className="h-4 w-4 text-sky-300" aria-hidden="true" />
-        {t('crudDebugger.debugOn')}
-      </button>
+      {!debugButtonHidden && (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <button
+              type="button"
+              onClick={() => setCrudDebuggerEnabled(false)}
+              className="fixed bottom-3 right-3 z-[10000] inline-flex items-center gap-2 rounded-full border border-sky-500/70 bg-slate-950/95 px-3 py-2 font-mono text-xs text-slate-100 shadow-xl hover:border-sky-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+              aria-label={t('crudDebugger.disable')}
+              title={t('crudDebugger.disable')}
+            >
+              <Activity className="h-4 w-4 text-sky-300" aria-hidden="true" />
+              {t('crudDebugger.debugOn')}
+            </button>
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuItem className="gap-2" onSelect={() => setDebugButtonHidden(true)}>
+              <EyeOff className="h-4 w-4" aria-hidden="true" />
+              {t('crudDebugger.hideButton')}
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      )}
 
       <section
         role="dialog"

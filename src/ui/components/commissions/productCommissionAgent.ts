@@ -1,3 +1,5 @@
+import { supportsSalesAgentWorkflows } from '@/local-db/models'
+
 type LinkedProductCommissionAgent = {
     id: string
     linkedUserId?: string | null
@@ -19,7 +21,7 @@ export function findLinkedProductCommissionAgent<T extends LinkedProductCommissi
     return agents.find((agent) => (
         !agent.isDeleted
         && agent.status === 'active'
-        && agent.agentType === 'field_agent'
+        && supportsSalesAgentWorkflows(agent.agentType)
         && agent.linkedUserId === userId
     )) ?? null
 }

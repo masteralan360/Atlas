@@ -544,8 +544,18 @@ export interface Customer extends BaseEntity {
 export type RealEstateBusinessPartnerRole = 'buyer' | 'seller'
 export type BusinessPartnerRole =
   'customer' | 'supplier' | 'both' | 'agent' | 'online_customer' | RealEstateBusinessPartnerRole
-export type AgentType = 'driver' | 'field_agent' | 'courier'
+export type AgentMode = 'driver' | 'field_agent' | 'courier' | 'seller'
+export type AgentType = AgentMode
 export type AgentStatus = 'active' | 'inactive' | 'blocked'
+
+export interface CustomAgentType extends BaseEntity {
+  name: string
+  mode: AgentMode
+}
+
+export function supportsSalesAgentWorkflows(mode: AgentMode | string | null | undefined): boolean {
+  return mode === 'field_agent' || mode === 'seller'
+}
 
 export const REAL_ESTATE_BUSINESS_PARTNER_ROLES: readonly RealEstateBusinessPartnerRole[] = ['buyer', 'seller']
 
@@ -563,6 +573,7 @@ export interface Agent extends BaseEntity {
   businessPartnerId: string
   zone: string
   agentType: AgentType
+  customAgentTypeId?: string | null
   /** Fee the courier keeps for each successfully delivered post. */
   courierDeliveryFee?: number
   carModel?: string | null
@@ -582,6 +593,7 @@ export interface AgentExcludedCategory extends BaseEntity {
 export interface AgentFacetInput {
   zone: string
   agentType: AgentType
+  customAgentTypeId?: string | null
   courierDeliveryFee?: number
   carModel?: string | null
   plateNumber?: string | null
@@ -2990,6 +3002,7 @@ export interface SyncQueueItem {
     | 'customers'
     | 'suppliers'
     | 'agents'
+    | 'agent_types'
     | 'agent_excluded_categories'
     | 'agent_commission_plans'
     | 'agent_commission_memberships'
@@ -3244,6 +3257,7 @@ export interface OfflineMutation {
     | 'customers'
     | 'suppliers'
     | 'agents'
+    | 'agent_types'
     | 'agent_excluded_categories'
     | 'agent_commission_plans'
     | 'agent_commission_memberships'

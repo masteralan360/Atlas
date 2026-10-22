@@ -6,6 +6,7 @@
     "debugOn": "Debug on",
     "enable": "Enable CRUD performance tracking",
     "disable": "Disable CRUD performance tracking",
+    "hideButton": "Hide Debug button for this session",
     "clear": "Clear recent history",
     "recentOperations": "Recent operations",
     "noHistory": "No completed operations yet",
@@ -2940,7 +2941,8 @@
       "types": {
         "driver": "Driver",
         "field_agent": "Field agent",
-        "courier": "Courier"
+        "courier": "Courier",
+        "seller": "Seller"
       },
       "statuses": {
         "active": "Active",
@@ -2982,6 +2984,36 @@
     "total": "Total Agents",
     "active": "Active",
     "drivers": "Drivers",
+    "tabs": {
+      "agents": "Agents"
+    },
+    "agentTypes": {
+      "title": "Agent Types",
+      "description": "Create workspace agent labels that use one of the supported agent modes.",
+      "create": "Create Agent Type",
+      "edit": "Edit Agent Type",
+      "name": "Agent Type Name",
+      "mode": "Mode",
+      "selectMode": "Select a mode",
+      "assignedAgents": "Assigned Agents",
+      "empty": "No custom agent types have been created.",
+      "nameRequired": "Enter an agent type name.",
+      "modeRequired": "Select a supported agent mode.",
+      "workspaceRequired": "Select a workspace before managing agent types.",
+      "duplicateName": "An agent type with this name already exists in this workspace.",
+      "modeLocked": "Reassign agents before changing this type’s mode.",
+      "assignedDeleteBlocked": "Reassign agents before deleting this agent type.",
+      "unavailable": "The selected custom agent type is unavailable in this workspace.",
+      "unavailableSelected": "Unavailable custom type",
+      "notFound": "This agent type is no longer available.",
+      "createSuccess": "Agent type created.",
+      "updateSuccess": "Agent type updated.",
+      "deleteSuccess": "Agent type deleted.",
+      "saveFailed": "The agent type could not be saved.",
+      "deleteFailed": "The agent type could not be deleted.",
+      "deleteTitle": "Delete Agent Type",
+      "deleteDescription": "Agents must be reassigned before this type can be deleted."
+    },
     "blocked": "Blocked",
     "empty": "No agents found.",
     "agent": "Agent",

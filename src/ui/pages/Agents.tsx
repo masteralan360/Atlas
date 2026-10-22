@@ -15,7 +15,8 @@ import {
     type Agent,
     type AgentStatus,
     type BusinessPartner,
-    type CurrencyCode
+    type CurrencyCode,
+    useCustomAgentTypes
 } from '@/local-db'
 import { platformService } from '@/services/platformService'
 import { Input } from '@/ui/components/input'
@@ -32,6 +33,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   useToast,
 } from '@/ui/components'
 import { BusinessPartnerFormDialog, type BusinessPartnerFormPayload } from '@/ui/components/crm/BusinessPartnerFormDialog'
@@ -43,6 +48,7 @@ import {
     useOptionalCommissionFeatureData
 } from '@/ui/components/commissions/useCommissionAgentDirectory'
 import { formatCommissionPlanTerms } from '@/ui/components/commissions/agentCommissionPresentation'
+import { AgentTypesManagement } from '@/ui/components/agents/AgentTypesManagement'
 
 function statusClass(status: AgentStatus) {
     if (status === 'active') return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
@@ -50,7 +56,7 @@ function statusClass(status: AgentStatus) {
     return 'border-border bg-muted text-muted-foreground'
 }
 
-export function Agents() {
+export function Agents({ initialTab = 'agents' }: { initialTab?: 'agents' | 'types' }) {
     const { t } = useTranslation()
     const { user } = useAuth()
     const { features, hasFeature } = useWorkspace()
@@ -59,6 +65,7 @@ export function Agents() {
     const [, navigate] = useLocation()
     const partners = useBusinessPartners(user?.workspaceId, { roles: ['agent'], includeAgentRoles: true })
     const agents = useAgents(user?.workspaceId)
+    const customAgentTypes = useCustomAgentTypes(user?.workspaceId)
     const workspaceUsers = useWorkspaceUsers(user?.workspaceId)
     const [search, setSearch] = useState('')
     const [dialogOpen, setDialogOpen] = useState(false)
@@ -86,6 +93,7 @@ export function Agents() {
         [features.allowed_currencies, features.default_currency]
     )
     const agentById = useMemo(() => new Map(agents.map((agent) => [agent.id, agent])), [agents])
+    const customAgentTypeById = useMemo(() => new Map(customAgentTypes.map((agentType) => [agentType.id, agentType])), [customAgentTypes])
     const userById = useMemo(() => new Map(workspaceUsers.map((workspaceUser) => [workspaceUser.id, workspaceUser])), [workspaceUsers])
     const listedAgentFacets = useMemo(
         () => partners.map((partner) => partner.agentFacetId ? agentById.get(partner.agentFacetId) : undefined)
@@ -98,11 +106,12 @@ export function Agents() {
         return partners.filter((partner) => {
             const agent = partner.agentFacetId ? agentById.get(partner.agentFacetId) : undefined
             const linkedUser = agent?.linkedUserId ? userById.get(agent.linkedUserId) : undefined
-            return [partner.partnerName, partner.phone, agent?.zone, agent?.agentType, agent?.carModel, agent?.plateNumber, agent?.status, linkedUser?.name, linkedUser?.email]
+            const customTypeName = agent?.customAgentTypeId ? customAgentTypeById.get(agent.customAgentTypeId)?.name : undefined
+            return [partner.partnerName, partner.phone, agent?.zone, customTypeName, agent?.agentType, agent?.carModel, agent?.plateNumber, agent?.status, linkedUser?.name, linkedUser?.email]
                 .filter((value): value is string => typeof value === 'string' && value.length > 0)
                 .some((value) => value.toLowerCase().includes(query))
         })
-    }, [agentById, partners, search, userById])
+    }, [agentById, customAgentTypeById, partners, search, userById])
     const activeCount = listedAgentFacets.filter((agent) => agent.status === 'active').length
     const driverCount = listedAgentFacets.filter((agent) => agent.agentType === 'driver').length
     const blockedCount = listedAgentFacets.filter((agent) => agent.status === 'blocked').length
@@ -167,7 +176,7 @@ export function Agents() {
                                 {t('salesAgentCommissions.settings')}
                             </Button>
                         ) : null}
-                        {canEdit ? (
+                        {initialTab === 'agents' && canEdit ? (
                             <Button onClick={() => { setEditingPartner(null); setDialogOpen(true) }} className="gap-2 rounded-xl">
                                 <Plus className="h-4 w-4" />
                                 {t('agents.addAgent', { defaultValue: 'Add Agent' })}
@@ -176,6 +185,22 @@ export function Agents() {
                     </div>
                 </div>
 
+                <Tabs
+                    value={initialTab}
+                    onValueChange={(tab) => navigate(tab === 'types' ? '/agents/types' : '/agents')}
+                    className="space-y-6"
+                >
+                <TabsList className="grid w-full max-w-md grid-cols-2 rounded-2xl bg-secondary/50 p-1">
+                    <TabsTrigger value="agents" className="rounded-xl gap-2">
+                        <UsersRound className="h-4 w-4" />
+                        {t('agents.tabs.agents', { defaultValue: 'Agents' })}
+                    </TabsTrigger>
+                    <TabsTrigger value="types" className="rounded-xl gap-2">
+                        <Settings2 className="h-4 w-4" />
+                        {t('agents.agentTypes.title', { defaultValue: 'Agent Types' })}
+                    </TabsTrigger>
+                </TabsList>
+                <TabsContent value="agents" className="space-y-6">
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     <AgentMetric title={t('agents.total', { defaultValue: 'Total Agents' })} value={partners.length} icon={UsersRound} />
                     <AgentMetric title={t('agents.active', { defaultValue: 'Active' })} value={activeCount} icon={UserRound} />
@@ -230,13 +255,18 @@ export function Agents() {
                                                 </TableCell>
                                                 <TableCell>{agent?.zone || unavailable}</TableCell>
                                                 <TableCell>
-                                                    {agent
-                                                        ? agent.agentType === 'driver'
-                                                            ? t('businessPartners.agent.types.driver', { defaultValue: 'Driver' })
-                                                            : agent.agentType === 'courier'
-                                                                ? t('businessPartners.agent.types.courier', { defaultValue: 'Courier' })
-                                                                : t('businessPartners.agent.types.fieldAgent', { defaultValue: 'Field Agent' })
-                                                        : unavailable}
+                                                    {agent ? (() => {
+                                                        const customType = agent.customAgentTypeId
+                                                            ? customAgentTypeById.get(agent.customAgentTypeId)
+                                                            : undefined
+                                                        const modeLabel = t(`businessPartners.agent.types.${agent.agentType}`, { defaultValue: agent.agentType })
+                                                        return customType ? (
+                                                            <div>
+                                                                <div className="font-medium">{customType.name}</div>
+                                                                <div className="text-xs text-muted-foreground">{modeLabel}</div>
+                                                            </div>
+                                                        ) : modeLabel
+                                                    })() : unavailable}
                                                 </TableCell>
                                                 <TableCell>{agent?.agentType === 'driver' ? [agent.carModel, agent.plateNumber].filter(Boolean).join(' / ') || unavailable : unavailable}</TableCell>
                                                 <TableCell>{linkedUser?.name || linkedUser?.email || t('businessPartners.agent.noLinkedUser', { defaultValue: 'Not linked' })}</TableCell>
@@ -300,6 +330,15 @@ export function Agents() {
                     title={t('agents.deleteTitle', { defaultValue: 'Delete Agent' })}
                     description={t('agents.deleteWarning', { defaultValue: 'Agents with transaction history cannot be deleted.' })}
                 />
+                </TabsContent>
+                <TabsContent value="types">
+                    <AgentTypesManagement
+                        workspaceId={user?.workspaceId}
+                        canEdit={canEdit}
+                        canDelete={canDelete}
+                    />
+                </TabsContent>
+                </Tabs>
             </div>
         </CommissionFeatureBoundary>
     )

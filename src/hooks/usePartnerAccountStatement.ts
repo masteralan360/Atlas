@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { supportsSalesAgentWorkflows } from '@/local-db/models'
 
 import {
   db,
@@ -312,7 +313,7 @@ export function usePartnerAccountStatement(
       ? agents.filter((agent) => (
         !agent.isDeleted
         && agent.workspaceId === workspaceId
-        && agent.agentType === 'field_agent'
+        && supportsSalesAgentWorkflows(agent.agentType)
         && agent.businessPartnerId === partnerId
       ))
       : [],

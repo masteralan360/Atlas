@@ -70,6 +70,7 @@ const SYNC_PULL_TABLES = [
   "commerce_operations_records",
   "suppliers",
   "agents",
+  "agent_types",
   "agent_excluded_categories",
   "agent_commission_plans",
   "agent_commission_memberships",
@@ -377,6 +378,7 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
       break;
     case "agents":
       addParent("business_partners", "businessPartnerId", "business_partner_id");
+      addParent("agent_types", "customAgentTypeId", "custom_agent_type_id");
       break;
     case "garden_construction_projects":
     case "garden_maintenance_contracts":
@@ -610,6 +612,24 @@ export function orderMutationsForSync<T extends MutationSyncOrderItem>(mutations
       ) ?? activeParentIndices[0];
       if (parentIndex !== undefined) addEdge(parentIndex, index);
     }
+  });
+
+  // Agent type removal is rejected by the database while any live agent still
+  // references it. An offline reassignment can be a child update that no
+  // longer carries the old type id, so make a later type soft-delete wait for
+  // all earlier agent mutations in that workspace to avoid racing that guard.
+  chronological.forEach((typeMutation, typeIndex) => {
+    const isAgentTypeSoftDelete = typeMutation.entityType === "agent_types"
+      && typeMutation.operation === "update"
+      && (typeMutation.payload.isDeleted === true || typeMutation.payload.is_deleted === true);
+    if (!isAgentTypeSoftDelete) return;
+
+    chronological.forEach((agentMutation, agentIndex) => {
+      if (agentIndex >= typeIndex
+        || agentMutation.workspaceId !== typeMutation.workspaceId
+        || agentMutation.entityType !== "agents") return;
+      addEdge(agentIndex, typeIndex);
+    });
   });
 
   // Effective-dated commission revisions must close the previous open row

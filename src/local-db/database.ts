@@ -50,6 +50,7 @@ import type {
   Supplier,
   Customer,
   Agent,
+  CustomAgentType,
   AgentExcludedCategory,
   AgentCommissionPlan,
   AgentCommissionMembership,
@@ -507,6 +508,7 @@ export class AtlasDatabase extends Dexie {
   suppliers!: EntityTable<Supplier, 'id'>
   customers!: EntityTable<Customer, 'id'>
   agents!: EntityTable<Agent, 'id'>
+  agent_types!: EntityTable<CustomAgentType, 'id'>
   agent_excluded_categories!: EntityTable<AgentExcludedCategory, 'id'>
   agent_commission_plans!: EntityTable<AgentCommissionPlan, 'id'>
   agent_commission_memberships!: EntityTable<AgentCommissionMembership, 'id'>
@@ -3888,6 +3890,13 @@ export class AtlasDatabase extends Dexie {
         'id, orderNumber, businessPartnerId, customerId, linkedLoanId, salesAccountAgentId, workspaceId, status, paymentStatus, paymentMethod, currency, nextDueDate, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+salesAccountAgentId], [workspaceId+createdAt], [workspaceId+isArchived], [workspaceId+status]'
     })
 
+    this.version(159).stores({
+      agents:
+        'id, workspaceId, businessPartnerId, agentType, customAgentTypeId, status, linkedUserId, salesAccountEnabled, updatedAt, isDeleted, syncStatus, [workspaceId+status], [workspaceId+agentType], [workspaceId+salesAccountEnabled], [workspaceId+customAgentTypeId]',
+      agent_types:
+        'id, workspaceId, name, mode, updatedAt, isDeleted, syncStatus, [workspaceId+name], [workspaceId+mode]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
@@ -4168,6 +4177,7 @@ export class AtlasDatabase extends Dexie {
       'suppliers',
       'customers',
       'agents',
+      'agent_types',
       'agent_commission_plans',
       'agent_commission_memberships',
       'product_commission_rules',
@@ -4452,6 +4462,7 @@ export async function clearDatabase(): Promise<void> {
       db.sale_product_exchanges,
       db.agent_commission_entries,
       db.agent_product_commission_entries,
+      db.agent_types,
       db.sales_order_agent_assignments,
       db.agent_commission_memberships,
       db.agent_commission_plans,
@@ -4532,6 +4543,7 @@ export async function clearDatabase(): Promise<void> {
       await db.sale_product_exchanges.clear()
       await db.agent_commission_entries.clear()
       await db.agent_product_commission_entries.clear()
+      await db.agent_types.clear()
       await db.sales_order_agent_assignments.clear()
       await db.agent_commission_memberships.clear()
       await db.agent_commission_plans.clear()

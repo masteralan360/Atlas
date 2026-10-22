@@ -20,6 +20,7 @@ import type {
     ProductCommissionRule,
     ProductCommissionRuleAgent
 } from './models'
+import { supportsSalesAgentWorkflows } from './models'
 import { addToOfflineMutations } from './offlineMutations'
 import { getSalesOrderCommissionMode } from './commissionMode'
 
@@ -177,7 +178,7 @@ export async function replaceProductCommissionRule(
             || agent.workspaceId !== workspaceId
             || agent.isDeleted
             || agent.status !== 'active'
-            || agent.agentType !== 'field_agent'
+            || !supportsSalesAgentWorkflows(agent.agentType)
         ))) {
             throw new Error('Select eligible field agents for this product commission')
         }
@@ -306,7 +307,7 @@ export async function refreshPartnerStatementProductCommissionEntries(
     const agents = await db.agents
         .where('workspaceId')
         .equals(workspaceId)
-        .and((agent) => !agent.isDeleted && agent.agentType === 'field_agent' && agent.businessPartnerId === partnerId)
+        .and((agent) => !agent.isDeleted && supportsSalesAgentWorkflows(agent.agentType) && agent.businessPartnerId === partnerId)
         .toArray()
     const agentIds = [...new Set(agents.map((agent) => agent.id))]
     if (agentIds.length === 0) return

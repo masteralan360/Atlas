@@ -291,6 +291,11 @@ export const moduleMetaByHref: Record<string, ModuleMeta> = {
     description: "Manage drivers and field agents with territories, vehicles, status, and user links.",
     badge: "Field team",
   },
+  "/agents/types": {
+    section: "agents",
+    description: "Create and manage workspace-specific custom agent types.",
+    badge: "Agent Types",
+  },
   "/agents/commissions": {
     section: "agents",
     description: "Review earned agent commission, record payments, and collect commission recoveries.",

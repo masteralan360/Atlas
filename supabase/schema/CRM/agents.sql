@@ -2,6 +2,7 @@ CREATE TABLE crm.agents (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   workspace_id uuid NOT NULL,
   business_partner_id uuid NOT NULL,
+  custom_agent_type_id uuid NULL,
   zone text NOT NULL,
   agent_type text NOT NULL,
   car_model text NULL,
@@ -21,7 +22,7 @@ CREATE TABLE crm.agents (
   CONSTRAINT agents_linked_user_id_fkey
     FOREIGN KEY (linked_user_id) REFERENCES public.profiles(id) ON DELETE SET NULL,
   CONSTRAINT agents_type_check CHECK (
-    agent_type IN ('driver', 'field_agent')
+    agent_type IN ('driver', 'field_agent', 'courier', 'seller')
   ),
   CONSTRAINT agents_status_check CHECK (
     status IN ('active', 'inactive', 'blocked')
@@ -34,6 +35,12 @@ CREATE TABLE crm.agents (
     )
   )
 );
+
+ALTER TABLE crm.agents
+  ADD CONSTRAINT agents_custom_type_workspace_fkey
+  FOREIGN KEY (workspace_id, custom_agent_type_id)
+  REFERENCES crm.agent_types(workspace_id, id)
+  ON DELETE RESTRICT;
 
 CREATE INDEX IF NOT EXISTS idx_crm_agents_workspace
   ON crm.agents (workspace_id);

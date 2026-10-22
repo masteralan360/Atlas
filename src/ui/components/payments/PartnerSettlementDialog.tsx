@@ -14,6 +14,7 @@ import {
     useAgents,
     useBusinessPartnersLoading
 } from '@/local-db'
+import { supportsSalesAgentWorkflows } from '@/local-db/models'
 import { STANDARD_PAYMENT_METHODS } from '@/lib/paymentMethods'
 import {
     cn,
@@ -102,7 +103,7 @@ export function PartnerSettlementDialog({
         () => agents
             .filter((agent) => (
                 !agent.isDeleted
-                && agent.agentType === 'field_agent'
+                && supportsSalesAgentWorkflows(agent.agentType)
             ))
             .map((agent) => agent.businessPartnerId),
         [agents]

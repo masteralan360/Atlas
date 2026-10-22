@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { BadgeDollarSign, BadgePercent, CircleDollarSign, ClipboardList, Link2, Loader2, NotebookPen, ShoppingCart, UserRound, Warehouse, X } from 'lucide-react'
 
 import { useAuth } from '@/auth'
+import { supportsSalesAgentWorkflows } from '@/local-db/models'
 import type { CartItem } from '@/types'
 import {
     createBusinessPartner,
@@ -327,7 +328,8 @@ export function QuickOrderModal({
         && Boolean(customer)
         && !selectedSalesAccount
     const commissionRecipient = commissionAssignmentsEnabled
-        && selectedSalesAccount?.agent.agentType === 'field_agent'
+        && selectedSalesAccount
+        && supportsSalesAgentWorkflows(selectedSalesAccount.agent.agentType)
         ? selectedSalesAccount.agent
         : null
     const creatorCommissionAgent = useMemo(

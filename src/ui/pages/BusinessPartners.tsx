@@ -12,6 +12,7 @@ import {
     loadAllBusinessPartnerDirectoryRows,
     updateBusinessPartner,
     useBusinessPartnerDirectoryPage,
+    useCustomAgentTypes,
     type BusinessPartner,
     type BusinessPartnerRole,
     type CurrencyCode
@@ -178,6 +179,7 @@ export function BusinessPartners() {
         pageSize: pagination.pageSize,
         search,
     })
+    const customAgentTypes = useCustomAgentTypes(user?.workspaceId)
     const directoryPagination = usePaginationBounds({
         currentPage: pagination.currentPage,
         setCurrentPage: pagination.setCurrentPage,
@@ -238,6 +240,10 @@ export function BusinessPartners() {
     const agentMap = useMemo(
         () => new Map(directoryPage.agents.map((agent) => [agent.id, agent])),
         [directoryPage.agents]
+    )
+    const customAgentTypeById = useMemo(
+        () => new Map(customAgentTypes.map((agentType) => [agentType.id, agentType])),
+        [customAgentTypes]
     )
     const workspaceUserMap = useMemo(
         () => new Map(directoryPage.workspaceUsers.map((workspaceUser) => [workspaceUser.id, workspaceUser])),
@@ -537,9 +543,9 @@ export function BusinessPartners() {
                                                         {agent ? (
                                                             <div className="mt-1 flex flex-wrap gap-1.5">
                                                                 <span className="text-xs text-muted-foreground">
-                                                                    {agent.agentType === 'driver'
-                                                                        ? t('businessPartners.agent.types.driver', { defaultValue: 'Driver' })
-                                                                        : t('businessPartners.agent.types.fieldAgent', { defaultValue: 'Field Agent' })}
+                                                                    {agent.customAgentTypeId && customAgentTypeById.has(agent.customAgentTypeId)
+                                                                        ? <>{customAgentTypeById.get(agent.customAgentTypeId)?.name} · {t(`businessPartners.agent.types.${agent.agentType}`, { defaultValue: agent.agentType })}</>
+                                                                        : t(`businessPartners.agent.types.${agent.agentType}`, { defaultValue: agent.agentType })}
                                                                 </span>
                                                                 <span className={agent.status === 'active'
                                                                     ? 'rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-700 dark:text-emerald-300'

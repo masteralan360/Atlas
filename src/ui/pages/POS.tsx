@@ -6905,8 +6905,14 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                                     </div>
                                 )}
 
+                                {isServiceProduct && (
+                                    <div className="absolute top-2 right-2 rounded-full bg-primary/10 px-2 py-1 text-[10px] font-black uppercase text-primary">
+                                        {t('services.badge', { defaultValue: 'Service' })}
+                                    </div>
+                                )}
+
                                 {/* Stock Badge */}
-                                {showQuantityIndicator && !isInfiniteActivity && <div data-testid="pos-product-quantity" className={cn(
+                                {showQuantityIndicator && !isInfiniteActivity && !isServiceProduct && <div data-testid="pos-product-quantity" className={cn(
                                     "absolute top-2 right-2 backdrop-blur-md px-2.5 py-1 rounded-xl text-[10px] font-black border transition-colors duration-300",
                                     remainingQuantity <= 0
                                         ? "bg-destructive text-destructive-foreground border-destructive/20"

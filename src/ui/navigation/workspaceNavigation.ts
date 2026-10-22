@@ -45,6 +45,7 @@ import {
   Wallet,
   Zap,
   Ruler,
+  Tag,
 } from "lucide-react";
 import type { WorkspaceFeatures } from "@/workspace";
 import type { ModuleFeatureKey } from "@/workspace/WorkspaceContext";
@@ -282,6 +283,11 @@ export function buildWorkspaceNavigation({
           href: "/agents",
           icon: UserRound,
           children: [
+            {
+              name: t("agents.agentTypes.title", { defaultValue: "Agent Types" }),
+              href: "/agents/types",
+              icon: Tag,
+            },
             ...(hasFeature("sales_agent_commissions")
               && (
                 canAccessPermission("salesAgentCommissions.viewAll")
