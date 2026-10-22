@@ -103,6 +103,7 @@ function entryLabel(kind: PartnerAccountStatementEntryKind, t: (key: string, opt
         agent_commission: t('salesAgentCommissions.title', { defaultValue: 'Sales agent commission' }),
         delivery_post: t('postService.title', { defaultValue: 'Post Service' }),
         installment_sale: t('businessPartners.accountStatement.installmentSale', { defaultValue: 'Installment sale' }),
+        agent_sales_activity: t('businessPartners.accountStatement.sellerSalesActivity', { defaultValue: 'Seller sales activity' }),
         partner_settlement: t('businessPartners.accountStatement.descriptions.partnerSettlement', { defaultValue: 'Partner settlement' })
     }
     return labels[kind]
@@ -253,7 +254,7 @@ function LedgerTableChunk({
                     </tr>
                 ) : entries.map((entry) => {
                     const description = getPartnerAccountStatementEntryDescription(entry, t)
-                    const detail = getPartnerAccountStatementEntryDetail(entry, { t, i18n, language })
+                    const detail = getPartnerAccountStatementEntryDetail(entry, { t, i18n, language, iqdPreference })
                     return (
                         <tr key={entry.id} data-pdf-keep-together style={{ height: `${PARTNER_STATEMENT_TABLE_ROW_HEIGHT_MM}mm` }}>
                             {columns.map((columnId) => {

@@ -34,6 +34,24 @@ export type PartnerAccountStatementPosSaleItem = {
   lineTotal: number
 }
 
+/** Sales created by a Seller's linked user are shown as informational activity.
+ * They describe the Seller's work, but the customer remains the financial
+ * counterparty, so these rows do not change the Seller partner balance.
+ */
+export type PartnerAccountStatementAgentSaleActivity = {
+  id: string
+  date: string
+  reference: string
+  saleKind: 'sales_order' | 'pos_sale' | 'installment_sale'
+  descriptionKey: 'sellerCreatedSalesOrder' | 'sellerCreatedPosSale' | 'sellerCreatedInstallmentSale'
+  amount: number
+  currency: string
+  source:
+    | { recordType: 'order'; recordId: string }
+    | { recordType: 'sale'; recordId: string }
+    | { recordType: 'installment_sale'; recordId: string }
+}
+
 /**
  * The source records needed to create a partner subledger. This deliberately
  * contains source data rather than stored balances: both the screen and the
@@ -67,6 +85,8 @@ export type PartnerAccountStatementData = {
   linkedOrderCodes?: Record<string, string>
   /** POS-sale references for loans created from a POS sale. */
   linkedPosSaleCodes?: Record<string, string>
+  /** Sales created by a linked Seller user, shown without changing the balance. */
+  agentCreatedSalesActivities?: PartnerAccountStatementAgentSaleActivity[]
   /** Original POS sale lines, keyed by POS sale ID. */
   posSaleItemsBySaleId?: Record<string, PartnerAccountStatementPosSaleItem[]>
   settlementTransactions?: PaymentTransaction[]
@@ -107,6 +127,7 @@ export type PartnerAccountStatementEntryKind =
   | 'pos_sale_loan'
   | 'pos_sale_installment_loan'
   | 'installment_sale'
+  | 'agent_sales_activity'
   | 'agent_commission'
   | 'delivery_post'
   | 'partner_settlement'
@@ -137,6 +158,9 @@ export type PartnerAccountStatementEntryDescriptionKey =
   | 'loanRepaymentReceived'
   | 'loanRepaymentMade'
   | 'installmentSale'
+  | 'sellerCreatedSalesOrder'
+  | 'sellerCreatedPosSale'
+  | 'sellerCreatedInstallmentSale'
   | 'paymentReversal'
   | 'orderReturnRefund'
   | 'loanRepaymentRefund'
@@ -159,6 +183,7 @@ export type PartnerAccountStatementEntrySource =
   | { recordType: 'order'; recordId: string }
   | { recordType: 'loan'; recordId: string; loanCategory: Loan['loanCategory'] }
   | { recordType: 'installment_sale'; recordId: string }
+  | { recordType: 'sale'; recordId: string }
   | { recordType: 'payment_transaction'; recordId: string }
   | { recordType: 'delivery_ledger_entry'; recordId: string }
 
@@ -181,6 +206,8 @@ export type PartnerAccountStatementEntry = {
   /** Historical commission explanation for agent product rows; never changes the account delta. */
   commissionPerProduct?: number | null
   totalProductCommission?: number | null
+  /** Informational Seller sales amount; excluded from debit, credit, and balance. */
+  salesActivityAmount?: number | null
   currency: string
   /** Positive movements increase the amount due from the partner. */
   delta: number
@@ -1301,6 +1328,30 @@ function createInstallmentSaleEntries(data: PartnerAccountStatementData): Partne
     }))
 }
 
+function createAgentCreatedSalesActivityEntries(
+  data: PartnerAccountStatementData
+): PartnerAccountStatementEntry[] {
+  return (data.agentCreatedSalesActivities || []).map((activity) => {
+    const descriptions: Record<PartnerAccountStatementAgentSaleActivity['saleKind'], string> = {
+      sales_order: 'Sales order created by Seller',
+      pos_sale: 'POS sale created by Seller',
+      installment_sale: 'Installment sale created by Seller'
+    }
+    return {
+      id: `agent-sales-activity:${activity.saleKind}:${activity.id}`,
+      date: activity.date,
+      reference: activity.reference,
+      kind: 'agent_sales_activity',
+      description: descriptions[activity.saleKind],
+      descriptionKey: activity.descriptionKey,
+      currency: activity.currency,
+      delta: 0,
+      salesActivityAmount: Math.abs(Number(activity.amount || 0)),
+      source: activity.source
+    }
+  })
+}
+
 function deliveryEntryPresentation(kind: DeliveryLedgerEntry['kind']): {
   description: string
   descriptionKey: PartnerAccountStatementEntryDescriptionKey
@@ -1398,11 +1449,13 @@ export function buildPartnerAccountStatementLedger(
     ...createAgentCommissionEntries(data),
     ...createLoanEntries(data),
     ...createInstallmentSaleEntries(data),
+    ...createAgentCreatedSalesActivityEntries(data),
     ...createDeliveryEntries(data)
   ].filter((entry) => (
     Math.abs(entry.delta) > 0.000001
     || entry.descriptionKey === 'commissionSettledAutomatically'
     || entry.totalProductCommission != null
+    || entry.salesActivityAmount != null
     // Agent financed-order return rows are informational. Preserve their item
     // audit rows even when no commission rule applied, without adding balance.
     || (entry.kind === 'sales_order_return' && entry.itemName != null)

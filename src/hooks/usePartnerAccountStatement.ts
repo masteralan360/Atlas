@@ -28,6 +28,7 @@ import {
 import { getCommissionEntryMode, isPayableCommissionEntry } from '@/local-db/commissionMode'
 import type { PurchaseOrder, Sale, SalesOrder } from '@/local-db/models'
 import { isDirectTransactionPartnerAccountEffect } from '@/local-db/payments'
+import { isActiveSale } from '@/lib/saleArchiving'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { usePartnerAccountStatementPeriod } from '@/hooks/usePartnerAccountStatementPeriod'
 import { deriveOrderPartnerBalanceAtPosting } from '@/lib/orderPartnerBalance'
@@ -40,6 +41,7 @@ import {
   getPartnerAccountStatementClosingBalances,
   type PartnerAccountStatementClosingBalance,
   type PartnerAccountStatementData,
+  type PartnerAccountStatementAgentSaleActivity,
   type PartnerAccountStatementPosSaleItem
 } from '@/lib/partnerAccountStatement'
 import {
@@ -408,6 +410,82 @@ export function usePartnerAccountStatement(
     () => (partnerId ? installmentSales.filter((sale) => sale.customerBusinessPartnerId === partnerId) : []),
     [installmentSales, partnerId]
   )
+  const sellerCreatedSalesActivities = useMemo<PartnerAccountStatementAgentSaleActivity[]>(() => {
+    const sellerUserIds = new Set(commissionAgents
+      .filter((agent) => agent.agentType === 'seller' && agent.linkedUserId)
+      .map((agent) => agent.linkedUserId as string))
+    if (sellerUserIds.size === 0 || !workspaceId) return []
+
+    const directSalesOrderIds = new Set(partnerSalesOrders.map((order) => order.id))
+    const directInstallmentSaleIds = new Set(partnerInstallmentSales.map((sale) => sale.id))
+    const activities: PartnerAccountStatementAgentSaleActivity[] = []
+
+    for (const order of salesOrders) {
+      if (
+        order.workspaceId !== workspaceId
+        || order.isDeleted
+        || order.status === 'draft'
+        || order.status === 'cancelled'
+        || directSalesOrderIds.has(order.id)
+        || !order.createdBy
+        || !sellerUserIds.has(order.createdBy)
+      ) continue
+      activities.push({
+        id: order.id,
+        date: order.createdAt,
+        reference: order.orderNumber,
+        saleKind: 'sales_order',
+        descriptionKey: 'sellerCreatedSalesOrder',
+        amount: Math.abs(Number(order.total || 0)) + Math.abs(Number(order.returnedAmount || 0)),
+        currency: order.currency,
+        source: { recordType: 'order', recordId: order.id }
+      })
+    }
+
+    for (const sale of sales) {
+      if (
+        sale.workspaceId !== workspaceId
+        || sale.isDeleted
+        || !isActiveSale(sale)
+        || !sellerUserIds.has(sale.cashierId)
+      ) continue
+      activities.push({
+        id: sale.id,
+        date: sale.createdAt,
+        reference: sale.sequenceId
+          ? `SALE-${sale.sequenceId}`
+          : `SALE-${sale.id.slice(0, 8).toUpperCase()}`,
+        saleKind: 'pos_sale',
+        descriptionKey: 'sellerCreatedPosSale',
+        amount: Math.abs(Number(sale.totalAmount || 0)) + Math.abs(Number(sale.returnedAmount || 0)),
+        currency: sale.settlementCurrency,
+        source: { recordType: 'sale', recordId: sale.id }
+      })
+    }
+
+    for (const sale of installmentSales) {
+      if (
+        sale.workspaceId !== workspaceId
+        || sale.isDeleted
+        || sale.status === 'cancelled'
+        || directInstallmentSaleIds.has(sale.id)
+        || !sale.createdBy
+        || !sellerUserIds.has(sale.createdBy)
+      ) continue
+      activities.push({
+        id: sale.id,
+        date: sale.createdAt,
+        reference: sale.saleNo,
+        saleKind: 'installment_sale',
+        descriptionKey: 'sellerCreatedInstallmentSale',
+        amount: Math.abs(Number(sale.totalSalePrice || 0)),
+        currency: sale.currency,
+        source: { recordType: 'installment_sale', recordId: sale.id }
+      })
+    }
+
+    return activities
+  }, [commissionAgents, installmentSales, partnerInstallmentSales, partnerSalesOrders, sales, salesOrders, workspaceId])
   const salesAccountProductCommissionEntries = useMemo(
     () => productCommissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId)),
     [commissionAgentIds, productCommissionEntries]
@@ -573,6 +651,7 @@ export function usePartnerAccountStatement(
       loanPayments,
       loanPaymentTransactions,
       installmentSales: partnerInstallmentSales,
+      agentCreatedSalesActivities: sellerCreatedSalesActivities,
       linkedOrderCodes: Object.fromEntries(
         [...allOrders, ...marketplaceAttributedOrders]
           .filter((order) => !order.isDeleted)
@@ -621,6 +700,7 @@ export function usePartnerAccountStatement(
     salesAccountCommissionEntries,
     trackedCommissionEntries,
     salesAccountProductCommissionEntries,
+    sellerCreatedSalesActivities,
     salesOrders,
     sales,
     settlementOperations,

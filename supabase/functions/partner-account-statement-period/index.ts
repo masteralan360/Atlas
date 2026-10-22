@@ -287,7 +287,7 @@ async function loadPartnerStatement(
     loansRaw, installmentSalesRaw, settlementOperationsRaw, merchantProfilesRaw, storageAccess] = await Promise.all([
     client.schema(crm).rpc("read_business_partner_summaries", { p_workspace_id: workspaceId, p_partner_ids: [partnerId] }),
     readAll(client, crm, "agents", workspaceId, (query) => query
-      .eq("business_partner_id", partnerId).eq("agent_type", "field_agent").eq("is_deleted", false)),
+      .eq("business_partner_id", partnerId).in("agent_type", ["field_agent", "seller"]).eq("is_deleted", false)),
     readAll(client, crm, "sales_orders", workspaceId, (query) => query
       .eq("business_partner_id", partnerId).eq("is_deleted", false)),
     readAll(client, crm, "sales_orders", workspaceId, (query) => query
@@ -317,6 +317,10 @@ async function loadPartnerStatement(
     .map((row) => visibleOrderForStorage(camelize(row) as Record<string, unknown>, false, storageAccess))
     .filter((row): row is Record<string, unknown> => Boolean(row))
   const agents = agentsRaw.map((row) => camelize(row) as Record<string, unknown>)
+  const sellerLinkedUserIds = [...new Set(agents
+    .filter((agent) => agent.agentType === "seller")
+    .map((agent) => valueText(agent, "linkedUserId"))
+    .filter((id): id is string => Boolean(id) && isUuid(id)))]
   const agentIds = agents.map((agent) => String(agent.id))
   const salesOrderIds = salesOrdersRaw.map((order) => String(order.id))
   const purchaseOrderIds = purchaseOrdersRaw.map((order) => String(order.id))
@@ -325,6 +329,22 @@ async function loadPartnerStatement(
   const settlementOperationIds = settlementOperationsRaw.map((operation) => String(operation.id))
   const merchantProfileIds = merchantProfilesRaw.map((profile) => String(profile.id))
   const periodEnd = periodEndExclusive(period)
+
+  // Include sales made by users linked to Seller agents as informational
+  // statement activity. The customer remains the counterparty, so these rows
+  // are not added to the Seller's receivable balance.
+  const sellerCreatedSalesOrdersPromise = sellerLinkedUserIds.length
+    ? readAll(client, crm, "sales_orders", workspaceId, (query) => query
+      .in("created_by", sellerLinkedUserIds).eq("is_deleted", false))
+    : Promise.resolve([])
+  const sellerCreatedPosSalesPromise = sellerLinkedUserIds.length
+    ? readAll(client, "public", "sales", workspaceId, (query) => query
+      .in("cashier_id", sellerLinkedUserIds).eq("is_deleted", false), "*, sale_items(id, storage_id, total_price)")
+    : Promise.resolve([])
+  const sellerCreatedInstallmentSalesPromise = sellerLinkedUserIds.length
+    ? readAll(client, "public", "installment_sales", workspaceId, (query) => query
+      .in("created_by", sellerLinkedUserIds).eq("is_deleted", false))
+    : Promise.resolve([])
 
   const productCommissionForPeriod = agentIds.length
     ? readAll(client, crm, "agent_product_commission_entries", workspaceId, (query) => {
@@ -410,7 +430,8 @@ async function loadPartnerStatement(
   const [returnsRaw, returnItemsRaw, loanPaymentsRaw, installmentSalesFetchedRaw,
     commissionRaw, assignmentsRaw, assignmentsByOrderRaw, productCommissionRaw,
     trackedProductExistsResult, merchantLedgerByPartner, merchantLedgerByProfile, paymentTransactionsRaw,
-    posSaleRows, referenceRows] = await Promise.all([
+    posSaleRows, referenceRows, sellerCreatedSalesOrdersRaw, sellerCreatedPosSalesRaw,
+    sellerCreatedInstallmentSalesRaw] = await Promise.all([
     readIds(client, "public", "order_returns", workspaceId, "order_id", salesOrderIds,
       (query) => query.eq("is_deleted", false)),
     readIds(client, "public", "order_return_items", workspaceId, "order_id", salesOrderIds,
@@ -435,7 +456,10 @@ async function loadPartnerStatement(
       : Promise.resolve([]),
     paymentTransactionsPromise,
     posSaleRowsPromise,
-    referencesPromise
+    referencesPromise,
+    sellerCreatedSalesOrdersPromise,
+    sellerCreatedPosSalesPromise,
+    sellerCreatedInstallmentSalesPromise
   ])
   if (trackedProductExistsResult.error) throw trackedProductExistsResult.error
 
@@ -450,6 +474,84 @@ async function loadPartnerStatement(
   const loans = loansRaw.map((row) => camelize(row) as Record<string, unknown>)
   const loanPayments = loanPaymentsRaw.map((row) => camelize(row) as Record<string, unknown>)
   const installmentSales = installmentSalesFetchedRaw.map((row) => camelize(row) as Record<string, unknown>)
+  const directSalesOrderIdSet = new Set(salesOrderIds)
+  const directInstallmentSaleIds = new Set(installmentSales.map((sale) => String(sale.id)))
+  const sellerCreatedSalesOrders = uniqueRows(sellerCreatedSalesOrdersRaw)
+    .filter((row) => !directSalesOrderIdSet.has(String(row.id)))
+    .map((row) => visibleOrderForStorage(camelize(row) as Record<string, unknown>, true, storageAccess))
+    .filter((row): row is Record<string, unknown> => Boolean(row))
+  const sellerCreatedPosSales = sellerCreatedPosSalesRaw
+    .map((row) => camelize(row) as Record<string, unknown>)
+    .flatMap((sale) => {
+      if (sale.isArchived === true) return []
+      if (storageAccess.isAdmin || storageAccess.excludedStorageIds.size === 0) return [sale]
+
+      const items = Array.isArray(sale.saleItems)
+        ? sale.saleItems as Record<string, unknown>[]
+        : []
+      const visibleItems = items.filter((item) => {
+        const storageId = valueText(item, "storageId")
+        return !storageId || !storageAccess.excludedStorageIds.has(storageId)
+      })
+      if (visibleItems.length === 0) return []
+
+      const visibleTotal = visibleItems.reduce((sum, item) => (
+        sum + numberValue(item.totalPrice ?? item.total_price)
+      ), 0)
+      const originalTotal = numberValue(sale.totalAmount)
+      const visibleRatio = originalTotal > 0
+        ? Math.min(1, Math.max(0, visibleTotal / originalTotal))
+        : 0
+      return [{
+        ...sale,
+        totalAmount: visibleTotal,
+        returnedAmount: numberValue(sale.returnedAmount) * visibleRatio,
+        ...(sale.originalTotalAmount !== undefined
+          ? { originalTotalAmount: numberValue(sale.originalTotalAmount) * visibleRatio }
+          : {})
+      }]
+    })
+  const sellerCreatedInstallmentSales = uniqueRows(sellerCreatedInstallmentSalesRaw)
+    .map((row) => camelize(row) as Record<string, unknown>)
+    .filter((sale) => !directInstallmentSaleIds.has(String(sale.id)))
+  const agentCreatedSalesActivities = [
+    ...sellerCreatedSalesOrders
+      .filter((order) => order.status !== "draft" && order.status !== "cancelled")
+      .map((order) => ({
+        id: String(order.id),
+        date: String(order.createdAt || ""),
+        reference: valueText(order, "orderNumber") || String(order.id),
+        saleKind: "sales_order" as const,
+        descriptionKey: "sellerCreatedSalesOrder" as const,
+        amount: Math.abs(numberValue(order.total)) + Math.abs(numberValue(order.returnedAmount)),
+        currency: valueText(order, "currency") || "usd",
+        source: { recordType: "order" as const, recordId: String(order.id) }
+      })),
+    ...sellerCreatedPosSales.map((sale) => ({
+      id: String(sale.id),
+      date: String(sale.createdAt || ""),
+      reference: sale.sequenceId
+        ? `SALE-${sale.sequenceId}`
+        : `SALE-${String(sale.id).slice(0, 8).toUpperCase()}`,
+      saleKind: "pos_sale" as const,
+      descriptionKey: "sellerCreatedPosSale" as const,
+      amount: Math.abs(numberValue(sale.totalAmount)) + Math.abs(numberValue(sale.returnedAmount)),
+      currency: valueText(sale, "settlementCurrency") || "usd",
+      source: { recordType: "sale" as const, recordId: String(sale.id) }
+    })),
+    ...sellerCreatedInstallmentSales
+      .filter((sale) => sale.status !== "cancelled")
+      .map((sale) => ({
+        id: String(sale.id),
+        date: String(sale.createdAt || ""),
+        reference: valueText(sale, "saleNo") || String(sale.id),
+        saleKind: "installment_sale" as const,
+        descriptionKey: "sellerCreatedInstallmentSale" as const,
+        amount: Math.abs(numberValue(sale.totalSalePrice)),
+        currency: valueText(sale, "currency") || "usd",
+        source: { recordType: "installment_sale" as const, recordId: String(sale.id) }
+      }))
+  ]
   const commissionEntries = commissionRaw.map((row) => camelize(row) as Record<string, unknown>)
   const assignments = uniqueRows(assignmentsRaw, assignmentsByOrderRaw)
     .map((row) => camelize(row) as Record<string, unknown>)
@@ -579,6 +681,7 @@ async function loadPartnerStatement(
     loanPayments: loanPayments as unknown as PartnerAccountStatementData["loanPayments"],
     loanPaymentTransactions: loanPaymentTransactions as unknown as PartnerAccountStatementData["loanPaymentTransactions"],
     installmentSales: installmentSales as unknown as PartnerAccountStatementData["installmentSales"],
+    agentCreatedSalesActivities: agentCreatedSalesActivities as PartnerAccountStatementData["agentCreatedSalesActivities"],
     linkedOrderCodes,
     linkedPosSaleCodes,
     posSaleItemsBySaleId: posSaleItemsBySaleId as PartnerAccountStatementData["posSaleItemsBySaleId"],

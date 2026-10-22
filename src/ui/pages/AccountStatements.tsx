@@ -118,6 +118,7 @@ function entryLabel(
         pos_sale_loan: t('loans.posSaleLoan', { defaultValue: 'POS Sale Loan' }),
         pos_sale_installment_loan: t('loans.posSaleInstallmentLoan', { defaultValue: 'POS Sale Installment Loan' }),
         installment_sale: t('businessPartners.accountStatement.installmentSale', { defaultValue: 'Installment sale' }),
+        agent_sales_activity: t('businessPartners.accountStatement.sellerSalesActivity', { defaultValue: 'Seller sales activity' }),
         agent_commission: t('salesAgentCommissions.title', { defaultValue: 'Sales agent commission' }),
         delivery_post: t('postService.title', { defaultValue: 'Post Service' }),
         partner_settlement: t('businessPartners.accountStatement.descriptions.partnerSettlement', { defaultValue: 'Partner settlement' })
@@ -140,6 +141,9 @@ function entrySourcePath(entry: PartnerAccountStatementEntry) {
     }
     if (entry.source?.recordType === 'installment_sale') {
         return '/installments'
+    }
+    if (entry.source?.recordType === 'sale') {
+        return '/sales'
     }
     if (entry.source?.recordType === 'delivery_ledger_entry') {
         return '/post-service'
@@ -315,7 +319,7 @@ function LedgerCard({
                                     relatedReturnId && hoveredReturnId === relatedReturnId
                                 )
                                 const description = getPartnerAccountStatementEntryDescription(entry, t)
-                                const detail = getPartnerAccountStatementEntryDetail(entry, { t, i18n, language })
+                                const detail = getPartnerAccountStatementEntryDetail(entry, { t, i18n, language, iqdPreference })
                                 const row = (
                                     <TableRow
                                         className={cn(
@@ -409,7 +413,7 @@ function LedgerCard({
                                                         {entry.childEntries.map((child) => {
                                                             const childSourcePath = entrySourcePath(child)
                                                             const childDescription = getPartnerAccountStatementEntryDescription(child, t)
-                                                            const childDetail = getPartnerAccountStatementEntryDetail(child, { t, i18n, language })
+                                                            const childDetail = getPartnerAccountStatementEntryDetail(child, { t, i18n, language, iqdPreference })
                                                             return (
                                                                 <div key={child.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs">
                                                                     <div className="min-w-0">

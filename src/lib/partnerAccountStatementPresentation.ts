@@ -5,6 +5,7 @@ import {
     type PartnerAccountStatementEntry
 } from '@/lib/partnerAccountStatement'
 import { localizeReturnReason } from '@/lib/returnReasons'
+import { formatCurrency } from '@/lib/utils'
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
 type StatementPaymentMethod = NonNullable<PartnerAccountStatementEntry['paymentMethod']>
@@ -52,8 +53,9 @@ export function getPartnerAccountStatementEntryDescription(
 }
 
 export function getPartnerAccountStatementEntryDetail(
-    entry: Pick<PartnerAccountStatementEntry, 'note' | 'returnReason'>,
-    options: { t: Translate; i18n: I18n; language: string }
+    entry: Pick<PartnerAccountStatementEntry, 'note' | 'returnReason'>
+        & Partial<Pick<PartnerAccountStatementEntry, 'salesActivityAmount' | 'currency'>>,
+    options: { t: Translate; i18n: I18n; language: string; iqdPreference?: Parameters<typeof formatCurrency>[2] }
 ) {
     if (entry.returnReason?.trim()) {
         const reason = localizeReturnReason(
@@ -65,5 +67,13 @@ export function getPartnerAccountStatementEntryDetail(
         return `${options.t('businessPartners.accountStatement.reason', { defaultValue: 'Reason' })}: ${reason}`
     }
 
-    return entry.note?.trim() || null
+    const details: string[] = []
+    if (entry.salesActivityAmount != null) {
+        details.push(options.t('businessPartners.accountStatement.descriptions.sellerSalesAmount', {
+            defaultValue: 'Sale total: {{amount}}',
+            amount: formatCurrency(entry.salesActivityAmount, entry.currency || 'usd', options.iqdPreference || 'IQD')
+        }))
+    }
+    if (entry.note?.trim()) details.push(entry.note.trim())
+    return details.length ? details.join(' · ') : null
 }
