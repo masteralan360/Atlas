@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useRoute } from 'wouter'
 import {
     ArrowLeft,
@@ -154,11 +154,13 @@ type ProductScannerTarget = 'none' | 'sku' | 'barcode' | 'variantSku'
 
 const PRODUCT_SCANNER_TARGET_KEY = 'products_scanner_target'
 const PRODUCT_SKU_SCANNER_ENABLED_KEY = 'products_sku_scanner_enabled'
+const PRODUCT_AUTO_SKU_GENERATION_ENABLED_KEY = 'products_auto_sku_generation_enabled'
 const PRODUCT_BARCODE_SCANNER_ENABLED_KEY = 'products_barcode_scanner_enabled'
 const PRODUCT_VARIANT_SKU_SCANNER_ENABLED_KEY = 'products_variant_sku_scanner_enabled'
 const PRODUCT_SKU_HID_DEVICE_KEY = 'products_sku_hid_device_id'
 const PRODUCT_BARCODE_HID_DEVICE_KEY = 'products_barcode_hid_device_id'
 const PRODUCT_FORM_SCANNER_IDLE_COMMIT_DELAY_MS = 1200
+const PRODUCT_AUTO_SKU_LONG_PRESS_DELAY_MS = 650
 
 type ProductFormMode = 'create' | 'edit' | 'clone'
 
@@ -480,11 +482,23 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const [deleteProductOpen, setDeleteProductOpen] = useState(false)
     const [isDeletingProduct, setIsDeletingProduct] = useState(false)
     const [isGeneratingSku, setIsGeneratingSku] = useState(false)
+    const [isAutoSkuGenerationEnabled, setIsAutoSkuGenerationEnabled] = useState(
+        () => mode === 'create' && readStoredBoolean(PRODUCT_AUTO_SKU_GENERATION_ENABLED_KEY)
+    )
+    const [isCreateFormInitialized, setIsCreateFormInitialized] = useState(false)
     const [isCameraSkuScannerOpen, setIsCameraSkuScannerOpen] = useState(false)
     const [activeScannerTarget, setActiveScannerTarget] = useState<ProductScannerTarget>(() => readStoredScannerTarget())
     const [variantSkuScannerPreference, setVariantSkuScannerPreference] = useState(() => readStoredBoolean(PRODUCT_VARIANT_SKU_SCANNER_ENABLED_KEY))
     const skuInputRef = useRef<HTMLInputElement>(null)
     const isGeneratingSkuRef = useRef(false)
+    const skuValueRef = useRef(formData.sku)
+    const autoSkuGenerationEnabledRef = useRef(isAutoSkuGenerationEnabled)
+    const autoSkuGenerationAttemptedRef = useRef(false)
+    const autoSkuGenerationStoppedRef = useRef(false)
+    const autoSkuLongPressTimerRef = useRef<number | null>(null)
+    const suppressAutoSkuClickRef = useRef(false)
+    const suppressAutoSkuClickResetTimerRef = useRef<number | null>(null)
+    const lastSkuPointerTypeRef = useRef<string | null>(null)
     const storageTriggerRef = useRef<HTMLButtonElement>(null)
     const overrideSectionRef = useRef<HTMLDivElement>(null)
     const newBarcodeInputRef = useRef<HTMLInputElement>(null)
@@ -589,6 +603,15 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         )
     }, [])
 
+    useEffect(() => () => {
+        if (autoSkuLongPressTimerRef.current !== null) {
+            window.clearTimeout(autoSkuLongPressTimerRef.current)
+        }
+        if (suppressAutoSkuClickResetTimerRef.current !== null) {
+            window.clearTimeout(suppressAutoSkuClickResetTimerRef.current)
+        }
+    }, [])
+
     useEffect(() => {
         setProductHydrationResolved(false)
     }, [mode, productId])
@@ -679,9 +702,13 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         }
 
         setFormData(nextFormData)
+        skuValueRef.current = nextFormData.sku
         setImageError(false)
         initialFormSnapshotRef.current = JSON.stringify(nextFormData)
         initializedKeyRef.current = nextKey
+        if (mode === 'create') {
+            setIsCreateFormInitialized(true)
+        }
     }, [features.default_currency, hideCosts, mode, product, storages])
 
     useEffect(() => {
@@ -1167,7 +1194,12 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             return
         }
 
-        setFormData((current) => ({ ...current, sku: normalizeBarcodeScannerText(value) }))
+        const sku = normalizeBarcodeScannerText(value)
+        skuValueRef.current = sku
+        if (mode === 'create') {
+            autoSkuGenerationStoppedRef.current = true
+        }
+        setFormData((current) => ({ ...current, sku }))
     }
 
     const handleCameraSkuCapture = (barcodes: Array<{ rawValue?: string | null }>) => {
@@ -1180,12 +1212,16 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             return
         }
 
+        skuValueRef.current = sku
+        if (mode === 'create') {
+            autoSkuGenerationStoppedRef.current = true
+        }
         setFormData((current) => ({ ...current, sku }))
         setIsCameraSkuScannerOpen(false)
     }
 
-    const handleGenerateSku = async () => {
-        if (isReadOnly || !workspaceId || isGeneratingSkuRef.current) {
+    const handleGenerateSku = useCallback(async ({ automatic = false }: { automatic?: boolean } = {}) => {
+        if (isReadOnly || !workspaceId || isGeneratingSkuRef.current || (automatic && mode !== 'create')) {
             return
         }
 
@@ -1193,18 +1229,47 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         setIsGeneratingSku(true)
         try {
             for (let attempt = 0; attempt < 20; attempt += 1) {
+                if (automatic && (
+                    !autoSkuGenerationEnabledRef.current
+                    || autoSkuGenerationStoppedRef.current
+                    || skuValueRef.current.trim()
+                )) {
+                    return
+                }
+
                 const sku = generateRandomUpc()
-                if (sku === formData.sku) {
+                if (sku === (automatic ? skuValueRef.current : formData.sku)) {
                     continue
                 }
 
                 const existingProduct = await findActiveProductBySku(workspaceId, sku)
 
                 if (!existingProduct) {
+                    if (automatic) {
+                        if (
+                            !autoSkuGenerationEnabledRef.current
+                            || autoSkuGenerationStoppedRef.current
+                            || skuValueRef.current.trim()
+                        ) {
+                            return
+                        }
+                    }
+
+                    skuValueRef.current = sku
                     setFormData((current) => ({ ...current, sku }))
-                    skuInputRef.current?.focus()
+                    if (!automatic) {
+                        skuInputRef.current?.focus()
+                    }
                     return
                 }
+            }
+
+            if (automatic && (
+                !autoSkuGenerationEnabledRef.current
+                || autoSkuGenerationStoppedRef.current
+                || skuValueRef.current.trim()
+            )) {
+                return
             }
 
             toast({
@@ -1218,6 +1283,36 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             isGeneratingSkuRef.current = false
             setIsGeneratingSku(false)
         }
+    }, [formData.sku, isReadOnly, mode, t, toast, workspaceId])
+
+    useEffect(() => {
+        if (
+            mode !== 'create'
+            || !isCreateFormInitialized
+            || !isAutoSkuGenerationEnabled
+            || !workspaceId
+            || autoSkuGenerationAttemptedRef.current
+        ) {
+            return
+        }
+
+        autoSkuGenerationAttemptedRef.current = true
+        if (skuValueRef.current.trim() || autoSkuGenerationStoppedRef.current) {
+            return
+        }
+
+        void handleGenerateSku({ automatic: true })
+    }, [handleGenerateSku, isAutoSkuGenerationEnabled, isCreateFormInitialized, mode, workspaceId])
+
+    const toggleAutoSkuGeneration = () => {
+        if (mode !== 'create') {
+            return
+        }
+
+        const nextEnabled = !autoSkuGenerationEnabledRef.current
+        autoSkuGenerationEnabledRef.current = nextEnabled
+        writeStoredBoolean(PRODUCT_AUTO_SKU_GENERATION_ENABLED_KEY, nextEnabled)
+        setIsAutoSkuGenerationEnabled(nextEnabled)
     }
 
     const handleAdditionalBarcodeScan = (value: string) => {
@@ -1690,6 +1785,17 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             : (t('common.create') || 'Create')
     const scannerEnabledLabel = t('pos.scannerEnabled', { defaultValue: 'Scanner Enabled' })
     const scannerDisabledLabel = t('pos.scannerDisabled', { defaultValue: 'Scanner Disabled' })
+    const generateSkuLabel = mode === 'create'
+        ? t(isAutoSkuGenerationEnabled
+            ? 'products.form.generateUpcAutoEnabledHint'
+            : 'products.form.generateUpcAutoDisabledHint', {
+            defaultValue: isAutoSkuGenerationEnabled
+                ? 'Automatic SKU generation is on. Click to generate manually; right-click or long-press to turn it off.'
+                : 'Click to generate a unique UPC. Right-click or long-press to turn on automatic SKU generation.'
+        })
+        : isEditing
+            ? t('products.form.generateUpcOnDoubleClick', { defaultValue: 'Double-click to generate a unique UPC' })
+            : t('products.form.generateUpc', { defaultValue: 'Generate a unique UPC' })
 
     if (mode !== 'create' && !product) {
         return (
@@ -1877,6 +1983,21 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                                 variant="ghost"
                                                                 size="icon"
                                                                 onClick={(event) => {
+                                                                    if (mode === 'create' && event.button !== 0 && event.detail !== 0) {
+                                                                        event.preventDefault()
+                                                                        return
+                                                                    }
+
+                                                                    if (mode === 'create' && suppressAutoSkuClickRef.current) {
+                                                                        suppressAutoSkuClickRef.current = false
+                                                                        if (suppressAutoSkuClickResetTimerRef.current !== null) {
+                                                                            window.clearTimeout(suppressAutoSkuClickResetTimerRef.current)
+                                                                            suppressAutoSkuClickResetTimerRef.current = null
+                                                                        }
+                                                                        event.preventDefault()
+                                                                        return
+                                                                    }
+
                                                                     if (!isEditing || event.detail === 0) {
                                                                         void handleGenerateSku()
                                                                     }
@@ -1886,20 +2007,66 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                                         void handleGenerateSku()
                                                                     }
                                                                 }}
+                                                                onContextMenu={mode === 'create' ? (event) => {
+                                                                    event.preventDefault()
+                                                                    if (event.button === 2 && lastSkuPointerTypeRef.current !== 'touch') {
+                                                                        toggleAutoSkuGeneration()
+                                                                    }
+                                                                } : undefined}
+                                                                onPointerDown={mode === 'create' ? (event) => {
+                                                                    lastSkuPointerTypeRef.current = event.pointerType
+                                                                    if (event.pointerType !== 'touch' || event.button !== 0 || isGeneratingSku) {
+                                                                        return
+                                                                    }
+
+                                                                    if (autoSkuLongPressTimerRef.current !== null) {
+                                                                        window.clearTimeout(autoSkuLongPressTimerRef.current)
+                                                                    }
+                                                                    autoSkuLongPressTimerRef.current = window.setTimeout(() => {
+                                                                        autoSkuLongPressTimerRef.current = null
+                                                                        suppressAutoSkuClickRef.current = true
+                                                                        if (suppressAutoSkuClickResetTimerRef.current !== null) {
+                                                                            window.clearTimeout(suppressAutoSkuClickResetTimerRef.current)
+                                                                        }
+                                                                        suppressAutoSkuClickResetTimerRef.current = window.setTimeout(() => {
+                                                                            suppressAutoSkuClickRef.current = false
+                                                                            suppressAutoSkuClickResetTimerRef.current = null
+                                                                        }, 1200)
+                                                                        toggleAutoSkuGeneration()
+                                                                    }, PRODUCT_AUTO_SKU_LONG_PRESS_DELAY_MS)
+                                                                } : undefined}
+                                                                onPointerUp={mode === 'create' ? () => {
+                                                                    if (autoSkuLongPressTimerRef.current !== null) {
+                                                                        window.clearTimeout(autoSkuLongPressTimerRef.current)
+                                                                        autoSkuLongPressTimerRef.current = null
+                                                                    }
+                                                                } : undefined}
+                                                                onPointerCancel={mode === 'create' ? () => {
+                                                                    if (autoSkuLongPressTimerRef.current !== null) {
+                                                                        window.clearTimeout(autoSkuLongPressTimerRef.current)
+                                                                        autoSkuLongPressTimerRef.current = null
+                                                                    }
+                                                                } : undefined}
+                                                                onPointerLeave={mode === 'create' ? () => {
+                                                                    if (autoSkuLongPressTimerRef.current !== null) {
+                                                                        window.clearTimeout(autoSkuLongPressTimerRef.current)
+                                                                        autoSkuLongPressTimerRef.current = null
+                                                                    }
+                                                                } : undefined}
+                                                                onDragStart={mode === 'create' ? (event) => event.preventDefault() : undefined}
                                                                 disabled={isGeneratingSku}
-                                                                aria-label={isEditing
-                                                                    ? t('products.form.generateUpcOnDoubleClick', { defaultValue: 'Double-click to generate a unique UPC' })
-                                                                    : t('products.form.generateUpc', { defaultValue: 'Generate a unique UPC' })}
-                                                                className="h-6 w-6 rounded-md text-muted-foreground hover:text-primary"
+                                                                aria-label={generateSkuLabel}
+                                                                aria-pressed={mode === 'create' ? isAutoSkuGenerationEnabled : undefined}
+                                                                className={cn(
+                                                                    'h-6 w-6 rounded-md text-muted-foreground hover:text-primary',
+                                                                    mode === 'create' && 'select-none',
+                                                                    mode === 'create' && isAutoSkuGenerationEnabled && 'bg-primary/10 text-primary ring-1 ring-primary/40 hover:bg-primary/15'
+                                                                )}
                                                             >
                                                                 <Shuffle className="h-3.5 w-3.5" />
                                                             </Button>
                                                         </TooltipTrigger>
-                                                        <TooltipContent>
-                                                            {isEditing
-                                                                ? t('products.form.generateUpcOnDoubleClick', { defaultValue: 'Double-click to generate a unique UPC' })
-                                                                : t('products.form.generateUpc', { defaultValue: 'Generate a unique UPC' })}
-                                                        </TooltipContent>
+                                                        <TooltipContent>{generateSkuLabel}</TooltipContent>
                                                     </Tooltip>
                                                 </TooltipProvider>
                                             )}
@@ -1909,10 +2076,14 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                                 ref={skuInputRef}
                                                 id="product-sku"
                                                 value={formData.sku}
-                                                onChange={(event) => setFormData((current) => ({
-                                                    ...current,
-                                                    sku: normalizeBarcodeDigits(event.target.value)
-                                                }))}
+                                                onChange={(event) => {
+                                                    const sku = normalizeBarcodeDigits(event.target.value)
+                                                    skuValueRef.current = sku
+                                                    if (mode === 'create') {
+                                                        autoSkuGenerationStoppedRef.current = true
+                                                    }
+                                                    setFormData((current) => ({ ...current, sku }))
+                                                }}
                                                 placeholder="PRD-001"
                                                 readOnly={isReadOnly}
                                                 required
