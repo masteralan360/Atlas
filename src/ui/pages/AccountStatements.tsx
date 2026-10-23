@@ -202,6 +202,7 @@ function LedgerCard({
     const [expandedSettlementIds, setExpandedSettlementIds] = useState<Set<string>>(() => new Set())
     const [hoveredReturnId, setHoveredReturnId] = useState<string | null>(null)
     const display = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
+    const displaySigned = (amount: number) => formatCurrency(amount, ledger.currency, iqdPreference)
     const canShowBothAmounts = columns.includes('debit') && columns.includes('credit')
     const entries = useMemo(
         () => buildPartnerAccountStatementDisplayEntries(ledger, {
@@ -219,7 +220,7 @@ function LedgerCard({
             ? ledger.openingBalance < 0 ? display(ledger.openingBalance) : '—'
             : display(ledger.creditTotal)
         if (columnId === 'balance') return display(kind === 'opening' ? ledger.openingBalance : ledger.closingBalance)
-        if (columnId === 'sellerTotal' && kind === 'total') return display(getPartnerAccountStatementSalesActivityTotal(ledger))
+        if (columnId === 'sellerTotal' && kind === 'total') return displaySigned(getPartnerAccountStatementSalesActivityTotal(ledger))
         if (columnId === 'totalProductCommission' && kind === 'total') return display(ledger.productCommissionTotal)
         return null
     }
@@ -382,7 +383,7 @@ function LedgerCard({
                                                 case 'quantity':
                                                     return <TableCell key={columnId} className="text-right tabular-nums whitespace-nowrap">{formatProductQuantity(entry.quantity, entry.unit, language, t)}</TableCell>
                                                 case 'sellerTotal':
-                                                    return <TableCell key={columnId} className="text-right font-medium tabular-nums whitespace-nowrap">{entry.salesActivityAmount == null ? '—' : display(entry.salesActivityAmount)}</TableCell>
+                                                    return <TableCell key={columnId} className="text-right font-medium tabular-nums whitespace-nowrap">{entry.salesActivityAmount == null ? '—' : displaySigned(entry.salesActivityAmount)}</TableCell>
                                                 case 'commissionPerProduct':
                                                     return <TableCell key={columnId} className="text-right font-medium tabular-nums whitespace-nowrap">{entry.commissionPerProduct == null ? '—' : display(entry.commissionPerProduct)}</TableCell>
                                                 case 'totalProductCommission':
@@ -941,7 +942,7 @@ export function AccountStatements() {
                             onChange={changePartnerQuery}
                             onSelectPartner={selectPartner}
                             workspaceId={workspaceId}
-                            includeAgentRoles={hasFeature('agent_sales_accounts')}
+                            includeAgentRoles={hasFeature('agents')}
 
                             placeholder={t('businessPartners.accountStatement.searchPartner', { defaultValue: 'Search for a business partner' })}
                         />

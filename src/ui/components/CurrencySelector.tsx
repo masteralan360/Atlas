@@ -13,6 +13,7 @@ import {
 } from './ui/dropdown-menu'
 
 interface CurrencySelectorCommonProps {
+    id?: string
     label?: string
     iqdDisplayPreference?: 'IQD' | 'د.ع'
     disabled?: boolean
@@ -76,7 +77,7 @@ export function CurrencySelector(props: CurrencySelectorProps) {
                 {props.label && <Label>{props.label}</Label>}
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                        <Button type="button" variant="outline" disabled={props.disabled} className="w-full justify-between font-normal" title={selectionLabel}>
+                        <Button id={props.id} type="button" variant="outline" disabled={props.disabled} className="w-full justify-between font-normal" title={selectionLabel}>
                             <span className="truncate">{selectionLabel}</span>
                             <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                         </Button>
@@ -115,7 +116,7 @@ export function CurrencySelector(props: CurrencySelectorProps) {
         <div className="space-y-2">
             {props.label && <Label>{props.label}</Label>}
             <Select value={props.value} onValueChange={(v) => props.onChange(v as CurrencyCode)} disabled={props.disabled}>
-                <SelectTrigger allowViewer={true}>
+                <SelectTrigger id={props.id} allowViewer={true}>
                     <SelectValue placeholder="Select Currency" />
                 </SelectTrigger>
                 <SelectContent>

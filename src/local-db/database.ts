@@ -3897,6 +3897,11 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, name, mode, updatedAt, isDeleted, syncStatus, [workspaceId+name], [workspaceId+mode]'
     })
 
+    this.version(160).stores({
+      payment_transactions:
+        'id, workspaceId, paidAt, accountId, cashierShiftOccurrenceId, sourceModule, sourceType, sourceRecordId, sourceSubrecordId, direction, reversalOfTransactionId, voidId, settlementOperationId, updatedAt, isDeleted, syncStatus, [workspaceId+paidAt], [workspaceId+accountId], [workspaceId+cashierShiftOccurrenceId], [workspaceId+sourceType+sourceRecordId], [workspaceId+settlementOperationId], [workspaceId+voidId], [workspaceId+sourceType+paidAt+createdAt+id]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

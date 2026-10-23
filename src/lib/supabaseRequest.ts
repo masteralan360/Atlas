@@ -7,6 +7,7 @@ export const WEB_REQUEST_TIMEOUT_MS = 12000
 const RETRY_ERROR_MESSAGE = 'The request did not finish. Please try again.'
 
 type RunSupabaseActionOptions = {
+    signal?: AbortSignal
     timeoutMs?: number
     platform?: 'web-only' | 'all'
 }
@@ -203,11 +204,19 @@ export async function runSupabaseAction<T>(
     const startedAt = Date.now()
     const timeoutMs = options.timeoutMs ?? WEB_REQUEST_TIMEOUT_MS
     const shouldApplyTimeout = options.platform === 'all' ? true : isWeb()
+    const abortCleanups: Array<() => void> = []
     const executeAction = (controller?: AbortController | null) => Promise.resolve().then(() => {
+        options.signal?.throwIfAborted()
+        if (controller && options.signal) {
+            const forwardAbort = () => controller.abort(options.signal?.reason)
+            options.signal.addEventListener('abort', forwardAbort, { once: true })
+            abortCleanups.push(() => options.signal?.removeEventListener('abort', forwardAbort))
+        }
         const action = promiseFactory() as AbortableSupabaseAction<T> | PromiseLike<T> | Promise<T> | T
 
-        if (controller && action && typeof action === 'object' && typeof (action as AbortableSupabaseAction<T>).abortSignal === 'function') {
-            return (action as AbortableSupabaseAction<T>).abortSignal!(controller.signal)
+        const requestSignal = controller?.signal ?? options.signal
+        if (requestSignal && action && typeof action === 'object' && typeof (action as AbortableSupabaseAction<T>).abortSignal === 'function') {
+            return (action as AbortableSupabaseAction<T>).abortSignal!(requestSignal)
         }
 
         return action
@@ -228,10 +237,13 @@ export async function runSupabaseAction<T>(
             logResult('ok')
             return result
         } catch (error) {
+            if (options.signal?.aborted) throw options.signal.reason
             const normalized = normalizeSupabaseActionError(error)
             reportRetriableConnectionFailure(label, normalized)
             logResult('failed', normalized)
             throw normalized
+        } finally {
+            abortCleanups.forEach(cleanup => cleanup())
         }
     }
 
@@ -254,11 +266,13 @@ export async function runSupabaseAction<T>(
         logResult('ok')
         return result
     } catch (error) {
+        if (options.signal?.aborted) throw options.signal.reason
         const normalized = normalizeSupabaseActionError(error)
         reportRetriableConnectionFailure(label, normalized)
         logResult('failed', normalized)
         throw normalized
     } finally {
+        abortCleanups.forEach(cleanup => cleanup())
         if (timeoutHandle) {
             clearTimeout(timeoutHandle)
         }

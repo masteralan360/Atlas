@@ -565,9 +565,14 @@ export async function voidFinancialTransaction(
   input: VoidFinancialTransactionInput,
 ): Promise<VoidFinancialTransactionResult> {
   assertVoidInput(input)
-  return isLocalWorkspaceMode(workspaceId)
+  const result = await (isLocalWorkspaceMode(workspaceId)
     ? voidFinancialTransactionLocally(workspaceId, paymentTransactionId, input)
-    : voidFinancialTransactionInCloud(workspaceId, paymentTransactionId, input)
+    : voidFinancialTransactionInCloud(workspaceId, paymentTransactionId, input))
+  if (result.transactions.some(transaction => transaction.sourceType === 'direct_transaction')) {
+    const { invalidateDirectTransactions } = await import('./directTransactionReads')
+    invalidateDirectTransactions(workspaceId)
+  }
+  return result
 }
 
 export function useFinancialTransactionVoids(workspaceId: string | undefined) {

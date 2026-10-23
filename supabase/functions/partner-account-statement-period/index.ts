@@ -2,6 +2,8 @@ import "@supabase/functions-js/edge-runtime.d.ts"
 
 import {
   buildPartnerAccountStatementLedger,
+  createPartnerAccountStatementSellerReturnActivities,
+  type PartnerAccountStatementSellerReturnRecord,
   type PartnerAccountStatementData,
   type PartnerAccountStatementPeriod
 } from "../../../src/lib/partnerAccountStatement.ts"
@@ -469,7 +471,6 @@ async function loadPartnerStatement(
     ? await readIds(client, "public", "order_return_items", workspaceId, "return_id", returnIds,
       (query) => query.eq("is_deleted", false))
     : []
-  const salesReturns = returnsRaw.map((row) => camelize(row) as Record<string, unknown>)
   const salesReturnItems = uniqueRows(returnItemsRaw, returnItemsByReturnId)
     .map((row) => camelize(row) as Record<string, unknown>)
   const loans = loansRaw.map((row) => camelize(row) as Record<string, unknown>)
@@ -499,47 +500,117 @@ async function loadPartnerStatement(
       const visibleTotal = visibleItems.reduce((sum, item) => (
         sum + numberValue(item.totalPrice ?? item.total_price)
       ), 0)
-      const originalTotal = numberValue(sale.totalAmount)
+      const originalTotal = numberValue(
+        sale.originalTotalAmount ?? (numberValue(sale.totalAmount) + numberValue(sale.returnedAmount))
+      )
       const visibleRatio = originalTotal > 0
         ? Math.min(1, Math.max(0, visibleTotal / originalTotal))
         : 0
+      const visibleReturnedAmount = numberValue(sale.returnedAmount) * visibleRatio
       return [{
         ...sale,
-        totalAmount: visibleTotal,
-        returnedAmount: numberValue(sale.returnedAmount) * visibleRatio,
-        ...(sale.originalTotalAmount !== undefined
-          ? { originalTotalAmount: numberValue(sale.originalTotalAmount) * visibleRatio }
-          : {})
+        totalAmount: Math.max(0, visibleTotal - visibleReturnedAmount),
+        returnedAmount: visibleReturnedAmount,
+        originalTotalAmount: visibleTotal
       }]
     })
   const sellerCreatedInstallmentSales = uniqueRows(sellerCreatedInstallmentSalesRaw)
     .map((row) => camelize(row) as Record<string, unknown>)
     .filter((sale) => !directInstallmentSaleIds.has(String(sale.id)))
+  const sellerCreatedOrderIds = sellerCreatedSalesOrders.map((order) => String(order.id))
+  const sellerCreatedPosSaleIds = sellerCreatedPosSales.map((sale) => String(sale.id))
+  const [sellerCreatedOrderReturnsRaw, sellerCreatedPosSaleReturnsRaw] = await Promise.all([
+    sellerCreatedOrderIds.length
+      ? readIds(client, "public", "order_returns", workspaceId, "order_id", sellerCreatedOrderIds,
+        (query) => query.eq("status", "posted").eq("is_deleted", false))
+      : Promise.resolve([]),
+    sellerCreatedPosSaleIds.length
+      ? readIds(client, "public", "sale_returns", workspaceId, "sale_id", sellerCreatedPosSaleIds,
+        (query) => query.eq("status", "posted"))
+      : Promise.resolve([])
+  ])
+  const sellerCreatedOrderReturns = sellerCreatedOrderReturnsRaw
+    .map((row) => camelize(row) as Record<string, unknown>)
+  const sellerCreatedPosSaleReturns = sellerCreatedPosSaleReturnsRaw
+    .map((row) => camelize(row) as Record<string, unknown>)
+  const sellerOrderReturnsByOrderId = new Map<string, Record<string, unknown>[]>()
+  for (const orderReturn of sellerCreatedOrderReturns) {
+    const orderId = String(orderReturn.orderId)
+    const rows = sellerOrderReturnsByOrderId.get(orderId) || []
+    rows.push(orderReturn)
+    sellerOrderReturnsByOrderId.set(orderId, rows)
+  }
+  const sellerPosReturnsBySaleId = new Map<string, Record<string, unknown>[]>()
+  for (const saleReturn of sellerCreatedPosSaleReturns) {
+    const saleId = String(saleReturn.saleId)
+    const rows = sellerPosReturnsBySaleId.get(saleId) || []
+    rows.push(saleReturn)
+    sellerPosReturnsBySaleId.set(saleId, rows)
+  }
+  const salesReturns = returnsRaw.map((row) => camelize(row) as Record<string, unknown>)
   const agentCreatedSalesActivities = [
     ...sellerCreatedSalesOrders
       .filter((order) => order.status !== "draft" && order.status !== "cancelled")
-      .map((order) => ({
-        id: String(order.id),
-        date: String(order.createdAt || ""),
-        reference: valueText(order, "orderNumber") || String(order.id),
-        saleKind: "sales_order" as const,
-        descriptionKey: "sellerCreatedSalesOrder" as const,
-        amount: Math.abs(numberValue(order.total)) + Math.abs(numberValue(order.returnedAmount)),
-        currency: valueText(order, "currency") || "usd",
-        source: { recordType: "order" as const, recordId: String(order.id) }
-      })),
-    ...sellerCreatedPosSales.map((sale) => ({
-      id: String(sale.id),
-      date: String(sale.createdAt || ""),
-      reference: sale.sequenceId
+      .flatMap((order) => {
+        const orderId = String(order.id)
+        const reference = valueText(order, "orderNumber") || orderId
+        const currency = valueText(order, "currency") || "usd"
+        const source = { recordType: "order" as const, recordId: orderId }
+        return [
+          {
+            id: orderId,
+            date: String(order.createdAt || ""),
+            reference,
+            saleKind: "sales_order" as const,
+            descriptionKey: "sellerCreatedSalesOrder" as const,
+            amount: Math.abs(numberValue(order.total)) + Math.abs(numberValue(order.returnedAmount)),
+            currency,
+            source
+          },
+          ...createPartnerAccountStatementSellerReturnActivities({
+            saleId: orderId,
+            saleKind: "sales_order",
+            saleReference: reference,
+            currency,
+            returnedAmount: order.returnedAmount == null ? undefined : numberValue(order.returnedAmount),
+            fallbackDate: valueText(order, "returnedAt", "updatedAt"),
+            returns: (sellerOrderReturnsByOrderId.get(orderId) || []) as unknown as PartnerAccountStatementSellerReturnRecord[],
+            source
+          })
+        ]
+      }),
+    ...sellerCreatedPosSales.flatMap((sale) => {
+      const saleId = String(sale.id)
+      const reference = sale.sequenceId
         ? `SALE-${sale.sequenceId}`
-        : `SALE-${String(sale.id).slice(0, 8).toUpperCase()}`,
-      saleKind: "pos_sale" as const,
-      descriptionKey: "sellerCreatedPosSale" as const,
-      amount: Math.abs(numberValue(sale.totalAmount)) + Math.abs(numberValue(sale.returnedAmount)),
-      currency: valueText(sale, "settlementCurrency") || "usd",
-      source: { recordType: "sale" as const, recordId: String(sale.id) }
-    })),
+        : `SALE-${saleId.slice(0, 8).toUpperCase()}`
+      const currency = valueText(sale, "settlementCurrency") || "usd"
+      const source = { recordType: "sale" as const, recordId: saleId }
+      return [
+        {
+          id: saleId,
+          date: String(sale.createdAt || ""),
+          reference,
+          saleKind: "pos_sale" as const,
+          descriptionKey: "sellerCreatedPosSale" as const,
+          amount: Math.abs(numberValue(
+            sale.originalTotalAmount ?? (numberValue(sale.totalAmount) + numberValue(sale.returnedAmount))
+          )),
+          currency,
+          source
+        },
+        ...createPartnerAccountStatementSellerReturnActivities({
+          saleId,
+          saleKind: "pos_sale",
+          saleReference: reference,
+          currency,
+          returnedAmount: sale.returnedAmount == null ? undefined : numberValue(sale.returnedAmount),
+          fallbackDate: valueText(sale, "returnedAt", "updatedAt"),
+          returns: (sellerPosReturnsBySaleId.get(saleId) || []) as unknown as PartnerAccountStatementSellerReturnRecord[],
+          source
+        })
+      ]
+    }),
     ...sellerCreatedInstallmentSales
       .filter((sale) => sale.status !== "cancelled")
       .map((sale) => ({

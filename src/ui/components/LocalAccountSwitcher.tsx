@@ -267,7 +267,7 @@ export function LocalAccountSwitcher({
           <button
             type="button"
             className={cn(
-              "flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-start transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+              "flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-xl border border-transparent px-2 py-2 text-start transition-colors hover:border-primary/15 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
               isCompact && "flex-col gap-1 px-1",
               nameRoleOnly && !isCompact && "gap-1 px-1",
               manualShiftActiveDuration && "mb-3",
@@ -276,7 +276,10 @@ export function LocalAccountSwitcher({
           >
             {!nameRoleOnly && (
               <span className="relative shrink-0">
-                <AccountAvatar account={currentAccount} className="h-9 w-9 text-sm" />
+                <AccountAvatar
+                  account={currentAccount}
+                  className="h-9 w-9 text-sm"
+                />
                 {shiftBadge ? (
                   <span className="pointer-events-none absolute -bottom-1 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap">
                     <span
@@ -337,8 +340,8 @@ export function LocalAccountSwitcher({
             )}
             <ChevronUp
               className={cn(
-                "h-4 w-4 shrink-0 text-muted-foreground",
-                isCompact && "h-3.5 w-3.5",
+                "h-5 w-5 shrink-0 rounded-full bg-primary/10 p-1 text-primary",
+                isCompact && "h-4 w-4 p-0.5",
               )}
             />
           </button>

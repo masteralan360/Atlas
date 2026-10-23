@@ -43,9 +43,16 @@ export type PartnerAccountStatementAgentSaleActivity = {
   date: string
   reference: string
   saleKind: 'sales_order' | 'pos_sale' | 'installment_sale'
-  descriptionKey: 'sellerCreatedSalesOrder' | 'sellerCreatedPosSale' | 'sellerCreatedInstallmentSale'
+  descriptionKey:
+    | 'sellerCreatedSalesOrder'
+    | 'sellerCreatedPosSale'
+    | 'sellerCreatedInstallmentSale'
+    | 'sellerReturnedSalesOrder'
+    | 'sellerReturnedPosSale'
   amount: number
   currency: string
+  relatedReturnId?: string | null
+  returnReason?: string | null
   source:
     | { recordType: 'order'; recordId: string }
     | { recordType: 'sale'; recordId: string }
@@ -163,6 +170,8 @@ export type PartnerAccountStatementEntryDescriptionKey =
   | 'sellerCreatedSalesOrder'
   | 'sellerCreatedPosSale'
   | 'sellerCreatedInstallmentSale'
+  | 'sellerReturnedSalesOrder'
+  | 'sellerReturnedPosSale'
   | 'paymentReversal'
   | 'orderReturnRefund'
   | 'loanRepaymentRefund'
@@ -239,9 +248,90 @@ export function getPartnerAccountStatementSalesActivityTotal(
   ledger: Pick<PartnerAccountStatementCurrencyLedger, 'entries'>
 ) {
   return roundStatementAmount(ledger.entries.reduce(
-    (total, entry) => total + Math.abs(Number(entry.salesActivityAmount || 0)),
+    (total, entry) => total + Number(entry.salesActivityAmount || 0),
     0
   ))
+}
+
+export type PartnerAccountStatementSellerReturnRecord = {
+  id: string
+  status?: string | null
+  isDeleted?: boolean
+  returnedAt?: string | null
+  createdAt?: string | null
+  refundAmount?: number | null
+  reason?: string | null
+}
+
+/** Creates signed Seller counter-rows from the immutable return records. */
+export function createPartnerAccountStatementSellerReturnActivities(input: {
+  saleId: string
+  saleKind: 'sales_order' | 'pos_sale'
+  saleReference: string
+  currency: string
+  returnedAmount?: number | null
+  fallbackDate?: string | null
+  returns: readonly PartnerAccountStatementSellerReturnRecord[]
+  source:
+    | { recordType: 'order'; recordId: string }
+    | { recordType: 'sale'; recordId: string }
+}) {
+  const postedReturns = input.returns.filter((item) => (
+    !item.isDeleted && (!item.status || item.status === 'posted')
+  ))
+  const recordedReturnTotal = postedReturns.reduce(
+    (total, item) => total + Math.abs(Number(item.refundAmount || 0)),
+    0
+  )
+  const hasReturnedAmount = input.returnedAmount != null
+    && Number.isFinite(Number(input.returnedAmount))
+  const targetReturnTotal = hasReturnedAmount
+    ? Math.max(0, Number(input.returnedAmount))
+    : recordedReturnTotal
+  const returnScale = recordedReturnTotal > targetReturnTotal && recordedReturnTotal > 0
+    ? targetReturnTotal / recordedReturnTotal
+    : 1
+  const descriptionKey = input.saleKind === 'sales_order'
+    ? 'sellerReturnedSalesOrder' as const
+    : 'sellerReturnedPosSale' as const
+  const activities: PartnerAccountStatementAgentSaleActivity[] = postedReturns.flatMap((item) => {
+    const amount = Math.abs(Number(item.refundAmount || 0)) * returnScale
+    if (amount <= 0.000001) return []
+    return [{
+      id: `return:${item.id}`,
+      date: item.returnedAt || item.createdAt || input.fallbackDate || '',
+      reference: `${input.saleReference} · ${item.id.slice(0, 8).toUpperCase()}`,
+      saleKind: input.saleKind,
+      descriptionKey,
+      amount: -amount,
+      currency: input.currency,
+      relatedReturnId: item.id,
+      returnReason: item.reason || null,
+      source: input.source
+    }]
+  })
+
+  const visibleRecordedTotal = Math.min(recordedReturnTotal, targetReturnTotal)
+  const unrecordedReturnTotal = Math.max(0, targetReturnTotal - visibleRecordedTotal)
+  if (unrecordedReturnTotal > 0.000001) {
+    const latestReturn = postedReturns
+      .slice()
+      .sort((left, right) => (right.returnedAt || right.createdAt || '').localeCompare(left.returnedAt || left.createdAt || ''))[0]
+    activities.push({
+      id: `return:aggregate:${input.saleId}`,
+      date: latestReturn?.returnedAt || latestReturn?.createdAt || input.fallbackDate || '',
+      reference: `${input.saleReference} · Return`,
+      saleKind: input.saleKind,
+      descriptionKey,
+      amount: -unrecordedReturnTotal,
+      currency: input.currency,
+      relatedReturnId: latestReturn?.id || null,
+      returnReason: latestReturn?.reason || null,
+      source: input.source
+    })
+  }
+
+  return activities
 }
 
 /**
@@ -907,6 +997,7 @@ function createPaymentEntries(data: PartnerAccountStatementData): PartnerAccount
     getAutomaticCommissionSettlements(data).map((settlement) => settlement.payoutEntryId)
   )
   return Array.from(transactionsById.values())
+    .filter((transaction) => transaction.sourceType !== 'direct_transaction' || transaction.metadata?.partnerAccountEffect !== 'none')
     .filter((transaction) => !collapsedPayoutIds.has(transaction.sourceSubrecordId || ''))
     .filter((transaction) => !isSalesAccountAgentPartialReturnReversal(transaction, salesOrdersById, salesAccountAgentIds))
     .map((transaction) => {
@@ -1343,21 +1434,25 @@ function createAgentCreatedSalesActivityEntries(
   data: PartnerAccountStatementData
 ): PartnerAccountStatementEntry[] {
   return (data.agentCreatedSalesActivities || []).map((activity) => {
-    const descriptions: Record<PartnerAccountStatementAgentSaleActivity['saleKind'], string> = {
-      sales_order: 'Sales order created by Seller',
-      pos_sale: 'POS sale created by Seller',
-      installment_sale: 'Installment sale created by Seller'
+    const descriptions: Record<PartnerAccountStatementAgentSaleActivity['descriptionKey'], string> = {
+      sellerCreatedSalesOrder: 'Sales order created by Seller',
+      sellerCreatedPosSale: 'POS sale created by Seller',
+      sellerCreatedInstallmentSale: 'Installment sale created by Seller',
+      sellerReturnedSalesOrder: 'Sales order returned by Seller',
+      sellerReturnedPosSale: 'POS sale returned by Seller'
     }
     return {
       id: `agent-sales-activity:${activity.saleKind}:${activity.id}`,
       date: activity.date,
       reference: activity.reference,
       kind: 'agent_sales_activity',
-      description: descriptions[activity.saleKind],
+      description: descriptions[activity.descriptionKey],
       descriptionKey: activity.descriptionKey,
+      relatedReturnId: activity.relatedReturnId,
+      returnReason: activity.returnReason,
       currency: activity.currency,
       delta: 0,
-      salesActivityAmount: Math.abs(Number(activity.amount || 0)),
+      salesActivityAmount: Number(activity.amount || 0),
       source: activity.source
     }
   })

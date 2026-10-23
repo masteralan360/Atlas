@@ -1,27 +1,31 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table'
+import { usePaginationState, usePaginationBounds } from '@/hooks/usePaginationState'
+import { directTransactionReversalState, type DirectTransactionPageRow } from '@/local-db/directTransactions'
+import { useDirectTransactionsPage } from '@/local-db/directTransactionHooks'
+import { DIRECT_TRANSACTION_PAGE_SIZES, readDirectTransactionPageSize, saveDirectTransactionPageSize } from '@/ui/components/payments/directTransactionPageSize'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
-import { ArrowDownLeft, ArrowUpRight, Plus, Printer, RotateCcw, Search } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, Plus, Printer, RotateCcw, Search, Loader2, UserRound, Users } from 'lucide-react'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 
 import { useAuth } from '@/auth'
 import { useDateRange } from '@/context/DateRangeContext'
 import {
-    getPaymentSourceKey,
-    getPaymentTransactionReversalState,
     getPaymentTransactionRoutePath,
-    getRemainingPaymentTransactions,
     loadDirectTransactionVoucher,
     recordDirectTransaction,
     reversePaymentTransaction,
     useWorkspaceContacts,
-    usePaymentTransactions,
-    type PaymentTransaction
+    type PaymentTransaction,
+    type RecordDirectTransactionInput
 } from '@/local-db'
-import { isDateInDateRange } from '@/lib/dateRangeFilters'
+import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { cn, formatCurrency, formatDateTime } from '@/lib/utils'
 import { Input } from '@/ui/components/input'
 import {
+  AppPagination,
+  Badge,
   Button,
   Card,
   CardContent,
@@ -54,6 +58,13 @@ import { saveDirectTransactionVoucherPdf } from '@/services/directTransactionVou
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 type DirectionFilter = 'all' | 'incoming' | 'outgoing'
+const DIRECT_FRESHNESS_TABLES = ['payment_transactions']
+const DIRECT_COLUMNS: ColumnDef<DirectTransactionPageRow>[] = [
+    { id: 'paidAt', accessorFn: row => row.transaction.paidAt },
+    { id: 'createdAt', accessorFn: row => row.transaction.createdAt },
+    { id: 'id', accessorFn: row => row.transaction.id },
+]
+
 
 function paymentMethodLabel(value: PaymentTransaction['paymentMethod'], t: any) {
     switch (value) {
@@ -84,8 +95,9 @@ export function DirectTransactions() {
     const { dateRange, customDates } = useDateRange()
     const [, setLocation] = useLocation()
     const workspaceId = user?.workspaceId
-    const hasPaymentsSurface = features.loans || features.crm || features.budget || features.hr
+    const hasPaymentsSurface = features.loans || features.crm || features.budget || features.hr || features.agents
 
+    const submitLock = useRef(false)
     const [search, setSearch] = useState('')
     const [directionFilter, setDirectionFilter] = useState<DirectionFilter>('all')
     const [isDirectDialogOpen, setIsDirectDialogOpen] = useState(false)
@@ -118,72 +130,31 @@ export function DirectTransactions() {
         })
     } : undefined, [features.iqd_display_preference, features.logo_url, printContactLine, printLang, voucherData, workspaceId, workspaceName])
 
-    const allTransactions = usePaymentTransactions(workspaceId, { includeReversals: true })
-    const directTransactions = useMemo(() => {
-        const normalizedSearch = search.trim().toLowerCase()
-
-        return allTransactions
-            .filter((item) => {
-                if (item.sourceType !== 'direct_transaction') {
-                    return false
-                }
-
-                if (!isDateInDateRange(item.paidAt, dateRange, customDates)) {
-                    return false
-                }
-
-                if (directionFilter !== 'all' && item.direction !== directionFilter) {
-                    return false
-                }
-
-                if (!normalizedSearch) {
-                    return true
-                }
-
-                return [
-                    item.referenceLabel,
-                    formatDirectTransactionVoucherNumber(item),
-                    item.counterpartyName,
-                    item.note,
-                    item.paymentMethod
-                ].some((value) => value?.toLowerCase().includes(normalizedSearch))
-            })
-            .sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt))
-    }, [allTransactions, customDates, dateRange, directionFilter, search])
-    const visibleDirectTransactions = directTransactions
-
-    const latestUnreversedBySource = useMemo(() => {
-        const map = new Map<string, PaymentTransaction>()
-        const sourceRows = getRemainingPaymentTransactions(allTransactions)
-            .sort((left, right) => right.paidAt.localeCompare(left.paidAt) || right.createdAt.localeCompare(left.createdAt))
-
-        sourceRows.forEach((item) => {
-            const key = getPaymentSourceKey(item)
-            if (!map.has(key)) {
-                map.set(key, item)
-            }
-        })
-
-        return map
-    }, [allTransactions])
-
-    const handleCreateDirectTransaction = async (input: {
-        direction: 'incoming' | 'outgoing'
-        amount: number
-        currency: 'usd' | 'iqd' | 'eur' | 'try'
-        paymentMethod: PaymentTransaction['paymentMethod']
-        paidAt: string
-        reason: string
-        note?: string
-        counterpartyName?: string
-        businessPartnerId?: string | null
-        accountId?: string | null
-        accountNameSnapshot?: string | null
-    }) => {
-        if (!workspaceId) {
+    const dateBounds = getDateRangeBounds(dateRange, customDates)
+    const pagination = usePaginationState({ resetOn: [workspaceId, search, directionFilter, dateBounds.start?.toISOString(), dateBounds.end?.toISOString()],
+        initialPageSize: readDirectTransactionPageSize('direct_transactions_page_size'),
+        onPageSizeChange: size => saveDirectTransactionPageSize('direct_transactions_page_size', size) })
+    const page = useDirectTransactionsPage(workspaceId, { page: pagination.currentPage, pageSize: pagination.pageSize,
+        search, direction: directionFilter, start: dateBounds.start?.toISOString(), end: dateBounds.end?.toISOString() })
+    const bounds = usePaginationBounds({ currentPage: pagination.currentPage, setCurrentPage: pagination.setCurrentPage,
+        totalCount: page.data?.totalCount, pageSize: pagination.pageSize, isLoading: page.isLoading, error: page.error })
+    const table = useReactTable({ data: page.data?.items ?? [], columns: DIRECT_COLUMNS,
+        getRowId: row => row.transaction.id, getCoreRowModel: getCoreRowModel(),
+        manualPagination: true, manualFiltering: true, manualSorting: true, rowCount: page.data?.totalCount ?? 0,
+        state: { pagination: { pageIndex: bounds.currentPage - 1, pageSize: pagination.pageSize }, globalFilter: search,
+            sorting: [{ id: 'paidAt', desc: true }, { id: 'createdAt', desc: true }, { id: 'id', desc: true }] },
+        onPaginationChange: updater => {
+            const next = typeof updater === 'function' ? updater({ pageIndex: bounds.currentPage - 1, pageSize: pagination.pageSize }) : updater
+            if (next.pageSize !== pagination.pageSize) pagination.setPageSize(next.pageSize)
+            else pagination.setCurrentPage(next.pageIndex + 1)
+        } })
+    const visibleDirectTransactions = table.getRowModel().rows.map(row => row.original)
+    const reverseRow = page.data?.items.find(row => row.transaction.id === transactionToReverse?.id)
+    const handleCreateDirectTransaction = async (input: RecordDirectTransactionInput) => {
+        if (!workspaceId || submitLock.current) {
             return
         }
-
+        submitLock.current = true
         setIsSubmittingDirectTransaction(true)
         try {
             await recordDirectTransaction(workspaceId, {
@@ -192,13 +163,15 @@ export function DirectTransactions() {
             })
             toast({ title: t('directTransactions.recorded', { defaultValue: 'Direct transaction recorded' }) })
             setIsDirectDialogOpen(false)
-        } catch (error: any) {
+        } catch (error: unknown) {
+            console.error('[DirectTransactions] Payment action failed:', error)
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: error?.message || t('directTransactions.recordFailed', { defaultValue: 'Failed to record direct transaction.' }),
+                description: t('directTransactions.recordFailed'),
                 variant: 'destructive'
             })
         } finally {
+            submitLock.current = false
             setIsSubmittingDirectTransaction(false)
         }
     }
@@ -216,10 +189,11 @@ export function DirectTransactions() {
             })
             toast({ title: t('directTransactions.reversed', { defaultValue: 'Transaction reversed' }) })
             setTransactionToReverse(null)
-        } catch (error: any) {
+        } catch (error: unknown) {
+            console.error('[DirectTransactions] Reversal failed:', error)
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: error?.message || t('directTransactions.reverseFailed', { defaultValue: 'Failed to reverse transaction.' }),
+                description: t('directTransactions.reverseFailed'),
                 variant: 'destructive'
             })
         } finally {
@@ -268,7 +242,7 @@ export function DirectTransactions() {
                         <DateRangeBadge />
                     </h1>
                     <p className="text-sm text-muted-foreground">
-                        {t('directTransactions.subtitle', { defaultValue: 'Manual incoming and outgoing money for activity outside the tracked modules. Payroll stays out of this page.' })} <ModulePageFreshness className="ms-2" />
+                        {t('directTransactions.subtitle', { defaultValue: 'Manual incoming and outgoing money for activity outside the tracked modules. Payroll stays out of this page.' })} <ModulePageFreshness className="ms-2" tableNames={DIRECT_FRESHNESS_TABLES} />
                     </p>
                     <div className="flex flex-wrap gap-3">
                         <Button type="button" variant="outline" onClick={() => setLocation('/payments')} className="w-fit">
@@ -321,7 +295,7 @@ export function DirectTransactions() {
             </Card>
 
             <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0">
+                <CardHeader className="flex flex-col gap-3 space-y-0">
                     <div className="space-y-1">
                         <CardTitle>{t('directTransactions.title', { defaultValue: 'Direct Transactions' })}</CardTitle>
                         <p className="text-sm text-muted-foreground">
@@ -329,8 +303,11 @@ export function DirectTransactions() {
                         </p>
                     </div>
                     <div className="text-sm text-muted-foreground">
-                        {t('directTransactions.matchingEntries', { count: visibleDirectTransactions.length, defaultValue: '{{count}} matching entries' })}
+                        {t('directTransactions.matchingEntries', { count: page.data?.totalCount ?? 0, defaultValue: '{{count}} matching entries' })}
                     </div>
+                    <AppPagination currentPage={bounds.currentPage} pageCount={bounds.pageCount} totalCount={page.data?.totalCount ?? 0}
+                        pageSize={pagination.pageSize} onPageChange={pageNumber => table.setPageIndex(pageNumber - 1)}
+                        onPageSizeChange={size => table.setPageSize(size)} pageSizeOptions={DIRECT_TRANSACTION_PAGE_SIZES} />
                 </CardHeader>
                 <CardContent className="overflow-x-auto">
                     <Table>
@@ -350,19 +327,23 @@ export function DirectTransactions() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {visibleDirectTransactions.length === 0 ? (
+                            {page.isLoading ? <TableRow><TableCell colSpan={11} className="py-16 text-center">
+                                <div role="status" className="flex items-center justify-center gap-2 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" />{t('common.loading')}</div>
+                            </TableCell></TableRow> : page.error ? <TableRow><TableCell colSpan={11} className="py-12 text-center">
+                                <p role="alert">{t('directTransactions.loadFailed')}</p><Button type="button" variant="outline" onClick={() => void page.refetch()}>{t('directTransactionModal.counterparties.retry')}</Button>
+                            </TableCell></TableRow> : visibleDirectTransactions.length === 0 ? (
                                 <TableRow>
                                     <TableCell colSpan={11} className="py-12 text-center text-muted-foreground">
                                         {t('directTransactions.noMatch', { defaultValue: 'No direct transactions match the current filters.' })}
                                     </TableCell>
                                 </TableRow>
-                            ) : visibleDirectTransactions.map((item) => {
+                            ) : visibleDirectTransactions.map((row) => {
+                                const item = row.transaction
                                 const isReversal = !!item.reversalOfTransactionId
-                                const reversalState = isReversal ? null : getPaymentTransactionReversalState(item, allTransactions)
+                                const reversalState = isReversal ? null : directTransactionReversalState(row)
                                 const isReversed = reversalState?.status === 'fully_reversed'
                                 const isPartiallyReversed = reversalState?.status === 'partially_reversed'
-                                const isLatestUnreversed = latestUnreversedBySource.get(getPaymentSourceKey(item))?.id === item.id
-                                const canReverse = !isReversal && !isReversed && isLatestUnreversed
+                                const canReverse = row.canReverse
                                 const displayAmount = isReversal
                                     ? (item.direction === 'incoming' ? item.amount : -item.amount)
                                     : item.amount
@@ -374,9 +355,12 @@ export function DirectTransactions() {
                                         <TableCell className="font-medium">{item.referenceLabel || t('directTransactions.defaultReason', { defaultValue: 'Direct transaction' })}</TableCell>
                                         <TableCell>{item.counterpartyName || '-'}</TableCell>
                                         <TableCell>
-                                            {typeof item.metadata?.businessPartnerId === 'string' && item.metadata.businessPartnerId 
-                                                ? t('directTransactions.businessPartnerLink', { defaultValue: 'Business Partner' }) 
-                                                : t('directTransactions.external', { defaultValue: 'External' })}
+                                            <Badge variant="outline">{row.counterpartyKind === 'agent' ? <UserRound className="me-1 h-3 w-3" /> : <Users className="me-1 h-3 w-3" />}
+                                                {row.counterpartyKind === 'agent' ? t('agents.agent') : row.counterpartyKind === 'business_partner'
+                                                    ? t('directTransactions.businessPartnerLink') : t('directTransactions.external')}</Badge>
+                                            {row.counterpartyKind === 'agent' && page.scope.agents && typeof item.metadata?.businessPartnerId === 'string' ? (
+                                                <Button type="button" variant="link" size="sm" onClick={() => setLocation('/agents/' + item.metadata!.businessPartnerId)}>{t('agents.viewProfile')}</Button>
+                                            ) : null}
                                         </TableCell>
                                         <TableCell>
                                             <span className={cn(
@@ -473,6 +457,7 @@ export function DirectTransactions() {
                 onSubmit={handleReverse}
                 isProcessing={reversingTransactionId === transactionToReverse?.id}
                 transaction={transactionToReverse}
+                reversalState={reverseRow ? directTransactionReversalState(reverseRow) : null}
                 workspaceId={workspaceId}
                 iqdPreference={features.iqd_display_preference}
             />

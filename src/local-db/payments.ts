@@ -17,7 +17,7 @@ import {
     monthKeyFromDate,
     type MonthKey
 } from '@/lib/budget'
-import { isOnline } from '@/lib/network'
+import { getActiveBusinessUserId, getActiveBusinessUserRole, isOnline } from '@/lib/network'
 import {
   createRemoteOrderSaveConfirmationError,
 } from '@/lib/orderSaveProgress'
@@ -25,6 +25,10 @@ import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
 import { nextDirectTransactionVoucherNumber } from '@/lib/directTransactionVoucher'
+import i18n from '@/i18n/config'
+import { resolveDirectCounterparty } from './directTransactionCounterparties'
+import { getDirectTransactionAccess } from './directTransactionAccess'
+import { invalidateDirectTransactions } from './directTransactionReads'
 import { isReportablePaymentTransaction } from '@/lib/financialReportability'
 import {
   applySalesAgentStatementCreditToOrderLoans,
@@ -133,6 +137,8 @@ export interface RecordObligationSettlementInput {
 }
 
 export interface RecordDirectTransactionInput {
+    /** Stable for one submission and its retries. */
+    id?: string
     direction: PaymentTransactionDirection
     amount: number
     currency: CurrencyCode
@@ -142,6 +148,7 @@ export interface RecordDirectTransactionInput {
     note?: string
     counterpartyName?: string
     businessPartnerId?: string | null
+    agentId?: string | null
     /** Explicit partner-subledger treatment; cash-only is the safe default. */
     partnerAccountEffect?: DirectTransactionPartnerAccountEffect
     createdBy?: string | null
@@ -2049,12 +2056,19 @@ export async function appendPaymentTransaction(
       ? client.from('payment_transactions').upsert(payload, { onConflict: 'id' })
       : client.from('payment_transactions').insert(payload)
     let voucherNumber: number | null = null
+    let confirmedDirectFields: Record<string, unknown> = {}
     if (transaction.sourceType === 'direct_transaction') {
       const { data, error } = await runMutation('payment_transactions.create', () =>
-        mutation.select('voucher_number').single()
+        mutation.select('*').single()
       )
       if (error) throw error
       voucherNumber = Number(data?.voucher_number || 0) || null
+      confirmedDirectFields = data ? toCamelCase(data as Record<string, unknown>) : {}
+      for (const field of ['paidAt', 'createdAt', 'updatedAt']) {
+        if (typeof confirmedDirectFields[field] === 'string') {
+          confirmedDirectFields[field] = new Date(confirmedDirectFields[field] as string).toISOString()
+        }
+      }
     } else {
       const { error } = await runMutation('payment_transactions.create', () => mutation)
       if (error) throw error
@@ -2063,6 +2077,7 @@ export async function appendPaymentTransaction(
     const syncedAt = new Date().toISOString()
     const syncedTransaction: PaymentTransaction = {
       ...transaction,
+      ...confirmedDirectFields,
       ...(transaction.sourceType === 'direct_transaction' ? { voucherNumber } : {}),
       syncStatus: 'synced',
       lastSyncedAt: syncedAt
@@ -2663,8 +2678,31 @@ export async function replacePaymentTransactionForSource(
   return next
 }
 
+const directTransactionSubmissions = new Map<string, Promise<void>>()
+
 export async function recordDirectTransaction(workspaceId: string, input: RecordDirectTransactionInput) {
+  const key = input.id ? `${workspaceId}:${input.id}` : null
+  if (!key) return recordDirectTransactionInternal(workspaceId, input)
+  const previous = directTransactionSubmissions.get(key) ?? Promise.resolve()
+  let release!: () => void
+  const completed = new Promise<void>(resolve => { release = resolve })
+  const queued = previous.then(() => completed)
+  directTransactionSubmissions.set(key, queued)
+  await previous
+  try { return await recordDirectTransactionInternal(workspaceId, input) } finally {
+    release()
+    if (directTransactionSubmissions.get(key) === queued) directTransactionSubmissions.delete(key)
+  }
+}
+
+async function recordDirectTransactionInternal(workspaceId: string, input: RecordDirectTransactionInput) {
   assertStandardSettlementPaymentMethod(input.paymentMethod)
+  if (getActiveBusinessUserRole(workspaceId) === 'viewer' || !['incoming', 'outgoing'].includes(input.direction)) {
+    throw new Error(i18n.t('directTransactions.recordFailed'))
+  }
+  if (getActiveBusinessUserId() && !getDirectTransactionAccess(workspaceId).canPost) {
+    throw new Error(i18n.t('directTransactions.recordFailed'))
+  }
 
   const reason = input.reason.trim()
   if (!reason) {
@@ -2679,16 +2717,50 @@ export async function recordDirectTransaction(workspaceId: string, input: Record
   let counterpartyName = input.counterpartyName?.trim() || null
   let businessPartnerId = input.businessPartnerId || null
   let partnerAccountEffect: DirectTransactionPartnerAccountEffect = input.partnerAccountEffect || 'none'
+  const createdBy = input.createdBy ?? getActiveBusinessUserId() ?? null
+  if (input.agentId && !businessPartnerId) throw new Error(i18n.t('directTransactionModal.counterparties.unavailable'))
+  if (input.id) {
+    const existing = await db.payment_transactions.get(input.id)
+    if (existing) {
+      if (existing.workspaceId !== workspaceId || existing.isDeleted || existing.voidId
+        || existing.sourceType !== 'direct_transaction' || existing.reversalOfTransactionId
+        || existing.amount !== amount || existing.currency !== input.currency || existing.direction !== input.direction
+        || existing.paymentMethod !== input.paymentMethod || existing.referenceLabel !== reason
+        || (existing.note || null) !== (input.note?.trim() || null)
+        || (input.paidAt && Date.parse(existing.paidAt) !== Date.parse(input.paidAt))
+        || (existing.accountId || null) !== (input.accountId || null)
+        || (existing.createdBy || null) !== createdBy
+        || (existing.metadata?.businessPartnerId || null) !== businessPartnerId
+        || (existing.metadata?.partnerAccountEffect || 'none') !== (businessPartnerId ? partnerAccountEffect : 'none')
+        || (!businessPartnerId && existing.counterpartyName !== counterpartyName)
+        || (input.agentId && existing.metadata?.agentId !== input.agentId)) {
+        throw new Error(i18n.t('directTransactionModal.counterparties.retryMismatch'))
+      }
+      invalidateDirectTransactions(workspaceId)
+      return existing
+    }
+  }
+
+  let agentSnapshot: Record<string, unknown> = {}
 
   if (businessPartnerId) {
     if (!await canAccessBusinessPartnerInLocalCache(workspaceId, businessPartnerId)) {
       throw new Error('Business partner not found')
     }
-    const partner = await db.business_partners.get(businessPartnerId)
+    let partner = await db.business_partners.get(businessPartnerId)
     if (!partner || partner.isDeleted || partner.mergedIntoBusinessPartnerId) {
       throw new Error('Business partner not found')
     }
 
+    // Resolve the current authoritative Agent before posting; status and grants
+    // can change after an autocomplete result has been selected.
+    if (partner.role === 'agent' || input.agentId || getActiveBusinessUserId()) {
+      const selected = await resolveDirectCounterparty(workspaceId, businessPartnerId, input.agentId)
+      if ((partner.role === 'agent' || input.agentId) && !selected.agent) throw new Error(i18n.t('directTransactionModal.counterparties.unavailable'))
+      partner = selected.partner
+      if (selected.agent) agentSnapshot = { agentId: selected.agent.id, agentTypeSnapshot: selected.agent.agentType,
+        customAgentTypeNameSnapshot: selected.customType?.name ?? null }
+    }
     counterpartyName = partner.partnerName
     businessPartnerId = partner.id
   }
@@ -2710,9 +2782,11 @@ export async function recordDirectTransaction(workspaceId: string, input: Record
   }
 
   const transaction = await appendPaymentTransaction(workspaceId, {
+    id: input.id,
+    idempotent: Boolean(input.id),
     sourceModule: 'payments',
     sourceType: 'direct_transaction',
-    sourceRecordId: generateId(),
+    sourceRecordId: input.id ?? generateId(),
     sourceSubrecordId: businessPartnerId,
     direction: input.direction,
     amount,
@@ -2722,21 +2796,25 @@ export async function recordDirectTransaction(workspaceId: string, input: Record
     counterpartyName,
     referenceLabel: reason,
     note: input.note?.trim() || null,
-    createdBy: input.createdBy || null,
+    createdBy,
     accountId: input.accountId ?? null,
     accountNameSnapshot: input.accountNameSnapshot ?? null,
     metadata: {
       reason,
       businessPartnerId,
-      partnerAccountEffect
+      partnerAccountEffect,
+      counterpartyKind: agentSnapshot.agentId ? 'agent' : businessPartnerId ? 'business_partner' : 'external',
+      ...agentSnapshot
     }
   })
 
   if (businessPartnerId && partnerAccountEffect !== 'none') {
     const { recalculateBusinessPartnerSummary } = await import('./businessPartners')
-    await recalculateBusinessPartnerSummary(workspaceId, businessPartnerId)
+    await recalculateBusinessPartnerSummary(workspaceId, businessPartnerId).catch(error => {
+      console.warn('[DirectTransactions] Saved payment; partner summary will refresh:', error)
+    })
   }
-
+  invalidateDirectTransactions(workspaceId)
   return transaction
 }
 
@@ -4080,9 +4158,12 @@ export async function reversePaymentTransaction(
     isDirectTransactionPartnerAccountEffect(transaction.metadata?.partnerAccountEffect)
   ) {
     const { recalculateBusinessPartnerSummary } = await import('./businessPartners')
-    await recalculateBusinessPartnerSummary(workspaceId, businessPartnerId)
+    await recalculateBusinessPartnerSummary(workspaceId, businessPartnerId).catch(error => {
+      console.warn('[DirectTransactions] Saved reversal; partner summary will refresh:', error)
+    })
   }
 
+  if (transaction.sourceType === 'direct_transaction') invalidateDirectTransactions(workspaceId)
   return reversal
 }
 

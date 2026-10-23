@@ -269,7 +269,7 @@ const routePrefetchMap: Record<string, () => Promise<unknown>> = {
 
 // Prefetch a route's chunk on hover (only triggers once per route)
 const prefetchedRoutes = new Set<string>()
-const SIDEBAR_WORKSPACE_LABEL_MAX_LENGTH = 10
+const SIDEBAR_WORKSPACE_LABEL_MAX_LENGTH = 24
 const MODULE_SURFACE_SHADOW_FADE_DISTANCE = 112
 const DESKTOP_STICKY_BAR_COLLAPSE_DISTANCE = 144
 const DESKTOP_STICKY_BAR_HEIGHT = 68
@@ -1545,7 +1545,7 @@ export function Layout({ children }: LayoutProps) {
   // Keep the actual sidebar in its compact rail whenever that happens.
   const isPosTabletLayout = isPosLikeRoute && viewportWidth >= 1024 && (viewportWidth < 1366 || isMobile())
   const isSidebarMini = !isSidebarCustomizationMode && (isMini || isPosTabletLayout)
-  const showCompactWorkspaceHeader = isSidebarHeaderCompact && !isSidebarMini && !mobileSidebarOpen
+  const showCompactWorkspaceHeader = isSidebarHeaderCompact && !isSidebarMini
   const isModuleLauncherRoute = location === '/modules'
 
   const setDesktopStickyBarProgressFromScroll = (scrollTop: number) => {
@@ -1716,7 +1716,7 @@ export function Layout({ children }: LayoutProps) {
             {/* Logo */}
             <div
               className={cn(
-                'relative z-10 mx-3 mt-3 flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border border-border/70 bg-card/85 px-5 py-4 shadow-sm backdrop-blur-md transition-[padding,gap] duration-300 ease-out',
+                'sidebar-neumorphic-inset relative z-10 mx-3 mt-3 flex shrink-0 items-center gap-3 overflow-hidden rounded-2xl border border-border/70 bg-card/85 px-4 py-4 backdrop-blur-md transition-[padding,gap] duration-300 ease-out',
                 isSidebarMini && !mobileSidebarOpen ? 'mx-2 mt-2 flex-col justify-center gap-2 px-2 py-3' : '',
                 showCompactWorkspaceHeader && 'gap-2.5 py-2.5'
               )}
@@ -1765,7 +1765,7 @@ export function Layout({ children }: LayoutProps) {
                       })}
                     >
                       <div className="min-w-0 flex-1">
-                        <h1 className="max-w-[10ch] truncate text-lg font-bold gradient-text" title={fullWorkspaceLabel}>
+                        <h1 className="max-w-full truncate text-lg font-bold gradient-text" title={fullWorkspaceLabel}>
                           {sidebarWorkspaceLabel}
                         </h1>
                       </div>
@@ -1932,7 +1932,7 @@ export function Layout({ children }: LayoutProps) {
                 }}
                 disabled={isPosTabletLayout}
                 className={cn(
-                  'hidden lg:flex items-center justify-center w-6 h-6 rounded-md hover:bg-secondary text-muted-foreground hover:text-primary transition-all',
+                  'hidden lg:flex h-7 w-7 items-center justify-center rounded-lg border border-transparent text-muted-foreground transition-all hover:border-primary/20 hover:bg-primary/10 hover:text-primary',
                   isSidebarMini ? 'mt-2 rotate-180' : 'ms-auto'
                 )}
                 title={
@@ -2155,12 +2155,13 @@ export function Layout({ children }: LayoutProps) {
                       const parentContent = (
                         <span
                           className={cn(
-                            'relative flex items-center gap-3 px-3 py-2 rounded-sm text-[13px] font-semibold transition-all duration-300 ease-in-out border-s-[3px] border-transparent',
+                            'sidebar-neumorphic-tab relative flex items-center gap-3 rounded-xl px-3 py-2 text-[13px] font-semibold transition-all duration-300 ease-in-out',
                             isActive
-                              ? 'bg-primary/10 text-primary border-primary'
-                              : 'text-muted-foreground hover:bg-primary/5 hover:text-primary hover:border-primary/30',
-                            isSidebarMini && !mobileSidebarOpen && 'justify-center px-0 py-3 border-s-0'
+                              ? 'border border-primary/15 bg-primary/10 text-primary dark:border-primary/20 dark:bg-primary/5'
+                              : 'text-muted-foreground hover:bg-primary/5 hover:text-primary',
+                            isSidebarMini && !mobileSidebarOpen && 'justify-center px-0 py-3'
                           )}
+                          data-active={isActive ? 'true' : 'false'}
                           title={isSidebarMini && !mobileSidebarOpen ? item.name : undefined}
                         >
                           <item.icon className="w-5 h-5 flex-shrink-0" />
@@ -2426,11 +2427,12 @@ export function Layout({ children }: LayoutProps) {
                                     )}
                                     <span
                                       className={cn(
-                                        'flex items-center gap-3 px-3 py-2 rounded-sm text-[13px] font-medium transition-all duration-300 ease-in-out border-s-[3px] border-transparent',
+                                        'sidebar-neumorphic-tab flex items-center gap-3 rounded-xl px-3 py-2 text-[13px] font-medium transition-all duration-300 ease-in-out',
                                         isChildSelected
-                                          ? 'bg-primary/10 text-primary border-primary'
-                                          : 'text-muted-foreground hover:bg-primary/5 hover:text-primary hover:border-primary/30'
+                                          ? 'border border-primary/15 bg-primary/10 text-primary dark:border-primary/20 dark:bg-primary/5'
+                                          : 'text-muted-foreground hover:bg-primary/5 hover:text-primary'
                                       )}
+                                      data-active={isChildSelected ? 'true' : 'false'}
                                     >
                                       {child.icon ? (
                                         <child.icon
@@ -2633,13 +2635,13 @@ export function Layout({ children }: LayoutProps) {
 
             <div
               className={cn(
-                'relative z-10 mx-3 mb-3 shrink-0 rounded-2xl border border-border/70 bg-card/85 p-3 shadow-sm backdrop-blur-md transition-all duration-300',
+                'sidebar-neumorphic-inset relative z-10 mx-3 mb-3 shrink-0 rounded-2xl border border-border/70 bg-card/85 p-3 backdrop-blur-md transition-all duration-300',
                 isSidebarMini && !mobileSidebarOpen && 'mx-2 mb-2 flex flex-col items-center gap-3 py-4'
               )}
             >
               <div
                 className={cn(
-                  'flex items-center gap-2 px-2 py-1',
+                  'flex items-center gap-2 px-1.5 py-1',
                   isSidebarMini && !mobileSidebarOpen && 'flex-col p-0 gap-2'
                 )}
               >
@@ -2858,7 +2860,7 @@ export function Layout({ children }: LayoutProps) {
                       triggerHaptic('warning')
                     }}
                     className={cn(
-                      'h-8 w-8 shrink-0 rounded-xl border border-border/50 bg-muted/80 text-muted-foreground shadow-inner hover:bg-card hover:text-destructive dark:bg-background/70',
+                      'h-8 w-8 shrink-0 rounded-xl border border-primary/20 bg-primary/10 text-primary shadow-inner transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive',
                       isSidebarMini && !mobileSidebarOpen && 'mt-1'
                     )}
                     title="Sign Out"
@@ -2928,7 +2930,7 @@ export function Layout({ children }: LayoutProps) {
                       setIsSignOutModalOpen(true)
                       triggerHaptic('warning')
                     }}
-                    className="h-8 w-8 shrink-0 rounded-xl border border-border/50 bg-muted/80 text-muted-foreground shadow-inner hover:bg-card hover:text-destructive dark:bg-background/70"
+                    className="h-8 w-8 shrink-0 rounded-xl border border-primary/20 bg-primary/10 text-primary shadow-inner transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
                     title="Sign Out"
                   >
                     <LogOut className="h-4 w-4" />
@@ -2940,14 +2942,14 @@ export function Layout({ children }: LayoutProps) {
                 <div className="mt-2 text-center">
                   {isTauri ? (
                     <p
-                      className="text-[10px] text-muted-foreground font-mono opacity-50 truncate px-2"
+                      className="text-[10px] text-muted-foreground font-mono opacity-60 truncate px-2"
                       title={versionTooltip || undefined}
                     >
                       {`v${version}`}
                     </p>
                   ) : isLocalMode && updatesDisabled ? (
                     <p
-                      className="text-[10px] text-muted-foreground font-mono opacity-50 truncate px-2"
+                      className="text-[10px] text-muted-foreground font-mono opacity-60 truncate px-2"
                       title={versionTooltip || undefined}
                     >
                       {version}

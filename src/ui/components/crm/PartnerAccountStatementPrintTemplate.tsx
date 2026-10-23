@@ -167,6 +167,7 @@ function LedgerTableChunk({
     iqdPreference: IQDDisplayPreference
 }) {
     const displayAmount = (amount: number) => formatCurrency(Math.abs(amount), ledger.currency, iqdPreference)
+    const displaySignedAmount = (amount: number) => formatCurrency(amount, ledger.currency, iqdPreference)
     const summaryLabelColumn = getPartnerAccountStatementSummaryLabelColumn(columns)
     const summaryValue = (columnId: PartnerAccountStatementColumnId, kind: 'opening' | 'total') => {
         if (columnId === 'debit') return kind === 'opening'
@@ -176,7 +177,7 @@ function LedgerTableChunk({
             ? ledger.openingBalance < 0 ? displayAmount(ledger.openingBalance) : '—'
             : displayAmount(ledger.creditTotal)
         if (columnId === 'balance') return displayAmount(kind === 'opening' ? ledger.openingBalance : ledger.closingBalance)
-        if (columnId === 'sellerTotal' && kind === 'total') return displayAmount(getPartnerAccountStatementSalesActivityTotal(ledger))
+        if (columnId === 'sellerTotal' && kind === 'total') return displaySignedAmount(getPartnerAccountStatementSalesActivityTotal(ledger))
         if (columnId === 'totalProductCommission' && kind === 'total') return displayAmount(ledger.productCommissionTotal)
         return null
     }
@@ -282,7 +283,7 @@ function LedgerTableChunk({
                                     case 'quantity':
                                         return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{formatProductQuantity(entry.quantity, entry.unit, language, t)}</td>
                                     case 'sellerTotal':
-                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{entry.salesActivityAmount == null ? '—' : displayAmount(entry.salesActivityAmount)}</td>
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{entry.salesActivityAmount == null ? '—' : displaySignedAmount(entry.salesActivityAmount)}</td>
                                     case 'commissionPerProduct':
                                         return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{entry.commissionPerProduct == null ? '—' : displayAmount(entry.commissionPerProduct)}</td>
                                     case 'totalProductCommission':

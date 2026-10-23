@@ -26,7 +26,7 @@ import {
   refreshPartnerStatementProductCommissionEntries
 } from '@/local-db'
 import { getCommissionEntryMode, isPayableCommissionEntry } from '@/local-db/commissionMode'
-import type { PurchaseOrder, Sale, SalesOrder } from '@/local-db/models'
+import type { PurchaseOrder, Sale, SaleReturn, SalesOrder } from '@/local-db/models'
 import { isDirectTransactionPartnerAccountEffect } from '@/local-db/payments'
 import { isActiveSale } from '@/lib/saleArchiving'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
@@ -39,6 +39,7 @@ import {
 } from '@/lib/orderPartnerBalancePrintDemand'
 import {
   getPartnerAccountStatementClosingBalances,
+  createPartnerAccountStatementSellerReturnActivities,
   type PartnerAccountStatementClosingBalance,
   type PartnerAccountStatementData,
   type PartnerAccountStatementAgentSaleActivity,
@@ -95,6 +96,24 @@ function readRecordNumber(record: Record<string, unknown>, key: string): number 
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
+}
+
+function getSellerPosSaleGrossAmount(sale: Sale) {
+  const originalTotal = Number(sale.originalTotalAmount)
+  if (sale.originalTotalAmount != null && Number.isFinite(originalTotal)) {
+    return Math.abs(originalTotal)
+  }
+
+  const enrichedItems = (sale as Sale & { _enrichedItems?: Array<Record<string, unknown>> })._enrichedItems
+  if (Array.isArray(enrichedItems)) {
+    return Math.abs(enrichedItems.reduce((total, item) => {
+      const itemTotal = item.totalPrice ?? item.total_price
+      const amount = typeof itemTotal === 'number' ? itemTotal : Number(itemTotal)
+      return total + (Number.isFinite(amount) ? amount : 0)
+    }, 0))
+  }
+
+  return Math.abs(Number(sale.totalAmount || 0)) + Math.abs(Number(sale.returnedAmount || 0))
 }
 
 function posSaleItemsForStatement(sale: Sale): PartnerAccountStatementPosSaleItem[] {
@@ -326,6 +345,39 @@ export function usePartnerAccountStatement(
     [commissionAgents]
   )
   const commissionAgentIds = useMemo(() => new Set(commissionAgentIdList), [commissionAgentIdList])
+  const sellerLinkedUserIds = useMemo(() => new Set(commissionAgents
+    .filter((agent) => agent.agentType === 'seller' && agent.linkedUserId)
+    .map((agent) => agent.linkedUserId as string)), [commissionAgents])
+  const sellerCreatedPosSales = useMemo(() => sales.filter((sale) => (
+    sale.workspaceId === workspaceId
+    && !sale.isDeleted
+    && isActiveSale(sale)
+    && sellerLinkedUserIds.has(sale.cashierId)
+  )), [sales, sellerLinkedUserIds, workspaceId])
+  const sellerPosSaleIds = useMemo(
+    () => sellerCreatedPosSales.map((sale) => sale.id).sort(),
+    [sellerCreatedPosSales]
+  )
+  const sellerPosReturnsRequestKey = `${workspaceId ?? ''}:${sellerPosSaleIds.join('|')}`
+  const queriedSellerPosReturns = useLiveQuery(async () => ({
+    requestKey: sellerPosReturnsRequestKey,
+    rows: workspaceId && sellerPosSaleIds.length > 0
+      ? await db.sale_returns
+        .where('saleId')
+        .anyOf(sellerPosSaleIds)
+        .and((saleReturn) => (
+          saleReturn.workspaceId === workspaceId
+          && !saleReturn.isDeleted
+          && saleReturn.status === 'posted'
+        ))
+        .toArray()
+      : [] as SaleReturn[]
+  }), [sellerPosReturnsRequestKey, sellerPosSaleIds, workspaceId])
+  const currentSellerPosReturns = queriedSellerPosReturns?.requestKey === sellerPosReturnsRequestKey
+    ? queriedSellerPosReturns
+    : undefined
+  const sellerPosSaleReturns = currentSellerPosReturns?.rows ?? []
+  const hasCurrentSellerPosReturns = currentSellerPosReturns !== undefined
   const productCommissionEntries = useAgentProductCommissionEntries(
     workspaceId,
     productCommissionScope === 'partner'
@@ -411,14 +463,23 @@ export function usePartnerAccountStatement(
     [installmentSales, partnerId]
   )
   const sellerCreatedSalesActivities = useMemo<PartnerAccountStatementAgentSaleActivity[]>(() => {
-    const sellerUserIds = new Set(commissionAgents
-      .filter((agent) => agent.agentType === 'seller' && agent.linkedUserId)
-      .map((agent) => agent.linkedUserId as string))
-    if (sellerUserIds.size === 0 || !workspaceId) return []
+    if (sellerLinkedUserIds.size === 0 || !workspaceId) return []
 
     const directSalesOrderIds = new Set(partnerSalesOrders.map((order) => order.id))
     const directInstallmentSaleIds = new Set(partnerInstallmentSales.map((sale) => sale.id))
     const activities: PartnerAccountStatementAgentSaleActivity[] = []
+    const sellerSalesOrderReturns = new Map<string, Array<(typeof salesOrderReturns)[number]>>()
+    for (const orderReturn of salesOrderReturns) {
+      const rows = sellerSalesOrderReturns.get(orderReturn.orderId) || []
+      rows.push(orderReturn)
+      sellerSalesOrderReturns.set(orderReturn.orderId, rows)
+    }
+    const sellerPosReturnsBySaleId = new Map<string, SaleReturn[]>()
+    for (const saleReturn of sellerPosSaleReturns) {
+      const rows = sellerPosReturnsBySaleId.get(saleReturn.saleId) || []
+      rows.push(saleReturn)
+      sellerPosReturnsBySaleId.set(saleReturn.saleId, rows)
+    }
 
     for (const order of salesOrders) {
       if (
@@ -428,7 +489,7 @@ export function usePartnerAccountStatement(
         || order.status === 'cancelled'
         || directSalesOrderIds.has(order.id)
         || !order.createdBy
-        || !sellerUserIds.has(order.createdBy)
+        || !sellerLinkedUserIds.has(order.createdBy)
       ) continue
       activities.push({
         id: order.id,
@@ -440,15 +501,19 @@ export function usePartnerAccountStatement(
         currency: order.currency,
         source: { recordType: 'order', recordId: order.id }
       })
+      activities.push(...createPartnerAccountStatementSellerReturnActivities({
+        saleId: order.id,
+        saleKind: 'sales_order',
+        saleReference: order.orderNumber,
+        currency: order.currency,
+        returnedAmount: order.returnedAmount,
+        fallbackDate: order.returnedAt || order.updatedAt,
+        returns: sellerSalesOrderReturns.get(order.id) || [],
+        source: { recordType: 'order', recordId: order.id }
+      }))
     }
 
-    for (const sale of sales) {
-      if (
-        sale.workspaceId !== workspaceId
-        || sale.isDeleted
-        || !isActiveSale(sale)
-        || !sellerUserIds.has(sale.cashierId)
-      ) continue
+    for (const sale of sellerCreatedPosSales) {
       activities.push({
         id: sale.id,
         date: sale.createdAt,
@@ -457,10 +522,22 @@ export function usePartnerAccountStatement(
           : `SALE-${sale.id.slice(0, 8).toUpperCase()}`,
         saleKind: 'pos_sale',
         descriptionKey: 'sellerCreatedPosSale',
-        amount: Math.abs(Number(sale.totalAmount || 0)) + Math.abs(Number(sale.returnedAmount || 0)),
+        amount: getSellerPosSaleGrossAmount(sale),
         currency: sale.settlementCurrency,
         source: { recordType: 'sale', recordId: sale.id }
       })
+      activities.push(...createPartnerAccountStatementSellerReturnActivities({
+        saleId: sale.id,
+        saleKind: 'pos_sale',
+        saleReference: sale.sequenceId
+          ? `SALE-${sale.sequenceId}`
+          : `SALE-${sale.id.slice(0, 8).toUpperCase()}`,
+        currency: sale.settlementCurrency,
+        returnedAmount: sale.returnedAmount,
+        fallbackDate: sale.returnedAt || sale.updatedAt,
+        returns: sellerPosReturnsBySaleId.get(sale.id) || [],
+        source: { recordType: 'sale', recordId: sale.id }
+      }))
     }
 
     for (const sale of installmentSales) {
@@ -470,7 +547,7 @@ export function usePartnerAccountStatement(
         || sale.status === 'cancelled'
         || directInstallmentSaleIds.has(sale.id)
         || !sale.createdBy
-        || !sellerUserIds.has(sale.createdBy)
+        || !sellerLinkedUserIds.has(sale.createdBy)
       ) continue
       activities.push({
         id: sale.id,
@@ -485,7 +562,7 @@ export function usePartnerAccountStatement(
     }
 
     return activities
-  }, [commissionAgents, installmentSales, partnerInstallmentSales, partnerSalesOrders, sales, salesOrders, workspaceId])
+  }, [installmentSales, partnerInstallmentSales, partnerSalesOrders, salesOrderReturns, sellerLinkedUserIds, sellerPosSaleReturns, sellerCreatedPosSales, salesOrders, workspaceId])
   const salesAccountProductCommissionEntries = useMemo(
     () => productCommissionEntries.filter((entry) => commissionAgentIds.has(entry.agentId)),
     [commissionAgentIds, productCommissionEntries]
@@ -718,6 +795,7 @@ export function usePartnerAccountStatement(
     || sales.isLoading
     || salesOrderReturns.isLoading
     || salesOrderReturnItems.isLoading
+    || (sellerPosSaleIds.length > 0 && !hasCurrentSellerPosReturns)
     || purchaseOrders.isLoading
     || loans.isLoading
     || installmentSales.isLoading

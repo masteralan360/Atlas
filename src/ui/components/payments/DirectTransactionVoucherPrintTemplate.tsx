@@ -118,7 +118,11 @@ export function DirectTransactionVoucherPrintTemplate({ data, workspaceName, con
               [t('directTransactions.voucher.payer'), payer],
               [t('directTransactions.voucher.recipient'), recipient],
               [t('directTransactions.voucher.account'), transaction.accountNameSnapshot || '—'],
-              [t('directTransactions.voucher.linkedPartner'), typeof transaction.metadata?.businessPartnerId === 'string' && transaction.metadata.businessPartnerId ? transaction.counterpartyName || '—' : '—'],
+              [transaction.metadata?.counterpartyKind === 'agent' ? t('directTransactions.linkedAgent') : t('directTransactions.voucher.linkedPartner'),
+                typeof transaction.metadata?.businessPartnerId === 'string' && transaction.metadata.businessPartnerId
+                  ? [transaction.counterpartyName, transaction.metadata?.counterpartyKind === 'agent'
+                    ? transaction.metadata.customAgentTypeNameSnapshot || (typeof transaction.metadata.agentTypeSnapshot === 'string'
+                      ? t(`businessPartners.agent.types.${transaction.metadata.agentTypeSnapshot}`) : null) : null].filter(Boolean).join(' · ') || '—' : '—'],
             ] as [string, string][]).map(([label, value]) => <div key={label} className="border-b border-slate-200 pb-2"><div className="text-[9px] font-semibold uppercase text-slate-500">{label}</div><div className="break-words font-medium">{value}</div></div>)}
           </div>
           <div className="mt-4 text-[11px]"><div className="text-[9px] font-semibold uppercase text-slate-500">{t('directTransactions.voucher.reason')}</div><div className="break-words font-medium">{reasonChunks[0]}</div></div>

@@ -23,6 +23,8 @@ describe('direct transaction vouchers in Local mode', () => {
     ;({ DirectTransactionVoucherPrintTemplate: template } = await import('@/ui/components/payments/DirectTransactionVoucherPrintTemplate'))
     ;({ getLedgerPaymentTransactionEffect, getLedgerPaymentTransactions } = await import('@/lib/ledgerPaymentTransactions'))
     ;({ savePaymentAccount } = await import('./paymentAccounts'))
+    const { default: i18n } = await import('@/i18n/config')
+    await i18n.loadLanguages(['ar', 'ku'])
   }, 90_000)
   beforeEach(async () => {
     installTestBrowser()

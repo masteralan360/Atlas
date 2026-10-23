@@ -9,6 +9,7 @@ import {
   usePaymentTransactions,
   type IQDDisplayPreference,
   type PaymentTransaction,
+  type PaymentTransactionReversalState,
   type ReversePaymentTransactionInput,
   type WorkspacePaymentMethod,
 } from '@/local-db'
@@ -43,6 +44,8 @@ export type PaymentReversalDialogInput = Pick<
 >
 
 interface PaymentReversalDialogProps {
+  /** Source-paged callers supply the complete source aggregate. */
+  reversalState?: PaymentTransactionReversalState | null
   open: boolean
   onOpenChange: (open: boolean) => void
   onSubmit: (input: PaymentReversalDialogInput) => Promise<void> | void
@@ -55,6 +58,7 @@ interface PaymentReversalDialogProps {
 const PAYMENT_EPSILON = 0.000001
 
 export function PaymentReversalDialog({
+  reversalState: suppliedReversalState,
   open,
   onOpenChange,
   onSubmit,
@@ -65,11 +69,13 @@ export function PaymentReversalDialog({
 }: PaymentReversalDialogProps) {
   const { t } = useTranslation()
   const { user } = useAuth()
-  const transactions = usePaymentTransactions(workspaceId, { includeReversals: true }, { hydrateSourceTables: false })
+  const transactions = usePaymentTransactions(suppliedReversalState !== undefined ? undefined : workspaceId,
+    { includeReversals: true }, { hydrateSourceTables: false })
   const { accounts } = usePaymentAccountsState(workspaceId, user?.id)
   const reversalState = useMemo(
-    () => transaction ? getPaymentTransactionReversalState(transaction, transactions) : null,
-    [transaction, transactions],
+    () => suppliedReversalState !== undefined ? suppliedReversalState
+      : transaction ? getPaymentTransactionReversalState(transaction, transactions) : null,
+    [suppliedReversalState, transaction, transactions],
   )
   const [amount, setAmount] = useState('')
   const [paidAt, setPaidAt] = useState('')

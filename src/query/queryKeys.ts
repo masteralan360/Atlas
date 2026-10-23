@@ -1,6 +1,10 @@
 import type { OrdersListPageQuery } from '@/local-db/ordersList'
 
 export const queryKeys = {
+  directTransactions: {
+    all: (workspaceId: string | undefined) =>
+      ['atlas', 'workspace', workspaceId ?? 'unscoped', 'direct-transactions'] as const,
+  },
   inventoryTransactions: {
     all: (workspaceId: string | undefined) =>
       ['atlas', 'workspace', workspaceId ?? 'unscoped', 'inventory-transactions'] as const,

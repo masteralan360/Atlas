@@ -2777,6 +2777,8 @@
         "sellerCreatedSalesOrder": "Sales order created by Seller",
         "sellerCreatedPosSale": "POS sale created by Seller",
         "sellerCreatedInstallmentSale": "Installment sale created by Seller",
+        "sellerReturnedSalesOrder": "Sales order return created by Seller",
+        "sellerReturnedPosSale": "POS sale return created by Seller",
         "sellerSalesAmount": "Sale total: {{amount}}",
         "paymentReversal": "Payment reversal",
         "orderReturnRefund": "Order return refund",
@@ -3241,10 +3243,12 @@
     "unknown": "Unknown"
   },
   "directTransactions": {
+    "loadFailed": "Transactions could not be loaded. Please try again.",
+    "linkedAgent": "Agent",
     "title": "Direct Transactions",
     "subtitle": "Manual incoming and outgoing money for activity outside the tracked modules. Payroll stays out of this page.",
     "notAvailable": "Direct Transactions is not available in this workspace",
-    "enableModules": "Enable Loans, CRM, Accounting and Expenses, or HR to use the central payments surface.",
+    "enableModules": "Enable Agents, Loans, CRM, Accounting and Expenses, or HR to use Direct Transactions.",
     "newTransaction": "New Direct Transaction",
     "searchPlaceholder": "Search direct transactions",
     "clearFilters": "Clear Filters",
@@ -3333,6 +3337,20 @@
     }
   },
   "directTransactionModal": {
+    "counterparties": {
+      "title": "Select Counterparty",
+      "description": "Choose a business partner or an active Agent for this transaction.",
+      "browse": "Browse counterparties",
+      "search": "Search names, phone numbers, Agent zones or types…",
+      "scope": "Counterparty type",
+      "all": "All",
+      "unavailable": "This counterparty is no longer available. Choose another record or unlink it to continue.",
+      "retryMismatch": "This payment has already been recorded with different details. Close this form and review the recorded transaction.",
+      "unlink": "Unlink",
+      "retry": "Try again",
+      "partners": "Business Partners",
+      "agents": "Agents"
+    },
     "title": "New Direct Transaction",
     "description": "Manual incoming or outgoing money for activity outside the tracked system modules. Payroll does not belong here.",
     "fields": {

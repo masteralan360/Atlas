@@ -301,7 +301,8 @@ export function redactSaleForStorageAccess<T extends Sale & { _enrichedItems?: A
     const totalPrice = 'totalPrice' in item ? item.totalPrice : item.total_price
     return sum + (typeof totalPrice === 'number' ? totalPrice : 0)
   }, 0))
-  const ratio = calculateVisibleRatio(totalAmount, sale.totalAmount)
+  const originalGrossAmount = sale.originalTotalAmount ?? (sale.totalAmount + (sale.returnedAmount || 0))
+  const ratio = calculateVisibleRatio(totalAmount, originalGrossAmount)
   return {
     ...sale,
     totalAmount,

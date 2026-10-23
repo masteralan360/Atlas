@@ -68,7 +68,7 @@ export function DeploymentRefreshVersion({
             type="button"
             title={title ? `${title}\n${holdLabel}` : holdLabel}
             aria-label={holdLabel}
-            className="relative block w-full touch-none select-none text-[10px] font-mono text-muted-foreground opacity-50 outline-none focus-visible:opacity-100"
+            className="relative block w-full touch-none select-none text-[10px] font-mono text-muted-foreground opacity-60 outline-none focus-visible:opacity-100"
             onClick={(event) => event.preventDefault()}
             onPointerDown={(event) => {
                 if (event.button !== 0) return

@@ -27,6 +27,9 @@ const EMPTY_PARTNER_IDS: string[] = []
 const EMPTY_ADDITIONAL_OPTIONS: PartnerAutocompleteAdditionalOption[] = []
 
 interface PartnerAutocompleteInputProps {
+    id?: string
+    /** Optional scoped source; default partner searches are unchanged. */
+    searchProvider?: (search: string) => Promise<BusinessPartner[]>
     value: string
     onChange: (value: string) => void
     onSelectPartner: (partner: BusinessPartner) => void
@@ -50,6 +53,8 @@ interface PartnerAutocompleteInputProps {
 }
 
 export function PartnerAutocompleteInput({
+    id,
+    searchProvider,
     value,
     onChange,
     onSelectPartner,
@@ -131,7 +136,7 @@ export function PartnerAutocompleteInput({
     const searchPartners = useCallback((
         search: string,
         publishPartialResults?: (items: BusinessPartner[], complete?: boolean) => void,
-    ) => (
+    ) => searchProvider ? searchProvider(search) : (
         searchBusinessPartnerAutocompleteSuggestions(
             workspaceId,
             search,
@@ -140,7 +145,7 @@ export function PartnerAutocompleteInput({
             searchConstraints,
             publishPartialResults,
         )
-    ), [searchConstraints, searchOptions, viewer, workspaceId])
+    ), [searchProvider, searchConstraints, searchOptions, viewer, workspaceId])
     const remoteSearch = useDebouncedAutocompleteSearch(
         query,
         canDisplayPartnerAutocompleteResults(isFocused, justSelected, Boolean(addPartner?.active))
@@ -240,6 +245,7 @@ export function PartnerAutocompleteInput({
                         />
                     ) : null}
                     <Input
+                        id={id}
                         ref={inputRef}
                         value={value}
                         onChange={(e) => {
@@ -280,8 +286,8 @@ export function PartnerAutocompleteInput({
                             className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent focus:bg-accent focus:outline-none"
                             onMouseDown={(e) => {
                                 e.preventDefault()
-                                handleSelect(partner)
                             }}
+                            onClick={() => handleSelect(partner)}
                         >
                             <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                             <div className="min-w-0 flex-1">
