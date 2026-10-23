@@ -4,6 +4,7 @@ import type { i18n as I18n } from 'i18next'
 import type { IQDDisplayPreference } from '@/local-db'
 import {
     buildPartnerAccountStatementLedger,
+    getPartnerAccountStatementSalesActivityTotal,
     type PartnerAccountStatementCurrencyLedger,
     type PartnerAccountStatementData,
     type PartnerAccountStatementEntryKind,
@@ -175,6 +176,7 @@ function LedgerTableChunk({
             ? ledger.openingBalance < 0 ? displayAmount(ledger.openingBalance) : '—'
             : displayAmount(ledger.creditTotal)
         if (columnId === 'balance') return displayAmount(kind === 'opening' ? ledger.openingBalance : ledger.closingBalance)
+        if (columnId === 'sellerTotal' && kind === 'total') return displayAmount(getPartnerAccountStatementSalesActivityTotal(ledger))
         if (columnId === 'totalProductCommission' && kind === 'total') return displayAmount(ledger.productCommissionTotal)
         return null
     }
@@ -186,6 +188,7 @@ function LedgerTableChunk({
             description: ['common.description', 'Description'],
             item: ['businessPartners.accountStatement.item', 'Item'],
             quantity: ['businessPartners.accountStatement.quantity', 'Quantity'],
+            sellerTotal: ['common.total', 'Total'],
             commissionPerProduct: ['salesAgentCommissions.productCommission.perUnit', 'Product commission / unit'],
             totalProductCommission: ['salesAgentCommissions.productCommission.lineTotal', 'Total product commission'],
             debit: ['businessPartners.accountStatement.debit', 'Debit'],
@@ -197,6 +200,7 @@ function LedgerTableChunk({
     }
     const numericColumn = (columnId: PartnerAccountStatementColumnId) => [
         'quantity',
+        'sellerTotal',
         'commissionPerProduct',
         'totalProductCommission',
         'debit',
@@ -228,13 +232,14 @@ function LedgerTableChunk({
                             columnId === 'type' && 'w-[12%]',
                             columnId === 'description' && 'w-[18%]',
                             columnId === 'item' && 'w-[14%]',
+                            columnId === 'sellerTotal' && 'w-[11%]',
                             (columnId === 'commissionPerProduct' || columnId === 'totalProductCommission') && 'w-[11%]'
                         )}>{headerLabel(columnId)}</th>
                     ))}
                 </tr>
             </thead>
             <tbody>
-                {isFirst && Math.abs(ledger.openingBalance) > 0.000001 ? (
+                {isFirst && !columns.includes('sellerTotal') && Math.abs(ledger.openingBalance) > 0.000001 ? (
                     <tr className="bg-slate-50 font-semibold" data-pdf-keep-together style={{ height: `${PARTNER_STATEMENT_TABLE_ROW_HEIGHT_MM}mm` }}>
                         {columns.map((columnId) => {
                             const value = summaryValue(columnId, 'opening')
@@ -276,6 +281,8 @@ function LedgerTableChunk({
                                         return <td key={columnId} className="border border-slate-300 px-1.5 py-1 align-top whitespace-pre-wrap">{entry.itemName || '—'}</td>
                                     case 'quantity':
                                         return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{formatProductQuantity(entry.quantity, entry.unit, language, t)}</td>
+                                    case 'sellerTotal':
+                                        return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{entry.salesActivityAmount == null ? '—' : displayAmount(entry.salesActivityAmount)}</td>
                                     case 'commissionPerProduct':
                                         return <td key={columnId} className="border border-slate-300 px-1.5 py-1 text-end align-top whitespace-nowrap">{entry.commissionPerProduct == null ? '—' : displayAmount(entry.commissionPerProduct)}</td>
                                     case 'totalProductCommission':
@@ -391,7 +398,8 @@ export function PartnerAccountStatementPrintTemplate({
         ? data.tableColumns
         : getPartnerAccountStatementVisibleColumns(DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION, {
             showItemColumns,
-            showProductCommissionColumns
+            showProductCommissionColumns,
+            showSellerTotalColumn: data.isSellerAgentStatement === true
         })
     const logoSrc = resolveLogoSrc(logoUrl)
     const ledgers = buildPartnerAccountStatementLedger(data)

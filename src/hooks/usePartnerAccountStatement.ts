@@ -641,6 +641,7 @@ export function usePartnerAccountStatement(
       partnerId: partner.id,
       period,
       isAgentCommissionStatement: commissionAgents.length > 0,
+      isSellerAgentStatement: commissionAgents.some((agent) => agent.agentType === 'seller'),
       salesOrders: partnerSalesOrders,
       salesOrderReturns: partnerSalesOrderReturns,
       salesOrderReturnItems: partnerSalesOrderReturnItems,

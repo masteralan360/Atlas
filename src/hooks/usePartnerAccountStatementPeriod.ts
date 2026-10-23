@@ -12,6 +12,7 @@ type PeriodStatementResponse = {
   partner: Pick<BusinessPartner, 'id' | 'workspaceId' | 'partnerName' | 'phone' | 'address' | 'city' | 'role' | 'netExposure' | 'defaultCurrency'>
   ledgers: PartnerAccountStatementCurrencyLedger[]
   isAgentCommissionStatement: boolean
+  isSellerAgentStatement?: boolean
 }
 
 type LoadState = {
@@ -160,6 +161,7 @@ export function usePartnerAccountStatementPeriod(
       itemizeSalesOrders: options.itemizeSalesOrders,
       itemizePosSaleLoans: options.itemizePosSaleLoans,
       isAgentCommissionStatement: response.isAgentCommissionStatement,
+      isSellerAgentStatement: response.isSellerAgentStatement === true,
       salesOrders: [],
       purchaseOrders: [],
       precomputedLedgers: response.ledgers

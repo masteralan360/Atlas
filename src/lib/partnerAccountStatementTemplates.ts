@@ -22,7 +22,7 @@ export const PARTNER_ACCOUNT_STATEMENT_COLUMN_IDS = [
 ] as const
 
 export type PartnerAccountStatementColumnId =
-  (typeof PARTNER_ACCOUNT_STATEMENT_COLUMN_IDS)[number]
+  (typeof PARTNER_ACCOUNT_STATEMENT_COLUMN_IDS)[number] | 'sellerTotal'
 
 export type PartnerAccountStatementTemplateConfiguration = {
   version: 1
@@ -162,23 +162,61 @@ export function isPartnerAccountStatementColumnVisible(
 
 export function getPartnerAccountStatementVisibleColumns(
   configuration: PartnerAccountStatementTemplateConfiguration,
-  options: { showItemColumns: boolean; showProductCommissionColumns: boolean }
+  options: {
+    showItemColumns: boolean
+    showProductCommissionColumns: boolean
+    showSellerTotalColumn?: boolean
+  }
 ) {
-  const visibleColumns = configuration.columnOrder.filter((columnId) => {
+  const showSellerTotalColumn = options.showSellerTotalColumn === true
+  const sellerReplacementColumns = new Set<PartnerAccountStatementColumnId>([
+    'commissionPerProduct',
+    'totalProductCommission',
+    'debit',
+    'credit',
+    'balance'
+  ])
+  const configuredVisibleColumns = configuration.columnOrder.filter((columnId) => {
     if (!isPartnerAccountStatementColumnVisible(configuration, columnId)) return false
     if ((columnId === 'item' || columnId === 'quantity') && !options.showItemColumns) return false
+    if (columnId === 'sellerTotal') return false
     if (
       (columnId === 'commissionPerProduct' || columnId === 'totalProductCommission')
       && !options.showProductCommissionColumns
     ) return false
+    if (showSellerTotalColumn && sellerReplacementColumns.has(columnId)) return false
     return true
   })
 
+  if (showSellerTotalColumn) {
+    const firstReplacedColumnIndex = configuration.columnOrder.findIndex((columnId) =>
+      sellerReplacementColumns.has(columnId) && isPartnerAccountStatementColumnVisible(configuration, columnId)
+    )
+    const visibleBeforeReplacement = firstReplacedColumnIndex < 0
+      ? -1
+      : configuration.columnOrder
+        .slice(0, firstReplacedColumnIndex)
+        .filter((columnId) => configuredVisibleColumns.includes(columnId)).length
+    const quantityIndex = configuredVisibleColumns.indexOf('quantity')
+    const insertionIndex = visibleBeforeReplacement >= 0
+      ? visibleBeforeReplacement
+      : quantityIndex >= 0 ? quantityIndex + 1 : configuredVisibleColumns.length
+    const sellerColumns = [...configuredVisibleColumns]
+    sellerColumns.splice(insertionIndex, 0, 'sellerTotal')
+    return sellerColumns
+  }
+
   // A template may intentionally retain only dynamic columns. Keep a usable
   // audit table when those dynamic columns are not applicable to this partner.
-  return visibleColumns.length > 0
-    ? visibleColumns
-    : configuration.columnOrder.filter((columnId) => isPartnerAccountStatementColumnVisible(configuration, columnId)).slice(0, 1)
+  return configuredVisibleColumns.length > 0
+    ? configuredVisibleColumns
+    : configuration.columnOrder.filter((columnId) => (
+      isPartnerAccountStatementColumnVisible(configuration, columnId)
+      && columnId !== 'sellerTotal'
+      && !((columnId === 'item' || columnId === 'quantity') && !options.showItemColumns)
+      && !((columnId === 'commissionPerProduct' || columnId === 'totalProductCommission')
+        && !options.showProductCommissionColumns)
+    )).slice(0, 1)
 }
 
 export function getPartnerAccountStatementSummaryLabelColumn(
@@ -191,6 +229,7 @@ export function getPartnerAccountStatementSummaryLabelColumn(
     'item',
     'date',
     'quantity',
+    'sellerTotal',
     'commissionPerProduct',
     'totalProductCommission'
   ]

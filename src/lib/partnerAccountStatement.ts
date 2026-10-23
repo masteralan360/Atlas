@@ -70,6 +70,8 @@ export type PartnerAccountStatementData = {
   itemizePosSaleLoans?: boolean
   /** Enables product-commission columns on an eligible agent statement. */
   isAgentCommissionStatement?: boolean
+  /** Marks Seller mode so its activity table can show sales totals without account-balance columns. */
+  isSellerAgentStatement?: boolean
   /** Agent IDs linked to the selected partner, used to apply agent return-refund balance rules. */
   salesAccountAgentIds?: string[]
   /** Tracked commission journal rows used for reporting totals, kept out of balances. */
@@ -231,6 +233,15 @@ export type PartnerAccountStatementCurrencyLedger = {
   creditTotal: number
   closingBalance: number
   entries: Array<PartnerAccountStatementEntry & { runningBalance: number }>
+}
+
+export function getPartnerAccountStatementSalesActivityTotal(
+  ledger: Pick<PartnerAccountStatementCurrencyLedger, 'entries'>
+) {
+  return roundStatementAmount(ledger.entries.reduce(
+    (total, entry) => total + Math.abs(Number(entry.salesActivityAmount || 0)),
+    0
+  ))
 }
 
 /**

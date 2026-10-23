@@ -36,6 +36,7 @@ import {
 } from '@/lib/partnerAccountStatementTemplates'
 import {
   buildPartnerAccountStatementLedger,
+  getPartnerAccountStatementSalesActivityTotal,
   type PartnerAccountStatementCurrencyLedger,
     type PartnerAccountStatementEntry,
     type PartnerAccountStatementEntryKind,
@@ -162,6 +163,7 @@ function statementColumnLabel(
         description: ['common.description', 'Description'],
         item: ['businessPartners.accountStatement.item', 'Item'],
         quantity: ['businessPartners.accountStatement.quantity', 'Quantity'],
+        sellerTotal: ['common.total', 'Total'],
         commissionPerProduct: ['salesAgentCommissions.productCommission.perUnit', 'Product commission / unit'],
         totalProductCommission: ['salesAgentCommissions.productCommission.lineTotal', 'Total product commission'],
         debit: ['businessPartners.accountStatement.debit', 'Debit'],
@@ -173,7 +175,7 @@ function statementColumnLabel(
 }
 
 function statementColumnIsNumeric(columnId: PartnerAccountStatementColumnId) {
-    return ['quantity', 'commissionPerProduct', 'totalProductCommission', 'debit', 'credit', 'balance'].includes(columnId)
+    return ['quantity', 'sellerTotal', 'commissionPerProduct', 'totalProductCommission', 'debit', 'credit', 'balance'].includes(columnId)
 }
 
 function LedgerCard({
@@ -217,6 +219,7 @@ function LedgerCard({
             ? ledger.openingBalance < 0 ? display(ledger.openingBalance) : '—'
             : display(ledger.creditTotal)
         if (columnId === 'balance') return display(kind === 'opening' ? ledger.openingBalance : ledger.closingBalance)
+        if (columnId === 'sellerTotal' && kind === 'total') return display(getPartnerAccountStatementSalesActivityTotal(ledger))
         if (columnId === 'totalProductCommission' && kind === 'total') return display(ledger.productCommissionTotal)
         return null
     }
@@ -271,6 +274,7 @@ function LedgerCard({
                                             statementColumnIsNumeric(columnId) && 'text-right',
                                             columnId === 'description' && 'min-w-48',
                                             columnId === 'item' && 'min-w-40',
+                                            columnId === 'sellerTotal' && 'min-w-32',
                                             columnId === 'totalProductCommission' && 'min-w-36',
                                             columnId === 'commissionPerProduct' && 'min-w-32'
                                         )}
@@ -288,7 +292,7 @@ function LedgerCard({
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {Math.abs(ledger.openingBalance) > 0.000001 ? (
+                            {!columns.includes('sellerTotal') && Math.abs(ledger.openingBalance) > 0.000001 ? (
                                 <TableRow className="bg-muted/20 font-medium">
                                     {columns.map((columnId) => {
                                         const value = summaryValue(columnId, 'opening')
@@ -377,6 +381,8 @@ function LedgerCard({
                                                     return <TableCell key={columnId} className="min-w-40 whitespace-pre-wrap">{entry.itemName || '—'}</TableCell>
                                                 case 'quantity':
                                                     return <TableCell key={columnId} className="text-right tabular-nums whitespace-nowrap">{formatProductQuantity(entry.quantity, entry.unit, language, t)}</TableCell>
+                                                case 'sellerTotal':
+                                                    return <TableCell key={columnId} className="text-right font-medium tabular-nums whitespace-nowrap">{entry.salesActivityAmount == null ? '—' : display(entry.salesActivityAmount)}</TableCell>
                                                 case 'commissionPerProduct':
                                                     return <TableCell key={columnId} className="text-right font-medium tabular-nums whitespace-nowrap">{entry.commissionPerProduct == null ? '—' : display(entry.commissionPerProduct)}</TableCell>
                                                 case 'totalProductCommission':
@@ -607,11 +613,13 @@ export function AccountStatements() {
         })
         : ''
     const isAgentStatement = isAgentBusinessPartnerRole(partner?.role)
+    const isSellerAgentStatement = statementData?.isSellerAgentStatement === true
     const itemizeSalesOrders = activeStatementTemplate.configuration.showOrderItems
     const itemizePosSaleLoans = activeStatementTemplate.configuration.showPosSaleItems
     const statementColumns = getPartnerAccountStatementVisibleColumns(activeStatementTemplate.configuration, {
         showItemColumns: itemizeSalesOrders || itemizePosSaleLoans,
-        showProductCommissionColumns: isAgentStatement
+        showProductCommissionColumns: isAgentStatement,
+        showSellerTotalColumn: isSellerAgentStatement
     })
     const statementDataForDisplay = useMemo(
         () => statementData ? { ...statementData, itemizeSalesOrders, itemizePosSaleLoans } : null,

@@ -489,6 +489,8 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const [isCameraSkuScannerOpen, setIsCameraSkuScannerOpen] = useState(false)
     const [activeScannerTarget, setActiveScannerTarget] = useState<ProductScannerTarget>(() => readStoredScannerTarget())
     const [variantSkuScannerPreference, setVariantSkuScannerPreference] = useState(() => readStoredBoolean(PRODUCT_VARIANT_SKU_SCANNER_ENABLED_KEY))
+    const productFormRef = useRef<HTMLFormElement>(null)
+    const saveForPendingNavigationRef = useRef(false)
     const skuInputRef = useRef<HTMLInputElement>(null)
     const isGeneratingSkuRef = useRef(false)
     const skuValueRef = useRef(formData.sku)
@@ -1636,6 +1638,8 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault()
+        const saveForPendingNavigation = saveForPendingNavigationRef.current
+        saveForPendingNavigationRef.current = false
 
         if (canManageMinimumSellingPrice && formData.minimumSellingPrice.trim() !== '') {
             const minimumSellingPrice = Number(formData.minimumSellingPrice)
@@ -1669,7 +1673,10 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             return
         }
 
-        await persistProduct()
+        const didSave = await persistProduct({ navigateAfterSave: !saveForPendingNavigation })
+        if (saveForPendingNavigation && didSave) {
+            confirmNavigation(navigate)
+        }
     }
 
     const title = isClone
@@ -1936,7 +1943,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                 </div>
             )}
 
-            <form id="product-form-page" onSubmit={handleSubmit} className="space-y-4">
+            <form ref={productFormRef} id="product-form-page" onSubmit={handleSubmit} className="space-y-4">
                 {isEditing && product?.parentProductId && (
                     <ProductVariantParentNotice
                         variant={product}
@@ -3338,21 +3345,26 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                         <p className="text-sm text-muted-foreground">
                             {t('common.unsavedChanges.message') || 'You have unsaved changes. Would you like to save your work before leaving?'}
                         </p>
-                        <DialogFooter className="flex flex-col gap-2 sm:flex-row sm:justify-between">
-                            <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={() => confirmNavigation(navigate)}>
+                        <DialogFooter className="flex flex-col gap-2 sm:flex-col sm:items-stretch sm:justify-start sm:space-x-0">
+                            <Button variant="ghost" className="h-auto min-h-10 w-full min-w-0 whitespace-normal break-words px-3 py-2 text-center leading-snug text-destructive hover:text-destructive" onClick={() => confirmNavigation(navigate)}>
                                 {t('common.unsavedChanges.discard') || 'Discard Changes'}
                             </Button>
-                            <div className="flex gap-2">
-                                <Button variant="secondary" onClick={() => cancelNavigation()}>
+                            <div className="flex w-full flex-col gap-2">
+                                <Button variant="secondary" className="h-auto min-h-10 w-full min-w-0 whitespace-normal break-words px-3 py-2 text-center leading-snug" onClick={() => cancelNavigation()}>
                                     {t('common.unsavedChanges.continue') || 'Continue Editing'}
                                 </Button>
                                 <Button
+                                    type="button"
+                                    className="h-auto min-h-10 w-full min-w-0 whitespace-normal break-words px-3 py-2 text-center leading-snug"
                                     disabled={isProductSaveDisabled}
-                                    onClick={async () => {
-                                        const didSave = await persistProduct({ navigateAfterSave: false })
-                                        if (didSave) {
-                                            confirmNavigation(navigate)
+                                    onClick={() => {
+                                        const productForm = productFormRef.current
+                                        if (!productForm || !productForm.reportValidity()) {
+                                            return
                                         }
+
+                                        saveForPendingNavigationRef.current = true
+                                        productForm.requestSubmit()
                                     }}
                                 >
                                     {isSaving ? (t('common.loading') || 'Loading...') : (t('common.unsavedChanges.save') || 'Save Changes')}

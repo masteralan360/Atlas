@@ -239,6 +239,7 @@ function mapPosSaleItems(sales: Record<string, unknown>[], excludedStorageIds: S
   const codesBySaleId: Record<string, string> = {}
 
   for (const sale of sales) {
+    if (sale.isArchived === true) continue
     const saleId = typeof sale.id === "string" ? sale.id : ""
     if (!saleId) continue
     const allRows = Array.isArray(sale.saleItems) ? sale.saleItems as Record<string, unknown>[] : []
@@ -339,7 +340,7 @@ async function loadPartnerStatement(
     : Promise.resolve([])
   const sellerCreatedPosSalesPromise = sellerLinkedUserIds.length
     ? readAll(client, "public", "sales", workspaceId, (query) => query
-      .in("cashier_id", sellerLinkedUserIds).eq("is_deleted", false), "*, sale_items(id, storage_id, total_price)")
+      .in("cashier_id", sellerLinkedUserIds), "*, sale_items(id, storage_id, total_price)")
     : Promise.resolve([])
   const sellerCreatedInstallmentSalesPromise = sellerLinkedUserIds.length
     ? readAll(client, "public", "installment_sales", workspaceId, (query) => query
@@ -425,7 +426,7 @@ async function loadPartnerStatement(
     : []
   const posSaleRowsPromise = saleIds.length
     ? readIds(client, "public", "sales", workspaceId, "id", saleIds,
-      (query) => query.eq("is_deleted", false), "*, sale_items(*, product:product_id(name, unit))")
+      (query) => query, "*, sale_items(*, product:product_id(name, unit))")
     : Promise.resolve([])
   const [returnsRaw, returnItemsRaw, loanPaymentsRaw, installmentSalesFetchedRaw,
     commissionRaw, assignmentsRaw, assignmentsByOrderRaw, productCommissionRaw,
@@ -671,6 +672,7 @@ async function loadPartnerStatement(
     itemizeSalesOrders,
     itemizePosSaleLoans,
     isAgentCommissionStatement: agents.length > 0,
+    isSellerAgentStatement: agents.some((agent) => agent.agentType === "seller"),
     salesOrders: allSalesOrders as unknown as PartnerAccountStatementData["salesOrders"],
     salesOrderReturns: salesReturns as unknown as PartnerAccountStatementData["salesOrderReturns"],
     salesOrderReturnItems: salesReturnItems as unknown as PartnerAccountStatementData["salesOrderReturnItems"],
@@ -713,7 +715,8 @@ async function loadPartnerStatement(
       defaultCurrency: visiblePartner.defaultCurrency
     },
     ledgers,
-    isAgentCommissionStatement: agents.length > 0
+    isAgentCommissionStatement: agents.length > 0,
+    isSellerAgentStatement: agents.some((agent) => agent.agentType === "seller")
   }
 }
 

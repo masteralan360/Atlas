@@ -88,6 +88,7 @@ function getColumnLabel(
     description: ['businessPartners.accountStatement.templateColumns.description', 'Description'],
     item: ['businessPartners.accountStatement.templateColumns.item', 'Item'],
     quantity: ['businessPartners.accountStatement.templateColumns.quantity', 'Quantity'],
+    sellerTotal: ['common.total', 'Total'],
     commissionPerProduct: ['businessPartners.accountStatement.templateColumns.commissionPerProduct', 'Product commission / unit'],
     totalProductCommission: ['businessPartners.accountStatement.templateColumns.totalProductCommission', 'Total product commission'],
     debit: ['businessPartners.accountStatement.templateColumns.debit', 'Debit'],
