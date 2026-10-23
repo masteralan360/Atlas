@@ -35,7 +35,6 @@ import {
     useProducts,
     useProductUoms,
     useUnits,
-    useWorkspaceProductBarcodes,
     usePurchaseOrder,
     useStorages,
     type BusinessPartner,
@@ -87,7 +86,6 @@ import { ProductsViewModal, ProductsViewModalTrigger } from '@/ui/components/Pro
 import { PaymentMethodSelect } from '@/ui/components/payments/PaymentMethodSelect'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { ProductAutocompleteInput } from './ProductAutocompleteInput'
-import { useOrderBarcodeScanner } from './useOrderBarcodeScanner'
 import { LoanPartyPickerDialog } from '@/ui/components/loans/LoanPartyPickerDialog'
 import { OrderAdjustmentsDialog } from './OrderAdjustmentsDialog'
 import { OrderLineItemNoteDialog } from './OrderLineItemNoteDialog'
@@ -236,7 +234,6 @@ export function PurchaseOrderFormPage({
         [productUoms]
     )
     const orderSelectableProducts = purchasableProducts
-    const productBarcodes = useWorkspaceProductBarcodes(workspaceId, { syncProductCache: false })
     const storages = useStorages(workspaceId)
     const { options: unitOptions } = useUnitRegistry(workspaceId)
     const supplierPartners = useBusinessPartners(workspaceId, { roles: ['supplier'] })
@@ -271,7 +268,7 @@ export function PurchaseOrderFormPage({
         'order', 'businessPartners', 'priceBooks'
     ])
     const lineItemsLoad = orderEditorLiveData.getSectionState([
-        'order', 'products', 'productBarcodes', 'storages', 'units', 'priceBooks'
+        'order', 'products', 'storages', 'units', 'priceBooks'
     ])
     const orderDataLoad = orderEditorLiveData.getSectionState(['order'])
     const { isAccessKeyHeld } = useUiAccess()
@@ -718,29 +715,6 @@ export function PurchaseOrderFormPage({
             })
         )
     }
-
-    useOrderBarcodeScanner({
-        enabled: !isSupplierSelectionRequired && !(priceBooksEnabled && (!isPriceBookCatalogReady || !selectedSupplier)),
-        items,
-        products,
-        productBarcodes,
-        onProductScanned: (product, index) => {
-            if (!orderSelectableProducts.some((candidate) => candidate.id === product.id)) {
-                toast({
-                    title: t('products.notFoundTitle', { defaultValue: 'Product not found' }),
-                    description: t('products.notFoundDescription', { defaultValue: 'This product could not be found. It may have been deleted or is no longer available.' }),
-                    variant: 'destructive'
-                })
-                return
-            }
-            updateItem(index, { productId: product.id, productSearch: product.name })
-        },
-        onProductNotFound: () => toast({
-            title: t('products.notFoundTitle', { defaultValue: 'Product not found' }),
-            description: t('products.notFoundDescription', { defaultValue: 'This product could not be found. It may have been deleted or is no longer available.' }),
-            variant: 'destructive'
-        })
-    })
 
     const preview = useMemo(() => {
         const subtotal = items.reduce((sum, item) => sum + ((Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)), 0)
@@ -1274,7 +1248,6 @@ export function PurchaseOrderFormPage({
                                                             <ProductAutocompleteInput
                                                                 className="min-w-0 flex-1"
                                                                 inputClassName={canOpenProductsView ? 'rounded-s-none' : undefined}
-                                                                scannerTargetIndex={index}
                                                                 value={item.productSearch}
                                                                 onChange={(value) => updateItem(index, { productSearch: value, productId: '' })}
                                                                 onSelectProduct={(product) => updateItem(index, { productId: product.id, productSearch: product.name })}

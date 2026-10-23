@@ -55,7 +55,6 @@ import {
     usePriceBookUomPrices,
     useProductUoms,
     useUnits,
-    useWorkspaceProductBarcodes,
     useSalesOrderAgentAssignments,
     useSalesOrder,
     useStockBatches,
@@ -128,7 +127,6 @@ import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountS
 import { OrderFinancingTermsFields } from './OrderFinancingTermsFields'
 import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
 import { ProductAutocompleteInput } from './ProductAutocompleteInput'
-import { useOrderBarcodeScanner } from './useOrderBarcodeScanner'
 import { LoanPartyPickerDialog } from '@/ui/components/loans/LoanPartyPickerDialog'
 import { OrderAdjustmentsDialog } from './OrderAdjustmentsDialog'
 import { OrderLineItemNoteDialog } from './OrderLineItemNoteDialog'
@@ -313,7 +311,6 @@ export function SalesOrderFormPage({
         () => indexProductUomsByProduct(productUoms),
         [productUoms]
     )
-    const productBarcodes = useWorkspaceProductBarcodes(workspaceId, { syncProductCache: false })
     const inventory = useInventory(workspaceId)
     const resolveDiscountForPrice = useDiscountPriceResolver(workspaceId, { inventoryRows: inventory })
     const stockBatches = useStockBatches(workspaceId)
@@ -393,7 +390,7 @@ export function SalesOrderFormPage({
         'order', 'businessPartners', 'agents', 'priceBooks'
     ])
     const lineItemsLoad = orderEditorLiveData.getSectionState([
-        'order', 'products', 'productBarcodes', 'storages', 'units', 'inventory', 'stockBatches', 'discounts', 'priceBooks'
+        'order', 'products', 'storages', 'units', 'inventory', 'stockBatches', 'discounts', 'priceBooks'
     ])
     const commissionLoad = orderEditorLiveData.getSectionState([
         'order', 'businessPartners', 'agents', 'salesOrderAgentAssignments',
@@ -1228,32 +1225,6 @@ export function SalesOrderFormPage({
             ...(isService(product) ? { storageId: SERVICES_VIRTUAL_STORAGE_ID, batchId: '' } : {})
         })
     }
-
-    useOrderBarcodeScanner({
-        enabled: !isCustomerSelectionRequired && !(priceBooksEnabled && (!isPriceBookCatalogReady || !selectedCustomer)),
-        items: displayedItems,
-        products,
-        productBarcodes,
-        onProductScanned: (product, index) => {
-            const item = displayedItems[index]
-            const isAvailableForLine = item && getSalesProductOptions(item.storageId, item.productId)
-                .some((candidate) => candidate.id === product.id)
-            if (!isAvailableForLine) {
-                toast({
-                    title: t('products.notFoundTitle', { defaultValue: 'Product not found' }),
-                    description: t('products.notFoundDescription', { defaultValue: 'This product could not be found. It may have been deleted or is no longer available.' }),
-                    variant: 'destructive'
-                })
-                return
-            }
-            selectProductForItem(item.clientId, product)
-        },
-        onProductNotFound: () => toast({
-            title: t('products.notFoundTitle', { defaultValue: 'Product not found' }),
-            description: t('products.notFoundDescription', { defaultValue: 'This product could not be found. It may have been deleted or is no longer available.' }),
-            variant: 'destructive'
-        })
-    })
 
     useEffect(() => {
         if (stockBatches.length === 0) return
@@ -2107,7 +2078,7 @@ export function SalesOrderFormPage({
                                     </Button>
                                 </CardHeader>
                                 <CardContent className="space-y-3">
-                                    {displayedItems.map((item, index) => {
+                                    {displayedItems.map((item) => {
                                         const product = products.find((entry) => entry.id === item.productId)
                                         const itemUnitOptions = product ? getProductUnitOptions(product.id) : []
             const hasAdditionalUoms = itemUnitOptions.length > 1
@@ -2189,7 +2160,6 @@ export function SalesOrderFormPage({
                                                         <ProductAutocompleteInput
                                                             className="min-w-0 flex-1"
                                                             inputClassName={canOpenProductsView ? 'rounded-s-none' : undefined}
-                                                            scannerTargetIndex={index}
                                                             value={item.productSearch}
                                                             onChange={(value) => updateItem(item.clientId, { productSearch: value, productId: '' })}
                                                             onSelectProduct={(product) => selectProductForItem(item.clientId, product)}

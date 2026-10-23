@@ -38,7 +38,6 @@ interface ProductAutocompleteInputProps {
     storageMissing?: boolean
     onStorageMissingClick?: () => void
     storageMissingLabel?: string
-    scannerTargetIndex?: number
 }
 
 const getDisplayImageUrl = getProductImageDisplayUrl
@@ -87,8 +86,7 @@ export function ProductAutocompleteInput({
     skuLabel = 'SKU',
     storageMissing,
     onStorageMissingClick,
-    storageMissingLabel = 'Select Storage',
-    scannerTargetIndex
+    storageMissingLabel = 'Select Storage'
 }: ProductAutocompleteInputProps) {
     const { i18n, t } = useTranslation()
     const user = useOptionalAuth()?.user
@@ -235,8 +233,6 @@ export function ProductAutocompleteInput({
                         value={value}
                         onChange={handleInputChange}
                         onFocus={handleFocus}
-                        data-order-product-input={scannerTargetIndex === undefined ? undefined : 'true'}
-                        data-order-product-index={scannerTargetIndex}
                         placeholder={placeholder}
                         disabled={Boolean(disabled || storageMissing)}
                         aria-busy={isSearchLoading || undefined}

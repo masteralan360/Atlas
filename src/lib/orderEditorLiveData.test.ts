@@ -16,7 +16,6 @@ describe('order editor live-data sources', () => {
             'order',
             'businessPartners',
             'products',
-            'productBarcodes',
             'storages',
             'units'
         ])

@@ -11,7 +11,6 @@ export type OrderEditorLiveDataSource =
     | 'order'
     | 'businessPartners'
     | 'products'
-    | 'productBarcodes'
     | 'storages'
     | 'units'
     | 'priceBooks'
@@ -28,7 +27,6 @@ const PURCHASE_SOURCES: readonly OrderEditorLiveDataSource[] = [
     'order',
     'businessPartners',
     'products',
-    'productBarcodes',
     'storages',
     'units'
 ]
@@ -37,7 +35,6 @@ const SALES_SOURCES: readonly OrderEditorLiveDataSource[] = [
     'order',
     'businessPartners',
     'products',
-    'productBarcodes',
     'storages',
     'units',
     'inventory',

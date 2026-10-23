@@ -89,9 +89,6 @@ async function hydrateSource(
         case 'products':
             await requireSuccessfulHydration(fetchTableFromSupabase('products', db.products, workspaceId))
             return
-        case 'productBarcodes':
-            await requireSuccessfulHydration(fetchTableFromSupabase('product_barcodes', db.product_barcodes, workspaceId))
-            return
         case 'storages':
             await requireSuccessfulHydration(fetchTableFromSupabase('storages', db.storages, workspaceId))
             return
