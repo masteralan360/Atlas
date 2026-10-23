@@ -316,11 +316,6 @@ export const moduleMetaByHref: Record<string, ModuleMeta> = {
     description: "Explicitly enable or stop foreground location sharing for a linked agent.",
     badge: "Location",
   },
-  "/post-service": {
-    section: "agents",
-    description: "Operate COD shipments, courier dispatch, cash handovers, and merchant payouts.",
-    badge: "Delivery",
-  },
   "/manual-entry": {
     section: "manual-entry",
     description: "Create manual entries using reusable templates with editable A4 forms.",

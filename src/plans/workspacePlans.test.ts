@@ -92,28 +92,6 @@ describe('Sales Agent Commissions workspace module access', () => {
     })
 })
 
-describe('Post Service workspace module access', () => {
-    it('is not included in any workspace subscription plan', () => {
-        for (const plan of WORKSPACE_PLANS) {
-            expect(planHasModule(plan, 'post_service')).toBe(false)
-        }
-    })
-
-    it('is enabled only by a workspace module grant override', () => {
-        const resolved = applyWorkspaceOverrides(getPlanCapabilities('enterprise'), [{
-            id: 'override-post-service',
-            workspace_id: 'workspace-1',
-            type: 'module',
-            key: 'post_service',
-            value: 'grant',
-            created_by: null,
-            created_at: new Date(0).toISOString()
-        }])
-
-        expect(resolved.modules).toContain('post_service')
-    })
-})
-
 describe('Agent Sales Accounts workspace module access', () => {
     it('is not included in any workspace subscription plan', () => {
         for (const plan of WORKSPACE_PLANS) {
@@ -311,5 +289,18 @@ describe('Quick Order capability access', () => {
         }])
 
         expect(resolved.capabilities).toContain('quickOrder')
+    })
+})
+
+describe('retired workspace module grants', () => {
+    it('ignores stale Post Service grants for every subscription plan', () => {
+        for (const plan of WORKSPACE_PLANS) {
+            const resolved = applyWorkspaceOverrides(getPlanCapabilities(plan), [{
+                id: 'retired-grant', workspace_id: 'workspace-1', type: 'module',
+                key: 'post_service', value: 'grant', created_by: null,
+                created_at: new Date(0).toISOString(),
+            }])
+            expect(resolved.modules).not.toContain('post_service')
+        }
     })
 })

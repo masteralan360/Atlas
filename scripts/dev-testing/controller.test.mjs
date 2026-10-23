@@ -73,7 +73,6 @@ describe('developer runner boundaries', () => {
       })
     ])
     expect(validateRunOptions({ suiteId: 'pos' }).groups.length).toBe(14)
-    expect(validateRunOptions({ suiteId: 'post-service' }).groups.length).toBe(13)
     expect(validateRunOptions({ suiteId: 'platform' }).groups).toEqual([
       expect.objectContaining({
         id: 'pwa-updates',
@@ -83,7 +82,6 @@ describe('developer runner boundaries', () => {
         ])
       })
     ])
-    expect(validateRunOptions({ suiteId: 'post-service', groupIds: ['remote-contract', 'merchants'] }).groups.map((group) => group.id)).toEqual(['merchants', 'remote-contract'])
     expect(validateRunOptions({ suiteId: 'pos', groupIds: ['checkout', 'remote-contract'] }).groups.map((group) => group.id)).toEqual(['checkout', 'remote-contract'])
     expect(validateRunOptions({ suiteId: 'pos', groupIds: ['unit-of-measure'] }).groups).toEqual([
       expect.objectContaining({
@@ -222,6 +220,8 @@ describe('developer runner execution and reports', () => {
     const { controller, children, spawnChild } = await arrangeController()
     controller.preflight = vi.fn(async () => ({ target: { host: 'project.supabase.co', workspaceId: 'test-workspace', workspaceName: 'DEV TEST Atlas' }, mode: 'cloud' }))
     const options = validateRunOptions({ suiteId: 'pos', environment: 'hosted-supabase', groupIds: ['cart'], seed: 0, samples: 1 })
+    // Cart now has hosted coverage. Explicitly model the isolated-only case here.
+    options.groups = options.groups.map((group) => ({ ...group, files: [], isolatedOnly: true }))
     const config = {
       origin: 'https://project.supabase.co', ATLAS_LIVE_SUPABASE_KEY: 'public-test-key',
       ATLAS_LIVE_TEST_EMAIL: 'dev-test@example.com', ATLAS_LIVE_TEST_PASSWORD: 'test-password',

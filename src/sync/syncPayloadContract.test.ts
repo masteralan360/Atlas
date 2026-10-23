@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import { prepareRemoteMutationPayload } from './syncPayloadContract'
 
+it('removes retired per-post fees from legacy agent retries while preserving the agent identity', () => {
+    expect(prepareRemoteMutationPayload('agents', {
+        id: 'courier-1', workspaceId: 'workspace-1', agentType: 'courier', courierDeliveryFee: 5,
+    })).toEqual({ id: 'courier-1', workspace_id: 'workspace-1', agent_type: 'courier' })
+})
+
 describe('Price Book sync payload', () => {
     it('includes assigned and cleared colors in remote mutations', () => {
         expect(prepareRemoteMutationPayload('price_books', {

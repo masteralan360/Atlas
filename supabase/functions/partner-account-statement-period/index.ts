@@ -14,16 +14,6 @@ import { createRequestClient, getAuthenticatedUser } from "../_shared/supabase.t
 const PAGE_SIZE = 1000
 const ID_BATCH_SIZE = 100
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-const MERCHANT_LEDGER_KINDS = [
-  "merchant_cod_payable",
-  "merchant_cod_correction",
-  "merchant_recipient_payout_correction",
-  "merchant_fee",
-  "merchant_recipient_payout",
-  "merchant_payout",
-  "merchant_repayment",
-  "adjustment"
-]
 
 type StatementRequest = {
   workspaceId?: unknown
@@ -286,8 +276,7 @@ async function loadPartnerStatement(
   itemizePosSaleLoans: boolean
 ) {
   const crm = "crm"
-  const [partnerResult, agentsRaw, salesByPartner, salesByCustomer, purchasesByPartner, purchasesBySupplier,
-    loansRaw, installmentSalesRaw, settlementOperationsRaw, merchantProfilesRaw, storageAccess] = await Promise.all([
+  const [partnerResult, agentsRaw, salesByPartner, salesByCustomer, purchasesByPartner, purchasesBySupplier, loansRaw, installmentSalesRaw, settlementOperationsRaw, storageAccess] = await Promise.all([
     client.schema(crm).rpc("read_business_partner_summaries", { p_workspace_id: workspaceId, p_partner_ids: [partnerId] }),
     readAll(client, crm, "agents", workspaceId, (query) => query
       .eq("business_partner_id", partnerId).in("agent_type", ["field_agent", "seller"]).eq("is_deleted", false)),
@@ -305,8 +294,6 @@ async function loadPartnerStatement(
       .eq("customer_business_partner_id", partnerId).eq("is_deleted", false)),
     readAll(client, "public", "partner_settlement_operations", workspaceId, (query) => query
       .eq("partner_id", partnerId).eq("is_deleted", false)),
-    readAll(client, "delivery", "delivery_merchant_profiles", workspaceId, (query) => query
-      .eq("business_partner_id", partnerId).eq("is_deleted", false)),
     loadStorageAccess(client, workspaceId)
   ])
   if (partnerResult.error) throw partnerResult.error
@@ -330,7 +317,7 @@ async function loadPartnerStatement(
   const directOrderIds = [...salesOrderIds, ...purchaseOrderIds]
   const loanIds = loansRaw.map((loan) => String(loan.id))
   const settlementOperationIds = settlementOperationsRaw.map((operation) => String(operation.id))
-  const merchantProfileIds = merchantProfilesRaw.map((profile) => String(profile.id))
+
   const periodEnd = periodEndExclusive(period)
 
   // Include sales made by users linked to Seller agents as informational
@@ -430,11 +417,7 @@ async function loadPartnerStatement(
     ? readIds(client, "public", "sales", workspaceId, "id", saleIds,
       (query) => query, "*, sale_items(*, product:product_id(name, unit))")
     : Promise.resolve([])
-  const [returnsRaw, returnItemsRaw, loanPaymentsRaw, installmentSalesFetchedRaw,
-    commissionRaw, assignmentsRaw, assignmentsByOrderRaw, productCommissionRaw,
-    trackedProductExistsResult, merchantLedgerByPartner, merchantLedgerByProfile, paymentTransactionsRaw,
-    posSaleRows, referenceRows, sellerCreatedSalesOrdersRaw, sellerCreatedPosSalesRaw,
-    sellerCreatedInstallmentSalesRaw] = await Promise.all([
+  const [returnsRaw, returnItemsRaw, loanPaymentsRaw, installmentSalesFetchedRaw, commissionRaw, assignmentsRaw, assignmentsByOrderRaw, productCommissionRaw, trackedProductExistsResult, paymentTransactionsRaw, posSaleRows, referenceRows, sellerCreatedSalesOrdersRaw, sellerCreatedPosSalesRaw, sellerCreatedInstallmentSalesRaw] = await Promise.all([
     readIds(client, "public", "order_returns", workspaceId, "order_id", salesOrderIds,
       (query) => query.eq("is_deleted", false)),
     readIds(client, "public", "order_return_items", workspaceId, "order_id", salesOrderIds,
@@ -451,12 +434,6 @@ async function loadPartnerStatement(
         .eq("workspace_id", workspaceId).in("agent_id", agentIds).eq("is_deleted", false)
         .eq("commission_mode", "tracked").limit(1).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
-    readAll(client, "delivery", "delivery_ledger_entries", workspaceId, (query) => query
-      .eq("business_partner_id", partnerId).in("kind", MERCHANT_LEDGER_KINDS).eq("is_deleted", false)),
-    merchantProfileIds.length
-      ? readIds(client, "delivery", "delivery_ledger_entries", workspaceId, "merchant_profile_id", merchantProfileIds,
-        (query) => query.in("kind", MERCHANT_LEDGER_KINDS).eq("is_deleted", false))
-      : Promise.resolve([]),
     paymentTransactionsPromise,
     posSaleRowsPromise,
     referencesPromise,
@@ -628,8 +605,6 @@ async function loadPartnerStatement(
   const assignments = uniqueRows(assignmentsRaw, assignmentsByOrderRaw)
     .map((row) => camelize(row) as Record<string, unknown>)
   const agentProductCommissionEntries = productCommissionRaw.map((row) => camelize(row) as Record<string, unknown>)
-  const merchantLedgerEntries = uniqueRows(merchantLedgerByPartner, merchantLedgerByProfile)
-    .map((row) => camelize(row) as Record<string, unknown>)
 
   const [referencedSalesOrders, referencedPurchaseOrders] = referenceRows
   const linkedOrderCodes = Object.fromEntries(uniqueRows(referencedSalesOrders, referencedPurchaseOrders)
@@ -713,27 +688,6 @@ async function loadPartnerStatement(
     linkedPosSaleCodes = mapped.codesBySaleId
   }
 
-  const linkedShipmentIds = [...new Set(merchantLedgerEntries
-    .map((entry) => valueText(entry, "shipmentId")).filter((id): id is string => Boolean(id) && isUuid(id)))]
-  const linkedSettlementIds = [...new Set(merchantLedgerEntries
-    .map((entry) => valueText(entry, "settlementId")).filter((id): id is string => Boolean(id) && isUuid(id)))]
-  const [shipmentRows, deliverySettlementRows] = await Promise.all([
-    readIds(client, "delivery", "delivery_shipments", workspaceId, "id", linkedShipmentIds,
-      (query) => query.eq("is_deleted", false), "id,tracking_number"),
-    readIds(client, "delivery", "delivery_settlements", workspaceId, "id", linkedSettlementIds,
-      (query) => query.eq("is_deleted", false), "id,settlement_number")
-  ])
-  const deliveryShipmentReferences = Object.fromEntries(shipmentRows.flatMap((row) => (
-    typeof row.id === "string" && typeof row.tracking_number === "string"
-      ? [[row.id, row.tracking_number]]
-      : []
-  )))
-  const deliverySettlementReferences = Object.fromEntries(deliverySettlementRows.flatMap((row) => (
-    typeof row.id === "string" && typeof row.settlement_number === "string"
-      ? [[row.id, row.settlement_number]]
-      : []
-  )))
-
   const hasTrackedProductCommission = Boolean(trackedProductExistsResult.data)
   const trackedCommissionEntries = commissionEntries.filter((entry) => entry.commissionMode === "tracked")
   const productCommissionEntries = agentProductCommissionEntries
@@ -766,10 +720,7 @@ async function loadPartnerStatement(
       : undefined,
     agentProductCommissionEntries: productCommissionEntries as unknown as PartnerAccountStatementData["agentProductCommissionEntries"],
     marketplaceDeliveryProductCommissionOrderIds: marketplaceDeliveryIds,
-    marketplaceShippingProductCommissionOrderIds: marketplaceShippingIds,
-    deliveryLedgerEntries: merchantLedgerEntries as unknown as PartnerAccountStatementData["deliveryLedgerEntries"],
-    deliveryShipmentReferences,
-    deliverySettlementReferences
+    marketplaceShippingProductCommissionOrderIds: marketplaceShippingIds
   }
   const ledgers = buildPartnerAccountStatementLedger(data)
   const visiblePartner = camelize(partnerRaw) as Record<string, unknown>

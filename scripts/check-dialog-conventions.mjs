@@ -90,7 +90,6 @@ const legacyGenericDialogBaseline = {
   'src/ui/pages/Orders.tsx': 2,
   'src/ui/pages/PrintPreviewEditorPage.tsx': 1,
   'src/ui/pages/POS.tsx': 8,
-  'src/ui/pages/PostService.tsx': 2,
   'src/ui/pages/ProductFormPage.tsx': 4,
   'src/ui/pages/Products.tsx': 4,
   'src/ui/pages/Revenue.tsx': 1,

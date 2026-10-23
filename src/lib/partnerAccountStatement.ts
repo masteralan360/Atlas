@@ -1,7 +1,6 @@
 import type {
   AgentCommissionEntry,
   AgentProductCommissionEntry,
-  DeliveryLedgerEntry,
   InstallmentSale,
   Loan,
   LoanPayment,
@@ -116,87 +115,18 @@ export type PartnerAccountStatementData = {
   marketplaceDeliveryProductCommissionOrderIds?: string[]
   /** Marketplace orders whose product commission belongs to the shipping actor. */
   marketplaceShippingProductCommissionOrderIds?: string[]
-  /** Merchant-facing Post Service subledger entries. */
-  deliveryLedgerEntries?: DeliveryLedgerEntry[]
-  deliveryShipmentReferences?: Record<string, string>
-  deliverySettlementReferences?: Record<string, string>
   /** Server-computed ledger for period-scoped remote statement reads. */
   precomputedLedgers?: PartnerAccountStatementCurrencyLedger[]
 }
 
 export type PartnerAccountStatementEntryKind =
-  | 'sales_order'
-  | 'sales_order_return'
-  | 'purchase_order'
-  | 'incoming_payment'
-  | 'outgoing_payment'
-  | 'direct_transaction'
-  | 'loan_disbursal'
-  | 'loan_repayment'
-  | 'pos_sale_loan'
-  | 'pos_sale_installment_loan'
-  | 'installment_sale'
-  | 'agent_sales_activity'
-  | 'agent_commission'
-  | 'delivery_post'
-  | 'partner_settlement'
+  'sales_order' | 'sales_order_return' | 'purchase_order' | 'incoming_payment' | 'outgoing_payment' | 'direct_transaction' | 'loan_disbursal' | 'loan_repayment' | 'pos_sale_loan' | 'pos_sale_installment_loan' | 'installment_sale' | 'agent_sales_activity' | 'agent_commission' | 'partner_settlement'
 
 export type PartnerAccountStatementEntryDescriptionKey =
-  | 'salesOrder'
-  | 'salesOrderReturn'
-  | 'purchaseOrder'
-  | 'paymentReceived'
-  | 'advancePaymentReceived'
-  | 'orderLoanDownPaymentReceived'
-  | 'paymentMade'
-  | 'commissionPaid'
-  | 'commissionRecovered'
-  | 'commissionSettledAutomatically'
-  | 'commissionEarned'
-  | 'commissionReversed'
-  | 'commissionAdjustment'
-  | 'marketplaceDeliveryProductCommission'
-  | 'marketplaceShippingProductCommission'
-  | 'directReceipt'
-  | 'directPayment'
-  | 'saleOrderByPaymentMethod'
-  | 'posSaleLoanProvided'
-  | 'posSaleLoanReceived'
-  | 'loanProvided'
-  | 'loanReceived'
-  | 'loanRepaymentReceived'
-  | 'loanRepaymentMade'
-  | 'installmentSale'
-  | 'sellerCreatedSalesOrder'
-  | 'sellerCreatedPosSale'
-  | 'sellerCreatedInstallmentSale'
-  | 'sellerReturnedSalesOrder'
-  | 'sellerReturnedPosSale'
-  | 'paymentReversal'
-  | 'orderReturnRefund'
-  | 'loanRepaymentRefund'
-  | 'financingDownPaymentRefund'
-  | 'fullSaleReturnRefund'
-  | 'returnCredit'
-  | 'deliveryCodPayable'
-  | 'deliveryCodCorrection'
-  | 'deliveryRecipientPayoutCorrection'
-  | 'deliveryFee'
-  | 'deliveryRecipientPayout'
-  | 'deliveryMerchantPayout'
-  | 'deliveryMerchantRepayment'
-  | 'deliveryAdjustment'
-  | 'cashCollection'
-  | 'cashPaid'
-  | 'partnerSettlement'
+  'salesOrder' | 'salesOrderReturn' | 'purchaseOrder' | 'paymentReceived' | 'advancePaymentReceived' | 'orderLoanDownPaymentReceived' | 'paymentMade' | 'commissionPaid' | 'commissionRecovered' | 'commissionSettledAutomatically' | 'commissionEarned' | 'commissionReversed' | 'commissionAdjustment' | 'marketplaceDeliveryProductCommission' | 'marketplaceShippingProductCommission' | 'directReceipt' | 'directPayment' | 'saleOrderByPaymentMethod' | 'posSaleLoanProvided' | 'posSaleLoanReceived' | 'loanProvided' | 'loanReceived' | 'loanRepaymentReceived' | 'loanRepaymentMade' | 'installmentSale' | 'sellerCreatedSalesOrder' | 'sellerCreatedPosSale' | 'sellerCreatedInstallmentSale' | 'sellerReturnedSalesOrder' | 'sellerReturnedPosSale' | 'paymentReversal' | 'orderReturnRefund' | 'loanRepaymentRefund' | 'financingDownPaymentRefund' | 'fullSaleReturnRefund' | 'returnCredit' | 'cashCollection' | 'cashPaid' | 'partnerSettlement'
 
 export type PartnerAccountStatementEntrySource =
-  | { recordType: 'order'; recordId: string }
-  | { recordType: 'loan'; recordId: string; loanCategory: Loan['loanCategory'] }
-  | { recordType: 'installment_sale'; recordId: string }
-  | { recordType: 'sale'; recordId: string }
-  | { recordType: 'payment_transaction'; recordId: string }
-  | { recordType: 'delivery_ledger_entry'; recordId: string }
+  { recordType: 'order'; recordId: string } | { recordType: 'loan'; recordId: string; loanCategory: Loan['loanCategory'] } | { recordType: 'installment_sale'; recordId: string } | { recordType: 'sale'; recordId: string } | { recordType: 'payment_transaction'; recordId: string }
 
 export type PartnerAccountStatementEntry = {
   id: string
@@ -1458,85 +1388,6 @@ function createAgentCreatedSalesActivityEntries(
   })
 }
 
-function deliveryEntryPresentation(kind: DeliveryLedgerEntry['kind']): {
-  description: string
-  descriptionKey: PartnerAccountStatementEntryDescriptionKey
-} | null {
-  switch (kind) {
-    case 'merchant_cod_payable':
-      return {
-        description: 'Delivery COD payable',
-        descriptionKey: 'deliveryCodPayable'
-      }
-    case 'merchant_cod_correction':
-      return {
-        description: 'Delivered COD correction',
-        descriptionKey: 'deliveryCodCorrection'
-      }
-    case 'merchant_recipient_payout_correction':
-      return {
-        description: 'Delivered recipient payout correction',
-        descriptionKey: 'deliveryRecipientPayoutCorrection'
-      }
-    case 'merchant_fee':
-      return { description: 'Delivery fee', descriptionKey: 'deliveryFee' }
-    case 'merchant_recipient_payout':
-      return {
-        description: 'Recipient payout',
-        descriptionKey: 'deliveryRecipientPayout'
-      }
-    case 'merchant_payout':
-      return {
-        description: 'Merchant payout',
-        descriptionKey: 'deliveryMerchantPayout'
-      }
-    case 'merchant_repayment':
-      return {
-        description: 'Merchant repayment',
-        descriptionKey: 'deliveryMerchantRepayment'
-      }
-    case 'adjustment':
-      return {
-        description: 'Delivery adjustment',
-        descriptionKey: 'deliveryAdjustment'
-      }
-    default:
-      return null
-  }
-}
-
-function createDeliveryEntries(data: PartnerAccountStatementData): PartnerAccountStatementEntry[] {
-  return (data.deliveryLedgerEntries || [])
-    .filter((entry) => !entry.isDeleted)
-    .flatMap((entry) => {
-      const presentation = deliveryEntryPresentation(entry.kind)
-      if (!presentation) return []
-
-      const shipmentReference = entry.shipmentId ? data.deliveryShipmentReferences?.[entry.shipmentId] : null
-      const settlementReference = entry.settlementId ? data.deliverySettlementReferences?.[entry.settlementId] : null
-
-      return [
-        {
-          id: `delivery-ledger:${entry.id}`,
-          date: entry.occurredAt || entry.createdAt,
-          reference: shipmentReference || settlementReference || entry.shipmentId || entry.settlementId || entry.id,
-          kind: 'delivery_post' as const,
-          ...presentation,
-          note: entry.note?.trim() || null,
-          currency: entry.currency,
-          // Delivery uses the inverse merchant sign convention: positive
-          // means we owe the merchant, while a positive statement delta
-          // means the merchant owes the workspace.
-          delta: -Number(entry.amount || 0),
-          source: {
-            recordType: 'delivery_ledger_entry' as const,
-            recordId: entry.id
-          }
-        }
-      ]
-    })
-}
-
 /**
  * Builds an auditable per-currency partner ledger. A positive balance means
  * the partner owes the workspace; a negative balance means the workspace owes
@@ -1555,8 +1406,7 @@ export function buildPartnerAccountStatementLedger(
     ...createAgentCommissionEntries(data),
     ...createLoanEntries(data),
     ...createInstallmentSaleEntries(data),
-    ...createAgentCreatedSalesActivityEntries(data),
-    ...createDeliveryEntries(data)
+    ...createAgentCreatedSalesActivityEntries(data)
   ].filter((entry) => (
     Math.abs(entry.delta) > 0.000001
     || entry.descriptionKey === 'commissionSettledAutomatically'

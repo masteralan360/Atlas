@@ -21,7 +21,7 @@ import { applySalesOrderReturnQuantities, useSalesOrderReturnItemsForWorkspace, 
 import { useActivityTransactionLinesForWorkspace, useActivityTransactions } from '@/local-db/activities'
 import { useAgents, useBusinessPartners } from '@/local-db/businessPartners'
 import { useClinicalAppointments } from '@/local-db/clinicalAppointments'
-import { useDeliveryMerchantProfiles, useDeliveryShipments } from '@/local-db/postService'
+
 import { useExchangeTransactions } from '@/local-db/currencyExchange'
 import { useLoans, useSales, useWorkspaceUsers } from '@/local-db/hooks'
 import { usePaymentTransactions } from '@/local-db/payments'
@@ -74,13 +74,11 @@ const DASHBOARD_REVENUE_FRESHNESS_TABLES = [
     'order_return_items',
     'business_partners',
     'agents',
-    'delivery_merchant_profiles',
-    'delivery_shipments',
     'rental_contracts',
     'rental_vehicles',
     'clinical_appointments',
     'activity_transactions',
-    'activity_transaction_lines',
+    'activity_transaction_lines'
 ] as const
 const METRICS = [
     {
@@ -299,8 +297,7 @@ export function Dashboard() {
     const partners = useBusinessPartners(revenueWorkspaceId, { includeAgentRoles: true })
     const agents = useAgents(revenueWorkspaceId)
     const workspaceUsers = useWorkspaceUsers(revenueWorkspaceId)
-    const deliveryMerchantProfiles = useDeliveryMerchantProfiles(revenueWorkspaceId)
-    const deliveryShipments = useDeliveryShipments(revenueWorkspaceId)
+
     const rentalContracts = useRentalContracts(revenueWorkspaceId)
     const rentalVehicles = useRentalVehicles(revenueWorkspaceId)
     const clinicalAppointments = useClinicalAppointments(revenueWorkspaceId)
@@ -389,13 +386,11 @@ export function Dashboard() {
                 clinicalAppointmentTransactions,
                 activityTransactions,
                 activityTransactionLines,
-                deliveryShipments,
-                deliveryMerchantProfiles,
                 rentalContracts,
                 rentalVehicles,
                 partnerNameById,
                 userNameById,
-                t,
+                t
             }),
         [
             sales,
@@ -406,13 +401,11 @@ export function Dashboard() {
             clinicalAppointmentTransactions,
             activityTransactions,
             activityTransactionLines,
-            deliveryShipments,
-            deliveryMerchantProfiles,
             rentalContracts,
             rentalVehicles,
             partnerNameById,
             userNameById,
-            t,
+            t
         ],
     )
     const revenueRecords = useMemo(() => buildRevenueAnalysisRecords(uiSales, orders), [uiSales, orders])
@@ -446,9 +439,8 @@ export function Dashboard() {
             real_estate: 'revenue.filters.origins.realEstate',
             activities: 'revenue.filters.origins.activities',
             clinical_appointment: 'revenue.filters.origins.appointments',
-            post_service: 'revenue.filters.origins.postService',
             car_rental: 'revenue.filters.origins.carRental',
-            travel_transportation: 'travelTransportation.title',
+            travel_transportation: 'travelTransportation.title'
         }
         return t(keyByOrigin[origin] || 'dashboard.unknownSource', { defaultValue: origin.replace(/_/g, ' ') })
     }
@@ -460,7 +452,6 @@ export function Dashboard() {
             setLocation(`/activities?transaction=${record.sourceRecordId || record.id}`)
         else if (record.source === 'clinical_appointment')
             setLocation(`/clinical-appointments/${record.sourceRecordId || record.id}/edit`)
-        else if (record.source === 'post_service') setLocation('/post-service')
         else if (record.source === 'car_rental') setLocation('/car-rental/contracts')
         else if (record.source === 'travel_transportation')
             setLocation(`/travel-transportation/${record.sourceRecordId || record.id}`)

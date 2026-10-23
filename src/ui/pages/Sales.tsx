@@ -16,7 +16,7 @@ import { getLoanDetailsPath } from '@/lib/loanPresentation'
 import { isActiveSale, isSaleFullyReturned } from '@/lib/saleArchiving'
 import { getRetriableActionToast, isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 
-import { adjustInventoryQuantity, applySalesOrderReturnQuantities, commitStockBatchAllocations, db, getActiveTravelBookingPayments, markPosLoanCancelledForFullSaleReturn, processSaleProductExchange, recordLoanPayment, resolveReturnStorageId, restoreStockBatchAllocations, splitStockBatchAllocationsForReturn, useLoanBySaleId, useLoanInstallments, useLoanPayments, useLoans, usePriceBookCatalogState, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useInventory, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles, toUISale, toUISaleFromOrder, toUISaleFromExchangeTransaction, toUISaleFromRealEstateCommissionTransaction, toUISaleFromPaidClinicalAppointment, toUISaleFromActivityTransaction, toUISaleFromDeliveryShipment, toUISaleFromRentalContract, toUISaleFromTravelBookingPayment, type Loan, type PaymentAccount, type StockBatchAllocation } from '@/local-db'
+import { adjustInventoryQuantity, applySalesOrderReturnQuantities, commitStockBatchAllocations, db, getActiveTravelBookingPayments, markPosLoanCancelledForFullSaleReturn, processSaleProductExchange, recordLoanPayment, resolveReturnStorageId, restoreStockBatchAllocations, splitStockBatchAllocationsForReturn, useLoanBySaleId, useLoanInstallments, useLoanPayments, useLoans, usePriceBookCatalogState, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useInventory, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useRentalContracts, useRentalVehicles, toUISale, toUISaleFromOrder, toUISaleFromExchangeTransaction, toUISaleFromRealEstateCommissionTransaction, toUISaleFromPaidClinicalAppointment, toUISaleFromActivityTransaction, toUISaleFromRentalContract, toUISaleFromTravelBookingPayment, type Loan, type PaymentAccount, type StockBatchAllocation } from '@/local-db'
 import { useArchivedSales, syncSalesFromSupabase } from '@/local-db/hooks'
 import { setSaleArchived } from '@/local-db/saleArchiving'
 import { persistSaleReturnLedger, commitLocalSaleReturn, calculateSaleReturnAmount } from '@/local-db/posSaleReturns'
@@ -189,9 +189,7 @@ function getExternalSaleDetailsPath(sale: Sale) {
     if (sale.origin === 'clinical_appointment') {
         return `/clinical-appointments/${sale._clinicalAppointmentId || sale.id}/edit`
     }
-    if (sale.origin === 'post_service') {
-        return '/post-service'
-    }
+
     if (sale.origin === 'car_rental') {
         return '/car-rental/contracts'
     }
@@ -211,11 +209,6 @@ function getSaleReferenceLabel(sale: Sale) {
         return (sale as Sale & { orderNumber?: string | null; _orderNumber?: string | null }).orderNumber
             || (sale as Sale & { _orderNumber?: string | null })._orderNumber
             || `#${sale.id.slice(0, 8)}`
-    }
-
-    if (sale.origin === 'post_service') {
-        return (sale as Sale & { _trackingNumber?: string | null })._trackingNumber
-            || String(sale.sequenceId || `PST-${sale.id.slice(0, 8)}`)
     }
 
     if (sale.origin === 'car_rental') {
@@ -317,9 +310,7 @@ export function Sales() {
     const archivedSales = useArchivedSales(user?.workspaceId, true)
     const rawOrders = useSalesOrders(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
     const salesOrderReturnItems = useSalesOrderReturnItemsForWorkspace(user?.workspaceId)
-    const deliveryShipments = useDeliveryShipments(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
-    const deliveryMerchantProfiles = useDeliveryMerchantProfiles(user?.workspaceId)
-    const deliveryBusinessPartners = useBusinessPartners(user?.workspaceId)
+
     const rentalVehicles = useRentalVehicles(user?.workspaceId)
     const rentalContracts = useRentalContracts(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
     const rawExchangeTransactions = useExchangeTransactions(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
@@ -364,14 +355,7 @@ export function Sales() {
         () => new Map(workspaceUsers.map((member) => [member.id, member.name || member.email || 'Staff'] as const)),
         [workspaceUsers]
     )
-    const deliveryMerchantNameByProfileId = useMemo(() => {
-        const partnerNameById = new Map(deliveryBusinessPartners.map((partner) => [partner.id, partner.partnerName] as const))
-        return new Map(deliveryMerchantProfiles.map((profile) => [profile.id, partnerNameById.get(profile.businessPartnerId) || null] as const))
-    }, [deliveryBusinessPartners, deliveryMerchantProfiles])
-    const deliveryMerchantBusinessPartnerIdByProfileId = useMemo(
-        () => new Map(deliveryMerchantProfiles.map((profile) => [profile.id, profile.businessPartnerId] as const)),
-        [deliveryMerchantProfiles]
-    )
+
     const rentalVehicleById = useMemo(
         () => new Map(rentalVehicles.map((vehicle) => [vehicle.id, vehicle] as const)),
         [rentalVehicles]
@@ -400,20 +384,7 @@ export function Sales() {
                 activityTransactionLines.filter((line) => line.transactionId === transaction.id),
                 transaction.createdBy ? cashierNameById.get(transaction.createdBy) : undefined
             ))
-        const deliverySales = deliveryShipments
-            .filter((shipment) => shipment.status === 'delivered' && !!shipment.deliveredAt)
-            .filter((shipment) => (!dateBounds.startDate || shipment.deliveredAt! >= dateBounds.startDate)
-                && (!dateBounds.endDate || shipment.deliveredAt! <= dateBounds.endDate))
-            .map((shipment) => toUISaleFromDeliveryShipment(shipment, {
-                merchantName: deliveryMerchantNameByProfileId.get(shipment.merchantProfileId),
-                merchantBusinessPartnerId: deliveryMerchantBusinessPartnerIdByProfileId.get(shipment.merchantProfileId),
-                serviceName: t('postService.reporting.serviceName', { defaultValue: 'Delivery service' }),
-                serviceCategory: t('postService.reporting.serviceCategory', { defaultValue: 'Delivery service' }),
-                feePayerNote: t('postService.reporting.feePayerNote', {
-                    payer: t(`postService.feePayer.${shipment.feePayer}`, { defaultValue: shipment.feePayer }),
-                    defaultValue: `Fee charged to ${shipment.feePayer}`
-                })
-            }))
+
         const rentalSales = rentalContracts
             .filter((contract) => ['active', 'returned', 'closed'].includes(contract.status))
             .filter((contract) => {
@@ -425,8 +396,8 @@ export function Sales() {
                 serviceName: t('carRental.reporting.serviceName'),
                 serviceCategory: t('carRental.reporting.serviceCategory'),
             }))
-        return [...sales, ...orders, ...exchangeSales, ...realEstateCommissionSales, ...travelBookingProfitSales, ...clinicalSales, ...activitySales, ...deliverySales, ...rentalSales]
-    }, [rawSales, rawOrders, salesOrderReturnItems, rawExchangeTransactions, realEstateCommissionTransactions, travelBookingPayments, clinicalAppointments, clinicalAppointmentTransactions, activityTransactions, activityTransactionLines, cashierNameById, dateBounds.endDate, dateBounds.startDate, deliveryMerchantBusinessPartnerIdByProfileId, deliveryMerchantNameByProfileId, deliveryShipments, rentalContracts, rentalVehicleById, t])
+        return [ ...sales, ...orders, ...exchangeSales, ...realEstateCommissionSales, ...travelBookingProfitSales, ...clinicalSales, ...activitySales, ...rentalSales ]
+    }, [ rawSales, rawOrders, salesOrderReturnItems, rawExchangeTransactions, realEstateCommissionTransactions, travelBookingPayments, clinicalAppointments, clinicalAppointmentTransactions, activityTransactions, activityTransactionLines, cashierNameById, dateBounds.endDate, dateBounds.startDate, rentalContracts, rentalVehicleById, t ])
 
     const isLoadingArchivedSales = archivesOpen && archivedSales === undefined
     const archivedHistorySales = useMemo<Sale[]>(() => [
@@ -932,7 +903,6 @@ export function Sales() {
         })
     }, [printLang, renderLoanPrintTemplate, renderLoanReceiptTemplate])
 
-
     useEffect(() => {
         localStorage.setItem('sales_selected_cashier', filters.cashier)
     }, [filters.cashier])
@@ -954,8 +924,6 @@ export function Sales() {
     const [isExportModalOpen, setIsExportModalOpen] = useState(false)
     const [profileCardOpen, setProfileCardOpen] = useState(false)
     const [profileCardUserId, setProfileCardUserId] = useState<string | null>(null)
-
-
 
     useEffect(() => {
         if (!showPrintPreview || !user?.workspaceId || (!isLocalMode && !isSupabaseConfigured)) {
@@ -2229,9 +2197,8 @@ export function Sales() {
                     }
                 }
             }
-        
-            if (error) throw normalizeSupabaseActionError(error)
 
+            if (error) throw normalizeSupabaseActionError(error)
 
             // Close modal and refresh — local-db handles reactivity via useLiveQuery
             setReturnModalOpen(false)
@@ -2389,7 +2356,6 @@ export function Sales() {
             })
         }
     }
-
 
     const openArchivedSales = () => {
         setArchivesOpen(true)
@@ -3763,8 +3729,4 @@ export function Sales() {
         </TooltipProvider>
     )
 }
-
-
-
-
 

@@ -41,7 +41,6 @@ export const DEMO_OPTIONAL_MODULE_GRANTS = {
   CSC: { type: 'module', key: 'cashier_shift_control' },
   ACT: { type: 'module', key: 'activities' },
   REAL: { type: 'module', key: 'real_estate' },
-  POST: { type: 'module', key: 'post_service' },
   CRS: { type: 'module', key: 'car_rental' },
   TT: { type: 'module', key: 'travel_transportation' },
   CP: { type: 'module', key: 'customer_profitability' },

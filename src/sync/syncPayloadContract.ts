@@ -25,7 +25,7 @@ const NON_REMOTE_FIELDS_BY_ENTITY: Readonly<Record<string, ReadonlySet<string>>>
     "barcode",
     "barcodes",
   ]),
-  agents: new Set(["image_url"]),
+  agents: new Set(["image_url", "courier_delivery_fee"]),
   invoices: new Set([
     // Legacy/local invoice display and file fields.
     "items",
@@ -41,9 +41,6 @@ const NON_REMOTE_FIELDS_BY_ENTITY: Readonly<Record<string, ReadonlySet<string>>>
     "pdf_blob_a4",
     "pdf_blob_receipt",
   ]),
-  // `partner_name` is the sole active identity. The former `name` and
-  // `contact_name` fields remain stored only for historical recovery. Email
-  // and country are retired and must never be recreated from queued changes.
   business_partners: new Set([
     "name",
     "contact_name",
@@ -59,21 +56,8 @@ const NON_REMOTE_FIELDS_BY_ENTITY: Readonly<Record<string, ReadonlySet<string>>>
   ]),
   customers: new Set(["is_locked", "name", "email", "country"]),
   suppliers: new Set(["is_locked", "name", "contact_name", "email", "country"]),
-  // Order balances are reconstructed from the Account Statement ledger. This
-  // retired field can survive in a queued mutation from an older client.
-  // Sales orders use `source_storage_id`; `destination_storage_id` belongs to
-  // purchase orders. Older or malformed local rows can still carry it, so it
-  // must not be forwarded as an unknown sales-order column.
   sales_orders: new Set(["partner_balance_snapshot", "destination_storage_id"]),
-  purchase_orders: new Set(["partner_balance_snapshot"]),
-  // Delivery recipient phone is the only current identifier. These fields may
-  // remain in a local offline row created before the simplified contract, but
-  // no longer exist in the delivery_shipments table.
-  delivery_shipments: new Set([
-    "recipient_name",
-    "recipient_alternate_phone",
-    "recipient_city",
-  ]),
+  purchase_orders: new Set(["partner_balance_snapshot"])
 };
 
 // Development-only fault injection. Set VITE_DEBUG_FORCE_SYNC_SCHEMA_MISMATCH

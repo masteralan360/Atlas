@@ -188,8 +188,14 @@ Deno.serve(async (req) => {
         const productIds = Array.from(normalizedItems.keys())
         const inventoryProductIds = new Set(visibleProducts.inventoryRows.map((row) => row.product_id))
         const productsById = new Map(visibleProducts.productRows.map((product) => [product.id, product] as const))
-        if (productIds.some((productId) => !inventoryProductIds.has(productId) || !productsById.has(productId))) {
-            return errorResponse('Some products could not be found for this store')
+        const unavailableProductIds = productIds.filter((productId) =>
+            !inventoryProductIds.has(productId) || !productsById.has(productId)
+        )
+        if (unavailableProductIds.length > 0) {
+            return errorResponse('Some products could not be found for this store', 400, {
+                code: 'STOREFRONT_PRODUCTS_UNAVAILABLE',
+                unavailable_product_ids: unavailableProductIds
+            })
         }
 
         // A wholesale MOQ belongs to the parent product, not to each child

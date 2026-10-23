@@ -1,3 +1,4 @@
+import { isRetiredEntityType } from '@/local-db/retiredEntities';
 import { supabase, isSupabaseConfigured } from "@/auth/supabase";
 import i18n from "@/i18n/config";
 import { db } from "@/local-db";
@@ -21,7 +22,7 @@ import {
 } from "@/sync/syncProgress";
 import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 import { recordWorkspaceDataFetch } from "@/workspace/workspaceDataFreshness";
-import { getPostponedVoiceReasonCleanupPaths } from "@/lib/deliveryVoiceReasonPaths";
+
 import { linkPaymentTransactionToSettlement } from "@/local-db/partnerSettlementOperations";
 // import { getPendingItems, removeFromQueue, incrementRetry } from './syncQueue'
 
@@ -38,13 +39,6 @@ const PULL_PAGE_SIZE = 1000;
 const PULL_WRITE_BATCH_SIZE = 250;
 const SALE_ITEM_PARENT_BATCH_SIZE = 250;
 const PULL_FETCH_CONCURRENCY = 6;
-
-async function deleteQueuedDeliveryVoiceReasons(paths: readonly string[]) {
-  const uniquePaths = [...new Set(paths.filter((path) => typeof path === "string" && path.length > 0))];
-  if (uniquePaths.length === 0) return;
-  const { error } = await supabase.storage.from("voice").remove(uniquePaths);
-  if (error) throw error;
-}
 
 // Temporarily exclude these tables because the Garden schema migration is not deployed yet.
 const SYNC_PULL_TABLES = [
@@ -81,26 +75,9 @@ const SYNC_PULL_TABLES = [
   "agent_product_commission_entries",
   "fleet_vehicles",
   "fleet_vehicle_assignments",
-  // "garden_sites",
-  // "garden_construction_projects",
-  // "garden_maintenance_contracts",
-  // "garden_jobs",
-  // "garden_job_assignments",
-  // "garden_job_activity",
   "rental_vehicles",
   "rental_requests",
   "rental_contracts",
-  "delivery_merchant_profiles",
-  "delivery_shipments",
-  "delivery_shipment_events",
-  "delivery_shipment_cod_adjustment_requests",
-  "delivery_shipment_cod_corrections",
-  "delivery_shipment_recipient_payout_corrections",
-  "delivery_shipment_recipient_payout_adjustment_requests",
-  "delivery_runs",
-  "delivery_run_items",
-  "delivery_settlements",
-  "delivery_ledger_entries",
   "business_partners",
   "business_partner_groups",
   "business_partner_group_users",
@@ -160,7 +137,7 @@ const SYNC_PULL_TABLES = [
   "financial_transaction_voids",
   "clinical_presets",
   "manual_entry_templates",
-  "manual_entries",
+  "manual_entries"
 ] as const;
 
 const TABLES_WITHOUT_VERSION = new Set<string>([
@@ -434,52 +411,7 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
       addParent("agent_commission_plans", "planId", "plan_id");
       addParent("order_returns", "orderReturnId", "order_return_id");
       break;
-    case "delivery_merchant_profiles":
-      addParent("business_partners", "businessPartnerId", "business_partner_id");
-      break;
-    case "delivery_shipments":
-      addParent("delivery_merchant_profiles", "merchantProfileId", "merchant_profile_id");
-      addParent("business_partners", "merchantBusinessPartnerId", "merchant_business_partner_id");
-      addParent("agents", "assignedAgentId", "assigned_agent_id");
-      addParent("delivery_runs", "assignedRunId", "assigned_run_id");
-      break;
-    case "delivery_shipment_events":
-      addParent("delivery_shipments", "shipmentId", "shipment_id");
-      addParent("agents", "actorAgentId", "actor_agent_id");
-      break;
-    case "delivery_shipment_cod_adjustment_requests":
-      addParent("delivery_shipments", "shipmentId", "shipment_id");
-      addParent("agents", "requesterAgentId", "requester_agent_id");
-      break;
-    case "delivery_shipment_cod_corrections":
-      addParent("delivery_shipments", "shipmentId", "shipment_id");
-      addParent("delivery_ledger_entries", "courierLedgerEntryId", "courier_ledger_entry_id");
-      addParent("delivery_ledger_entries", "merchantLedgerEntryId", "merchant_ledger_entry_id");
-      break;
-    case "delivery_shipment_recipient_payout_corrections":
-      addParent("delivery_shipments", "shipmentId", "shipment_id");
-      addParent("delivery_ledger_entries", "courierLedgerEntryId", "courier_ledger_entry_id");
-      addParent("delivery_ledger_entries", "merchantLedgerEntryId", "merchant_ledger_entry_id");
-      break;
-    case "delivery_shipment_recipient_payout_adjustment_requests":
-      addParent("delivery_shipments", "shipmentId", "shipment_id");
-      addParent("agents", "requesterAgentId", "requester_agent_id");
-      break;
-    case "delivery_runs":
-      addParent("agents", "agentId", "agent_id");
-      addParent("fleet_vehicles", "vehicleId", "vehicle_id");
-      break;
-    case "delivery_run_items":
-      addParent("delivery_runs", "runId", "run_id");
-      addParent("delivery_shipments", "shipmentId", "shipment_id");
-      break;
-    case "delivery_settlements":
-      addParent("delivery_shipments", "shipmentId", "shipment_id");
-      addParent("agents", "agentId", "agent_id");
-      addParent("delivery_merchant_profiles", "merchantProfileId", "merchant_profile_id");
-      addParent("business_partners", "businessPartnerId", "business_partner_id");
-      addParent("payment_transactions", "paymentTransactionId", "payment_transaction_id");
-      break;
+
     case "payment_transactions":
       addParent("payment_accounts", "accountId", "account_id");
       addParent("payment_transactions", "reversalOfTransactionId", "reversal_of_transaction_id");
@@ -528,13 +460,7 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
       addParent("cashier_shift_occurrences", "occurrenceId", "occurrence_id");
       addParent("cashier_shift_pause_requests", "pauseRequestId", "pause_request_id");
       break;
-    case "delivery_ledger_entries":
-      addParent("delivery_shipments", "shipmentId", "shipment_id");
-      addParent("delivery_settlements", "settlementId", "settlement_id");
-      addParent("agents", "agentId", "agent_id");
-      addParent("delivery_merchant_profiles", "merchantProfileId", "merchant_profile_id");
-      addParent("business_partners", "businessPartnerId", "business_partner_id");
-      break;
+
     case "rental_requests":
       addParent("business_partners", "businessPartnerId", "business_partner_id");
       addParent("rental_vehicles", "preferredVehicleId", "preferred_vehicle_id");
@@ -544,17 +470,7 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
       addParent("rental_vehicles", "vehicleId", "vehicle_id");
       addParent("business_partners", "businessPartnerId", "business_partner_id");
       break;
-    case "delivery_voice_cleanup": {
-      addParent("delivery_shipments", "shipmentId", "shipment_id");
-      const rawEventIds: unknown = payload.eventIds ?? payload.event_ids;
-      const eventIds: unknown[] = Array.isArray(rawEventIds) ? rawEventIds : [];
-      for (const eventId of eventIds) {
-        if (typeof eventId === "string" && eventId) {
-          parentKeys.push(mutationEntityKey(workspaceId, "delivery_shipment_events", eventId));
-        }
-      }
-      break;
-    }
+
   }
 
   return parentKeys;
@@ -1085,6 +1001,7 @@ export async function processMutationQueue(
   const mutations = mutationGroups
     .flat()
     .concat(failedRetriableMutations)
+    .filter((mutation) => !isRetiredEntityType(mutation.entityType))
     .sort((left, right) =>
       String(left.createdAt).localeCompare(String(right.createdAt)),
     );
@@ -1284,32 +1201,7 @@ export async function processMutationQueue(
         reportCompleted();
         continue;
       }
-      if (entityType === "delivery_voice_cleanup") {
-        const shipmentId = payload.shipmentId ?? payload.shipment_id;
-        if (typeof shipmentId !== "string" || !shipmentId || shipmentId !== entityId) {
-          throw new Error("Voice recording cleanup has an invalid shipment reference.");
-        }
-        const rawEventIds: unknown = payload.eventIds ?? payload.event_ids;
-        const eventIds = Array.isArray(rawEventIds)
-          ? rawEventIds.filter((eventId): eventId is string => typeof eventId === "string" && !!eventId)
-          : [];
-        const events = eventIds.length > 0
-          ? await db.delivery_shipment_events.bulkGet(eventIds)
-          : [];
-        if (events.some((event) => !event || event.workspaceId !== workspaceId || event.syncStatus !== "synced")) {
-          throw new Error("Voice recording cleanup is waiting for the postponed status event to sync.");
-        }
-        const voiceReasonPaths = getPostponedVoiceReasonCleanupPaths({
-          workspaceId,
-          shipmentId,
-          paths: payload.paths,
-        });
-        await deleteQueuedDeliveryVoiceReasons(voiceReasonPaths);
-        await db.offline_mutations.update(id, { status: "synced", error: undefined });
-        successCount++;
-        reportCompleted();
-        continue;
-      }
+
       const tableName = getTableName(entityType);
       const client = getSupabaseClientForTable(tableName);
       const remoteTableName = getSupabaseRemoteTableName(tableName);
@@ -1676,33 +1568,6 @@ export async function processMutationQueue(
             }
             entityHandledInline = true;
           }
-        } else if (entityType === "delivery_shipments") {
-          const { data: remoteShipments, error } = await client
-            .from(remoteTableName)
-            .upsert(dbPayload)
-            .select("id, tracking_number");
-
-          if (error) throw error;
-
-          const remoteShipment = Array.isArray(remoteShipments)
-            ? remoteShipments.find(
-              (row) =>
-                row &&
-                typeof row === "object" &&
-                (row as { id?: unknown }).id === entityId,
-            ) as { tracking_number?: unknown } | undefined
-            : undefined;
-          const trackingNumber = remoteShipment?.tracking_number;
-
-          if (typeof trackingNumber === "string" && trackingNumber.length > 0) {
-            const syncedAt = new Date().toISOString();
-            await db.delivery_shipments.update(entityId, {
-              trackingNumber,
-              syncStatus: "synced",
-              lastSyncedAt: syncedAt,
-            });
-            entityHandledInline = true;
-          }
         } else if (entityType === "travel_bookings") {
           const { data: remoteBookings, error } = await client
             .from(remoteTableName)
@@ -1983,9 +1848,15 @@ export async function processMutationQueue(
 
   if (successCount > 0) {
     const summarySources = new Set([
-      'business_partners', 'sales_orders', 'purchase_orders', 'loans', 'loan_commands',
-      'order_cancellation_commands', 'installment_sales', 'payment_transactions',
-      'delivery_merchant_profiles', 'delivery_ledger_entries', 'agents',
+      'business_partners',
+      'sales_orders',
+      'purchase_orders',
+      'loans',
+      'loan_commands',
+      'order_cancellation_commands',
+      'installment_sales',
+      'payment_transactions',
+      'agents'
     ]);
     for (const workspaceId of new Set(orderedMutations.filter(mutation => summarySources.has(mutation.entityType))
       .map(mutation => mutation.workspaceId))) invalidatePartnerSummaries(workspaceId);

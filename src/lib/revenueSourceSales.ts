@@ -3,24 +3,21 @@ import {
     getActiveTravelBookingPayments,
     toUISale,
     toUISaleFromActivityTransaction,
-    toUISaleFromDeliveryShipment,
     toUISaleFromExchangeTransaction,
     toUISaleFromPaidClinicalAppointment,
     toUISaleFromRealEstateCommissionTransaction,
     toUISaleFromRentalContract,
-    toUISaleFromTravelBookingPayment,
+    toUISaleFromTravelBookingPayment
 } from '@/local-db'
 import type {
     useActivityTransactionLinesForWorkspace,
     useActivityTransactions,
     useClinicalAppointments,
-    useDeliveryMerchantProfiles,
-    useDeliveryShipments,
     useExchangeTransactions,
     usePaymentTransactions,
     useRentalContracts,
     useRentalVehicles,
-    useSales,
+    useSales
 } from '@/local-db'
 
 type Rows<Hook extends (...args: any[]) => unknown> = NonNullable<ReturnType<Hook>> extends readonly (infer Row)[]
@@ -36,8 +33,7 @@ export interface RevenueSourceSalesInput {
     clinicalAppointmentTransactions: Rows<typeof usePaymentTransactions>
     activityTransactions: Rows<typeof useActivityTransactions>
     activityTransactionLines: Rows<typeof useActivityTransactionLinesForWorkspace>
-    deliveryShipments: Rows<typeof useDeliveryShipments>
-    deliveryMerchantProfiles: Rows<typeof useDeliveryMerchantProfiles>
+
     rentalContracts: Rows<typeof useRentalContracts>
     rentalVehicles: Rows<typeof useRentalVehicles>
     partnerNameById: ReadonlyMap<string, string>
@@ -58,19 +54,14 @@ export function buildRevenueSourceSales(input: RevenueSourceSalesInput): Sale[] 
         clinicalAppointmentTransactions = [],
         activityTransactions = [],
         activityTransactionLines = [],
-        deliveryShipments = [],
-        deliveryMerchantProfiles = [],
         rentalContracts = [],
         rentalVehicles = [],
-        partnerNameById,
         userNameById,
         startDate,
         endDate,
-        t,
+        t
     } = input
-    const merchantPartnerByProfile = new Map(
-        deliveryMerchantProfiles.map((profile) => [profile.id, profile.businessPartnerId] as const),
-    )
+
     const vehicleById = new Map(rentalVehicles.map((vehicle) => [vehicle.id, vehicle] as const))
     return [
         ...sales.map(toUISale),
@@ -100,25 +91,6 @@ export function buildRevenueSourceSales(input: RevenueSourceSalesInput): Sale[] 
                     transaction.createdBy ? userNameById.get(transaction.createdBy) : undefined,
                 ),
             ),
-        ...deliveryShipments
-            .filter((shipment) => shipment.status === 'delivered' && !!shipment.deliveredAt)
-            .filter(
-                (shipment) =>
-                    (!startDate || shipment.deliveredAt! >= startDate) &&
-                    (!endDate || shipment.deliveredAt! <= endDate),
-            )
-            .map((shipment) => {
-                const partnerId = merchantPartnerByProfile.get(shipment.merchantProfileId)
-                return toUISaleFromDeliveryShipment(shipment, {
-                    merchantName: partnerId ? partnerNameById.get(partnerId) || null : null,
-                    merchantBusinessPartnerId: partnerId,
-                    serviceName: t('postService.reporting.serviceName'),
-                    serviceCategory: t('postService.reporting.serviceCategory'),
-                    feePayerNote: t('postService.reporting.feePayerNote', {
-                        payer: t(`postService.feePayer.${shipment.feePayer}`),
-                    }),
-                })
-            }),
         ...rentalContracts
             .filter((contract) => ['active', 'returned', 'closed'].includes(contract.status))
             .filter((contract) => {
@@ -130,6 +102,6 @@ export function buildRevenueSourceSales(input: RevenueSourceSalesInput): Sale[] 
                     serviceName: t('carRental.reporting.serviceName'),
                     serviceCategory: t('carRental.reporting.serviceCategory'),
                 }),
-            ),
+            )
     ]
 }

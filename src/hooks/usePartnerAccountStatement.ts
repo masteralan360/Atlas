@@ -10,10 +10,6 @@ import {
   useAgentCommissionEntries,
   useAgentProductCommissionEntries,
   useBusinessPartner,
-  useDeliveryLedgerEntries,
-  useDeliveryMerchantProfiles,
-  useDeliverySettlements,
-  useDeliveryShipments,
   useLoans,
   useInstallmentSales,
   usePaymentTransactions,
@@ -217,10 +213,6 @@ export function usePartnerAccountStatement(
     () => new Set(settlementOperations.map((operation) => operation.id)),
     [settlementOperations]
   )
-  const deliveryMerchantProfiles = useDeliveryMerchantProfiles(workspaceId)
-  const deliveryLedgerEntries = useDeliveryLedgerEntries(workspaceId)
-  const deliveryShipments = useDeliveryShipments(workspaceId)
-  const deliverySettlements = useDeliverySettlements(workspaceId)
 
   // Workspace-scope consumers keep one refresh key across partners so a batch
   // audit refreshes once. The account statement page includes its partner in
@@ -659,52 +651,6 @@ export function usePartnerAccountStatement(
     })
   }, [commissionAgentIds, commissionAgents.length, partnerId, partnerPurchaseOrders, partnerSalesOrders, paymentTransactions, settlementOperationIds])
 
-  const merchantDeliveryEntries = useMemo(() => {
-    if (!partnerId) return []
-    const merchantProfileIds = new Set(
-      deliveryMerchantProfiles
-        .filter((profile) => !profile.isDeleted && profile.businessPartnerId === partnerId)
-        .map((profile) => profile.id)
-    )
-    const merchantKinds = new Set([
-      'merchant_cod_payable',
-      'merchant_cod_correction',
-      'merchant_recipient_payout_correction',
-      'merchant_fee',
-      'merchant_recipient_payout',
-      'merchant_payout',
-      'merchant_repayment',
-      'adjustment'
-    ])
-
-    return deliveryLedgerEntries.filter(
-      (entry) =>
-        !entry.isDeleted &&
-        merchantKinds.has(entry.kind) &&
-        ((entry.merchantProfileId != null && merchantProfileIds.has(entry.merchantProfileId)) ||
-          entry.businessPartnerId === partnerId)
-    )
-  }, [deliveryLedgerEntries, deliveryMerchantProfiles, partnerId])
-
-  const deliveryShipmentReferences = useMemo(
-    () =>
-      Object.fromEntries(
-        deliveryShipments
-          .filter((shipment) => !shipment.isDeleted)
-          .map((shipment) => [shipment.id, shipment.trackingNumber])
-      ),
-    [deliveryShipments]
-  )
-  const deliverySettlementReferences = useMemo(
-    () =>
-      Object.fromEntries(
-        deliverySettlements
-          .filter((settlement) => !settlement.isDeleted)
-          .map((settlement) => [settlement.id, settlement.settlementNumber])
-      ),
-    [deliverySettlements]
-  )
-
   const statementData = useMemo<PartnerAccountStatementData | null>(() => {
     if (!partner) return null
 
@@ -752,17 +698,11 @@ export function usePartnerAccountStatement(
       trackedCommissionEntries,
       agentProductCommissionEntries: salesAccountProductCommissionEntries,
       marketplaceDeliveryProductCommissionOrderIds,
-      marketplaceShippingProductCommissionOrderIds,
-      deliveryLedgerEntries: merchantDeliveryEntries,
-      deliveryShipmentReferences,
-      deliverySettlementReferences
+      marketplaceShippingProductCommissionOrderIds
     }
   }, [
-    deliverySettlementReferences,
-    deliveryShipmentReferences,
     loanPayments,
     loanPaymentTransactions,
-    merchantDeliveryEntries,
     commissionAgents,
     partner,
     partnerInstallmentSales,
@@ -801,12 +741,7 @@ export function usePartnerAccountStatement(
     || installmentSales.isLoading
     || paymentTransactions.isLoading
     || !hasCurrentSettlementOperations
-    || !hasCurrentLoanPayments
-    || deliveryMerchantProfiles.isLoading
-    || deliveryLedgerEntries.isLoading
-    || deliveryShipments.isLoading
-    || deliverySettlements.isLoading
-  ))
+    || !hasCurrentLoanPayments  ))
 
   return {
     partner,
@@ -819,7 +754,7 @@ export function usePartnerAccountStatement(
     sourceCounts: {
       orders: partnerSalesOrders.length + partnerPurchaseOrders.length + partnerInstallmentSales.length,
       loans: partnerLoans.length,
-      payments: settlementTransactions.length + loanPayments.length + merchantDeliveryEntries.length
+      payments: settlementTransactions.length + loanPayments.length
     }
   }
 }

@@ -1,3 +1,4 @@
+import { RETIRED_ENTITY_TYPES } from './retiredEntities'
 import Dexie, {
   type DBCore,
   type DBCoreMutateRequest,
@@ -64,17 +65,6 @@ import type {
   RentalVehicle,
   RentalRequest,
   RentalContract,
-  DeliveryMerchantProfile,
-  DeliveryShipment,
-  DeliveryShipmentEvent,
-  DeliveryShipmentCodAdjustmentRequest,
-  DeliveryShipmentCodCorrection,
-  DeliveryShipmentRecipientPayoutCorrection,
-  DeliveryShipmentRecipientPayoutAdjustmentRequest,
-  DeliveryRun,
-  DeliveryRunItem,
-  DeliverySettlement,
-  DeliveryLedgerEntry,
   BusinessPartner,
   BusinessPartnerGroup,
   BusinessPartnerGroupUser,
@@ -528,20 +518,7 @@ export class AtlasDatabase extends Dexie {
   garden_jobs!: EntityTable<GardenJob, 'id'>
   garden_job_assignments!: EntityTable<GardenJobAssignment, 'id'>
   garden_job_activity!: EntityTable<GardenJobActivity, 'id'>
-  delivery_merchant_profiles!: EntityTable<DeliveryMerchantProfile, 'id'>
-  delivery_shipments!: EntityTable<DeliveryShipment, 'id'>
-  delivery_shipment_events!: EntityTable<DeliveryShipmentEvent, 'id'>
-  delivery_shipment_cod_adjustment_requests!: EntityTable<DeliveryShipmentCodAdjustmentRequest, 'id'>
-  delivery_shipment_cod_corrections!: EntityTable<DeliveryShipmentCodCorrection, 'id'>
-  delivery_shipment_recipient_payout_corrections!: EntityTable<DeliveryShipmentRecipientPayoutCorrection, 'id'>
-  delivery_shipment_recipient_payout_adjustment_requests!: EntityTable<
-    DeliveryShipmentRecipientPayoutAdjustmentRequest,
-    'id'
-  >
-  delivery_runs!: EntityTable<DeliveryRun, 'id'>
-  delivery_run_items!: EntityTable<DeliveryRunItem, 'id'>
-  delivery_settlements!: EntityTable<DeliverySettlement, 'id'>
-  delivery_ledger_entries!: EntityTable<DeliveryLedgerEntry, 'id'>
+
   business_partners!: EntityTable<BusinessPartner, 'id'>
   business_partner_groups!: EntityTable<BusinessPartnerGroup, 'id'>
   business_partner_group_users!: EntityTable<BusinessPartnerGroupUser, 'id'>
@@ -1567,7 +1544,7 @@ export class AtlasDatabase extends Dexie {
               paidAt: status.paidAt ?? status.updatedAt ?? status.createdAt ?? now,
               counterpartyName: employee?.name ?? null,
               referenceLabel: employee?.name
-                ? `${employee.name} • ${String(status.month ?? '')}`
+                ? `${employee.name} â€¢ ${String(status.month ?? '')}`
                 : String(status.month ?? 'Payroll'),
               note: null,
               createdBy: null,
@@ -3902,6 +3879,21 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, paidAt, accountId, cashierShiftOccurrenceId, sourceModule, sourceType, sourceRecordId, sourceSubrecordId, direction, reversalOfTransactionId, voidId, settlementOperationId, updatedAt, isDeleted, syncStatus, [workspaceId+paidAt], [workspaceId+accountId], [workspaceId+cashierShiftOccurrenceId], [workspaceId+sourceType+sourceRecordId], [workspaceId+settlementOperationId], [workspaceId+voidId], [workspaceId+sourceType+paidAt+createdAt+id]'
     })
 
+    // Remove retired operational data and retries without touching real payments.
+    this.version(161).stores(Object.fromEntries(
+      RETIRED_ENTITY_TYPES.filter((name) => name !== 'delivery_voice_cleanup').map((name) => [name, null])
+    )).upgrade(async (tx) => {
+      for (const tableName of ['offline_mutations', 'syncQueue']) {
+        await tx.table(tableName).where('entityType').anyOf([...RETIRED_ENTITY_TYPES]).delete()
+      }
+      await tx.table('workspaces').toCollection().modify((workspace) => {
+        delete workspace.post_service
+      })
+      await tx.table('agents').toCollection().modify((agent) => {
+        delete agent.courierDeliveryFee
+      })
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
@@ -4195,17 +4187,6 @@ export class AtlasDatabase extends Dexie {
       'rental_vehicles',
       'rental_requests',
       'rental_contracts',
-      'delivery_merchant_profiles',
-      'delivery_shipments',
-      'delivery_shipment_events',
-      'delivery_shipment_cod_adjustment_requests',
-      'delivery_shipment_cod_corrections',
-      'delivery_shipment_recipient_payout_corrections',
-      'delivery_shipment_recipient_payout_adjustment_requests',
-      'delivery_runs',
-      'delivery_run_items',
-      'delivery_settlements',
-      'delivery_ledger_entries',
       'business_partners',
       'business_partner_groups',
       'business_partner_group_users',
@@ -4365,8 +4346,12 @@ export class AtlasDatabase extends Dexie {
     // Covers mutations outside partner/order screens, remote hydration and
     // deletions. Refresh only after the complete source transaction commits.
     const summarySources = [
-      'sales_orders', 'purchase_orders', 'loans', 'installment_sales', 'payment_transactions',
-      'delivery_merchant_profiles', 'delivery_ledger_entries', 'agents',
+      'sales_orders',
+      'purchase_orders',
+      'loans',
+      'installment_sales',
+      'payment_transactions',
+      'agents'
     ]
     const scheduled = new WeakMap<Transaction, Set<string>>()
     const invalidateOnCommit = (transaction: Transaction, record?: { workspaceId?: string }) => {
@@ -4437,17 +4422,6 @@ export async function clearDatabase(): Promise<void> {
       db.rental_vehicles,
       db.rental_requests,
       db.rental_contracts,
-      db.delivery_merchant_profiles,
-      db.delivery_shipments,
-      db.delivery_shipment_events,
-      db.delivery_shipment_cod_adjustment_requests,
-      db.delivery_shipment_cod_corrections,
-      db.delivery_shipment_recipient_payout_corrections,
-      db.delivery_shipment_recipient_payout_adjustment_requests,
-      db.delivery_runs,
-      db.delivery_run_items,
-      db.delivery_settlements,
-      db.delivery_ledger_entries,
       db.payment_transactions,
       db.financial_transaction_voids,
       db.payment_accounts,
@@ -4518,17 +4492,7 @@ export async function clearDatabase(): Promise<void> {
       await db.rental_vehicles.clear()
       await db.rental_requests.clear()
       await db.rental_contracts.clear()
-      await db.delivery_merchant_profiles.clear()
-      await db.delivery_shipments.clear()
-      await db.delivery_shipment_events.clear()
-      await db.delivery_shipment_cod_adjustment_requests.clear()
-      await db.delivery_shipment_cod_corrections.clear()
-      await db.delivery_shipment_recipient_payout_corrections.clear()
-      await db.delivery_shipment_recipient_payout_adjustment_requests.clear()
-      await db.delivery_runs.clear()
-      await db.delivery_run_items.clear()
-      await db.delivery_settlements.clear()
-      await db.delivery_ledger_entries.clear()
+
       await db.payment_transactions.clear()
       await db.financial_transaction_voids.clear()
       await db.payment_accounts.clear()

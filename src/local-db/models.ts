@@ -574,8 +574,7 @@ export interface Agent extends BaseEntity {
   zone: string
   agentType: AgentType
   customAgentTypeId?: string | null
-  /** Fee the courier keeps for each successfully delivered post. */
-  courierDeliveryFee?: number
+
   carModel?: string | null
   plateNumber?: string | null
   linkedUserId?: string | null
@@ -594,7 +593,7 @@ export interface AgentFacetInput {
   zone: string
   agentType: AgentType
   customAgentTypeId?: string | null
-  courierDeliveryFee?: number
+
   carModel?: string | null
   plateNumber?: string | null
   linkedUserId?: string | null
@@ -749,179 +748,6 @@ export interface FleetLocationPoint {
   recordedAt: string
   receivedAt?: string
   isSharing: boolean
-}
-
-/**
- * Delivery profiles extend an existing business partner.  They deliberately do
- * not create a second merchant/customer directory: a merchant is still one
- * of the workspace's commercial partners.
- */
-export interface DeliveryMerchantProfile extends BaseEntity {
-  businessPartnerId: string
-  defaultFeeAmount: number
-  defaultFeePayer: DeliveryFeePayer
-  defaultPickupAddress?: string | null
-  payoutSchedule: DeliveryPayoutSchedule
-  isActive: boolean
-}
-
-export type DeliveryFeePayer = 'merchant' | 'recipient'
-/** Whether the courier must collect the COD amount from the recipient. */
-export type DeliveryCustomerPaymentStatus = 'cash_on_delivery' | 'prepaid_electronically'
-/** Who advances a recipient payout before the merchant reimburses the workspace. */
-export type DeliveryRecipientPayoutFunding = 'courier_advance' | 'workspace_payment'
-export type DeliveryPayoutSchedule = 'daily' | 'weekly' | 'on_request'
-export type DeliveryShipmentStatus = 'received' | 'assigned' | 'delivered' | 'postponed' | 'returned' | 'cancelled'
-export type DeliveryShipmentCodAdjustmentRequestStatus = 'pending' | 'approved' | 'rejected'
-export type DeliveryRunStatus = 'open' | 'closed' | 'cancelled'
-export type DeliverySettlementType =
-  'courier_remittance' | 'courier_fee_payout' | 'courier_reimbursement' | 'merchant_payout' | 'merchant_repayment'
-
-export interface DeliveryShipment extends BaseEntity {
-  trackingNumber: string
-  merchantProfileId: string
-  merchantBusinessPartnerId: string
-  /**
-   * The recipient's required, primary identifier for a delivery post.
-   *
-   * Legacy recipient-name, alternate-phone, and city fields were removed
-   * from the remote contract. The full location lives in recipientAddress.
-   */
-  recipientPhone: string
-  recipientAddress: string
-  recipientLatitude?: number | null
-  recipientLongitude?: number | null
-  description?: string | null
-  currency: CurrencyCode
-  /** Zero for an electronically prepaid delivery. */
-  codAmount: number
-  customerPaymentStatus: DeliveryCustomerPaymentStatus
-  /** Amount paid to the recipient when the post is delivered. */
-  recipientPayoutAmount: number
-  /** Courier advances are reimbursed later; workspace payments are paid immediately. */
-  recipientPayoutFunding: DeliveryRecipientPayoutFunding
-  recipientPayoutPaymentTransactionId?: string | null
-  deliveryFee: number
-  /** Courier fee snapshot from the manifest; charged only on delivery. */
-  courierDeliveryFee?: number
-  feePayer: DeliveryFeePayer
-  status: DeliveryShipmentStatus
-  assignedAgentId?: string | null
-  assignedRunId?: string | null
-  deliveredAt?: string | null
-  postponedAt?: string | null
-  returnedAt?: string | null
-  /** When the workspace physically received a returned package from its courier. */
-  returnReceivedAt?: string | null
-  statusNote?: string | null
-  sourceSalesOrderId?: string | null
-  createdBy?: string | null
-}
-
-export type DeliveryShipmentEventAction = 'status_change' | 'return_received'
-
-/** Immutable log of every operational change to a shipment. */
-export interface DeliveryShipmentEvent extends BaseEntity {
-  shipmentId: string
-  previousStatus?: DeliveryShipmentStatus | null
-  status: DeliveryShipmentStatus
-  /** Legacy events omit this and are treated as status changes. */
-  action?: DeliveryShipmentEventAction
-  note?: string | null
-  /** Private `voice` bucket path for a returned/postponed reason. */
-  voiceReasonPath?: string | null
-  /** Duration of the FLAC reason recording, retained for secure playback UX. */
-  voiceReasonDurationMs?: number | null
-  actorUserId?: string | null
-  actorAgentId?: string | null
-  occurredAt: string
-}
-
-export interface DeliveryRun extends BaseEntity {
-  runNumber: string
-  agentId: string
-  /** Per-delivered-post courier fee captured when the manifest was created. */
-  courierDeliveryFee?: number
-  vehicleId?: string | null
-  status: DeliveryRunStatus
-  dispatchedAt: string
-  closedAt?: string | null
-  notes?: string | null
-  createdBy?: string | null
-}
-
-/** Retains manifest history even when a shipment is later sent with another courier. */
-export interface DeliveryRunItem extends BaseEntity {
-  runId: string
-  shipmentId: string
-  assignedAt: string
-  returnedAt?: string | null
-}
-
-/**
- * The header represents real cash movement. The associated custody and
- * merchant ledger entries remain the source for the two derived balances.
- */
-export interface DeliverySettlement extends BaseEntity {
-  settlementNumber: string
-  type: DeliverySettlementType
-  agentId?: string | null
-  merchantProfileId?: string | null
-  businessPartnerId?: string | null
-  shipmentId?: string | null
-  currency: CurrencyCode
-  /** Per-post courier cost snapshot; zero for legacy or whole-party settlements. */
-  courierDeliveryFee?: number
-  expectedAmount: number
-  actualAmount: number
-  varianceAmount: number
-  varianceNote?: string | null
-  paymentMethod: WorkspacePaymentMethod
-  settledAt: string
-  note?: string | null
-  paymentTransactionId?: string | null
-  createdBy?: string | null
-}
-
-export type DeliveryLedgerEntryKind =
-  | 'courier_collection'
-  | 'courier_cod_correction'
-  | 'courier_recipient_payout_correction'
-  | 'courier_delivery_fee'
-  | 'courier_recipient_advance'
-  | 'courier_remittance'
-  | 'courier_fee_payout'
-  | 'courier_reimbursement'
-  | 'merchant_cod_payable'
-  | 'merchant_cod_correction'
-  | 'merchant_recipient_payout_correction'
-  | 'merchant_fee'
-  | 'merchant_recipient_payout'
-  | 'merchant_payout'
-  | 'merchant_repayment'
-  | 'adjustment'
-
-/**
- * A signed entry in either the courier-custody or merchant-payable view.
- * Positive `amount` increases what the named party is responsible for;
- * negative entries reduce it. Entries are never edited after creation.
- */
-export interface DeliveryLedgerEntry extends BaseEntity {
-  kind: DeliveryLedgerEntryKind
-  shipmentId?: string | null
-  /** Links a delivered-COD adjustment to its immutable audit record. */
-  codCorrectionId?: string | null
-  /** Links a delivered recipient-payout correction to its immutable audit record. */
-  recipientPayoutCorrectionId?: string | null
-  settlementId?: string | null
-  agentId?: string | null
-  merchantProfileId?: string | null
-  businessPartnerId?: string | null
-  amount: number
-  currency: CurrencyCode
-  occurredAt: string
-  note?: string | null
-  createdBy?: string | null
 }
 
 export interface BusinessPartner extends BaseEntity {
@@ -2712,75 +2538,6 @@ export interface CapitalPool extends BaseEntity {
   createdBy?: string | null
 }
 
-/**
- * A courier's auditable request to change the cash-on-delivery amount before
- * the post is completed. The post itself remains unchanged until an admin
- * reviews and approves the request.
- */
-export interface DeliveryShipmentCodAdjustmentRequest extends BaseEntity {
-  shipmentId: string
-  requesterUserId: string
-  requesterAgentId: string
-  currency: CurrencyCode
-  originalCodAmount: number
-  requestedCodAmount: number
-  reason: string | null
-  status: DeliveryShipmentCodAdjustmentRequestStatus
-  reviewedCodAmount?: number | null
-  reviewNote?: string | null
-  reviewedBy?: string | null
-  reviewedAt?: string | null
-}
-
-/**
- * Immutable audit record for an administrator's correction of a COD amount
- * after delivery and before either settlement side has started.
- */
-export interface DeliveryShipmentCodCorrection extends BaseEntity {
-  shipmentId: string
-  currency: CurrencyCode
-  originalCodAmount: number
-  correctedCodAmount: number
-  correctedBy: string
-  correctedAt: string
-  courierLedgerEntryId: string
-  merchantLedgerEntryId: string
-}
-
-/**
- * Immutable audit record for an administrator's correction of a courier-funded
- * recipient payout after delivery and before either linked settlement starts.
- */
-export interface DeliveryShipmentRecipientPayoutCorrection extends BaseEntity {
-  shipmentId: string
-  currency: CurrencyCode
-  originalRecipientPayoutAmount: number
-  correctedRecipientPayoutAmount: number
-  correctedBy: string
-  correctedAt: string
-  courierLedgerEntryId: string
-  merchantLedgerEntryId: string
-}
-
-/**
- * A courier's auditable request to change the amount paid out to a recipient
- * for a prepaid post. The payout funding method is deliberately unchanged.
- */
-export interface DeliveryShipmentRecipientPayoutAdjustmentRequest extends BaseEntity {
-  shipmentId: string
-  requesterUserId: string
-  requesterAgentId: string
-  currency: CurrencyCode
-  originalRecipientPayoutAmount: number
-  requestedRecipientPayoutAmount: number
-  reason: string | null
-  status: DeliveryShipmentCodAdjustmentRequestStatus
-  reviewedRecipientPayoutAmount?: number | null
-  reviewNote?: string | null
-  reviewedBy?: string | null
-  reviewedAt?: string | null
-}
-
 export type CashierShiftStatus = 'open' | 'closed'
 
 export type CashierShiftOccurrenceStatus = 'active' | 'paused' | 'completed' | 'terminated'
@@ -3020,18 +2777,6 @@ export interface SyncQueueItem {
     | 'garden_jobs'
     | 'garden_job_assignments'
     | 'garden_job_activity'
-    | 'delivery_merchant_profiles'
-    | 'delivery_shipments'
-    | 'delivery_shipment_events'
-    | 'delivery_shipment_cod_adjustment_requests'
-    | 'delivery_shipment_cod_corrections'
-    | 'delivery_shipment_recipient_payout_corrections'
-    | 'delivery_shipment_recipient_payout_adjustment_requests'
-    | 'delivery_runs'
-    | 'delivery_run_items'
-    | 'delivery_settlements'
-    | 'delivery_ledger_entries'
-    | 'delivery_voice_cleanup'
     | 'rental_vehicles'
     | 'rental_requests'
     | 'rental_contracts'
@@ -3088,7 +2833,6 @@ export interface Workspace extends BaseEntity {
   activities?: boolean
   currency_exchange?: boolean
   agents?: boolean
-  post_service?: boolean
   car_rental?: boolean
   clinical_appointments?: boolean
   loans?: boolean
@@ -3275,18 +3019,6 @@ export interface OfflineMutation {
     | 'garden_jobs'
     | 'garden_job_assignments'
     | 'garden_job_activity'
-    | 'delivery_merchant_profiles'
-    | 'delivery_shipments'
-    | 'delivery_shipment_events'
-    | 'delivery_shipment_cod_adjustment_requests'
-    | 'delivery_shipment_cod_corrections'
-    | 'delivery_shipment_recipient_payout_corrections'
-    | 'delivery_shipment_recipient_payout_adjustment_requests'
-    | 'delivery_runs'
-    | 'delivery_run_items'
-    | 'delivery_settlements'
-    | 'delivery_ledger_entries'
-    | 'delivery_voice_cleanup'
     | 'rental_vehicles'
     | 'rental_requests'
     | 'rental_contracts'

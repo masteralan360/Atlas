@@ -110,6 +110,7 @@ describe('Seller partner statement Edge Function', () => {
     const { response, body, reads, logError } = await requestStatement()
     expect(response.status).toBe(200)
     expect(logError).not.toHaveBeenCalled()
+    expect(reads.some((read) => read.table.startsWith('delivery.'))).toBe(false)
     expect(body.isSellerAgentStatement).toBe(true)
     const [ledger] = body.ledgers
     expect(ledger.closingBalance).toBe(0)

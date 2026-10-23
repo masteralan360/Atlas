@@ -2,7 +2,6 @@ import type { WorkspacePermissionKey } from "./workspacePermissionDefinitions";
 
 export const VIEW_OWN_RECORD_PERMISSION_KEYS = [
   "orders.view_own",
-  "postService.view_own",
   "sales.view_own",
   "loans.view_own",
   "installments.view_own",

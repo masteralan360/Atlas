@@ -859,68 +859,6 @@ describe('buildPartnerAccountStatementLedger', () => {
         expect(individualHtml).not.toContain('Cash Collection')
     })
 
-    it('includes every merchant-facing Post Service movement once with the inverse delivery-ledger sign', () => {
-        const data = statementData()
-        data.statementOrders = []
-        data.settlementTransactions = []
-        data.deliveryShipmentReferences = { 'post-1': 'PST-20260827-00001' }
-        data.deliveryLedgerEntries = [
-            {
-                id: 'delivery-cod',
-                kind: 'merchant_cod_payable',
-                shipmentId: 'post-1',
-                amount: 50000,
-                currency: 'iqd',
-                occurredAt: '2026-01-05T10:00:00.000Z',
-                createdAt: '2026-01-05T10:00:00.000Z',
-                isDeleted: false
-            },
-            {
-                id: 'delivery-fee',
-                kind: 'merchant_fee',
-                shipmentId: 'post-1',
-                amount: -3000,
-                currency: 'iqd',
-                occurredAt: '2026-01-05T10:00:00.000Z',
-                createdAt: '2026-01-05T10:00:00.000Z',
-                isDeleted: false
-            },
-            {
-                id: 'recipient-payout',
-                kind: 'merchant_recipient_payout',
-                shipmentId: 'post-1',
-                amount: -10000,
-                currency: 'iqd',
-                occurredAt: '2026-01-05T10:00:00.000Z',
-                createdAt: '2026-01-05T10:00:00.000Z',
-                isDeleted: false
-            },
-            {
-                id: 'merchant-payout',
-                kind: 'merchant_payout',
-                amount: -37000,
-                currency: 'iqd',
-                occurredAt: '2026-01-06T10:00:00.000Z',
-                createdAt: '2026-01-06T10:00:00.000Z',
-                isDeleted: false
-            }
-        ] as any
-
-        const [ledger] = buildPartnerAccountStatementLedger(data)
-
-        expect(ledger).toMatchObject({ currency: 'iqd', closingBalance: 0 })
-        expect(ledger.entries.map((entry) => [entry.reference, entry.delta, entry.descriptionKey])).toEqual([
-            ['PST-20260827-00001', -50000, 'deliveryCodPayable'],
-            ['PST-20260827-00001', 3000, 'deliveryFee'],
-            ['PST-20260827-00001', 10000, 'deliveryRecipientPayout'],
-            ['merchant-payout', 37000, 'deliveryMerchantPayout']
-        ])
-        expect(ledger.entries.find((entry) => entry.descriptionKey === 'deliveryRecipientPayout')?.source).toEqual({
-            recordType: 'delivery_ledger_entry',
-            recordId: 'recipient-payout'
-        })
-    })
-
     it('retains independent balances for every currency instead of converting an audit trail', () => {
         const data = statementData()
         data.statementOrders?.push({

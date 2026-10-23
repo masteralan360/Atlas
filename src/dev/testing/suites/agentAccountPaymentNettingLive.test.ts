@@ -83,10 +83,19 @@ describe('Sales-account agent payment credit allocation · hosted Supabase', () 
         recordLiveFixture(ids)
 
         const sourceTables = [
-          'business_partners', 'agents', 'loans', 'sales_orders', 'purchase_orders', 'loan_payments',
-          'payment_transactions', 'order_returns', 'order_return_items', 'agent_commission_entries',
-          'agent_product_commission_entries', 'installment_sales', 'partner_settlement_operations',
-          'delivery_merchant_profiles', 'delivery_ledger_entries'
+          'business_partners',
+          'agents',
+          'loans',
+          'sales_orders',
+          'purchase_orders',
+          'loan_payments',
+          'payment_transactions',
+          'order_returns',
+          'order_return_items',
+          'agent_commission_entries',
+          'agent_product_commission_entries',
+          'installment_sales',
+          'partner_settlement_operations'
         ] as const
         for (const table of sourceTables) {
           if (!await fetchTableFromSupabase(table, db[table] as any, liveWorkspaceId, { force: true })) {

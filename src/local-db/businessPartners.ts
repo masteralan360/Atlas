@@ -1059,9 +1059,6 @@ async function normalizeAgentFacetInput(
     input?.salesAccountEnabled === undefined
       ? (existing?.salesAccountEnabled ?? false)
       : Boolean(input.salesAccountEnabled)
-  const courierDeliveryFee = Number(
-    input?.courierDeliveryFee === undefined ? (existing?.courierDeliveryFee ?? 0) : (input.courierDeliveryFee ?? 0)
-  )
 
   if (agentType !== 'driver' && agentType !== 'field_agent' && agentType !== 'courier' && agentType !== 'seller') {
     throw new Error('Agent type is required')
@@ -1079,9 +1076,6 @@ async function normalizeAgentFacetInput(
   if (status !== 'active' && status !== 'inactive' && status !== 'blocked') {
     throw new Error('Agent status is invalid')
   }
-  if (!Number.isFinite(courierDeliveryFee) || courierDeliveryFee < 0) {
-    throw new Error('Courier delivery fee must be zero or greater')
-  }
 
   return {
     zone,
@@ -1091,10 +1085,7 @@ async function normalizeAgentFacetInput(
     plateNumber: agentType === 'driver' ? plateNumber : null,
     linkedUserId,
     salesAccountEnabled,
-    status,
-    // Keep non-courier agent records compatible with the database rule
-    // and avoid retaining an old fee after the role changes.
-    courierDeliveryFee: agentType === 'courier' ? courierDeliveryFee : 0
+    status
   }
 }
 
@@ -1138,7 +1129,7 @@ async function createOrUpdateAgentFacet(partner: BusinessPartner, input?: Partia
       && existing.linkedUserId === agentData.linkedUserId
       && existing.salesAccountEnabled === agentData.salesAccountEnabled
       && existing.status === agentData.status
-      && existing.courierDeliveryFee === agentData.courierDeliveryFee
+
     if (agentFieldsUnchanged) {
       await ensureDriverFleetAssignment(existing)
       return existing
@@ -1237,65 +1228,6 @@ async function getPartnerInstallmentSales(workspaceId: string, partnerId: string
     .toArray()
 }
 
-async function getDeliveryOutstandingBalances(workspaceId: string, partner: BusinessPartner) {
-  const payable = new Map<CurrencyCode, number>()
-  const receivable = new Map<CurrencyCode, number>()
-
-  const [profiles, entries] = await Promise.all([
-    db.delivery_merchant_profiles
-      .where('workspaceId')
-      .equals(workspaceId)
-      .and((profile) => !profile.isDeleted && profile.businessPartnerId === partner.id)
-      .toArray(),
-    db.delivery_ledger_entries
-      .where('workspaceId')
-      .equals(workspaceId)
-      .and((entry) => !entry.isDeleted)
-      .toArray()
-  ])
-  const profileIds = new Set(profiles.map((profile) => profile.id))
-
-  if (profileIds.size > 0) {
-    for (const entry of entries) {
-      if (entry.merchantProfileId && profileIds.has(entry.merchantProfileId)) {
-        payable.set(entry.currency, (payable.get(entry.currency) ?? 0) + Number(entry.amount || 0))
-      }
-    }
-  }
-
-  if (partner.agentFacetId) {
-    const agent = await db.agents.get(partner.agentFacetId)
-    if (agent && !agent.isDeleted) {
-      for (const entry of entries) {
-        if (entry.agentId === agent.id) {
-          receivable.set(entry.currency, (receivable.get(entry.currency) ?? 0) + Number(entry.amount || 0))
-        }
-      }
-    }
-  }
-
-  for (const currency of new Set<CurrencyCode>([...payable.keys(), ...receivable.keys()])) {
-    const payableAmount = payable.get(currency) ?? 0
-    const receivableAmount = receivable.get(currency) ?? 0
-    // A negative merchant delivery payable is a real receivable: for
-    // example, an electronic prepaid delivery fee or money the courier
-    // paid to the recipient on the merchant's behalf.
-    if (payableAmount < 0) {
-      payable.set(currency, 0)
-      receivable.set(currency, receivableAmount + Math.abs(payableAmount))
-    }
-    // A negative courier account is not a receivable from the courier. It
-    // is a genuine payable: the courier advanced cash to the recipient or
-    // earned a fee that could not be retained from COD cash.
-    if (receivableAmount < 0) {
-      receivable.set(currency, 0)
-      payable.set(currency, (payable.get(currency) ?? 0) + Math.abs(receivableAmount))
-    }
-  }
-
-  return { payable, receivable }
-}
-
 /**
  * Cash-only direct transactions never alter a partner balance. Explicit
  * partner-account movements are included here so the profile and statement
@@ -1367,13 +1299,12 @@ async function calculateBusinessPartnerSummary(workspaceId: string, partnerId: s
     return partner
   }
 
-  const [salesOrders, purchaseOrders, loans, installmentSales, deliveryBalances, directAccountEffects] =
+  const [salesOrders, purchaseOrders, loans, installmentSales, directAccountEffects] =
     await Promise.all([
       getPartnerSalesOrders(partner),
       getPartnerPurchaseOrders(partner),
       getPartnerLoans(partner),
       getPartnerInstallmentSales(workspaceId, partner.id),
-      getDeliveryOutstandingBalances(workspaceId, partner),
       getPartnerDirectAccountEffects(workspaceId, partner)
     ])
 
@@ -1427,11 +1358,6 @@ async function calculateBusinessPartnerSummary(workspaceId: string, partnerId: s
           sum +
           convertInstallmentSaleAmountForPartner(sale.customerBalanceAmount, sale.currency, partner.defaultCurrency),
         0
-      ) +
-      Array.from(deliveryBalances.receivable.entries()).reduce(
-        (sum, [currency, amount]) =>
-          sum + convertCurrencyAmountWithSnapshot(amount, currency, partner.defaultCurrency, undefined),
-        0
       ),
     partner.defaultCurrency
   )
@@ -1465,12 +1391,7 @@ async function calculateBusinessPartnerSummary(workspaceId: string, partnerId: s
           ),
         0
       ) +
-      activeBorrowedLoans.reduce((sum, loan) => sum + convertLoanAmountForPartner(loan, partner.defaultCurrency), 0) +
-      Array.from(deliveryBalances.payable.entries()).reduce(
-        (sum, [currency, amount]) =>
-          sum + convertCurrencyAmountWithSnapshot(amount, currency, partner.defaultCurrency, undefined),
-        0
-      ),
+      activeBorrowedLoans.reduce((sum, loan) => sum + convertLoanAmountForPartner(loan, partner.defaultCurrency), 0),
     partner.defaultCurrency
   )
 

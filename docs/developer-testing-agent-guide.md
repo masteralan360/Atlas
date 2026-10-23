@@ -14,7 +14,7 @@ rules or need to copy the lab's group structure.
 ## 1. What exists today
 
 - `npm run dev` automatically enables developer testing. Open Atlas through
-  localhost, then **Orders → Sale Orders → Developer tests**, **POS → Developer tests**, or **Post Service → Developer tests**.
+  localhost, then **Orders â†’ Sale Orders â†’ Developer tests**, **POS â†’ Developer tests**, or **Post Service â†’ Developer tests**.
 - Production builds exclude the entry point and runner client from the emitted
   application dependency graph. Production preview servers do not install the
   runner. Keep both protections when extending the system.
@@ -38,12 +38,12 @@ bugs, every possible scenario, or coverage of the unimplemented adapters.
 
 ```text
 Module page: development-only, lazy DeveloperTestButton(suiteId)
-    → shared DeveloperTestDialog + testRunnerClient
-    → same-origin Vite middleware
-    → TestController → allowlisted Vitest child processes
-    → reporter events → live run state → finished JSON report
+    â†’ shared DeveloperTestDialog + testRunnerClient
+    â†’ same-origin Vite middleware
+    â†’ TestController â†’ allowlisted Vitest child processes
+    â†’ reporter events â†’ live run state â†’ finished JSON report
 
-CLI → the same TestController and registered suite
+CLI â†’ the same TestController and registered suite
 ```
 
 | Responsibility | Source | Reuse boundary |
@@ -58,7 +58,7 @@ CLI → the same TestController and registered suite
 | CLI and localhost convenience server | `scripts/dev-testing/cli.mjs`, `dev.mjs` | CLI already accepts any registered suite |
 | Button, modal, HTTP client | `src/dev/testing/DeveloperTestButton.tsx`, `DeveloperTestDialog.tsx`, `client.ts` | Reusable components with suite-specific description metadata |
 | Runner/client regression tests | `scripts/dev-testing/controller.test.mjs`, `src/dev/testing/client.test.ts` | Test the infrastructure independently of business coverage |
-| Browser visual harness | `src/dev/testing/preview.tsx` | Registry-driven navigation; SORL by default, `?suite=pos` or `?suite=post-service` |
+| Browser visual harness | `src/dev/testing/preview.tsx` | Registry-driven navigation; SORL by default, `?suite=pos` |
 | Minimal browser import stubs | `src/dev/testing/fixtures/browser.ts` | Reuse only for compatible Node tests; not a rendered browser |
 | Sale Orders scenario suite | `src/dev/testing/salesOrderResilience/resilience.test.ts` | Sale Orders-specific |
 | Shared order inputs | `src/dev/testing/fixtures/orderInput.ts` | Neutral domain fixture retained for Orders and POS |
@@ -69,9 +69,6 @@ CLI → the same TestController and registered suite
 | POS SQLite adapter stub | `src/dev/testing/fixtures/sqlite.ts` | Recording contract adapter, not native persistence |
 | POS production persistence | `src/local-db/posCheckout.ts`, `posSaleReturns.ts` | Used by the actual POS and Sales pages as well as tests |
 | POS cart and retry snapshot logic | `src/lib/posCart.ts`, `posCheckoutAttempt.ts`, `posPaymentPolicy.ts` | Production calculations, held carts, retry identities and domain routing |
-| Post Service suite | `src/dev/testing/suites/postService*.test.ts` | Independent shipment, obligation, payment and remote-contract scenarios; includes existing domain regressions |
-| Post Service fixtures/assertions | `src/dev/testing/fixtures/postService.ts`, `postServiceHarness.ts`, `src/dev/testing/assertions/postService.ts` | Domain-specific and independent of Orders/POS |
-| Post Service production boundary | `src/local-db/postService.ts`, `src/lib/postService*.ts`, Post Service page | Actual production APIs and shared page error mapper; see `developer-testing-post-service.md` |
 | UI language strings | `src/i18n/locales/{en,ku,ar}.json`, `devTesting` namespace | Shared labels plus suite-specific descriptions |
 
 Existing tests elsewhere in `src/` are included by the registry without moving

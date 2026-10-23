@@ -28,10 +28,6 @@ import { getLoanDetailsPath, getLoanDirection, getLoanDirectionLabel, isSimpleLo
 import { getOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import type { CustomTemplateLayout } from '@/lib/printPreviewEditorStore'
 
-import {
-    courierSettlementBreakdownByParty,
-    merchantSettlementBreakdownByParty
-} from '@/lib/postServiceSettlementStatus'
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import {
     useAgent,
@@ -40,9 +36,6 @@ import {
     useBusinessPartner,
     useClinicalAppointments,
     useCustomerSalesOrders,
-    useDeliveryLedgerEntries,
-    useDeliveryMerchantProfiles,
-    useDeliveryShipments,
     useLoans,
     usePaymentTransactions,
     useSales,
@@ -52,14 +45,13 @@ import {
     useWorkspaceUsers,
     type BusinessPartnerRole,
     type ClinicalAppointment,
-    type DeliveryShipment,
     type Loan,
     type PurchaseOrder,
     type PaymentTransaction,
     type Sale,
     type SalesOrder,
     type LoanInstallment,
-    db,
+    db
 } from '@/local-db'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
 import { Button } from '@/ui/components/button'
@@ -217,7 +209,7 @@ function sourceLabel(source: ActivitySource, t: TranslationFn) {
         case 'clinical_appointment':
             return t('clinicalAppointments.title', { defaultValue: 'Appointment' })
         case 'delivery_shipment':
-            return t('postService.title', { defaultValue: 'Post Service' })
+            return t('ledger.sourceModule.postService')
         case 'delivery_settlement':
             return t('businessPartners.sources.settlement', { defaultValue: 'Settlement' })
         case 'delivery_recipient_payout':
@@ -465,7 +457,7 @@ function normalizePaymentTransaction(
     const isDeliverySettlement = tx.sourceType === 'delivery_courier_remittance' || tx.sourceType === 'delivery_courier_fee_payout' || tx.sourceType === 'delivery_courier_reimbursement' || tx.sourceType === 'delivery_merchant_payout' || tx.sourceType === 'delivery_merchant_repayment'
     const isRecipientPayout = tx.sourceType === 'delivery_recipient_payout'
     const deliverySettlementLabel = isDeliverySettlement
-        ? t(`postService.settlementType.${tx.metadata?.deliverySettlementType === 'merchant_payout' ? 'merchantPayout' : tx.metadata?.deliverySettlementType === 'merchant_repayment' ? 'merchantRepayment' : tx.metadata?.deliverySettlementType === 'courier_fee_payout' ? 'courierFeePayout' : tx.metadata?.deliverySettlementType === 'courier_reimbursement' ? 'courierReimbursement' : 'courierRemittance'}`, { defaultValue: 'Settlement' })
+        ? t('businessPartners.sources.settlement')
         : null
     return {
         id: tx.id,
@@ -533,43 +525,6 @@ function normalizeClinicalAppointment(
     }
 }
 
-function normalizeDeliveryShipment(
-    shipment: DeliveryShipment,
-    currency: SalesOrder['currency'],
-    t: TranslationFn,
-    perspective: 'courier' | 'merchant',
-    paidAmount: number,
-    outstandingAmount: number
-): RelatedTransaction {
-    const total = perspective === 'courier'
-        ? shipment.codAmount + (shipment.feePayer === 'recipient' ? shipment.deliveryFee : 0)
-        : shipment.codAmount - (shipment.feePayer === 'merchant' ? shipment.deliveryFee : 0)
-    const recipientLabel = shipment.recipientPhone
-    return {
-        id: shipment.id,
-        source: 'delivery_shipment',
-        reference: shipment.trackingNumber,
-        displayDate: shipment.createdAt,
-        sortDate: shipment.updatedAt || shipment.deliveredAt || shipment.createdAt,
-        activityDate: shipment.deliveredAt || shipment.updatedAt || shipment.createdAt,
-        status: shipment.status,
-        statusLabel: t(`postService.status.${shipment.status}`, { defaultValue: shipment.status }),
-        isPaid: total > 0 && outstandingAmount <= 0.000001,
-        summary: recipientLabel,
-        total,
-        originalAmount: total,
-        paidAmount,
-        remainingAmount: outstandingAmount,
-        currency: shipment.currency,
-        totalInPartnerCurrency: convertCurrencyAmountWithSnapshot(total, shipment.currency, currency, undefined),
-        units: 0,
-        viewHref: '/post-service',
-        isActive: shipment.status !== 'cancelled',
-        isCompleted: shipment.status === 'delivered' || shipment.status === 'returned',
-        isOutstanding: outstandingAmount > 0.000001
-    }
-}
-
 export function PartnerDetailsView({
     workspaceId,
     partnerId,
@@ -611,9 +566,7 @@ export function PartnerDetailsView({
     const loans = useLoans(workspaceId)
     const paymentTransactions = usePaymentTransactions(workspaceId)
     const clinicalAppointments = useClinicalAppointments(workspaceId)
-    const deliveryShipments = useDeliveryShipments(workspaceId)
-    const deliveryLedgerEntries = useDeliveryLedgerEntries(workspaceId)
-    const deliveryMerchantProfiles = useDeliveryMerchantProfiles(workspaceId)
+
     const { dateRange, customDates } = useDateRange()
     const [customPrintTemplates, setCustomPrintTemplates] = useState<StoredCustomTemplateRow[]>([])
     const [selectedPrintTemplate, setSelectedPrintTemplate] = useState<StoredCustomTemplateRow | null>(null)
@@ -724,24 +677,7 @@ export function PartnerDetailsView({
         () => filterByDate(paymentTransactions, (tx) => tx.paidAt || tx.createdAt),
         [filterByDate, paymentTransactions]
     )
-    const dateFilteredDeliveryShipments = useMemo(
-        () => filterByDate(deliveryShipments),
-        [deliveryShipments, filterByDate]
-    )
-    const courierSettlementBreakdown = useMemo(
-        () => courierSettlementBreakdownByParty(deliveryLedgerEntries),
-        [deliveryLedgerEntries]
-    )
-    const merchantSettlementBreakdown = useMemo(
-        () => merchantSettlementBreakdownByParty(deliveryLedgerEntries),
-        [deliveryLedgerEntries]
-    )
-    const merchantProfileIds = useMemo(
-        () => new Set(deliveryMerchantProfiles
-            .filter((profile) => profile.businessPartnerId === partnerId)
-            .map((profile) => profile.id)),
-        [deliveryMerchantProfiles, partnerId]
-    )
+
     const partnerLoanIds = useMemo(() => partnerLoans.map(l => l.id), [partnerLoans])
     const linkedSaleReferenceById = useMemo(
         () => new Map(sales.map((sale) => [
@@ -973,19 +909,7 @@ export function PartnerDetailsView({
         return [...orderRows, ...saleRows].sort((a, b) => new Date(b.sortDate).getTime() - new Date(a.sortDate).getTime())
     }, [dateFilteredAgentPosSales, defaultCurrency, isSalesAccountProfile, linkedLoanByOrderId, performanceSalesOrders, t])
     const agentRecentRows = agentSoldRows
-    const merchantShipments = useMemo<RelatedTransaction[]>(() => {
-        if (merchantProfileIds.size === 0) return []
 
-        return dateFilteredDeliveryShipments
-            .filter((shipment) => merchantProfileIds.has(shipment.merchantProfileId))
-            .map((shipment) => {
-                const post = merchantSettlementBreakdown.get(`${shipment.merchantProfileId}:${shipment.currency}`)?.find((row) => row.shipmentId === shipment.id)
-                const total = shipment.codAmount - (shipment.feePayer === 'merchant' ? shipment.deliveryFee : 0)
-                const paid = post?.paid ?? 0
-                const outstanding = post?.outstanding ?? Math.max(0, total - paid)
-                return normalizeDeliveryShipment(shipment, defaultCurrency, t, 'merchant', paid, outstanding)
-            })
-    }, [dateFilteredDeliveryShipments, defaultCurrency, merchantProfileIds, merchantSettlementBreakdown, t])
     const agentTopProducts = useMemo<AgentTopProduct[]>(() => {
         const rows = new Map<string, {
             id: string
@@ -1124,10 +1048,9 @@ export function PartnerDetailsView({
                 undefined,
                 loan.saleId ? linkedSaleReferenceById.get(loan.saleId) : undefined
             )),
-            ...merchantShipments,
             ...dateFilteredPayments.map((tx) => normalizePaymentTransaction(tx, defaultCurrency, conversionRates, t))
         ],
-        [dateFilteredCustomerOrders, defaultCurrency, standaloneDateFilteredLoans, dateFilteredSupplierOrders, dateFilteredPayments, merchantShipments, conversionRates, linkedLoanByOrderId, linkedSaleReferenceById, t]
+        [ dateFilteredCustomerOrders, defaultCurrency, standaloneDateFilteredLoans, dateFilteredSupplierOrders, dateFilteredPayments, conversionRates, linkedLoanByOrderId, linkedSaleReferenceById, t ]
     )
     const sortedTransactions = useMemo(
         () => [...relatedTransactions].sort((a, b) => new Date(b.sortDate).getTime() - new Date(a.sortDate).getTime()),
@@ -1193,10 +1116,9 @@ export function PartnerDetailsView({
         const rows: RelatedTransaction[] = [
             ...dateFilteredSupplierOrders.map((order) => normalizePurchaseOrder(order, defaultCurrency, t, linkedLoanByOrderId.get(order.id))),
             ...dateFilteredClinicalAppointments.map((a) => normalizeClinicalAppointment(a, defaultCurrency, conversionRates, t)),
-            ...merchantShipments,
             ...dateFilteredPayments
                 .filter((tx) => tx.direction === 'incoming')
-                .map((tx) => normalizePaymentTransaction(tx, defaultCurrency, conversionRates, t)),
+                .map((tx) => normalizePaymentTransaction(tx, defaultCurrency, conversionRates, t))
         ]
         for (const loan of standaloneDateFilteredLoans) {
             const direction = getLoanDirection(loan)
@@ -1214,7 +1136,7 @@ export function PartnerDetailsView({
             }
         }
         return rows.sort((a, b) => new Date(b.sortDate).getTime() - new Date(a.sortDate).getTime())
-    }, [dateFilteredSupplierOrders, dateFilteredClinicalAppointments, dateFilteredPayments, merchantShipments, standaloneDateFilteredLoans, dateFilteredInstallments, defaultCurrency, conversionRates, linkedLoanByOrderId, linkedSaleReferenceById, t])
+    }, [ dateFilteredSupplierOrders, dateFilteredClinicalAppointments, dateFilteredPayments, standaloneDateFilteredLoans, dateFilteredInstallments, defaultCurrency, conversionRates, linkedLoanByOrderId, linkedSaleReferenceById, t ])
     const directTransactionsVolume = useMemo(
         () => dateFilteredPayments.reduce((sum, tx) => sum + convertToStoreBase(tx.amount, tx.currency, defaultCurrency, conversionRates), 0),
         [dateFilteredPayments, defaultCurrency, conversionRates]
@@ -1335,37 +1257,6 @@ export function PartnerDetailsView({
             ) ?? 0), 0),
         [dateFilteredLoans, defaultCurrency]
     )
-    const deliveryReceivableTotals = useMemo<CurrencyAmountItem[]>(() => {
-        const map = new Map<string, number>()
-        if (isAgentProfile && agent) {
-            for (const shipment of deliveryShipments) {
-                if (shipment.isDeleted || shipment.assignedAgentId !== agent.id) continue
-                const post = courierSettlementBreakdown.get(`${agent.id}:${shipment.currency}`)?.find((row) => row.shipmentId === shipment.id)
-                const outstanding = post?.outstanding ?? 0
-                if (outstanding > 0.000001) {
-                    const curr = (shipment.currency || defaultCurrency).toUpperCase()
-                    map.set(curr, (map.get(curr) || 0) + outstanding)
-                }
-            }
-        }
-        return Array.from(map.entries()).map(([currency, amount]) => ({ currency, amount }))
-    }, [agent, courierSettlementBreakdown, defaultCurrency, deliveryShipments, isAgentProfile])
-
-    const deliveryPayableTotals = useMemo<CurrencyAmountItem[]>(() => {
-        const map = new Map<string, number>()
-        if (merchantProfileIds.size > 0) {
-            for (const shipment of deliveryShipments) {
-                if (shipment.isDeleted || !merchantProfileIds.has(shipment.merchantProfileId)) continue
-                const post = merchantSettlementBreakdown.get(`${shipment.merchantProfileId}:${shipment.currency}`)?.find((row) => row.shipmentId === shipment.id)
-                const outstanding = post?.outstanding ?? 0
-                if (outstanding > 0.000001) {
-                    const curr = (shipment.currency || defaultCurrency).toUpperCase()
-                    map.set(curr, (map.get(curr) || 0) + outstanding)
-                }
-            }
-        }
-        return Array.from(map.entries()).map(([currency, amount]) => ({ currency, amount }))
-    }, [defaultCurrency, deliveryShipments, merchantProfileIds, merchantSettlementBreakdown])
 
     const receivableCurrencyTotals = useMemo<CurrencyAmountItem[]>(() => {
         if (partner?.summarySource === 'server') return partner.receivableCurrencyTotals ?? []
@@ -1384,11 +1275,9 @@ export function PartnerDetailsView({
                 map.set(curr, (map.get(curr) || 0) + loan.balanceAmount)
             }
         }
-        for (const item of deliveryReceivableTotals) {
-            map.set(item.currency, (map.get(item.currency) || 0) + item.amount)
-        }
+
         return Array.from(map.entries()).map(([currency, amount]) => ({ currency, amount }))
-    }, [customerOrders, defaultCurrency, deliveryReceivableTotals, partnerLoans, partner?.summarySource, partner?.receivableCurrencyTotals])
+    }, [ customerOrders, defaultCurrency, partnerLoans, partner?.summarySource, partner?.receivableCurrencyTotals ])
 
     const payableCurrencyTotals = useMemo<CurrencyAmountItem[]>(() => {
         if (partner?.summarySource === 'server') return partner.payableCurrencyTotals ?? []
@@ -1407,11 +1296,9 @@ export function PartnerDetailsView({
                 map.set(curr, (map.get(curr) || 0) + loan.balanceAmount)
             }
         }
-        for (const item of deliveryPayableTotals) {
-            map.set(item.currency, (map.get(item.currency) || 0) + item.amount)
-        }
+
         return Array.from(map.entries()).map(([currency, amount]) => ({ currency, amount }))
-    }, [defaultCurrency, deliveryPayableTotals, partnerLoans, supplierOrders, partner?.summarySource, partner?.payableCurrencyTotals])
+    }, [ defaultCurrency, partnerLoans, supplierOrders, partner?.summarySource, partner?.payableCurrencyTotals ])
 
     const outstandingCurrencyTotals = useMemo<CurrencyAmountItem[]>(() => {
         const map = new Map<string, number>()
@@ -2533,9 +2420,9 @@ export function PartnerDetailsView({
                                     </div>
                                     <div className={cn(
                                         'mt-4 grid gap-3',
-                                        (relationshipReceivable > 0 || deliveryReceivableTotals.length > 0) && (relationshipPayable > 0 || deliveryPayableTotals.length > 0) && 'sm:grid-cols-2'
+                                        (relationshipReceivable > 0) && (relationshipPayable > 0) && 'sm:grid-cols-2'
                                     )}>
-                                        {relationshipReceivable > 0 || deliveryReceivableTotals.length > 0 ? (
+                                        {relationshipReceivable > 0 ? (
                                             <div className="rounded-2xl border border-emerald-200/50 bg-emerald-500/[0.06] p-4">
                                                 <div className="text-base font-semibold leading-relaxed text-emerald-800 dark:text-emerald-300">
                                                     {t('businessPartners.owesAmountTo', {
@@ -2553,7 +2440,7 @@ export function PartnerDetailsView({
                                                 </div>
                                             </div>
                                         ) : null}
-                                        {relationshipPayable > 0 || deliveryPayableTotals.length > 0 ? (
+                                        {relationshipPayable > 0 ? (
                                             <div className="rounded-2xl border border-amber-200/50 bg-amber-500/[0.06] p-4">
                                                 <div className="text-base font-semibold leading-relaxed text-amber-800 dark:text-amber-300">
                                                     {t('businessPartners.owesAmountTo', {
@@ -2571,8 +2458,7 @@ export function PartnerDetailsView({
                                                 </div>
                                             </div>
                                         ) : null}
-                                        {relationshipReceivable <= 0 && relationshipPayable <= 0
-                                            && deliveryReceivableTotals.length === 0 && deliveryPayableTotals.length === 0 ? (
+                                        {relationshipReceivable <= 0 && relationshipPayable <= 0 ? (
                                             <div className="rounded-2xl border bg-background/70 p-4 text-base font-semibold leading-relaxed text-muted-foreground">
                                                 {t('businessPartners.noOutstandingDebtBetween', {
                                                     first: partnerRelationshipName,

@@ -1,3 +1,4 @@
+import { RETIRED_ENTITY_TYPES } from './retiredEntities'
 import type Dexie from "dexie";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -118,17 +119,6 @@ export const LOCAL_MODE_SQLITE_TABLES = [
   "rental_vehicles",
   "rental_requests",
   "rental_contracts",
-  "delivery_merchant_profiles",
-  "delivery_shipments",
-  "delivery_shipment_events",
-  "delivery_shipment_cod_adjustment_requests",
-  "delivery_shipment_cod_corrections",
-  "delivery_shipment_recipient_payout_corrections",
-  "delivery_shipment_recipient_payout_adjustment_requests",
-  "delivery_runs",
-  "delivery_run_items",
-  "delivery_settlements",
-  "delivery_ledger_entries",
   "business_partners",
   "business_partner_groups",
   "business_partner_group_users",
@@ -187,14 +177,13 @@ export const LOCAL_MODE_SQLITE_TABLES = [
   "profiles",
   "local_account_credentials",
   "workspace_permissions",
-  // Hybrid recovery must restore the mutation journal alongside pending entities.
   "offline_mutations",
   "manual_entry_templates",
   "manual_entries",
   "clinical_appointments",
   "clinical_patients",
   "clinical_attachments",
-  "clinical_presets",
+  "clinical_presets"
 ] as const;
 
 export type LocalModeSqliteTableName =
@@ -560,11 +549,20 @@ async function purgeRetiredModuleEntities(connection: SqliteConnection) {
   );
 }
 
-async function purgeRetiredRecipientPayoutSettlementObligations(connection: SqliteConnection) {
+async function purgeRetiredOperationalEntities(connection: SqliteConnection) {
   await connection.execute(
-    'DELETE FROM local_entities WHERE entity_type = $1',
-    ['delivery_shipment_settlement_obligations'],
+    "UPDATE local_entities SET payload = json_remove(payload, '$.courierDeliveryFee', '$.courier_delivery_fee') WHERE entity_type = 'agents' AND (json_type(payload, '$.courierDeliveryFee') IS NOT NULL OR json_type(payload, '$.courier_delivery_fee') IS NOT NULL)",
   );
+  for (const entityType of RETIRED_ENTITY_TYPES) {
+    await connection.execute(
+      'DELETE FROM local_entities WHERE entity_type = $1',
+      [entityType],
+    );
+    await connection.execute(
+      "DELETE FROM local_entities WHERE entity_type IN ('offline_mutations', 'syncQueue') AND json_extract(payload, '$.entityType') = $1",
+      [entityType],
+    );
+  }
 }
 
 async function ensureCashierShiftActiveClaimsTable(
@@ -743,7 +741,7 @@ async function ensureConnection() {
       await ensureInventoryDeficitTriggers(connection);
       await ensureCashierShiftActiveClaimsTable(connection);
       await purgeRetiredModuleEntities(connection);
-      await purgeRetiredRecipientPayoutSettlementObligations(connection);
+      await purgeRetiredOperationalEntities(connection);
       return connection;
     })().catch((error) => {
       sqlitePromise = null;

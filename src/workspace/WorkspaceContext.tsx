@@ -79,7 +79,6 @@ export interface WorkspaceFeatures {
     agents: boolean
     sales_agent_commissions: boolean
     agent_sales_accounts: boolean
-    post_service: boolean
     car_rental: boolean
     garden_management: boolean
     travel_transportation: boolean
@@ -191,7 +190,6 @@ const PLAN_DERIVED_FEATURE_KEYS: ModuleFeatureKey[] = [
     'agents',
     'sales_agent_commissions',
     'agent_sales_accounts',
-    'post_service',
     'car_rental',
     'garden_management',
     'travel_transportation',
@@ -277,7 +275,6 @@ const defaultFeatures: WorkspaceFeatures = {
     activities: false,
     currency_exchange: false,
     agents: false,
-    post_service: false,
     car_rental: false,
     garden_management: false,
     travel_transportation: false,
@@ -401,7 +398,6 @@ function getFeaturesFromLocalWorkspace(localWorkspace: Workspace): WorkspaceFeat
         activities: localWorkspace.activities ?? false,
         currency_exchange: localWorkspace.currency_exchange ?? false,
         agents: localWorkspace.agents ?? false,
-        post_service: localWorkspace.post_service ?? false,
         car_rental: localWorkspace.car_rental ?? false,
         clinical_appointments: localWorkspace.clinical_appointments ?? false,
         is_configured: localWorkspace.is_configured,
@@ -576,7 +572,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             activities: nextFeatures.activities,
             currency_exchange: nextFeatures.currency_exchange,
             agents: nextFeatures.agents,
-            post_service: nextFeatures.post_service,
             car_rental: nextFeatures.car_rental,
             clinical_appointments: nextFeatures.clinical_appointments,
             loans: nextFeatures.loans,
@@ -810,7 +805,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 activities: currentFeatures.activities,
                 currency_exchange: currentFeatures.currency_exchange,
                 agents: currentFeatures.agents,
-                post_service: currentFeatures.post_service,
                 car_rental: currentFeatures.car_rental,
                 clinical_appointments: currentFeatures.clinical_appointments,
                 is_configured: workspaceRow.is_configured ?? currentFeatures.is_configured,
@@ -1097,7 +1091,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                             real_estate: data.real_estate ?? currentFeatures.real_estate,
                             currency_exchange: currentFeatures.currency_exchange,
                             agents: currentFeatures.agents,
-                            post_service: currentFeatures.post_service,
                             car_rental: currentFeatures.car_rental,
                             clinical_appointments: currentFeatures.clinical_appointments,
                             is_configured: data.is_configured ?? currentFeatures.is_configured,
@@ -1485,7 +1478,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                 real_estate: newFeatures.real_estate,
                 currency_exchange: newFeatures.currency_exchange,
                 agents: newFeatures.agents,
-                post_service: newFeatures.post_service,
                 clinical_appointments: newFeatures.clinical_appointments,
                 default_currency: newFeatures.default_currency,
                 pos_convert_to_workspace_currency: newFeatures.pos_convert_to_workspace_currency,

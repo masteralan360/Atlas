@@ -251,7 +251,7 @@ export function OrderAgentCommissionCard({
                             {t('salesAgentCommissions.noSellingAgent')}
                         </div>
                     )}
-                    <p className="text-xs text-muted-foreground">{t('salesAgentCommissions.postServiceOptional')}</p>
+
             </CardContent>
         </Card>
     )

@@ -95,9 +95,6 @@ import {
     useBusinessPartners,
     useExchangeTransactions,
     useAgents,
-    useDeliveryMerchantProfiles,
-    useDeliverySettlements,
-    useDeliveryShipments,
     type CurrencyCode,
     type IQDDisplayPreference,
     type Loan,
@@ -105,7 +102,7 @@ import {
     type RealEstateTransaction,
     type Sale,
     type SalesOrder,
-    type PurchaseOrder,
+    type PurchaseOrder
 } from '@/local-db'
 import { cn, formatCurrency, formatDate, formatDateTime, formatNumericInput, sanitizeNumericInput } from '@/lib/utils'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
@@ -240,10 +237,7 @@ const LEDGER_FRESHNESS_TABLES = [
     'purchase_orders',
     'business_partners',
     'agents',
-    'delivery_merchant_profiles',
-    'delivery_settlements',
-    'delivery_shipments',
-    'exchange_transactions',
+    'exchange_transactions'
 ] as const
 
 // Set to true to restore the supplementary Ledger analytics and Gross Surplus widgets.
@@ -520,7 +514,7 @@ function sourceModuleLabel(module: LedgerSourceModule, t: any) {
         case 'orders':
             return t('ledger.sourceModule.orders', { defaultValue: 'Orders' })
         case 'order_financing':
-            return t('ledger.sourceModule.orderFinancing', { defaultValue: 'Orders · Order Loan' })
+            return t('ledger.sourceModule.orderFinancing', { defaultValue: 'Orders Â· Order Loan' })
         case 'expenses':
             return t('ledger.sourceModule.expenses', { defaultValue: 'Expenses' })
         case 'payroll':
@@ -897,7 +891,7 @@ function buildExchangeLedgerEntry(tx: any): LedgerEntry | null {
         paymentMethod: tx.paymentMethod || null,
         notes: tx.notes || null,
         description:
-            tx.notes || `${tx.customerGivesAmount} ${tx.fromCurrency} → ${tx.customerReceivesAmount} ${tx.toCurrency} @ ${tx.exchangeRateUsed}`,
+            tx.notes || `${tx.customerGivesAmount} ${tx.fromCurrency} â†’ ${tx.customerReceivesAmount} ${tx.toCurrency} @ ${tx.exchangeRateUsed}`,
         routePath: '/currency-exchange',
     }
 }
@@ -929,20 +923,10 @@ interface LedgerBuildContext {
     salesOrderById: Map<string, SalesOrder>
     purchaseOrderById: Map<string, PurchaseOrder>
     businessPartnerByName: Map<string, string>
-    deliverySettlementById: Map<
-        string,
-        {
-            agentId?: string | null
-            merchantProfileId?: string | null
-            businessPartnerId?: string | null
-            shipmentId?: string | null
-        }
-    >
-    deliveryShipmentById: Map<string, { trackingNumber: string; recipientPhone: string }>
+
     agentNameById: Map<string, string>
     agentBusinessPartnerIdById: Map<string, string>
-    merchantNameByProfileId: Map<string, string>
-    merchantBusinessPartnerIdByProfileId: Map<string, string>
+
 }
 
 function getSaleStorageIds(sale: Sale | undefined) {
@@ -1450,153 +1434,10 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
         case 'delivery_merchant_payout':
         case 'delivery_recipient_payout':
         case 'delivery_merchant_repayment': {
-            const isCourierRemittance = transaction.sourceType === 'delivery_courier_remittance'
-            const isCourierFeePayout = transaction.sourceType === 'delivery_courier_fee_payout'
-            const isCourierReimbursement = transaction.sourceType === 'delivery_courier_reimbursement'
-            const isRecipientPayout = transaction.sourceType === 'delivery_recipient_payout'
-            const isMerchantRepayment = transaction.sourceType === 'delivery_merchant_repayment'
-            const settlement = context.deliverySettlementById.get(transaction.sourceRecordId)
-            const metadataAgentId = typeof transaction.metadata?.deliveryAgentId === 'string' ? transaction.metadata.deliveryAgentId : null
-            const metadataProfileId =
-                typeof transaction.metadata?.deliveryMerchantProfileId === 'string' ? transaction.metadata.deliveryMerchantProfileId : null
-            const metadataShipmentId =
-                typeof transaction.metadata?.deliveryShipmentId === 'string' ? transaction.metadata.deliveryShipmentId : null
-            const agentId = settlement?.agentId || metadataAgentId
-            const merchantProfileId = settlement?.merchantProfileId || metadataProfileId
-            const shipmentId = settlement?.shipmentId || metadataShipmentId
-            const shipment = shipmentId ? context.deliveryShipmentById.get(shipmentId) : null
-            const linkedBusinessPartnerId = isRecipientPayout
-                ? null
-                : settlement?.businessPartnerId ||
-                  (typeof transaction.metadata?.businessPartnerId === 'string' ? transaction.metadata.businessPartnerId : null) ||
-                  (agentId ? context.agentBusinessPartnerIdById.get(agentId) : null) ||
-                  (merchantProfileId ? context.merchantBusinessPartnerIdByProfileId.get(merchantProfileId) : null) ||
-                  null
-            const partner =
-                transaction.counterpartyName ||
-                (agentId ? context.agentNameById.get(agentId) : null) ||
-                (merchantProfileId ? context.merchantNameByProfileId.get(merchantProfileId) : null) ||
-                null
-            const relation = shipmentId
-                ? {
-                      // The two real cash movements for one post belong to the
-                      // same visual chain in Ledger, even when each is settled
-                      // in several partial payments.
-                      relationKey: `delivery-shipment:${shipmentId}`,
-                      relationRole: isCourierRemittance || isRecipientPayout ? ('origin' as const) : ('settlement' as const),
-                      relationTitle: isCourierRemittance
-                          ? t('ledger.type.deliveryCourierRemittance', {
-                                defaultValue: 'Courier Remittance',
-                            })
-                          : isCourierFeePayout
-                            ? t('ledger.type.deliveryCourierFeePayout', {
-                                  defaultValue: 'Courier Fee Payment',
-                              })
-                            : isCourierReimbursement
-                              ? t('ledger.type.deliveryCourierReimbursement', {
-                                    defaultValue: 'Courier Reimbursement',
-                                })
-                              : isRecipientPayout
-                                ? t('ledger.type.deliveryRecipientPayout', {
-                                      defaultValue: 'Recipient Payout',
-                                  })
-                                : isMerchantRepayment
-                                  ? t('ledger.type.deliveryMerchantRepayment', {
-                                        defaultValue: 'Merchant Repayment',
-                                    })
-                                  : t('ledger.type.deliveryMerchantPayout', {
-                                        defaultValue: 'Merchant Payout',
-                                    }),
-                      relationDescription: isCourierRemittance
-                          ? t('ledger.description.deliveryPostCourierRelation', {
-                                defaultValue: 'Post {{tracking}} · courier cash handover for {{recipient}}.',
-                                tracking: shipment?.trackingNumber || shipmentId,
-                                recipient: shipment?.recipientPhone || t('common.unknown', { defaultValue: 'Unknown recipient' }),
-                            })
-                          : isCourierFeePayout
-                            ? t('ledger.description.deliveryPostCourierFeePayoutRelation', {
-                                  defaultValue: 'Post {{tracking}} · courier fee paid to {{recipient}}.',
-                                  tracking: shipment?.trackingNumber || shipmentId,
-                                  recipient:
-                                      shipment?.recipientPhone ||
-                                      t('common.unknown', {
-                                          defaultValue: 'Unknown recipient',
-                                      }),
-                              })
-                            : isCourierReimbursement
-                              ? t('ledger.description.deliveryPostCourierReimbursementRelation', {
-                                    defaultValue: 'Post {{tracking}} · courier reimbursed for their advance to {{recipient}}.',
-                                    tracking: shipment?.trackingNumber || shipmentId,
-                                    recipient:
-                                        shipment?.recipientPhone ||
-                                        t('common.unknown', {
-                                            defaultValue: 'Unknown recipient',
-                                        }),
-                                })
-                              : isRecipientPayout
-                                ? t('ledger.description.deliveryPostRecipientPayoutRelation', {
-                                      defaultValue: 'Post {{tracking}} · payout made to {{recipient}}.',
-                                      tracking: shipment?.trackingNumber || shipmentId,
-                                      recipient:
-                                          shipment?.recipientPhone ||
-                                          t('common.unknown', {
-                                              defaultValue: 'Unknown recipient',
-                                          }),
-                                  })
-                                : isMerchantRepayment
-                                  ? t('ledger.description.deliveryPostMerchantRepaymentRelation', {
-                                        defaultValue: 'Post {{tracking}} · payment received from the merchant for {{recipient}}.',
-                                        tracking: shipment?.trackingNumber || shipmentId,
-                                        recipient:
-                                            shipment?.recipientPhone ||
-                                            t('common.unknown', {
-                                                defaultValue: 'Unknown recipient',
-                                            }),
-                                    })
-                                  : t('ledger.description.deliveryPostMerchantRelation', {
-                                        defaultValue: 'Post {{tracking}} · merchant payout for {{recipient}}.',
-                                        tracking: shipment?.trackingNumber || shipmentId,
-                                        recipient:
-                                            shipment?.recipientPhone ||
-                                            t('common.unknown', {
-                                                defaultValue: 'Unknown recipient',
-                                            }),
-                                    }),
-                  }
-                : {
-                      // A party-level settlement has no truthful per-post
-                      // relation, so retain an isolated settlement descriptor.
-                      relationKey: `delivery-settlement:${transaction.sourceRecordId}`,
-                      relationRole: 'settlement' as const,
-                      relationTitle: isCourierRemittance
-                          ? t('ledger.type.deliveryCourierRemittance', {
-                                defaultValue: 'Courier Remittance',
-                            })
-                          : isCourierFeePayout
-                            ? t('ledger.type.deliveryCourierFeePayout', {
-                                  defaultValue: 'Courier Fee Payment',
-                              })
-                            : isCourierReimbursement
-                              ? t('ledger.type.deliveryCourierReimbursement', {
-                                    defaultValue: 'Courier Reimbursement',
-                                })
-                              : isRecipientPayout
-                                ? t('ledger.type.deliveryRecipientPayout', {
-                                      defaultValue: 'Recipient Payout',
-                                  })
-                                : isMerchantRepayment
-                                  ? t('ledger.type.deliveryMerchantRepayment', {
-                                        defaultValue: 'Merchant Repayment',
-                                    })
-                                  : t('ledger.type.deliveryMerchantPayout', {
-                                        defaultValue: 'Merchant Payout',
-                                    }),
-                      relationDescription: t('ledger.description.deliverySettlementRelation', {
-                          defaultValue: 'Post Service settlement {{reference}}.',
-                          reference: buildTransactionReference(transaction),
-                      }),
-                  }
-
+            const shipmentId = typeof transaction.metadata?.deliveryShipmentId === 'string'
+                ? transaction.metadata.deliveryShipmentId : null
+            const businessPartnerId = typeof transaction.metadata?.businessPartnerId === 'string'
+                ? transaction.metadata.businessPartnerId : null
             return {
                 id: `payment:${transaction.id}`,
                 transactionId: transaction.id,
@@ -1607,37 +1448,19 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
                 currency: transaction.currency,
                 sourceModule: 'post_service',
                 referenceId: buildTransactionReference(transaction),
-                partner,
-                businessPartnerId: linkedBusinessPartnerId,
+                partner: transaction.counterpartyName || null,
+                businessPartnerId,
                 paymentMethod: transaction.paymentMethod || 'unknown',
                 notes: transaction.note?.trim() || null,
-                description:
-                    buildTransactionDescription(transaction, t) ||
-                    (isCourierRemittance
-                        ? t('ledger.description.deliveryCourierRemittance', {
-                              defaultValue: 'Courier cash handover',
-                          })
-                        : isCourierFeePayout
-                          ? t('ledger.description.deliveryCourierFeePayout', {
-                                defaultValue: 'Courier fee payment',
-                            })
-                          : isCourierReimbursement
-                            ? t('ledger.description.deliveryCourierReimbursement', {
-                                  defaultValue: 'Courier reimbursement',
-                              })
-                            : isRecipientPayout
-                              ? t('ledger.description.deliveryRecipientPayout', {
-                                    defaultValue: 'Recipient payout',
-                                })
-                              : isMerchantRepayment
-                                ? t('ledger.description.deliveryMerchantRepayment', {
-                                      defaultValue: 'Merchant repayment received',
-                                  })
-                                : t('ledger.description.deliveryMerchantPayout', {
-                                      defaultValue: 'Merchant payout',
-                                  })),
-                routePath: getPaymentTransactionRoutePath(transaction),
-                ...relation,
+                description: buildTransactionDescription(transaction, t) || ledgerTypeLabel(transaction.sourceType, t),
+                routePath: '/payments',
+                ...(shipmentId ? {
+                    relationKey: `delivery-shipment:${shipmentId}`,
+                    relationRole: transaction.sourceType === 'delivery_courier_remittance' || transaction.sourceType === 'delivery_recipient_payout'
+                        ? 'origin' as const : 'settlement' as const,
+                    relationTitle: ledgerTypeLabel(transaction.sourceType, t),
+                    relationDescription: buildTransactionReference(transaction),
+                } : {}),
             }
         }
         case 'loan_origination': {
@@ -2024,7 +1847,6 @@ export function Ledger() {
         features.real_estate ||
         features.activities ||
         features.clinical_appointments ||
-        features.post_service ||
         features.car_rental ||
         features.travel_transportation
 
@@ -2050,9 +1872,7 @@ export function Ledger() {
         includeAgentRoles: true,
     })
     const agents = useAgents(workspaceId)
-    const deliveryMerchantProfiles = useDeliveryMerchantProfiles(workspaceId)
-    const deliverySettlements = useDeliverySettlements(workspaceId)
-    const deliveryShipments = useDeliveryShipments(workspaceId)
+
     const rawExchangeTransactions = useExchangeTransactions(workspaceId)
     const ledgerPaymentTransactions = useMemo(() => getLedgerPaymentTransactions(paymentTransactions), [paymentTransactions])
     const ledgerCashMovementEntries = useMemo(
@@ -2157,25 +1977,6 @@ export function Ledger() {
         [agents, businessPartnerNameById],
     )
     const agentBusinessPartnerIdById = useMemo(() => new Map(agents.map((agent) => [agent.id, agent.businessPartnerId] as const)), [agents])
-    const merchantNameByProfileId = useMemo(
-        () =>
-            new Map(
-                deliveryMerchantProfiles.map((profile) => [profile.id, businessPartnerNameById.get(profile.businessPartnerId) || ''] as const),
-            ),
-        [businessPartnerNameById, deliveryMerchantProfiles],
-    )
-    const merchantBusinessPartnerIdByProfileId = useMemo(
-        () => new Map(deliveryMerchantProfiles.map((profile) => [profile.id, profile.businessPartnerId] as const)),
-        [deliveryMerchantProfiles],
-    )
-    const deliverySettlementById = useMemo(
-        () => new Map(deliverySettlements.map((settlement) => [settlement.id, settlement] as const)),
-        [deliverySettlements],
-    )
-    const deliveryShipmentById = useMemo(
-        () => new Map(deliveryShipments.map((shipment) => [shipment.id, shipment] as const)),
-        [deliveryShipments],
-    )
 
     const allEntries = useMemo(() => {
         const context: LedgerBuildContext = {
@@ -2186,12 +1987,8 @@ export function Ledger() {
             salesOrderById,
             purchaseOrderById,
             businessPartnerByName,
-            deliverySettlementById,
-            deliveryShipmentById,
             agentNameById,
-            agentBusinessPartnerIdById,
-            merchantNameByProfileId,
-            merchantBusinessPartnerIdByProfileId,
+            agentBusinessPartnerIdById
         }
         const paymentEntries: LedgerEntry[] = ledgerPaymentTransactions
             .map<LedgerEntry | null>((transaction) => {
@@ -2223,14 +2020,10 @@ export function Ledger() {
         salesOrderById,
         purchaseOrderById,
         businessPartnerByName,
-        deliverySettlementById,
-        deliveryShipmentById,
         agentNameById,
         agentBusinessPartnerIdById,
-        merchantNameByProfileId,
-        merchantBusinessPartnerIdByProfileId,
         rawExchangeTransactions,
-        t,
+        t
     ])
 
     const finalSettlementIndex = useMemo(() => {
@@ -2511,7 +2304,7 @@ export function Ledger() {
         const salesOrder = salesOrderById.get(historySelectedTransaction.sourceRecordId)
         if (salesOrder) {
             const order = salesOrder
-            return `${t(`orders.status.${order.status}`, { defaultValue: order.status })} · ${t(`orders.status.${order.paymentStatus}`, {
+            return `${t(`orders.status.${order.status}`, { defaultValue: order.status })} Â· ${t(`orders.status.${order.paymentStatus}`, {
                 defaultValue: order.paymentStatus,
             })}`
         }
@@ -2519,7 +2312,7 @@ export function Ledger() {
         const purchaseOrder = purchaseOrderById.get(historySelectedTransaction.sourceRecordId)
         if (purchaseOrder) {
             const order = purchaseOrder
-            return `${t(`orders.status.${order.status}`, { defaultValue: order.status })} · ${t(`orders.status.${order.paymentStatus}`, {
+            return `${t(`orders.status.${order.status}`, { defaultValue: order.status })} Â· ${t(`orders.status.${order.paymentStatus}`, {
                 defaultValue: order.paymentStatus,
             })}`
         }
@@ -3135,7 +2928,7 @@ export function Ledger() {
                                 const finalProjection = finalSettlementIndex.byTransactionId.get(entry.transactionId) ?? null
                                 const isReferenceIdTruncated = entry.referenceId.length > 15
                                 const displayedReferenceId = isReferenceIdTruncated
-                                    ? `${entry.referenceId.slice(0, 15)}…`
+                                    ? `${entry.referenceId.slice(0, 15)}â€¦`
                                     : entry.referenceId
                                 const entryHighlightKey = getEntryHighlightKey(entry)
                                 const isRelationHovered = !!hoveredRelationKey && entryHighlightKey === hoveredRelationKey
@@ -3271,7 +3064,7 @@ export function Ledger() {
                                         <div>
                                             <div className="text-[9px] font-black uppercase tracking-[0.16em] text-muted-foreground">
                                                 {t('ledger.settlement.finalAllDates', {
-                                                    defaultValue: 'Final settlement · all dates',
+                                                    defaultValue: 'Final settlement Â· all dates',
                                                 })}
                                             </div>
                                             <div className="mt-1 flex items-center justify-between gap-4">

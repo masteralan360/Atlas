@@ -24,7 +24,6 @@ export type PlanModuleKey =
     | 'agents'
     | 'sales_agent_commissions'
     | 'agent_sales_accounts'
-    | 'post_service'
     | 'car_rental'
     | 'garden_management'
     | 'travel_transportation'
@@ -61,7 +60,6 @@ export type WorkspaceFeatureKey =
     | 'agents'
     | 'sales_agent_commissions'
     | 'agent_sales_accounts'
-    | 'post_service'
     | 'car_rental'
     | 'garden_management'
     | 'travel_transportation'
@@ -257,7 +255,6 @@ export const WORKSPACE_FEATURE_MODULE_MAP: Record<WorkspaceFeatureKey, PlanModul
     agents: 'agents',
     sales_agent_commissions: 'sales_agent_commissions',
     agent_sales_accounts: 'agent_sales_accounts',
-    post_service: 'post_service',
     car_rental: 'car_rental',
     garden_management: 'garden_management',
     travel_transportation: 'travel_transportation',
@@ -381,6 +378,8 @@ export function applyWorkspaceOverrides(
     const limits = { ...resolved.limits }
 
     for (const override of overrides) {
+        // Persisted grants from older clients cannot restore a retired workflow.
+        if (override.type === 'module' && override.key.trim().toLowerCase() === 'post_service') continue
         const val = override.value ?? 'grant'
         switch (override.type) {
             case 'module': {

@@ -406,7 +406,7 @@ function getTransactionRoutePath(transaction: Pick<PaymentTransaction, 'sourceMo
   }
 
   if (transaction.sourceModule === 'post_service') {
-    return '/post-service'
+    return '/payments'
   }
 
   if (transaction.sourceModule === 'car_rental') {
@@ -703,8 +703,6 @@ function acquirePaymentSourceTablesHydration(workspaceId: string): PaymentSource
     acquireTableHydrationFromSupabase('agent_commission_entries', db.agent_commission_entries, workspaceId, { includeDeleted: true }),
     acquireTableHydrationFromSupabase('agent_product_commission_entries', db.agent_product_commission_entries, workspaceId, { includeDeleted: true }),
     acquireTableHydrationFromSupabase('partner_settlement_operations', db.partner_settlement_operations, workspaceId, { includeDeleted: true }),
-    acquireTableHydrationFromSupabase('delivery_merchant_profiles', db.delivery_merchant_profiles, workspaceId, { includeDeleted: true }),
-    acquireTableHydrationFromSupabase('delivery_ledger_entries', db.delivery_ledger_entries, workspaceId, { includeDeleted: true }),
     acquireTableHydrationFromSupabase('clinical_appointments', db.clinical_appointments, workspaceId, {
       includeDeleted: true
     }),
@@ -1301,9 +1299,7 @@ async function applySalesAccountAgentStatementCredits(
   )
   if (candidatePartnerIds.size === 0) return obligations
 
-  const [rawPartners, agents, loanPayments, orderReturns, orderReturnItems,
-    commissionEntries, productCommissionEntries, installmentSales, merchantProfiles,
-    deliveryLedgerEntries, settlementOperations] = await Promise.all([
+  const [rawPartners, agents, loanPayments, orderReturns, orderReturnItems, commissionEntries, productCommissionEntries, installmentSales, settlementOperations] = await Promise.all([
     db.business_partners.where('workspaceId').equals(workspaceId).toArray(),
     db.agents.where('workspaceId').equals(workspaceId).toArray(),
     db.loan_payments.where('workspaceId').equals(workspaceId).toArray(),
@@ -1312,8 +1308,6 @@ async function applySalesAccountAgentStatementCredits(
     db.agent_commission_entries.where('workspaceId').equals(workspaceId).toArray(),
     db.agent_product_commission_entries.where('workspaceId').equals(workspaceId).toArray(),
     db.installment_sales.where('workspaceId').equals(workspaceId).toArray(),
-    db.delivery_merchant_profiles.where('workspaceId').equals(workspaceId).toArray(),
-    db.delivery_ledger_entries.where('workspaceId').equals(workspaceId).toArray(),
     db.partner_settlement_operations.where('workspaceId').equals(workspaceId).toArray()
   ])
   const visiblePartners = await filterBusinessPartnersByGroupPrivacy(
@@ -1386,27 +1380,7 @@ async function applySalesAccountAgentStatementCredits(
         && transaction.metadata?.businessPartnerId === partner.id
         && isDirectTransactionPartnerAccountEffect(transaction.metadata?.partnerAccountEffect)
     })
-    const merchantProfileIds = new Set(
-      merchantProfiles
-        .filter((profile) => !profile.isDeleted && profile.businessPartnerId === partner.id)
-        .map((profile) => profile.id)
-    )
-    const merchantKinds = new Set([
-      'merchant_cod_payable',
-      'merchant_cod_correction',
-      'merchant_recipient_payout_correction',
-      'merchant_fee',
-      'merchant_recipient_payout',
-      'merchant_payout',
-      'merchant_repayment',
-      'adjustment'
-    ])
-    const partnerDeliveryEntries = deliveryLedgerEntries.filter((entry) => (
-      !entry.isDeleted
-      && merchantKinds.has(entry.kind)
-      && ((entry.merchantProfileId != null && merchantProfileIds.has(entry.merchantProfileId))
-        || entry.businessPartnerId === partner.id)
-    ))
+
     const statementData: PartnerAccountStatementData = {
       partnerId: partner.id,
       period: { type: 'allTime' },
@@ -1436,8 +1410,7 @@ async function applySalesAccountAgentStatementCredits(
       )),
       agentProductCommissionEntries: productCommissionEntries.filter((entry) => (
         !entry.isDeleted && agentIds.has(entry.agentId)
-      )),
-      deliveryLedgerEntries: partnerDeliveryEntries
+      ))
     }
     const partnerObligations = obligations.filter((obligation) => (
       getMetadataString(obligation.metadata, 'businessPartnerId') === partner.id

@@ -201,7 +201,7 @@ function resolveSourceLabel(
         case 'pos_sale_installment_loan':
             return t('loans.posSaleInstallmentLoan', { defaultValue: 'POS Sale Installment Loan' })
         case 'delivery_shipment':
-            return t('postService.title', { defaultValue: 'Post Service' })
+            return t('ledger.sourceModule.postService')
         case 'delivery_settlement':
             return t('businessPartners.sources.settlement', { defaultValue: 'Settlement' })
         case 'delivery_recipient_payout':

@@ -3,7 +3,7 @@ import { isSchemaMismatchError, isSyncIntegrityError } from '@/sync/syncErrors'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import { db } from './database'
-import type { BusinessPartner, DeliveryMerchantProfile, OfflineMutation } from './models'
+import type { OfflineMutation } from './models'
 
 const LOCAL_ONLY_ENTITY_TYPES = new Set<OfflineMutation['entityType']>([
     'inventory_transfer_transactions'
@@ -213,107 +213,12 @@ async function repairTravelPassengerWorkspaceMutations(
     return unrepairedMutationIds
 }
 
-async function queueRedispatchedPostponedVoiceCleanup(
-    workspaceId: string,
-    mutations: OfflineMutation[]
-) {
-    const shipmentMutations = mutations.filter((mutation) => (
-        mutation.entityType === 'delivery_shipments'
-        && mutation.payload.status === 'assigned'
-    ))
-
-    for (const mutation of shipmentMutations) {
-        const shipment = await db.delivery_shipments.get(mutation.entityId)
-        if (!shipment || shipment.isDeleted || shipment.workspaceId !== workspaceId || shipment.status !== 'assigned') continue
-
-        const events = await db.delivery_shipment_events
-            .where('[workspaceId+shipmentId]')
-            .equals([workspaceId, shipment.id])
-            .toArray()
-        const postponedEvents = events.filter((event) => (
-            !event.isDeleted
-            && event.status === 'postponed'
-            && typeof event.voiceReasonPath === 'string'
-            && event.voiceReasonPath.startsWith(`${workspaceId}/${shipment.id}/postponed/`)
-            && event.voiceReasonPath.endsWith('.flac')
-        ))
-        const paths = [...new Set(postponedEvents.map((event) => event.voiceReasonPath!))]
-        if (paths.length === 0) continue
-
-        await addToOfflineMutations(
-            'delivery_voice_cleanup',
-            shipment.id,
-            'delete',
-            {
-                shipmentId: shipment.id,
-                eventIds: postponedEvents.map((event) => event.id),
-                paths,
-            },
-            workspaceId,
-        )
-    }
-}
-
 /**
  * A merchant profile may have been created while a workspace was local, then
  * later be used to create a cloud shipment. When that shipment is explicitly
  * retried, requeue its local prerequisites so the server can receive the
  * profile, shipment, and event in dependency order.
  */
-async function requeueDeliveryShipmentParents(
-    workspaceId: string,
-    mutations: OfflineMutation[]
-) {
-    const shipmentMutations = mutations.filter(
-        (mutation) => mutation.entityType === 'delivery_shipments'
-    )
-    if (shipmentMutations.length === 0) return
-
-    const profileIds = new Set<string>()
-    const partnerIds = new Set<string>()
-    for (const mutation of shipmentMutations) {
-        const profileId = payloadId(mutation.payload, 'merchantProfileId', 'merchant_profile_id')
-        const partnerId = payloadId(mutation.payload, 'merchantBusinessPartnerId', 'merchant_business_partner_id')
-        if (profileId) profileIds.add(profileId)
-        if (partnerId) partnerIds.add(partnerId)
-    }
-
-    const profiles = (await Promise.all(
-        [...profileIds].map((profileId) => db.delivery_merchant_profiles.get(profileId))
-    )).filter((profile): profile is DeliveryMerchantProfile => (
-        !!profile
-        && !profile.isDeleted
-        && profile.workspaceId === workspaceId
-    ))
-    for (const profile of profiles) {
-        partnerIds.add(profile.businessPartnerId)
-    }
-
-    const partners = (await Promise.all(
-        [...partnerIds].map((partnerId) => db.business_partners.get(partnerId))
-    )).filter((partner): partner is BusinessPartner => (
-        !!partner
-        && !partner.isDeleted
-        && partner.workspaceId === workspaceId
-    ))
-
-    await Promise.all([
-        ...partners.map((partner) => addToOfflineMutations(
-            'business_partners',
-            partner.id,
-            partner.version > 1 ? 'update' : 'create',
-            partner as unknown as Record<string, unknown>,
-            workspaceId
-        )),
-        ...profiles.map((profile) => addToOfflineMutations(
-            'delivery_merchant_profiles',
-            profile.id,
-            profile.version > 1 ? 'update' : 'create',
-            profile as unknown as Record<string, unknown>,
-            workspaceId
-        ))
-    ])
-}
 
 export async function addToOfflineMutations(
     entityType: OfflineMutation['entityType'],
@@ -419,8 +324,6 @@ export async function retrySyncIntegrityMutations(workspaceId: string): Promise<
 
     if (rows.length === 0) return 0
 
-    await requeueDeliveryShipmentParents(workspaceId, rows)
-    await queueRedispatchedPostponedVoiceCleanup(workspaceId, rows)
     const unrepairedAssignmentMutationIds = await repairSalesOrderAgentAssignmentWorkspaceMutations(rows)
     const unrepairedTravelPassengerMutationIds = await repairTravelPassengerWorkspaceMutations(workspaceId, rows)
     const rowsToRetry = rows.filter((mutation) => (

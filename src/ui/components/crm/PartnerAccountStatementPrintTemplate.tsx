@@ -102,7 +102,6 @@ function entryLabel(kind: PartnerAccountStatementEntryKind, t: (key: string, opt
         pos_sale_loan: t('loans.posSaleLoan', { defaultValue: 'POS Sale Loan' }),
         pos_sale_installment_loan: t('loans.posSaleInstallmentLoan', { defaultValue: 'POS Sale Installment Loan' }),
         agent_commission: t('salesAgentCommissions.title', { defaultValue: 'Sales agent commission' }),
-        delivery_post: t('postService.title', { defaultValue: 'Post Service' }),
         installment_sale: t('businessPartners.accountStatement.installmentSale', { defaultValue: 'Installment sale' }),
         agent_sales_activity: t('businessPartners.accountStatement.sellerSalesActivity', { defaultValue: 'Seller sales activity' }),
         partner_settlement: t('businessPartners.accountStatement.descriptions.partnerSettlement', { defaultValue: 'Partner settlement' })

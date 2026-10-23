@@ -14,11 +14,10 @@ describe('view-own workspace permissions', () => {
     it('defines every supported module key with a matching database module', () => {
         const expected = [
             'orders.view_own',
-            'postService.view_own',
             'sales.view_own',
             'loans.view_own',
             'installments.view_own',
-            'invoice_history.view_own',
+            'invoice_history.view_own'
         ]
 
         expect(VIEW_OWN_RECORD_PERMISSION_KEYS).toEqual(expected)

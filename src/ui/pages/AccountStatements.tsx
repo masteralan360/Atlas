@@ -121,7 +121,6 @@ function entryLabel(
         installment_sale: t('businessPartners.accountStatement.installmentSale', { defaultValue: 'Installment sale' }),
         agent_sales_activity: t('businessPartners.accountStatement.sellerSalesActivity', { defaultValue: 'Seller sales activity' }),
         agent_commission: t('salesAgentCommissions.title', { defaultValue: 'Sales agent commission' }),
-        delivery_post: t('postService.title', { defaultValue: 'Post Service' }),
         partner_settlement: t('businessPartners.accountStatement.descriptions.partnerSettlement', { defaultValue: 'Partner settlement' })
     }
     return labels[kind]
@@ -146,9 +145,7 @@ function entrySourcePath(entry: PartnerAccountStatementEntry) {
     if (entry.source?.recordType === 'sale') {
         return '/sales'
     }
-    if (entry.source?.recordType === 'delivery_ledger_entry') {
-        return '/post-service'
-    }
+
     return null
 }
 
@@ -1147,5 +1144,4 @@ export function AccountStatements() {
         </div>
     )
 }
-
 

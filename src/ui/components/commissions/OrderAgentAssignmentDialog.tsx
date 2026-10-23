@@ -101,9 +101,6 @@ export function OrderAgentAssignmentDialog({
                             disabled={isSaving}
                         />
                     ) : null}
-                    <div className="rounded-2xl border border-sky-500/20 bg-sky-500/[0.06] p-4 text-sm text-sky-800 dark:text-sky-200">
-                        {t('salesAgentCommissions.postServiceOptionalDescription')}
-                    </div>
                 </AppDialogBody>
                 <AppDialogFooter>
                     <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>

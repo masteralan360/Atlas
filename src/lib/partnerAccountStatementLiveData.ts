@@ -12,11 +12,7 @@ export const PARTNER_ACCOUNT_STATEMENT_LIVE_TABLE_NAMES = [
   'loan_payments',
   'installment_sales',
   'payment_transactions',
-  'partner_settlement_operations',
-  'delivery_merchant_profiles',
-  'delivery_ledger_entries',
-  'delivery_shipments',
-  'delivery_settlements'
+  'partner_settlement_operations'
 ] as const
 
 export const PARTNER_ACCOUNT_STATEMENT_FRESHNESS_TABLE_NAMES = [

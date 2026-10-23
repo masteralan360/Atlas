@@ -311,15 +311,6 @@ export function buildWorkspaceNavigation({
         },
       ]
       : []),
-    ...(isCoreRole && hasFeature("post_service") && canAccessPermission("postService.access")
-      ? [
-        {
-          name: t("nav.postService", { defaultValue: "Post Service" }),
-          href: "/post-service",
-          icon: PackageCheck,
-        },
-      ]
-      : []),
     ...(isCoreRole && hasFeature("car_rental") && canAccessPermission("carRental.access")
       ? [
         {

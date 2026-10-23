@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, ShieldCheck, Trash2, Truck, UserMinus, UserPlus, UsersRound } from 'lucide-react'
+import { Plus, ShieldCheck, Trash2, UserMinus, UserPlus, UsersRound } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatLocalDateValue, formatNumericInput, generateId, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
 
@@ -649,20 +649,11 @@ export function AgentCommissionSettingsForm({ workspaceId, userId, onCancel }: A
                         </CardContent>
                     </Card>
 
-                    <div className="space-y-3">
-                        <div className="flex gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4 text-sm">
-                            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700 dark:text-emerald-300" />
-                            <div>
-                                <div className="font-semibold">{t('salesAgentCommissions.workspaceOnly')}</div>
-                                <p className="mt-1 text-muted-foreground">{t('salesAgentCommissions.workspaceOnlyDescription')}</p>
-                            </div>
-                        </div>
-                        <div className="flex gap-3 rounded-2xl border border-sky-500/20 bg-sky-500/[0.06] p-4 text-sm">
-                            <Truck className="mt-0.5 h-5 w-5 shrink-0 text-sky-700 dark:text-sky-300" />
-                            <div>
-                                <div className="font-semibold">{t('salesAgentCommissions.postServiceIsOptional')}</div>
-                                <p className="mt-1 text-muted-foreground">{t('salesAgentCommissions.postServiceSettingsDescription')}</p>
-                            </div>
+                    <div className="flex gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] p-4 text-sm">
+                        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-700 dark:text-emerald-300" />
+                        <div>
+                            <div className="font-semibold">{t('salesAgentCommissions.workspaceOnly')}</div>
+                            <p className="mt-1 text-muted-foreground">{t('salesAgentCommissions.workspaceOnlyDescription')}</p>
                         </div>
                     </div>
 

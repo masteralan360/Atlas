@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 import { useAuth } from '@/auth'
 import { Sale } from '@/types'
-import { applySalesOrderReturnQuantities, useCategories, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useAgents, useDeliveryMerchantProfiles, useDeliveryShipments, useRentalContracts, useRentalVehicles, useExpenseItemsForWorkspace } from '@/local-db'
+import { applySalesOrderReturnQuantities, useCategories, useProducts, useSales, useSalesOrderReturnItemsForWorkspace, useSalesOrders, useStorages, useExchangeTransactions, usePaymentTransactions, useClinicalAppointments, useActivityTransactions, useActivityTransactionLinesForWorkspace, useWorkspaceUsers, useBusinessPartners, useAgents, useRentalContracts, useRentalVehicles, useExpenseItemsForWorkspace } from '@/local-db'
 import { formatCurrency, formatDateTime, formatDate, formatTime } from '@/lib/utils'
 import { buildRevenueSourceSales } from '@/lib/revenueSourceSales'
 import { isActiveSale } from '@/lib/saleArchiving'
@@ -631,8 +631,7 @@ export function Revenue() {
     const expenseItems = useExpenseItemsForWorkspace(canAccessAccountingExpenses ? user?.workspaceId : undefined)
     const rawSalesOrders = useSalesOrders(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
     const salesOrderReturnItems = useSalesOrderReturnItemsForWorkspace(user?.workspaceId)
-    const deliveryShipments = useDeliveryShipments(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
-    const deliveryMerchantProfiles = useDeliveryMerchantProfiles(user?.workspaceId)
+
     const businessPartners = useBusinessPartners(user?.workspaceId, {
         includeRealEstateRoles: true,
         includeAgentRoles: true,
@@ -723,12 +722,22 @@ export function Revenue() {
     )
 
     const allSales = useMemo<Sale[]>(() => buildRevenueSourceSales({
-        sales: (rawSales || []).filter(isActiveSale), exchangeTransactions: rawExchangeTransactions || [], realEstateCommissionTransactions,
-        travelBookingPayments, clinicalAppointments, clinicalAppointmentTransactions, activityTransactions,
-        activityTransactionLines, deliveryShipments, deliveryMerchantProfiles, rentalContracts, rentalVehicles,
-        partnerNameById: new Map(businessPartners.map((partner) => [partner.id, partner.partnerName] as const)),
-        userNameById, startDate: dateBounds.startDate, endDate: dateBounds.endDate, t,
-    }), [rawSales, rawExchangeTransactions, realEstateCommissionTransactions, travelBookingPayments, clinicalAppointments, clinicalAppointmentTransactions, activityTransactions, activityTransactionLines, deliveryShipments, deliveryMerchantProfiles, rentalContracts, rentalVehicles, businessPartners, userNameById, dateBounds.startDate, dateBounds.endDate, t])
+      sales: (rawSales || []).filter(isActiveSale),
+      exchangeTransactions: rawExchangeTransactions || [],
+      realEstateCommissionTransactions,
+      travelBookingPayments,
+      clinicalAppointments,
+      clinicalAppointmentTransactions,
+      activityTransactions,
+      activityTransactionLines,
+      rentalContracts,
+      rentalVehicles,
+      partnerNameById: new Map(businessPartners.map((partner) => [partner.id, partner.partnerName] as const)),
+      userNameById,
+      startDate: dateBounds.startDate,
+      endDate: dateBounds.endDate,
+      t
+    }), [ rawSales, rawExchangeTransactions, realEstateCommissionTransactions, travelBookingPayments, clinicalAppointments, clinicalAppointmentTransactions, activityTransactions, activityTransactionLines, rentalContracts, rentalVehicles, businessPartners, userNameById, dateBounds.startDate, dateBounds.endDate, t ])
     const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
     const [selectedMetric, setSelectedMetric] = useState<MetricType | null>(null)
     const [isMetricModalOpen, setIsMetricModalOpen] = useState(false)
@@ -2090,7 +2099,7 @@ export function Revenue() {
                                         const isFullyReturned = !!sale.isReturned || sale.returnStatus === 'returned'
                                         const hasAnyReturn = isFullyReturned || !!sale.hasPartialReturn || sale.returnStatus === 'partial'
                                         const totalReturnedQuantity = sale.totalReturnedQuantity || 0
-                                        const canOpenSaleDetails = !!originalSale || sale.source === 'sales_order' || sale.source === 'exchange' || sale.source === 'real_estate' || sale.source === 'activities' || sale.source === 'clinical_appointment' || sale.source === 'post_service' || sale.source === 'car_rental' || sale.source === 'travel_transportation'
+                                        const canOpenSaleDetails = !!originalSale || sale.source === 'sales_order' || sale.source === 'exchange' || sale.source === 'real_estate' || sale.source === 'activities' || sale.source === 'clinical_appointment' || sale.source === 'car_rental' || sale.source === 'travel_transportation'
 
                                         const handleRecordClick = () => {
                                             if (sale.source === 'sales_order') {
@@ -2103,8 +2112,6 @@ export function Revenue() {
                                                 setLocation(`/activities?transaction=${sale.sourceRecordId || sale.id}`)
                                             } else if (sale.source === 'clinical_appointment') {
                                                 setLocation(`/clinical-appointments/${sale.sourceRecordId || sale.id}/edit`)
-                                            } else if (sale.source === 'post_service') {
-                                                setLocation('/post-service')
                                             } else if (sale.source === 'car_rental') {
                                                 setLocation('/car-rental/contracts')
                                             } else if (sale.source === 'travel_transportation') {
@@ -2248,7 +2255,7 @@ export function Revenue() {
                                             const isFullyReturned = !!sale.isReturned || sale.returnStatus === 'returned'
                                             const hasAnyReturn = isFullyReturned || !!sale.hasPartialReturn || sale.returnStatus === 'partial'
                                             const totalReturnedQuantity = sale.totalReturnedQuantity || 0
-                                            const canOpenSaleDetails = !!originalSale || sale.source === 'sales_order' || sale.source === 'exchange' || sale.source === 'real_estate' || sale.source === 'activities' || sale.source === 'clinical_appointment' || sale.source === 'post_service' || sale.source === 'car_rental' || sale.source === 'travel_transportation'
+                                            const canOpenSaleDetails = !!originalSale || sale.source === 'sales_order' || sale.source === 'exchange' || sale.source === 'real_estate' || sale.source === 'activities' || sale.source === 'clinical_appointment' || sale.source === 'car_rental' || sale.source === 'travel_transportation'
 
                                             const handleRecordClick = () => {
                                                 if (sale.source === 'sales_order') {
@@ -2261,8 +2268,6 @@ export function Revenue() {
                                                     setLocation(`/activities?transaction=${sale.sourceRecordId || sale.id}`)
                                                 } else if (sale.source === 'clinical_appointment') {
                                                     setLocation(`/clinical-appointments/${sale.sourceRecordId || sale.id}/edit`)
-                                                } else if (sale.source === 'post_service') {
-                                                    setLocation('/post-service')
                                                 } else if (sale.source === 'car_rental') {
                                                     setLocation('/car-rental/contracts')
                                                 } else if (sale.source === 'travel_transportation') {

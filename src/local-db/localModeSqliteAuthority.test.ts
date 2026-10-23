@@ -42,7 +42,7 @@ function installBrowserStorage() {
   };
   Object.defineProperty(globalThis, "window", {
     configurable: true,
-    value: { localStorage: storage, location: { pathname: '/', search: '', hash: '' } },
+    value: { localStorage: storage, location: { pathname: '/', search: '', hash: '' }, dispatchEvent: () => true },
   });
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,

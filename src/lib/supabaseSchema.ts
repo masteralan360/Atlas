@@ -114,20 +114,6 @@ const paymentAccountRemoteTableNames: Record<string, string> = {
     payment_account_transfers: 'transfers',
 }
 
-const deliveryTables = new Set([
-    'delivery_merchant_profiles',
-    'delivery_shipments',
-    'delivery_shipment_events',
-    'delivery_shipment_cod_adjustment_requests',
-    'delivery_shipment_cod_corrections',
-    'delivery_shipment_recipient_payout_corrections',
-    'delivery_shipment_recipient_payout_adjustment_requests',
-    'delivery_runs',
-    'delivery_run_items',
-    'delivery_settlements',
-    'delivery_ledger_entries'
-])
-
 const budgetClient = supabase.schema('budget')
 const crmClient = supabase.schema('crm')
 const realEstateClient = supabase.schema('real_estate')
@@ -138,7 +124,7 @@ const clinicsClient = supabase.schema('clinics')
 const fleetClient = supabase.schema('fleet')
 const rentalClient = supabase.schema('car_rental')
 const gardenClient = supabase.schema('garden')
-const deliveryClient = supabase.schema('delivery')
+
 const paymentAccountsClient = supabase.schema('payment_accounts')
 
 export function isBudgetTable(tableName: string): boolean {
@@ -195,10 +181,6 @@ export function isRentalTable(tableName: string): boolean {
 
 export function isGardenTable(tableName: string): boolean {
     return gardenTables.has(tableName)
-}
-
-export function isDeliveryTable(tableName: string): boolean {
-    return deliveryTables.has(tableName)
 }
 
 export function isPaymentAccountTable(tableName: string): boolean {
@@ -260,10 +242,6 @@ export function getSupabaseClientForTable(tableName: string) {
 
     if (isGardenTable(tableName)) {
         return gardenClient
-    }
-
-    if (isDeliveryTable(tableName)) {
-        return deliveryClient
     }
 
     if (isPaymentAccountTable(tableName)) {
