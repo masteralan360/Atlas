@@ -5778,6 +5778,35 @@
     "noInstallments": "This transaction does not have an installment schedule.",
     "noInstallmentRows": "No real estate installment rows are available."
   },
+  "workspaceAccountCreation": {
+    "title": "Create workspace account",
+    "description": "Create a sign-in account for a member of this workspace.",
+    "name": "Full name",
+    "namePlaceholder": "Enter the member's name",
+    "email": "Email address",
+    "emailPlaceholder": "name@example.com",
+    "password": "Password",
+    "passwordPlaceholder": "At least 8 characters",
+    "confirmPassword": "Confirm password",
+    "confirmPasswordPlaceholder": "Enter the password again",
+    "create": "Create account",
+    "creating": "Creating account...",
+    "success": "The workspace account was created and can sign in now.",
+    "errors": {
+      "nameRequired": "Enter a name with no more than 120 characters.",
+      "emailInvalid": "Enter a valid email address.",
+      "passwordTooShort": "Use at least 8 characters for the password.",
+      "passwordTooLong": "Use no more than 128 characters for the password.",
+      "passwordsMismatch": "The passwords do not match.",
+      "invalidPassword": "Choose a password that meets the account security requirements.",
+      "duplicateEmail": "An account with this email address already exists.",
+      "memberLimit": "This workspace has reached its member limit.",
+      "notAuthorized": "Only a workspace administrator can create accounts here.",
+      "workspaceUnavailable": "Account creation is available for active Cloud and Hybrid workspaces.",
+      "invalidRequest": "Check the account details and try again.",
+      "createFailed": "The account could not be created. Check the details and try again."
+    }
+  },
   "members": {
     "title": "Members & Admin Control",
     "titleShort": "Members",

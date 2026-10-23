@@ -35,6 +35,9 @@ verify_jwt = false
 [functions.workspace-account-switcher]
 verify_jwt = true
 
+[functions.workspace-account-creation]
+verify_jwt = true
+
 [functions.partner-account-statement-period]
 enabled = true
 verify_jwt = true
