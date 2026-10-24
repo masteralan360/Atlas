@@ -1,4 +1,9 @@
-import React, { createContext, useContext, useState, useEffect } from 'react'
+import React, { createContext, useContext, useState, useEffect, useSyncExternalStore } from 'react'
+import {
+    DATE_FILTER_DAY_BOUNDARY_CHANGE_EVENT,
+    DEFAULT_DATE_FILTER_DAY_BOUNDARY,
+    getDateFilterDayBoundary
+} from '@/lib/dateRangeFilters'
 
 export type DateRangeType = 'today' | 'yesterday' | 'month' | 'lastMonth' | 'allTime' | 'custom'
 
@@ -10,13 +15,26 @@ interface CustomDates {
 interface DateRangeContextType {
     dateRange: DateRangeType
     customDates: CustomDates
+    dateFilterDayBoundary: string
     setDateRange: (range: DateRangeType) => void
     setCustomDates: (dates: CustomDates | ((prev: CustomDates) => CustomDates)) => void
 }
 
 const DateRangeContext = createContext<DateRangeContextType | undefined>(undefined)
 
+function subscribeToDateFilterDayBoundary(callback: () => void) {
+    if (typeof window === 'undefined') return () => undefined
+
+    window.addEventListener(DATE_FILTER_DAY_BOUNDARY_CHANGE_EVENT, callback)
+    return () => window.removeEventListener(DATE_FILTER_DAY_BOUNDARY_CHANGE_EVENT, callback)
+}
+
 export function DateRangeProvider({ children }: { children: React.ReactNode }) {
+    const dateFilterDayBoundary = useSyncExternalStore(
+        subscribeToDateFilterDayBoundary,
+        getDateFilterDayBoundary,
+        () => DEFAULT_DATE_FILTER_DAY_BOUNDARY
+    )
     const [dateRange, setDateRange] = useState<DateRangeType>(() => {
         // Migration: check for previous local page-specific settings first, then default to 'month'
         const cached = localStorage.getItem('global_date_range') ||
@@ -41,7 +59,7 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
     }, [customDates])
 
     return (
-        <DateRangeContext.Provider value={{ dateRange, customDates, setDateRange, setCustomDates }}>
+        <DateRangeContext.Provider value={{ dateRange, customDates, dateFilterDayBoundary, setDateRange, setCustomDates }}>
             {children}
         </DateRangeContext.Provider>
     )

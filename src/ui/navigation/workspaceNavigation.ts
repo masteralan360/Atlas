@@ -311,6 +311,8 @@ export function buildWorkspaceNavigation({
         },
       ]
       : []),
+    ...((role === 'admin' || role === 'staff') && hasFeature('postal_service') && (canAccessPermission('postService.merchant') || canAccessPermission('postService.officeEmployee'))
+      ? [{ name: t('postal.title'), href: '/post-service', icon: PackageCheck }] : []),
     ...(isCoreRole && hasFeature("car_rental") && canAccessPermission("carRental.access")
       ? [
         {

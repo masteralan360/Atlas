@@ -259,7 +259,7 @@ export function CustomerProfitability() {
   const { toast } = useToast()
   const { user } = useAuth()
   const { features } = useWorkspace()
-  const { dateRange, customDates } = useDateRange()
+  const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
   const permissions = useOptionalWorkspacePermissions()
   const online = useNetworkStatus()
   const workspaceId = user?.workspaceId
@@ -355,7 +355,7 @@ export function CustomerProfitability() {
     attribution: attributionBySource.get(getSourceKey(row.sourceType, row.sourceRecordId, row.sourceSubrecordId)),
   })), [access, attributionBySource, expenseCategories, purchaseOrders, salesOrders, sourceRows])
 
-  const dateBounds = useMemo(() => getValidDateBounds(dateRange, customDates), [customDates, dateRange])
+  const dateBounds = useMemo(() => getValidDateBounds(dateRange, customDates), [customDates, dateFilterDayBoundary, dateRange])
   const visibleSources = useMemo(() => allSources.filter((row) => withinBounds(row.date, dateBounds)), [allSources, dateBounds])
   const unlinkedSources = useMemo(() => visibleSources.filter((row) => !row.attribution)
     .filter((row) => sourceFilter === 'all' || row.sourceType === sourceFilter), [sourceFilter, visibleSources])

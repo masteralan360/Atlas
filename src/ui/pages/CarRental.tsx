@@ -308,7 +308,7 @@ export function CarRental({
   const { hasPermission } = useWorkspacePermissions();
   const { toast } = useToast();
   const [, navigate] = useLocation();
-  const { dateRange, customDates } = useDateRange();
+  const { dateRange, customDates, dateFilterDayBoundary } = useDateRange();
   const workspaceId = user?.workspaceId;
   const canManage = hasPermission("carRental.access");
   const vehicles = useRentalVehicles(workspaceId);
@@ -361,14 +361,14 @@ export function CarRental({
       requests.filter((request) =>
         isDateInDateRange(request.createdAt, dateRange, customDates),
       ),
-    [customDates, dateRange, requests],
+    [customDates, dateFilterDayBoundary, dateRange, requests],
   );
   const filteredContracts = useMemo(
     () =>
       contracts.filter((contract) =>
         isDateInDateRange(contract.createdAt, dateRange, customDates),
       ),
-    [contracts, customDates, dateRange],
+    [contracts, customDates, dateFilterDayBoundary, dateRange],
   );
   const calendarDays = useMemo(
     () =>

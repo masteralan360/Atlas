@@ -57,6 +57,7 @@ import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountS
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { createBusinessPartner, useBusinessPartners, recalculateBusinessPartnerSummary } from '@/local-db'
 import { useDateRange } from '@/context/DateRangeContext'
+import { getDateRangeBounds, isDateInDateRange } from '@/lib/dateRangeFilters'
 import { r2Service } from '@/services/r2Service'
 import { platformService } from '@/services/platformService'
 import { useLocation, useRoute } from 'wouter'
@@ -309,7 +310,7 @@ function Beauty2AppointmentList({ workspaceId, navigate }: { workspaceId: string
   const { user } = useAuth()
   const { features } = useWorkspace()
   const { toast } = useToast()
-  const { dateRange, customDates } = useDateRange()
+  const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
   const appointments = useClinicalAppointments(workspaceId)
   const [searchQuery, setSearchQuery] = useState('')
   const [nextVisitDateFilter, setNextVisitDateFilter] = useState('')
@@ -324,6 +325,7 @@ function Beauty2AppointmentList({ workspaceId, navigate }: { workspaceId: string
         end: customDates.end,
       },
       nextVisitDate: nextVisitDateFilter,
+      dayBoundary: dateFilterDayBoundary,
       searchQuery,
     })
   }, [
@@ -331,6 +333,7 @@ function Beauty2AppointmentList({ workspaceId, navigate }: { workspaceId: string
     customDates.end,
     customDates.start,
     dateRange,
+    dateFilterDayBoundary,
     nextVisitDateFilter,
     searchQuery,
   ])
@@ -796,7 +799,7 @@ function AppointmentList({ workspaceId, navigate }: { workspaceId: string; navig
   const [isDeleting, setIsDeleting] = useState(false)
   const [paymentObligation, setPaymentObligation] = useState<PaymentObligation | null>(null)
   const [isCollectingPayment, setIsCollectingPayment] = useState(false)
-  const { dateRange, customDates } = useDateRange()
+  const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
 
   const handleStatusChange = useCallback(async (id: string, newStatus: string) => {
     setUpdatingId(id)
@@ -836,44 +839,24 @@ function AppointmentList({ workspaceId, navigate }: { workspaceId: string; navig
       )
     }
     const now = new Date()
-    if (dateRange === 'yesterday') {
-      const yesterday = new Date(now)
-      yesterday.setDate(yesterday.getDate() - 1)
-      const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`
-      result = result.filter((a) => a.appointmentDate === yesterdayStr)
-    } else if (dateRange === 'today') {
-      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-      result = result.filter((a) => a.appointmentDate === todayStr)
-    } else if (dateRange === 'month') {
-      const startOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-      result = result.filter((a) => a.appointmentDate >= startOfMonth)
-    } else if (dateRange === 'lastMonth') {
-      const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-      result = result.filter((a) => {
-        const appointmentDate = new Date(`${a.appointmentDate}T00:00:00`)
-        return appointmentDate >= startOfLastMonth && appointmentDate < startOfMonth
-      })
-    } else if (dateRange === 'custom' && (customDates.start || customDates.end)) {
-      result = result.filter((a) => {
-        if (customDates.start && a.appointmentDate < customDates.start) return false
-        if (customDates.end && a.appointmentDate > customDates.end) return false
-        return true
-      })
-    }
+    result = result.filter((appointment) => isDateInDateRange(
+      appointment.appointmentDate,
+      dateRange,
+      customDates,
+      now,
+      dateFilterDayBoundary
+    ))
+    const todayStart = getDateRangeBounds('today', { start: '', end: '' }, now, dateFilterDayBoundary).start ?? now
+    const todayStr = `${todayStart.getFullYear()}-${String(todayStart.getMonth() + 1).padStart(2, '0')}-${String(todayStart.getDate()).padStart(2, '0')}`
     if (filter === 'today') {
-      const d = new Date()
-      const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       result = result.filter((a) => a.appointmentDate === todayStr)
     } else if (filter === 'upcoming') {
-      const d = new Date()
-      const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       result = result.filter((a) => a.appointmentDate > todayStr && !['completed', 'cancelled', 'no_show'].includes(a.status))
     } else if (filter !== 'all') {
       result = result.filter((a) => a.status === filter)
     }
     return result
-  }, [appointments, searchQuery, filter, dateRange, customDates])
+  }, [appointments, searchQuery, filter, dateRange, customDates, dateFilterDayBoundary])
 
   const handleCollectPayment = (appointment: ClinicalAppointment) => {
     const obligation = buildClinicalAppointmentPaymentObligation(appointment, paymentTransactions, features.default_currency)

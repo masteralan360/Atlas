@@ -492,7 +492,7 @@ function EcommerceListView({
     const pageDirection = getLanguageDirection(i18n.resolvedLanguage || i18n.language)
     const [, navigate] = useLocation()
     const { features } = useWorkspace()
-    const { dateRange, customDates, setDateRange, setCustomDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary, setDateRange, setCustomDates } = useDateRange()
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => (localStorage.getItem('ecommerce_view_mode') as 'table' | 'grid') || 'table')
     const [search, setSearch] = useState('')
     const [statusFilter, setStatusFilter] = useState<MarketplaceOrderFilter>('all')
@@ -503,7 +503,7 @@ function EcommerceListView({
 
     const dateFilteredOrders = useMemo(
         () => filterEcommerceOrdersByDate(orders, dateRange, customDates, (order) => order.created_at),
-        [orders, dateRange, customDates]
+        [orders, dateRange, customDates, dateFilterDayBoundary]
     )
 
     const filteredOrders = useMemo(() => {
@@ -525,7 +525,7 @@ function EcommerceListView({
 
     const previousDateRange = useMemo(
         () => getPreviousDateRange(dateRange, customDates),
-        [dateRange, customDates]
+        [dateRange, customDates, dateFilterDayBoundary]
     )
     const previousOrderCount = useMemo(() => {
         if (!previousDateRange) return null
@@ -539,13 +539,9 @@ function EcommerceListView({
         : null
 
     const getDateDisplay = () => {
-        if (dateRange === 'today') {
-            return formatDate(new Date())
-        }
-        if (dateRange === 'yesterday') {
-            const yesterday = new Date()
-            yesterday.setDate(yesterday.getDate() - 1)
-            return formatDate(yesterday)
+        if (dateRange === 'today' || dateRange === 'yesterday') {
+            const start = getDateRangeBounds(dateRange, customDates).start
+            return start ? formatDate(start) : ''
         }
         if (dateRange === 'month') {
             return formatLocalizedMonthYear(new Date(), i18n.language)

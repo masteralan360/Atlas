@@ -246,6 +246,7 @@ export const moduleMetaByHref: Record<string, ModuleMeta> = {
     description: "Review completed sales, returns, and sales records.",
     badge: "History",
   },
+  "/post-service": { section: 'sell-and-serve', description: 'Create, track, route and print shipments.', badge: 'Post' },
   "/car-rental": {
     section: "sell-and-serve",
     description: "Manage rental vehicles, availability, customer requests, and rental contracts.",

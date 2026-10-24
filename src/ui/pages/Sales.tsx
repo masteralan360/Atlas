@@ -296,7 +296,7 @@ export function Sales() {
     const [saleArchiveConfirmation, setSaleArchiveConfirmation] = useState<{ sale: Sale; isArchived: boolean } | null>(null)
     const [isUpdatingSaleArchive, setIsUpdatingSaleArchive] = useState(false)
     const canManageSaleArchive = user?.role === 'admin' || user?.role === 'staff'
-    const { dateRange, customDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
 
     const dateBounds = useMemo<{ startDate?: string; endDate?: string }>(() => {
         const { start, end } = getDateRangeBounds(dateRange, customDates)
@@ -304,7 +304,7 @@ export function Sales() {
             startDate: start?.toISOString(),
             endDate: end ? new Date(end.getTime() - 1).toISOString() : undefined
         }
-    }, [dateRange, customDates])
+    }, [dateRange, customDates, dateFilterDayBoundary])
 
     const rawSales = useSales(user?.workspaceId, dateBounds.startDate, dateBounds.endDate)
     const archivedSales = useArchivedSales(user?.workspaceId, true)
@@ -686,7 +686,7 @@ export function Sales() {
         })
 
         return result
-    }, [allSales, dateRange, customDates, effectiveFilters])
+    }, [allSales, dateRange, customDates, dateFilterDayBoundary, effectiveFilters])
 
     useEffect(() => {
         const prev = prevDateBoundsRef.current
@@ -775,13 +775,9 @@ export function Sales() {
     }
 
     const getDateDisplay = () => {
-        if (dateRange === 'today') {
-            return formatDate(new Date())
-        }
-        if (dateRange === 'yesterday') {
-            const yesterday = new Date()
-            yesterday.setDate(yesterday.getDate() - 1)
-            return formatDate(yesterday)
+        if (dateRange === 'today' || dateRange === 'yesterday') {
+            const start = getDateRangeBounds(dateRange, customDates).start
+            return start ? formatDate(start) : ''
         }
         if (dateRange === 'month') {
             const now = new Date()

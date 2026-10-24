@@ -163,3 +163,6 @@ Secrets/novu-ec341-firebase-adminsdk-fbsvc-ee588ba935.json
 
 # Hosted suite persona credentials and prepared DEV TEST fixture identities.
 .atlas-sales-order-hosted.local.json
+
+# Generated Post Service browser verification outputs.
+/artifacts/postal/

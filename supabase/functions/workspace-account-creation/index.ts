@@ -11,6 +11,7 @@ type CreateWorkspaceAccountRequest = {
     email?: unknown
     name?: unknown
     password?: unknown
+    merchant?: unknown
 }
 
 type WorkspaceProfile = {
@@ -110,7 +111,29 @@ Deno.serve(async (req) => {
             return response('member_limit_reached', 403)
         }
 
+        if (request.merchant) {
+            const { data: grant, error: grantError } = await admin.from('workspace_access_overrides')
+                .select('value').eq('workspace_id', workspaceId).eq('type', 'module').eq('key', 'postal_service').maybeSingle()
+            if (grantError) throw grantError
+            if (grant?.value !== 'grant') return response('not_authorized', 403)
+            if (request.merchant.mode === 'join') {
+                const { data: organization, error: organizationError } = await admin.from('postal_organizations')
+                    .select('id').eq('workspace_id', workspaceId).eq('code', request.merchant.code).maybeSingle()
+                if (organizationError) throw organizationError
+                if (!organization) return response('invalid_organization')
+            }
+        }
+
+        const merchantUserId = request.merchant ? crypto.randomUUID() : undefined
+        if (merchantUserId) {
+            const { error: permitError } = await admin.rpc('postal_prepare_registration', {
+                p_user_id: merchantUserId, p_email: request.email,
+                p_enrollment: { ...request.merchant, workspace_id: workspaceId, actor_id: user.id }
+            })
+            if (permitError) throw permitError
+        }
         const { data: createdUserData, error: createUserError } = await admin.auth.admin.createUser({
+            ...(merchantUserId ? { id: merchantUserId } : {}),
             email: request.email,
             password: request.password,
             email_confirm: true,
@@ -118,6 +141,7 @@ Deno.serve(async (req) => {
         })
 
         if (createUserError || !createdUserData.user) {
+            if (merchantUserId) await admin.rpc('postal_cancel_registration', { p_user_id: merchantUserId })
             if (createUserError) {
                 let code = getCreationFailureCode(createUserError)
                 if (code === 'account_creation_failed'
@@ -131,6 +155,10 @@ Deno.serve(async (req) => {
         }
 
         const createdUser = createdUserData.user
+        // Merchant enrollment is committed by the Auth insert trigger, atomically
+        // with its profile, membership, organization and permission.
+        if (request.merchant) return jsonResponse({ id: createdUser.id, email: request.email })
+
         const { error: profileError } = await admin
             .from('profiles')
             .upsert(buildWorkspaceAccountProfile(createdUser.id, request.name, workspaceId), { onConflict: 'id' })

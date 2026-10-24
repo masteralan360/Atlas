@@ -328,7 +328,7 @@ export function Activities() {
     const [location] = useLocation()
     const { features, workspaceName } = useWorkspace()
     const { hasPermission } = useWorkspacePermissions()
-    const { dateRange, customDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
     const workspaceId = user?.workspaceId
     const catalog = useActivityCatalog(workspaceId)
     const transactions = useActivityTransactions(workspaceId)
@@ -385,7 +385,7 @@ export function Activities() {
             return [transaction.transactionNo, transaction.name, transaction.customerName]
             .some((value) => value?.toLowerCase().includes(query))
         })
-    }, [customDates, dateRange, search, transactions])
+    }, [customDates, dateFilterDayBoundary, dateRange, search, transactions])
 
     const transactionTotal = useMemo(() => transactionDraft.lines.reduce(
         (sum, line) => sum + Math.max(0, Number(line.quantity || 0)) * Math.max(0, Number(line.unitPrice || 0)),

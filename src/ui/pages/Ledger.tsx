@@ -167,6 +167,7 @@ import { getDateRangeBounds, isDateInDateRange } from '@/lib/dateRangeFilters'
 
 type LedgerDirection = LedgerReportingDirection
 type LedgerSourceModule =
+    | 'postal_service'
     | 'pos'
     | 'instant_pos'
     | 'orders'
@@ -186,6 +187,8 @@ type LedgerSourceModule =
     | 'travel_transportation'
 type LedgerRelationRole = 'origin' | 'repayment' | 'settlement'
 type LedgerEntryType =
+    | 'postal_cod'
+    | 'postal_settlement'
     | 'pos_sale'
     | 'instant_pos_sale'
     | 'ecommerce_receivable'
@@ -505,6 +508,7 @@ function ledgerTypeLabel(type: LedgerEntryType, t: any) {
 
 function sourceModuleLabel(module: LedgerSourceModule, t: any) {
     switch (module) {
+        case 'postal_service': return t('postal.title')
         case 'pos':
             return t('ledger.sourceModule.pos', { defaultValue: 'POS' })
         case 'instant_pos':
@@ -1586,6 +1590,20 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
         case 'real_estate_payment':
         case 'real_estate_installment':
             return null
+        case 'postal_cod':
+        case 'postal_settlement': {
+            const rawShipmentReference = transaction.metadata?.shipmentReference
+            const shipmentReference = typeof rawShipmentReference === 'string' && /^PS-\d{4}-\d{6,}$/i.test(rawShipmentReference)
+                ? rawShipmentReference : null
+            return { id: `payment:${transaction.id}`, transactionId: transaction.id, date: transaction.paidAt,
+                type: transaction.sourceType, direction: transaction.direction, amount: transaction.amount,
+                currency: transaction.currency, sourceModule: 'postal_service', referenceId: shipmentReference || '',
+                partner: transaction.counterpartyName || null, businessPartnerId: null,
+                paymentMethod: transaction.paymentMethod, notes: transaction.note || null,
+                description: t(transaction.sourceType === 'postal_cod' ? 'postal.collection' : 'postal.settlement'),
+                ...relation,
+                routePath: shipmentReference ? `/post-service/shipments/${shipmentReference}` : '/post-service' }
+        }
         case 'rental_payment':
         case 'rental_deposit':
         case 'rental_deposit_refund': {
@@ -1816,7 +1834,7 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
 export function Ledger() {
     const { user } = useAuth()
     const { t, i18n } = useTranslation()
-    const { dateRange, customDates, setDateRange } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary, setDateRange } = useDateRange()
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
 
     const scrollToRow = (id: string) => {
@@ -1847,6 +1865,7 @@ export function Ledger() {
         features.real_estate ||
         features.activities ||
         features.clinical_appointments ||
+        features.postal_service ||
         features.car_rental ||
         features.travel_transportation
 
@@ -1856,7 +1875,7 @@ export function Ledger() {
             startDate: start?.toISOString(),
             endDate: end ? new Date(end.getTime() - 1).toISOString() : undefined,
         }
-    }, [dateRange, customDates])
+    }, [dateRange, customDates, dateFilterDayBoundary])
 
     const loans = useLoans(workspaceId)
     const realEstateTransactions = useRealEstateTransactions(workspaceId)
@@ -2056,7 +2075,7 @@ export function Ledger() {
 
     const dateScopedEntries = useMemo(
         () => allEntries.filter((entry) => isEntryInDateRange(entry.date, dateRange, customDates)),
-        [allEntries, customDates, dateRange],
+        [allEntries, customDates, dateFilterDayBoundary, dateRange],
     )
     const filterFacets = useMemo(() => {
         const directionCounts = new Map<LedgerDirection, number>()
@@ -2336,13 +2355,9 @@ export function Ledger() {
     const isDraftAmountRangeInvalid = hasInvalidLedgerAmountRange(draftFilters)
 
     const dateDisplay = useMemo(() => {
-        if (dateRange === 'today') {
-            return formatDate(new Date())
-        }
-        if (dateRange === 'yesterday') {
-            const yesterday = new Date()
-            yesterday.setDate(yesterday.getDate() - 1)
-            return formatDate(yesterday)
+        if (dateRange === 'today' || dateRange === 'yesterday') {
+            const start = getDateRangeBounds(dateRange, customDates).start
+            return start ? formatDate(start) : ''
         }
 
         if (dateRange === 'month') {
@@ -2382,7 +2397,7 @@ export function Ledger() {
         }
 
         return ''
-    }, [customDates.end, customDates.start, dateRange, dateScopedEntries, i18n.language, t])
+    }, [customDates.end, customDates.start, dateRange, dateFilterDayBoundary, dateScopedEntries, i18n.language, t])
 
     useEffect(() => {
         if (!pendingScrollEntryId) return

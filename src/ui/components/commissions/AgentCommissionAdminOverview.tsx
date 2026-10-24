@@ -41,17 +41,17 @@ export function AgentCommissionAdminOverview({
     onSettleCommission?: (obligation: PaymentObligation) => void
 }) {
     const { t } = useTranslation()
-    const { dateRange, customDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
     const allEntries = useAgentCommissionEntries(workspaceId)
     const allAssignments = useSalesOrderAgentAssignments(workspaceId)
     const allSalesOrders = useSalesOrders(workspaceId)
     const statementPeriod = useMemo(
         () => createPartnerAccountStatementPeriod(dateRange, customDates),
-        [dateRange, customDates]
+        [dateRange, customDates, dateFilterDayBoundary]
     )
     const { entries, assignments, salesOrders, isScoped } = useMemo(
         () => filterAgentCommissionPeriod(allEntries, allAssignments, allSalesOrders, dateRange, customDates),
-        [allEntries, allAssignments, allSalesOrders, dateRange, customDates],
+        [allEntries, allAssignments, allSalesOrders, dateRange, customDates, dateFilterDayBoundary],
     )
     const directory = useCommissionAgentDirectory(workspaceId)
     const paymentObligations = usePaymentObligations(workspaceId)

@@ -1081,8 +1081,10 @@ export function InstantPOS() {
         if (!user?.workspaceId) return
         const existingById = new Map(restaurantPosTickets.map((ticket) => [ticket.id, ticket]))
         const nextIds = new Set(nextTickets.map((ticket) => ticket.id))
+        const currentById = new Map(restaurantTickets.map((ticket) => [ticket.id, ticket]))
 
         nextTickets.forEach((ticket) => {
+            if (currentById.get(ticket.id) === ticket) return
             const existing = existingById.get(ticket.id)
             const restaurantTicket = instantTicketToRestaurantTicket(ticket, user.workspaceId, user.id, existing)
             const persist = existing
@@ -1101,7 +1103,7 @@ export function InstantPOS() {
                     console.error('[Instant POS] Failed to close restaurant ticket:', error)
                 })
             })
-    }, [restaurantLiveSyncEnabled, restaurantPosTickets, user?.id, user?.workspaceId])
+    }, [restaurantLiveSyncEnabled, restaurantPosTickets, restaurantTickets, user?.id, user?.workspaceId])
 
     const setTickets = useCallback((next: InstantPosTicket[] | ((current: InstantPosTicket[]) => InstantPosTicket[])) => {
         if (!restaurantMode) {
@@ -1318,34 +1320,8 @@ export function InstantPOS() {
         return rows
     }, [catalogGridColumns, filteredProducts])
 
-    useEffect(() => {
-        if (!serviceAccessReady || storageAccess.isReady === false) return
-        const excludedProductIds = new Set(
-            products
-                .filter((product) => !canSelectProduct(product))
-                .map((product) => product.id)
-        )
-
-        const removeExcludedItems = (current: InstantPosTicket[], removeRestrictedStorageItems = true) => current.map((ticket) => {
-            const items = ticket.items.filter((item) => {
-                if (item.storageId === SERVICES_VIRTUAL_STORAGE_ID) return canSelectServiceId(item.productId)
-                const itemStorageId = item.storageId || selectedStorageId
-                return (!removeRestrictedStorageItems || (!!itemStorageId && storageAccess.canAccessStorage(itemStorageId)))
-                    && !excludedProductIds.has(item.productId)
-            })
-            return items.length === ticket.items.length ? ticket : { ...ticket, items }
-        })
-        if (restaurantMode) {
-            // Restaurant tickets are shared server records. Do not delete their
-            // storage-restricted lines just because this staff member cannot view them.
-            const nextTickets = removeExcludedItems(restaurantTickets, false)
-            if (nextTickets.some((ticket, index) => ticket !== restaurantTickets[index])) {
-                persistRestaurantTickets(nextTickets)
-            }
-            return
-        }
-        setLocalTickets(removeExcludedItems)
-    }, [canSelectProduct, canSelectServiceId, persistRestaurantTickets, products, restaurantMode, restaurantTickets, selectedStorageId, serviceAccessReady, storageAccess])
+    // Access/catalog refreshes must not edit saved orders. Check the current
+    // permissions when adding items or checking out, retaining unavailable lines.
 
     const activeTicketTotals = useMemo(() => {
         if (!activeTicket) {

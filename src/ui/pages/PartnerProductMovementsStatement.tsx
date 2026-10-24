@@ -38,7 +38,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import {
     useWorkspaceContacts
 } from '@/local-db'
-import type { DateRangeType } from '@/context/DateRangeContext'
+import { useDateRange, type DateRangeType } from '@/context/DateRangeContext'
 import type { PrintFormat } from '@/services/pdfGenerator'
 import { Button } from '@/ui/components/button'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
@@ -68,6 +68,7 @@ function readPartnerSelection(location: string) {
 export function PartnerProductMovementsStatement() {
     const { t, i18n } = useTranslation()
     const { user } = useAuth()
+    const { dateFilterDayBoundary } = useDateRange()
     const { features, hasFeature, workspaceName, isLocalMode } = useWorkspace()
     const online = useNetworkStatus()
     const workspaceId = user?.workspaceId
@@ -95,7 +96,7 @@ export function PartnerProductMovementsStatement() {
 
     const statementPeriod = useMemo<PartnerAccountStatementPeriod>(() => {
         return createPartnerAccountStatementPeriod(dateRange, customDates)
-    }, [customDates, dateRange])
+    }, [customDates, dateRange, dateFilterDayBoundary])
     const loadCustomTemplates = useCallback(async (signal?: AbortSignal) => {
         if (!workspaceId || (!isLocalMode && !isSupabaseConfigured)) {
             setCustomTemplates([])

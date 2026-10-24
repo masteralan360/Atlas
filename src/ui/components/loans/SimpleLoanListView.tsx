@@ -181,14 +181,14 @@ export function SimpleLoanListView({
     const { features, workspaceName, hasCapability } = useWorkspace()
     const { user } = useAuth()
     const { toast } = useToast()
-    const { dateRange, customDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
     const loanDateBounds = useMemo(() => {
         const { start, end } = getDateRangeBounds(dateRange, customDates)
         return {
             startDate: start?.toISOString(),
             endDate: end ? new Date(end.getTime() - 1).toISOString() : undefined
         }
-    }, [customDates, dateRange])
+    }, [customDates, dateFilterDayBoundary, dateRange])
     const isReadOnly = user?.role === 'viewer'
     const canUseWhatsApp = hasCapability('whatsappSharing')
     const [search, setSearch] = useState('')
@@ -268,7 +268,7 @@ export function SimpleLoanListView({
     const simpleLoanIdKey = useMemo(() => simpleLoans.map((loan) => loan.id).sort().join('|'), [simpleLoans])
     const dateScopedSimpleLoans = useMemo(
         () => simpleLoans.filter((loan) => isDateInDateRange(loan.createdAt, dateRange, customDates)),
-        [customDates, dateRange, simpleLoans]
+        [customDates, dateFilterDayBoundary, dateRange, simpleLoans]
     )
     const loanPaymentHistoryIds = useLiveQuery(
         async () => {

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { useLocation, useRoute } from 'wouter'
 
 import { useDateRange } from '@/context/DateRangeContext'
+import { isDateInDateRange } from '@/lib/dateRangeFilters'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
 import {
     useTravelBooking,
@@ -50,37 +51,12 @@ function statusClass(status: TravelBooking['status']) {
     return 'border-muted bg-muted text-muted-foreground'
 }
 
-function dateKey(value: string) {
-    return value.slice(0, 10)
-}
-
-function localDateKey(date: Date) {
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
-}
-
 function matchesCreatedDate(
     createdAt: string,
     range: ReturnType<typeof useDateRange>['dateRange'],
     customDates: ReturnType<typeof useDateRange>['customDates']
 ) {
-    const createdKey = dateKey(createdAt)
-    const today = new Date()
-    if (range === 'allTime') return true
-    if (range === 'today') return createdKey === localDateKey(today)
-    if (range === 'yesterday') {
-        const yesterday = new Date(today)
-        yesterday.setDate(today.getDate() - 1)
-        return createdKey === localDateKey(yesterday)
-    }
-    if (range === 'month') return createdKey.slice(0, 7) === localDateKey(today).slice(0, 7)
-    if (range === 'lastMonth') {
-        const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1)
-        return createdKey.slice(0, 7) === localDateKey(lastMonth).slice(0, 7)
-    }
-    return (!customDates.start || createdKey >= customDates.start) && (!customDates.end || createdKey <= customDates.end)
+    return isDateInDateRange(createdAt, range, customDates)
 }
 
 export function TravelTransportation() {
@@ -100,7 +76,7 @@ export function TravelTransportation() {
     const passengers = useTravelPassengers(bookingId, workspace?.id)
     const workspacePassengers = useTravelPassengersForWorkspace(workspace?.id)
     const payments = useTravelBookingPayments(bookingId, workspace?.id)
-    const { dateRange, customDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
     const [search, setSearch] = useState('')
     const [historyOpen, setHistoryOpen] = useState(false)
 
@@ -127,7 +103,7 @@ export function TravelTransportation() {
             const searchable = [candidate.bookingNumber, candidate.notes || '', ...passengerNames].join(' ').toLowerCase()
             return (!query || searchable.includes(query)) && matchesCreatedDate(candidate.createdAt, dateRange, customDates)
         })
-    }, [bookings, customDates, dateRange, passengerNamesByBookingId, search])
+    }, [bookings, customDates, dateRange, dateFilterDayBoundary, passengerNamesByBookingId, search])
     const summary = useMemo(
         () => summarizeTravelBookings(visibleBookings, passengerCountByBookingId),
         [passengerCountByBookingId, visibleBookings]

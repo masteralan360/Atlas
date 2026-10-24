@@ -43,7 +43,7 @@ const accessIdCache = new Map<string, AccessIdCacheEntry>()
 const accessIdRequests = new Map<string, Promise<ReadonlySet<string> | null>>()
 
 function getAccessCacheKey(workspaceId: string) {
-  return `${workspaceId}:${getActiveBusinessUserId() ?? 'anonymous'}`
+  return `${workspaceId}:${getActiveBusinessUserId() ?? 'anonymous'}:${getActiveBusinessUserRole(workspaceId) ?? 'unknown'}:${isLocalWorkspaceMode(workspaceId) ? 'local' : 'remote'}`
 }
 
 function invalidateLocalAccessIdCache(workspaceId?: string) {
@@ -225,10 +225,14 @@ export function fetchAccessibleServiceIds(workspaceId: string, forceRefresh = fa
 export function useServiceAccessIds(workspaceId?: string, enabled = true) {
   const resolvedWorkspaceId = workspaceId ?? getActiveBusinessWorkspaceId() ?? undefined
   const networkOnline = useNetworkStatus()
-  const [state, setState] = useState<{ key: string; ids: ReadonlySet<string> | null; ready: boolean }>(() => ({
+  const [state, setState] = useState<{
+    key: string
+    ids: ReadonlySet<string> | null
+    status: 'loading' | 'ready' | 'unavailable'
+  }>(() => ({
     key: '',
-    ids: null,
-    ready: false,
+    ids: new Set<string>(),
+    status: 'loading',
   }))
   const key = resolvedWorkspaceId ? getAccessCacheKey(resolvedWorkspaceId) : ''
   const localMode = Boolean(resolvedWorkspaceId && isLocalWorkspaceMode(resolvedWorkspaceId))
@@ -239,29 +243,34 @@ export function useServiceAccessIds(workspaceId?: string, enabled = true) {
 
   useEffect(() => {
     if (!enabled || !resolvedWorkspaceId || adminOfflineBypass) {
-      setState({ key, ids: null, ready: true })
+      setState({ key, ids: null, status: 'ready' })
       return
     }
 
     if (remoteOffline) {
-      setState({ key, ids: new Set<string>(), ready: true })
+      setState({ key, ids: new Set<string>(), status: 'unavailable' })
       return
     }
 
     let cancelled = false
+    let requestSequence = 0
     const refresh = async (forceRefresh = false) => {
+      const requestId = ++requestSequence
       try {
         const ids = await fetchAccessibleServiceIds(resolvedWorkspaceId, forceRefresh)
-        if (!cancelled) setState({ key, ids, ready: true })
+        if (!cancelled && requestId === requestSequence) setState({ key, ids, status: 'ready' })
       } catch {
-        // Do not render restricted services when authorization cannot be checked.
-        if (!cancelled) setState({ key, ids: new Set<string>(), ready: true })
+        // Fail closed for protected actions without claiming a successful empty
+        // authorization result. Existing orders must survive a failed refresh.
+        if (!cancelled && requestId === requestSequence) {
+          setState({ key, ids: new Set<string>(), status: 'unavailable' })
+        }
       }
     }
 
     setState((current) => current.key === key
-      ? { ...current, ready: false }
-      : { key, ids: new Set<string>(), ready: false })
+      ? { ...current, status: 'loading' }
+      : { key, ids: new Set<string>(), status: 'loading' })
     void refresh()
 
     const refreshIfRelevant = (event?: Event) => {
@@ -285,11 +294,17 @@ export function useServiceAccessIds(workspaceId?: string, enabled = true) {
       window.removeEventListener('focus', refreshOnFocus)
       document.removeEventListener('visibilitychange', refreshOnFocus)
     }
-  }, [activeRole, adminOfflineBypass, enabled, key, remoteOffline, resolvedWorkspaceId])
+  }, [activeRole, adminOfflineBypass, enabled, key, localMode, remoteOffline, resolvedWorkspaceId])
 
+  if (!enabled || !resolvedWorkspaceId || adminOfflineBypass) {
+    return { ids: null, isReady: true, status: 'ready' as const }
+  }
+  if (remoteOffline) {
+    return { ids: new Set<string>(), isReady: false, status: 'unavailable' as const }
+  }
   return state.key === key
-    ? { ids: state.ids, isReady: state.ready }
-    : { ids: adminOfflineBypass ? null : new Set<string>(), isReady: adminOfflineBypass }
+    ? { ids: state.ids, isReady: state.status === 'ready', status: state.status }
+    : { ids: new Set<string>(), isReady: false, status: 'loading' as const }
 }
 
 export async function listServiceAccessCategories(workspaceId: string): Promise<ServiceAccessCategorySummary[]> {

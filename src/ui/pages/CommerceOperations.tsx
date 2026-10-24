@@ -64,6 +64,7 @@ import { buildOrderExchangeRatesSnapshot, getAppliedCurrencyConversion } from '@
 import { fetchEURToIQDRate, fetchTRYToIQDRate, fetchUSDToIQDRate } from '@/lib/exchangeRate'
 import { formatCurrency, formatNumericInput, generateId, sanitizeNumericInput } from '@/lib/utils'
 import { useDateRange } from '@/context/DateRangeContext'
+import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { isOnline } from '@/lib/network'
 import { STANDARD_PAYMENT_METHODS, type PaymentMethodOption } from '@/lib/paymentMethods'
 import { getCommerceOperationsPartnerLabels } from './commerceOperationsPartnerLabels'
@@ -144,26 +145,9 @@ async function fetchDeliveryFeeExchangeRates(orderCurrency: CurrencyCode): Promi
 }
 
 function rangeBounds(range: ReturnType<typeof useDateRange>['dateRange'], custom: { start: string; end: string }) {
-  const today = new Date()
-  const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate())
-  const endOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999)
-  if (range === 'allTime') return null
-  if (range === 'custom') {
-    return {
-      start: custom.start ? new Date(`${custom.start}T00:00:00`) : null,
-      end: custom.end ? new Date(`${custom.end}T23:59:59.999`) : null,
-    }
-  }
-  if (range === 'today') return { start: startOfDay(today), end: endOfDay(today) }
-  if (range === 'yesterday') {
-    const yesterday = new Date(today)
-    yesterday.setDate(today.getDate() - 1)
-    return { start: startOfDay(yesterday), end: endOfDay(yesterday) }
-  }
-  if (range === 'lastMonth') {
-    return { start: new Date(today.getFullYear(), today.getMonth() - 1, 1), end: new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59, 999) }
-  }
-  return { start: new Date(today.getFullYear(), today.getMonth(), 1), end: endOfDay(today) }
+  const { start, end } = getDateRangeBounds(range, custom)
+  if (!start && !end) return null
+  return { start: start ?? null, end: end ?? null }
 }
 
 function inSelectedRange(value: string | undefined, bounds: ReturnType<typeof rangeBounds>) {
@@ -171,7 +155,7 @@ function inSelectedRange(value: string | undefined, bounds: ReturnType<typeof ra
   if (!value) return false
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return false
-  return (!bounds.start || date >= bounds.start) && (!bounds.end || date <= bounds.end)
+  return (!bounds.start || date >= bounds.start) && (!bounds.end || date < bounds.end)
 }
 
 function amountLabel(value: number, currency: CurrencyCode, preference: 'IQD' | 'د.ع') {
@@ -211,7 +195,7 @@ export function CommerceOperations() {
   const { features, hasFeature } = useWorkspace()
   const { hasPermission } = useWorkspacePermissions()
   const [, navigate] = useLocation()
-  const { dateRange, customDates } = useDateRange()
+  const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
   const [section, setSection] = useState<CommerceSection>('social')
   const [orderSectionTabs, setOrderSectionTabs] = useState<Record<OrderChannel, OrderSectionTab>>({ social: 'newOrder', wholesale: 'newOrder' })
   const [dataDialogOpen, setDataDialogOpen] = useState(false)
@@ -274,7 +258,7 @@ export function CommerceOperations() {
     void Promise.allSettled(refreshes)
   }, [workspaceId, hasFeature, features.agents, features.crm, features.orders, features.products, features.sales_agent_commissions])
 
-  const bounds = useMemo(() => rangeBounds(dateRange, customDates), [customDates, dateRange])
+  const bounds = useMemo(() => rangeBounds(dateRange, customDates), [customDates, dateFilterDayBoundary, dateRange])
   const orderDetailRecords = useMemo(
     () => records.filter((record) => record.recordType === 'order_details' && inSelectedRange(record.recordDate, bounds)).sort((a, b) => b.recordDate.localeCompare(a.recordDate)),
     [bounds, records],
@@ -588,8 +572,8 @@ function CoachesSection({ records, agents, partners, commissions, canUseCoaches,
   t: (key: string, options?: Record<string, unknown>) => string
   currencyPreference: 'IQD' | 'د.ع'
 }) {
-  const { dateRange, customDates } = useDateRange()
-  const bounds = useMemo(() => rangeBounds(dateRange, customDates), [customDates, dateRange])
+  const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
+  const bounds = useMemo(() => rangeBounds(dateRange, customDates), [customDates, dateFilterDayBoundary, dateRange])
   const partnerById = useMemo(() => new Map(partners.map((partner) => [partner.id, partner])), [partners])
   const agentByPartner = useMemo(() => new Map(agents.map((agent) => [agent.businessPartnerId, agent])), [agents])
   const filteredCommissions = useMemo(() => commissions.filter((entry) => inSelectedRange(entry.occurredAt, bounds)), [bounds, commissions])

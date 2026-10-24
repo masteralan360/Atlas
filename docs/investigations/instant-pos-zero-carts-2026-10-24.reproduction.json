@@ -1,0 +1,112 @@
+{
+  "sourceRoot": "E:\\ERP System\\Atlas\\",
+  "sourceReference": "2ed18604",
+  "mode": "Investigation only: exact source slices, injected React/network boundaries, disposable fake IndexedDB",
+  "results": [
+    {
+      "scenario": "Staff: successful lookup, then failed periodic refresh",
+      "tables": 12,
+      "savedWrites": 12,
+      "emptyCartsAfterReopen": 12,
+      "firstTableTotal": 0,
+      "allStillPending": true,
+      "remoteCalls": 0,
+      "queueCalls": 0
+    },
+    {
+      "scenario": "Mixed carts: failure removes services, preserves stock",
+      "tables": 12,
+      "savedWrites": 12,
+      "emptyCartsAfterReopen": 0,
+      "firstTableTotal": 2000,
+      "allStillPending": true,
+      "remoteCalls": 0,
+      "queueCalls": 0
+    },
+    {
+      "scenario": "Admin: online permission request fails",
+      "tables": 12,
+      "savedWrites": 12,
+      "emptyCartsAfterReopen": 12,
+      "firstTableTotal": 0,
+      "allStillPending": true,
+      "remoteCalls": 0,
+      "queueCalls": 0
+    },
+    {
+      "scenario": "Staff: Cloud/Hybrid workspace offline, ticket live sync off",
+      "tables": 12,
+      "savedWrites": 12,
+      "emptyCartsAfterReopen": 12,
+      "firstTableTotal": 0,
+      "allStillPending": true,
+      "remoteCalls": 0,
+      "queueCalls": 0
+    },
+    {
+      "scenario": "Control: offline admin bypass",
+      "tables": 12,
+      "savedWrites": 0,
+      "emptyCartsAfterReopen": 0,
+      "firstTableTotal": 10000,
+      "allStillPending": true,
+      "remoteCalls": 0,
+      "queueCalls": 0
+    },
+    {
+      "scenario": "Control: successful service lookup",
+      "tables": 12,
+      "savedWrites": 0,
+      "emptyCartsAfterReopen": 0,
+      "firstTableTotal": 10000,
+      "allStillPending": true,
+      "remoteCalls": 0,
+      "queueCalls": 0
+    },
+    {
+      "scenario": "Control: permission lookup still loading",
+      "tables": 12,
+      "savedWrites": 0,
+      "emptyCartsAfterReopen": 0,
+      "firstTableTotal": 10000,
+      "allStillPending": true,
+      "remoteCalls": 0,
+      "queueCalls": 0
+    },
+    {
+      "scenario": "Control: storage boundary unresolved",
+      "tables": 12,
+      "savedWrites": 0,
+      "emptyCartsAfterReopen": 0,
+      "firstTableTotal": 10000,
+      "allStillPending": true,
+      "remoteCalls": 0,
+      "queueCalls": 0
+    },
+    {
+      "scenario": "Separate stock risk: category exclusion rewrites shared carts",
+      "tables": 12,
+      "savedWrites": 12,
+      "emptyCartsAfterReopen": 0,
+      "firstTableTotal": 10000,
+      "allStillPending": true,
+      "remoteCalls": 0,
+      "queueCalls": 0
+    },
+    {
+      "scenario": "Historical control: cd0f34c5^ cleanup, same failed permission snapshot",
+      "tables": 12,
+      "savedWrites": 0,
+      "emptyCartsAfterReopen": 0,
+      "firstTableTotal": 10000,
+      "allStillPending": true,
+      "remoteCalls": 0,
+      "queueCalls": 0
+    },
+    {
+      "scenario": "Separate stock risk: legacy product allowed before inventory load, denied after restricted position loads",
+      "beforeLoad": "selectable",
+      "afterLoad": "excluded"
+    }
+  ]
+}

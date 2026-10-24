@@ -391,17 +391,17 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
     const { toast } = useToast()
     const [, navigate] = useLocation()
-    const { dateRange, customDates, setDateRange, setCustomDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary, setDateRange, setCustomDates } = useDateRange()
     const orderDateBounds = useMemo(() => {
         const { start, end } = getDateRangeBounds(dateRange, customDates)
         return {
             startDate: start?.toISOString(),
             endDate: end?.toISOString()
         }
-    }, [customDates, dateRange])
+    }, [customDates, dateFilterDayBoundary, dateRange])
     const previousDateRange = useMemo(
         () => getPreviousDateRange(dateRange, customDates),
-        [dateRange, customDates]
+        [dateRange, customDates, dateFilterDayBoundary]
     )
     const previousOrderDateBounds = useMemo(() => previousDateRange ? {
         startDate: previousDateRange.start.toISOString(),
@@ -448,7 +448,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             startDate: start?.toISOString(),
             endDate: end?.toISOString()
         }
-    }, [fulfillmentCustomDates, fulfillmentDateRange])
+    }, [dateFilterDayBoundary, fulfillmentCustomDates, fulfillmentDateRange])
     const ordersPageQuery = useMemo(() => ({
         workspaceId,
         orderType: activeTab,
@@ -799,13 +799,9 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     )
 
     const getDateDisplay = () => {
-        if (dateRange === 'today') {
-            return formatDate(new Date())
-        }
-        if (dateRange === 'yesterday') {
-            const yesterday = new Date()
-            yesterday.setDate(yesterday.getDate() - 1)
-            return formatDate(yesterday)
+        if (dateRange === 'today' || dateRange === 'yesterday') {
+            const start = getDateRangeBounds(dateRange, customDates).start
+            return start ? formatDate(start) : ''
         }
         if (dateRange === 'month') {
             const now = new Date()

@@ -9,7 +9,7 @@ import {
   Search,
   Warehouse,
 } from 'lucide-react'
-import type { DateRangeType } from '@/context/DateRangeContext'
+import { useDateRange, type DateRangeType } from '@/context/DateRangeContext'
 import {
   fetchInventoryTransferBatchDetails,
   fetchInventoryTransferBatchHistory,
@@ -18,6 +18,7 @@ import {
 } from '@/local-db'
 import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
+import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import { Input } from '@/ui/components/input'
 import {
@@ -58,7 +59,7 @@ import type { CustomTemplateLayout, TemplatePreview } from '@/lib/printPreviewEd
 import { createCustomTemplatePreview } from '@/lib/customTemplates'
 import type { PrintFormat } from '@/services/pdfGenerator'
 import { printPdfBlob } from '@/services/pdfPrintService'
-import { formatDateTime, parseLocalDateValue } from '@/lib/utils'
+import { formatDateTime } from '@/lib/utils'
 import { getProductUnitLabel } from '@/lib/productUnitPresentation'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { type WorkspaceFeatures } from '@/workspace'
@@ -69,40 +70,9 @@ const TRANSFER_TEMPLATE_TARGET = getCustomTemplateTarget(INVENTORY_TRANSFER_BATC
 
 type CustomDates = { start: string; end: string }
 
-function startOfDay(date: Date) {
-  const value = new Date(date)
-  value.setHours(0, 0, 0, 0)
-  return value
-}
-
-function addDays(date: Date, count: number) {
-  const value = new Date(date)
-  value.setDate(value.getDate() + count)
-  return value
-}
-
 function getDateBounds(range: DateRangeType, customDates: CustomDates) {
-  const now = new Date()
-  let from: Date | null = null
-  let to: Date | null = null
-  if (range === 'today') {
-    from = startOfDay(now)
-    to = addDays(from, 1)
-  } else if (range === 'yesterday') {
-    to = startOfDay(now)
-    from = addDays(to, -1)
-  } else if (range === 'month') {
-    from = new Date(now.getFullYear(), now.getMonth(), 1)
-    to = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-  } else if (range === 'lastMonth') {
-    from = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    to = new Date(now.getFullYear(), now.getMonth(), 1)
-  } else if (range === 'custom') {
-    from = customDates.start ? parseLocalDateValue(customDates.start) ?? null : null
-    const end = customDates.end ? parseLocalDateValue(customDates.end) ?? null : null
-    to = end ? addDays(end, 1) : null
-  }
-  return { from: from?.toISOString() ?? null, to: to?.toISOString() ?? null }
+  const { start, end } = getDateRangeBounds(range, customDates)
+  return { from: start?.toISOString() ?? null, to: end?.toISOString() ?? null }
 }
 
 export function InventoryTransferBatchesTab({
@@ -117,6 +87,7 @@ export function InventoryTransferBatchesTab({
   const { t, i18n } = useTranslation()
   const { toast } = useToast()
   const { activeWorkspace, branchInfo } = useWorkspace()
+  const { dateFilterDayBoundary } = useDateRange()
   const resolvedWorkspaceId = workspaceId || activeWorkspace?.id || ''
   const [dateRange, setDateRange] = useState<DateRangeType>('month')
   const [customDates, setCustomDates] = useState<CustomDates>({ start: '', end: '' })
@@ -149,7 +120,7 @@ export function InventoryTransferBatchesTab({
   const requestId = useRef(0)
   const detailRequestId = useRef(0)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const { from, to } = useMemo(() => getDateBounds(dateRange, customDates), [customDates, dateRange])
+  const { from, to } = useMemo(() => getDateBounds(dateRange, customDates), [customDates, dateFilterDayBoundary, dateRange])
 
   const quantityFormatter = useMemo(() => new Intl.NumberFormat(i18n.resolvedLanguage || i18n.language, {
     maximumFractionDigits: 6,

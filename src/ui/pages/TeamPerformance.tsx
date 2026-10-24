@@ -81,7 +81,7 @@ export function TeamPerformance() {
     const [sales, setSales] = useState<Sale[]>([])
     const [members, setMembers] = useState<User[]>([])
     const [isLoading, setIsLoading] = useState(true)
-    const { dateRange, customDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
     const [isTargetDialogOpen, setIsTargetDialogOpen] = useState(false)
     const [selectedMember, setSelectedMember] = useState<User | null>(null)
     const [newTarget, setNewTarget] = useState('')
@@ -232,6 +232,7 @@ export function TeamPerformance() {
         }
     }, [
         customDates,
+        dateFilterDayBoundary,
         dateRange,
         isLocalMode,
         salesViewOwnScope.isRestricted,
@@ -368,13 +369,9 @@ export function TeamPerformance() {
     }
 
     const getDateDisplay = () => {
-        if (dateRange === 'today') {
-            return formatDate(new Date())
-        }
-        if (dateRange === 'yesterday') {
-            const yesterday = new Date()
-            yesterday.setDate(yesterday.getDate() - 1)
-            return formatDate(yesterday)
+        if (dateRange === 'today' || dateRange === 'yesterday') {
+            const start = getDateRangeBounds(dateRange, customDates).start
+            return start ? formatDate(start) : ''
         }
         if (dateRange === 'month') {
             const now = new Date()

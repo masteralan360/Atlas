@@ -874,40 +874,8 @@ export function POS() {
         && (!serviceAccessReady || !canSelectServiceId(item.product_id))
     ))
 
-    useEffect(() => {
-        if (!serviceAccessReady || storageAccess.isReady === false) return
-        const excludedProductIds = new Set(
-            products
-                .filter((product) => !canSelectProduct(product))
-                .map((product) => product.id)
-        )
-        const nextCart = cart.filter((item) => {
-            if (item.is_service || item.storageId === SERVICES_VIRTUAL_STORAGE_ID) {
-                return canSelectServiceId(item.product_id)
-            }
-            if (item.storageId === ACTIVITIES_STORAGE_ID) return true
-            if (item.storageId && !storageAccess.canAccessStorage(item.storageId)) return false
-            return !excludedProductIds.has(item.product_id)
-        })
-        if (nextCart.length === cart.length) return
-
-        const restrictedServiceRemoved = cart.some((item) => (item.is_service || item.storageId === SERVICES_VIRTUAL_STORAGE_ID)
-            && !canSelectServiceId(item.product_id))
-        const restrictedStorageRemoved = cart.some((item) => item.storageId
-            && item.storageId !== ACTIVITIES_STORAGE_ID
-            && item.storageId !== SERVICES_VIRTUAL_STORAGE_ID
-            && !storageAccess.canAccessStorage(item.storageId))
-        setCart(nextCart)
-        toast({
-            variant: 'destructive',
-            title: t('messages.error'),
-            description: restrictedServiceRemoved
-                ? t('services.access.restrictedCartRemoved')
-                : restrictedStorageRemoved
-                    ? t('storages.permissions.errors.accessDenied')
-                : t('businessPartners.agent.excludedProductsRemoved', { defaultValue: 'Products from excluded categories were removed from the cart.' })
-        })
-    }, [canSelectProduct, canSelectServiceId, cart, products, serviceAccessReady, storageAccess, t, toast])
+    // Permission refreshes may block additions/checkout, but must never remove
+    // existing cart lines. This also protects against temporary lookup failures.
 
     useEffect(() => {
         // Keep an explicitly selected Activities storage while workspace features
@@ -1438,28 +1406,6 @@ export function POS() {
     useEffect(() => {
         localStorage.setItem('pos_held_sales', JSON.stringify(heldSales))
     }, [heldSales])
-
-    useEffect(() => {
-        if (!serviceAccessReady || storageAccess.isReady === false) return
-        const excludedProductIds = new Set(
-            products
-                .filter((product) => !canSelectProduct(product))
-                .map((product) => product.id)
-        )
-
-        const nextHeldSales = heldSales.map((sale) => {
-            const items = sale.items.filter((item) => {
-                if (item.is_service || item.storageId === SERVICES_VIRTUAL_STORAGE_ID) {
-                    return canSelectServiceId(item.product_id)
-                }
-                if (item.storageId === ACTIVITIES_STORAGE_ID) return true
-                if (item.storageId && !storageAccess.canAccessStorage(item.storageId)) return false
-                return !excludedProductIds.has(item.product_id)
-            })
-            return items.length === sale.items.length ? sale : { ...sale, items }
-        })
-        if (nextHeldSales.some((sale, index) => sale !== heldSales[index])) setHeldSales(nextHeldSales)
-    }, [canSelectProduct, canSelectServiceId, heldSales, products, serviceAccessReady, storageAccess])
 
     // Cart resizing state
     const [cartWidth, setCartWidth] = useState<number>(() => {

@@ -25,6 +25,14 @@ describe('workspace account creation server contract', () => {
         expect(parseCreateWorkspaceAccountInput({ email: 'bad', name: 'A', password: 'secure-pass-123' })).toBeNull()
         expect(parseCreateWorkspaceAccountInput({ email: 'a@b.com', name: 'A', password: 'short' })).toBeNull()
     })
+    it('requires exactly one valid organization path for merchant registration', () => {
+        const base = { email: 'merchant@example.com', name: 'Merchant', password: 'secure-pass-123' }
+        expect(parseCreateWorkspaceAccountInput({ ...base, merchant: {} })).toBeNull()
+        expect(parseCreateWorkspaceAccountInput({ ...base, merchant: { mode: 'join', code: 'invalid' } })).toBeNull()
+        expect(parseCreateWorkspaceAccountInput({ ...base, merchant: { mode: 'create', name: '  ' } })).toBeNull()
+        expect(parseCreateWorkspaceAccountInput({ ...base, merchant: { mode: 'join', code: 'abcd-2345', workspace_id: 'forged' } })?.merchant).toEqual({ mode: 'join', code: 'ABCD2345' })
+        expect(parseCreateWorkspaceAccountInput({ ...base, merchant: { mode: 'create', name: ' Shop ' } })?.merchant).toEqual({ mode: 'create', name: 'Shop' })
+    })
 
     it('requires an admin and an active Cloud or Hybrid workspace', () => {
         const valid = {

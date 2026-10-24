@@ -14,7 +14,7 @@ import {
     Trash2,
     UploadCloud,
 } from 'lucide-react'
-import type { DateRangeType } from '@/context/DateRangeContext'
+import { useDateRange, type DateRangeType } from '@/context/DateRangeContext'
 import { useAuth } from '@/auth/AuthContext'
 import { db } from '@/local-db'
 import type { MutationStatus, OfflineMutation } from '@/local-db/models'
@@ -110,6 +110,7 @@ export function MutationQueue() {
     const { t } = useTranslation()
     const { toast } = useToast()
     const { user, isSupabaseConfigured } = useAuth()
+    const { dateFilterDayBoundary } = useDateRange()
     const { sync, isOnline, isSyncing } = useSyncStatus()
     const [search, setSearch] = useState('')
     const [statusFilter, setStatusFilter] = useState<MutationQueueStatusFilter>('actionable')
@@ -132,7 +133,7 @@ export function MutationQueue() {
         queueRows,
         user?.workspaceId,
         { search, status: statusFilter, dateRange, customDates }
-    ), [customDates, dateRange, queueRows, search, statusFilter, user?.workspaceId])
+    ), [customDates, dateFilterDayBoundary, dateRange, queueRows, search, statusFilter, user?.workspaceId])
     const statusCounts = useMemo(
         () => getMutationQueueStatusCounts(queueRows, user?.workspaceId),
         [queueRows, user?.workspaceId]

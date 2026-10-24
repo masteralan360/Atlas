@@ -151,7 +151,7 @@ export function CashierShifts() {
   const { hasFeature } = useWorkspace()
   const { hasPermission } = useWorkspacePermissions()
   const [, navigate] = useLocation()
-  const { dateRange, customDates } = useDateRange()
+  const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
   const workspaceId = user?.workspaceId
   const currentUserId = user?.id
   const members = useWorkspaceUsers(workspaceId)
@@ -296,13 +296,13 @@ export function CashierShifts() {
       cashierUserId: currentUserId,
       now
     }).filter((row) => isDateInDateRange(row.scheduledStartAt, dateRange, customDates))
-  }, [assignments, currentUserId, customDates, dateRange, now, occurrences])
+  }, [assignments, currentUserId, customDates, dateFilterDayBoundary, dateRange, now, occurrences])
   const teamShiftRows = useMemo(
     () =>
       getCashierShiftTeamRows({ assignments, occurrences }).filter((row) =>
         isDateInDateRange(row.scheduledStartAt, dateRange, customDates)
       ),
-    [assignments, customDates, dateRange, occurrences]
+    [assignments, customDates, dateFilterDayBoundary, dateRange, occurrences]
   )
 
   const assignmentStartKey = timeKey(assignmentStartTime)

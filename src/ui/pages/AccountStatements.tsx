@@ -56,6 +56,7 @@ import type { CustomTemplateLayout } from '@/lib/printPreviewEditorStore'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
 import { usePartnerAccountStatement } from '@/hooks/usePartnerAccountStatement'
 import { usePartnerAccountStatementPeriod } from '@/hooks/usePartnerAccountStatementPeriod'
+import { useDateRange, type DateRangeType } from '@/context/DateRangeContext'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import {
     deleteLocalCustomTemplate,
@@ -63,7 +64,6 @@ import {
     saveLocalCustomTemplate,
     useWorkspaceContacts
 } from '@/local-db'
-import type { DateRangeType } from '@/context/DateRangeContext'
 import type { PrintFormat } from '@/services/pdfGenerator'
 import { Button } from '@/ui/components/button'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
@@ -473,6 +473,7 @@ function LedgerCard({
 }
 
 export function AccountStatements() {
+    const { dateFilterDayBoundary } = useDateRange()
     const { t, i18n } = useTranslation()
     const { user } = useAuth()
     const { features, hasFeature, workspaceName, isLocalMode } = useWorkspace()
@@ -508,7 +509,7 @@ export function AccountStatements() {
 
     const statementPeriod = useMemo<PartnerAccountStatementPeriod>(() => {
         return createPartnerAccountStatementPeriod(dateRange, customDates)
-    }, [customDates, dateRange])
+    }, [customDates, dateRange, dateFilterDayBoundary])
     const loadCustomTemplates = useCallback(async () => {
         if (!workspaceId || (!isLocalMode && !isSupabaseConfigured)) {
             setCustomTemplates([])

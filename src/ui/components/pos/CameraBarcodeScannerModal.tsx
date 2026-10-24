@@ -32,6 +32,8 @@ export type CameraBarcodeScannerModalProps = {
     tabOptionsLabel?: string
     title?: string
     className?: string
+    /** Dedicated QR recognition with one accepted result per scanner session. */
+    qrMode?: boolean
 }
 
 type ScannerFeedback = 'ready' | 'processing' | 'success' | 'failure' | 'camera-error'
@@ -67,12 +69,13 @@ export function CameraBarcodeScannerModal({
     defaultTabOptionId,
     tabOptionsLabel,
     title,
-    className
+    className,
+    qrMode = false
 }: CameraBarcodeScannerModalProps) {
     const { t } = useTranslation()
     const availableModes = useMemo<CameraBarcodeScanMode[]>(
-        () => modes.length > 0 ? [...new Set(modes)] : ['single'],
-        [modes]
+        () => qrMode ? ['single'] : modes.length > 0 ? [...new Set(modes)] : ['single'],
+        [modes, qrMode]
     )
     const customTabs = useMemo(
         () => (tabOptions ?? []).filter((option) => availableModes.includes(option.mode)),
@@ -91,6 +94,7 @@ export function CameraBarcodeScannerModal({
     const [isProcessing, setIsProcessing] = useState(false)
     const [isScanArmed, setIsScanArmed] = useState(false)
     const inFlightRef = useRef(false)
+    const acceptedQrRef = useRef(false)
     const scanArmedRef = useRef(false)
     const lastHandledBarcodeRef = useRef('')
     const sessionRef = useRef(0)
@@ -132,6 +136,7 @@ export function CameraBarcodeScannerModal({
 
         sessionRef.current += 1
         lastHandledBarcodeRef.current = ''
+        acceptedQrRef.current = false
         scanArmedRef.current = false
         setIsScanArmed(false)
         setMode(initialMode)
@@ -225,6 +230,7 @@ export function CameraBarcodeScannerModal({
             !open ||
             !barcode ||
             inFlightRef.current ||
+            (qrMode && acceptedQrRef.current) ||
             (mode === 'multiple' && !scanArmedRef.current) ||
             barcode === lastHandledBarcodeRef.current
         ) return
@@ -244,6 +250,7 @@ export function CameraBarcodeScannerModal({
         try {
             const result = await onScanRef.current(barcode, activeMode, activeTabOptionId)
             if (result === false) throw new Error('scan-rejected')
+            if (qrMode) acceptedQrRef.current = true
             lastHandledBarcodeRef.current = barcode
             if (!mountedRef.current || sessionRef.current !== activeSession) return
             playFeedbackSound('success')
@@ -264,7 +271,7 @@ export function CameraBarcodeScannerModal({
                 setIsProcessing(false)
             }
         }
-    }, [customTabs, mode, open, playFeedbackSound, requestOpenChange, selectedTabOptionId])
+    }, [customTabs, mode, open, playFeedbackSound, requestOpenChange, selectedTabOptionId, qrMode])
 
     const handleIntentionalRescan = () => {
         unlockAudio()
@@ -388,6 +395,7 @@ export function CameraBarcodeScannerModal({
                             <CameraBarcodeScanner
                                 key={`${selectedCameraId}:${cameraInstance}`}
                                 selectedCameraId={selectedCameraId}
+                                qrMode={qrMode}
                                 onCapture={handleCapture}
                                 onCameraStateChange={handleCameraStateChange}
                                 paused={isProcessing || (mode === 'multiple' && !isScanArmed)}

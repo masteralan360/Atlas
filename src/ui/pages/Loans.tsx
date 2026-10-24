@@ -183,14 +183,14 @@ function LoanListView({
     const { features, workspaceName, hasCapability } = useWorkspace()
     const { user } = useAuth()
     const { toast } = useToast()
-    const { dateRange, customDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
     const loanDateBounds = useMemo(() => {
         const { start, end } = getDateRangeBounds(dateRange, customDates)
         return {
             startDate: start?.toISOString(),
             endDate: end ? new Date(end.getTime() - 1).toISOString() : undefined
         }
-    }, [customDates, dateRange])
+    }, [customDates, dateFilterDayBoundary, dateRange])
     const isReadOnly = user?.role === 'viewer'
     const canUseWhatsApp = hasCapability('whatsappSharing')
     const [search, setSearch] = useState('')
@@ -259,7 +259,7 @@ function LoanListView({
     )
     const dateScopedLoans = useMemo(
         () => loans.filter((loan) => isDateInDateRange(loan.createdAt, dateRange, customDates)),
-        [customDates, dateRange, loans]
+        [customDates, dateFilterDayBoundary, dateRange, loans]
     )
     const dateScopedLoanIds = useMemo(
         () => new Set(dateScopedLoans.map((loan) => loan.id)),

@@ -235,7 +235,7 @@ export function InventoryTransactionsPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const { activeWorkspace } = useWorkspace();
-  const { dateRange, customDates, setDateRange } = useDateRange();
+  const { dateRange, customDates, dateFilterDayBoundary, setDateRange } = useDateRange();
   const online = useNetworkStatus();
   const inventoryDateRange = dateRange === "allTime" ? "month" : dateRange;
   const pageDirection =
@@ -285,7 +285,7 @@ export function InventoryTransactionsPage() {
 
   const dateBounds = useMemo(
     () => getDateRangeBounds(inventoryDateRange, customDates),
-    [customDates, inventoryDateRange],
+    [customDates, dateFilterDayBoundary, inventoryDateRange],
   );
   const listFilters = useMemo<InventoryTransactionListFilters>(() => ({
     productId: filters.productId,

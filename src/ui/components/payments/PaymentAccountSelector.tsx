@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { ShieldAlert } from 'lucide-react'
 
 import { useAuth } from '@/auth'
-import { usePaymentAccountBalancesState, usePaymentAccountsState, type PaymentAccount } from '@/local-db'
+import { usePaymentAccountBalancesState, usePaymentAccountsState, type PaymentAccount, type CurrencyCode } from '@/local-db'
 import { formatCurrency } from '@/lib/utils'
 import { Label } from '@/ui/components/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/components/select'
@@ -25,6 +25,8 @@ interface PaymentAccountSelectorProps {
   placeholder?: string
   /** Marks the account used by the original transaction in reversal workflows. */
   originAccountId?: string | null
+  /** Restrict balance labels for workflows that use one fixed currency. */
+  balanceCurrency?: CurrencyCode
 }
 
 /** Optional by design: leaving it empty preserves a normal ledger payment. */
@@ -39,6 +41,7 @@ export function PaymentAccountSelector({
   applyDefault = true,
   placeholder,
   originAccountId,
+  balanceCurrency,
 }: PaymentAccountSelectorProps) {
   const { t } = useTranslation()
   const { user } = useAuth()
@@ -59,6 +62,7 @@ export function PaymentAccountSelector({
     const grouped = new Map<string, typeof balances>()
 
     balances.forEach((balance) => {
+      if (balanceCurrency && balance.currency !== balanceCurrency) return
       const current = grouped.get(balance.accountId) ?? []
       current.push(balance)
       grouped.set(balance.accountId, current)
@@ -69,7 +73,7 @@ export function PaymentAccountSelector({
     })
 
     return grouped
-  }, [balances])
+  }, [balances, balanceCurrency])
   const [retainedSelectedAccount, setRetainedSelectedAccount] = useState<PaymentAccount | null>(null)
   const [explicitlyLedgerOnly, setExplicitlyLedgerOnly] = useState(false)
   const lastObservedValue = useRef<string | null | undefined>(undefined)

@@ -2,6 +2,7 @@ export interface CreateWorkspaceAccountInput {
     email: string
     name: string
     password: string
+    merchant?: { mode: 'join'; code: string } | { mode: 'create'; name: string }
 }
 
 export interface WorkspaceAccountCreationAuthorizationInput {
@@ -41,7 +42,19 @@ export function parseCreateWorkspaceAccountInput(body: unknown): CreateWorkspace
 
     // Only identity fields are returned. Any client-supplied workspace or role
     // is deliberately discarded so the caller cannot choose either value.
-    return { email, name, password: values.password }
+    let merchant: CreateWorkspaceAccountInput['merchant']
+    if (values.merchant !== undefined) {
+        if (!values.merchant || typeof values.merchant !== 'object' || Array.isArray(values.merchant)) return null
+        const enrollment = values.merchant as Record<string, unknown>
+        if (enrollment.mode === 'join' && typeof enrollment.code === 'string') {
+            const code = enrollment.code.trim().replace(/-/g, '').toUpperCase()
+            if (!/^[A-Z0-9]{8}$/.test(code)) return null
+            merchant = { mode: 'join', code }
+        } else if (enrollment.mode === 'create' && typeof enrollment.name === 'string' && enrollment.name.trim().length > 0 && enrollment.name.trim().length <= 120) {
+            merchant = { mode: 'create', name: enrollment.name.trim() }
+        } else return null
+    }
+    return { email, name, password: values.password, ...(merchant ? { merchant } : {}) }
 }
 
 export function getWorkspaceAccountCreationAuthorizationError(

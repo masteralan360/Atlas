@@ -48,7 +48,7 @@ export function RealEstateInstallmentsMirror({ workspaceId }: { workspaceId: str
     const { t } = useTranslation()
     const { features } = useWorkspace()
     const { user } = useAuth()
-    const { dateRange, customDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
     const installments = useRealEstateWorkspaceInstallments(workspaceId)
     const transactions = useRealEstateTransactions(workspaceId)
     const [search, setSearch] = useState('')
@@ -84,7 +84,7 @@ export function RealEstateInstallmentsMirror({ workspaceId }: { workspaceId: str
                     installment.status
                 ].some((value) => value.toLowerCase().includes(query))
             })
-    }, [customDates, dateRange, installments, search, transactionById])
+    }, [customDates, dateFilterDayBoundary, dateRange, installments, search, transactionById])
 
     const openRows = rows.filter(({ installment }) => installment.balanceAmount > 0)
     const overdueRows = openRows.filter(({ installment }) => installment.status === 'overdue')

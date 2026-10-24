@@ -151,6 +151,7 @@ const PERMISSION_MODULE_DEFAULT_LABELS: Record<string, string> = {
 }
 
 const PERMISSION_MODULE_PLAN_MODULES: Partial<Record<WorkspacePermissionModule, PlanModuleKey>> = {
+    postService: 'postal_service',
     payment: 'payments',
     paymentAccounts: 'payment_accounts',
     cashierShiftControl: 'cashier_shift_control',
@@ -218,7 +219,7 @@ export function Members() {
     const [copyingPermissions, setCopyingPermissions] = useState(false)
     const [copyError, setCopyError] = useState<string | null>(null)
     const canManageWorkspacePermissions = !isDemoMode
-        && hasCapability('workspaceManagementPermissions')
+        && (hasCapability('workspaceManagementPermissions') || planCapabilities.modules.includes('postal_service'))
 
     const getErrorMessage = (err: unknown) => {
         const normalized = normalizeSupabaseActionError(err)
@@ -523,12 +524,14 @@ export function Members() {
     const visiblePermissionDefinitions = useMemo(() => {
         const availableModules = new Set(planCapabilities.modules)
         return WORKSPACE_PERMISSION_DEFINITIONS.filter((permission) => {
+            if (permission.key === 'postService.merchant') return false
+            if (!hasCapability('workspaceManagementPermissions') && permission.module !== 'postService') return false
             if (permission.module === 'global') return true
             if (permission.module === 'installments' && availableModules.has('real_estate')) return true
             const planModule = PERMISSION_MODULE_PLAN_MODULES[permission.module]
             return planModule ? availableModules.has(planModule) : false
         })
-    }, [planCapabilities.modules])
+    }, [planCapabilities.modules, hasCapability])
 
     const selectedModulePermissions = useMemo(() => (
         visiblePermissionDefinitions.filter((permission) => (
@@ -1205,7 +1208,7 @@ export function Members() {
                                             </div>
                                             <Switch
                                                 checked={permission.key === 'global.NOprint' ? !selectedMemberPermissionKeys.has(permission.key) : selectedMemberPermissionKeys.has(permission.key)}
-                                                disabled={permissionMutationKey === `${permissionMember.id}:${permission.key}` || permissionsLoading}
+                                                disabled={permissionMutationKey === `${permissionMember.id}:${permission.key}` || permissionsLoading || (permission.module === 'postService' && (permissionMember.role !== 'staff' || selectedMemberPermissionKeys.has('postService.merchant')))}
                                                 onCheckedChange={(value) => {
                                                     const shouldGrant = permission.key === 'global.NOprint' ? !value : value
                                                     handlePermissionToggle(permissionMember, permission.key, shouldGrant)

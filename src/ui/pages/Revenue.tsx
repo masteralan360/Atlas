@@ -609,7 +609,7 @@ export function Revenue() {
     const [, setLocation] = useLocation()
     const { features, hasCapability, hasFeature } = useWorkspace()
     const permissions = useOptionalWorkspacePermissions()
-    const { dateRange, customDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
     const { style } = useTheme()
     const canAccessAccountingExpenses = hasFeature('budget')
         && (!permissions || permissions.hasPermission('budget.access'))
@@ -620,7 +620,7 @@ export function Revenue() {
             startDate: start?.toISOString(),
             endDate: end ? new Date(end.getTime() - 1).toISOString() : undefined
         }
-    }, [dateRange, customDates])
+    }, [dateRange, customDates, dateFilterDayBoundary])
     const revenueReportOriginId = useMemo(() => getReportOriginId(
         user?.workspaceId,
         'revenue',
@@ -845,11 +845,11 @@ export function Revenue() {
     }, [revenueRecords, t, userNameById])
     const dateScopedSales = useMemo(
         () => filterSalesByDateRange(allSales, dateRange, customDates),
-        [allSales, dateRange, customDates]
+        [allSales, dateRange, customDates, dateFilterDayBoundary]
     )
     const dateScopedRevenueRecords = useMemo(
         () => filterRevenueAnalysisRecords(revenueRecords, dateRange, customDates),
-        [revenueRecords, dateRange, customDates]
+        [revenueRecords, dateRange, customDates, dateFilterDayBoundary]
     )
     const filteredRevenueRecords = useMemo(
         () => applyRevenueFilters(filterRevenueRecordsByStorage(dateScopedRevenueRecords, filters.storage), filters, userNameById, t),
@@ -902,13 +902,9 @@ export function Revenue() {
     }, [filters, isFilterDialogOpen])
 
     const getDateDisplay = () => {
-        if (dateRange === 'today') {
-            return formatDate(new Date())
-        }
-        if (dateRange === 'yesterday') {
-            const yesterday = new Date()
-            yesterday.setDate(yesterday.getDate() - 1)
-            return formatDate(yesterday)
+        if (dateRange === 'today' || dateRange === 'yesterday') {
+            const start = getDateRangeBounds(dateRange, customDates).start
+            return start ? formatDate(start) : ''
         }
         if (dateRange === 'month') {
             const now = new Date()

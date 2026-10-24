@@ -223,14 +223,14 @@ export function SelectedCapitalPoolCharts({
   iqdDisplayPreference
 }: SelectedCapitalPoolChartsProps) {
   const { t, i18n } = useTranslation()
-  const { dateRange, customDates } = useDateRange()
+  const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
   const accountById = useMemo(
     () => new Map(accounts.map((account) => [account.id, account])),
     [accounts]
   )
   const flowRange = useMemo(
     () => getDateRangeBounds(dateRange, customDates),
-    [customDates, dateRange]
+    [customDates, dateFilterDayBoundary, dateRange]
   )
   const cashFlows = useMemo(
     () => buildCapitalPoolAccountCashFlows(selectedPool, movements, transactions, flowRange),

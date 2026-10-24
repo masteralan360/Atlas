@@ -1,6 +1,14 @@
 import type { OrdersListPageQuery } from '@/local-db/ordersList'
 
 export const queryKeys = {
+  postal: {
+    all: (workspaceId: string) => ['atlas', 'workspace', workspaceId, 'postal'] as const,
+    page: (input: import('@/local-db/postal').PostalPageInput) => [...queryKeys.postal.all(input.workspaceId), 'page', input] as const,
+    summary: (input: import('@/local-db/postal').PostalSummaryInput) => [...queryKeys.postal.all(input.workspaceId), 'summary', input] as const,
+    detail: (scope: import('@/local-db/postal').PostalScope, id: string) => [...queryKeys.postal.all(scope.workspaceId), 'detail', scope, id] as const,
+    events: (scope: import('@/local-db/postal').PostalScope, id: string) => [...queryKeys.postal.all(scope.workspaceId), 'events', scope, id] as const,
+    members: (scope: import('@/local-db/postal').PostalScope, id: string) => [...queryKeys.postal.all(scope.workspaceId), 'members', scope, id] as const,
+  },
   directTransactions: {
     all: (workspaceId: string | undefined) =>
       ['atlas', 'workspace', workspaceId ?? 'unscoped', 'direct-transactions'] as const,

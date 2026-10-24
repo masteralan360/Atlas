@@ -59,7 +59,7 @@ export interface DateRangeBounds {
     end?: Date
 }
 
-function toValidDate(value: Date | string | null | undefined) {
+function toValidDate(value: Date | string | null | undefined, dateOnlyBoundary = DEFAULT_DATE_FILTER_DAY_BOUNDARY) {
     if (!value) return null
     if (value instanceof Date) {
         return Number.isNaN(value.getTime()) ? null : value
@@ -67,7 +67,12 @@ function toValidDate(value: Date | string | null | undefined) {
 
     const dateOnlyMatch = DATE_ONLY_PATTERN.exec(value)
     const date = dateOnlyMatch
-        ? new Date(Number(dateOnlyMatch[1]), Number(dateOnlyMatch[2]) - 1, Number(dateOnlyMatch[3]))
+        ? atDayBoundary(
+            Number(dateOnlyMatch[1]),
+            Number(dateOnlyMatch[2]) - 1,
+            Number(dateOnlyMatch[3]),
+            dateOnlyBoundary
+        )
         : new Date(value)
 
     return Number.isNaN(date.getTime()) ? null : date
@@ -173,8 +178,9 @@ export function isDateInDateRange(
     now = new Date(),
     dayBoundary = getDateFilterDayBoundary()
 ) {
-    const date = toValidDate(value)
-    const { start, end } = getDateRangeBounds(dateRange, customDates, now, dayBoundary)
+    const normalizedBoundary = normalizeDateFilterDayBoundary(dayBoundary)
+    const date = toValidDate(value, normalizedBoundary)
+    const { start, end } = getDateRangeBounds(dateRange, customDates, now, normalizedBoundary)
 
     if (!start && !end) return true
     if (!date) return false

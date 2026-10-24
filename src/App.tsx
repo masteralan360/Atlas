@@ -27,6 +27,7 @@ import { WorkspacePermissionsProvider } from "@/permissions";
 import { FleetLocationSharingProvider } from "@/fleet/FleetLocationSharingContext";
 import { AutoSyncOverlay } from "@/ui/components/AutoSyncOverlay";
 import { OfflineEntryOverlay } from "@/ui/components/OfflineEntryOverlay";
+import { NetworkStatusNotifications } from "@/ui/components/NetworkStatusNotifications";
 import { SyncIntegrityOverlay } from "@/ui/components/SyncIntegrityOverlay";
 import {
   isBackendConfigurationRequired,
@@ -116,6 +117,9 @@ const ProductClonePage = __ATLAS_TAURI_BUILD__
 const Sales = __ATLAS_TAURI_BUILD__
   ? SalesEager
   : lazy(() => import("@/ui/pages/Sales").then((m) => ({ default: m.Sales })));
+
+const PostalServicePage = lazy(() => import('@/ui/pages/PostalServicePage'));
+const PostalShipmentPage = lazy(() => import('@/ui/pages/PostalShipmentPage'));
 
 // Other pages - always lazy loaded
 const Login = lazy(() =>
@@ -1444,6 +1448,7 @@ function App() {
               <FaviconHandler />
               <AutoSyncOverlay />
               <OfflineEntryOverlay />
+              <NetworkStatusNotifications />
               <SyncIntegrityOverlay />
               <PwaUpdateReadyBanner />
               {!isMobile() && <TitleBar />}
@@ -1680,6 +1685,12 @@ function App() {
                         </ProtectedRoute>
                       </Route>
 
+                      <Route path="/post-service/shipments/:shipmentId">
+                        {(params) => <ProtectedRoute allowedRoles={["admin", "staff"]} requiredFeature="postal_service" requiredAnyPermission={['postService.merchant','postService.officeEmployee']}><Layout><PostalShipmentPage shipmentId={params.shipmentId} /></Layout></ProtectedRoute>}
+                      </Route>
+                      <Route path="/post-service">
+                        <ProtectedRoute allowedRoles={["admin", "staff"]} requiredFeature="postal_service" requiredAnyPermission={['postService.merchant','postService.officeEmployee']}><Layout><PostalServicePage /></Layout></ProtectedRoute>
+                      </Route>
                       <Route path="/car-rental">
                         <ProtectedRoute
                           allowedRoles={["admin", "staff", "viewer"]}

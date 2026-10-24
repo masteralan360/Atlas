@@ -106,6 +106,24 @@ describe('centralized service access lookup', () => {
     expect(mocks.rpc).toHaveBeenCalledTimes(2)
   })
 
+  it('does not reuse a previous role or user permission snapshot', async () => {
+    await fetchAccessibleServiceIds(WORKSPACE_ID)
+    mocks.role = 'admin'
+    await fetchAccessibleServiceIds(WORKSPACE_ID)
+    mocks.userId = 'another-cashier'
+    await fetchAccessibleServiceIds(WORKSPACE_ID)
+    expect(mocks.rpc).toHaveBeenCalledTimes(3)
+  })
+
+  it('recomputes permissions from SQLite/Dexie authority after changing to Local mode', async () => {
+    await fetchAccessibleServiceIds(WORKSPACE_ID)
+    mocks.localMode = true
+    await seedLocalUser()
+    await db.products.put({ id: 'local-service', workspaceId: WORKSPACE_ID, isService: true, isDeleted: false } as any)
+    await expect(fetchAccessibleServiceIds(WORKSPACE_ID)).resolves.toEqual(new Set(['local-service']))
+    expect(mocks.rpc).toHaveBeenCalledTimes(1)
+  })
+
   it('fails closed for remote members while offline', async () => {
     mocks.online = false
 

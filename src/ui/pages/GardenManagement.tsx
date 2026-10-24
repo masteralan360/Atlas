@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 
 import { useAuth } from '@/auth/AuthContext'
+import { useDateRange } from '@/context/DateRangeContext'
 import { isDateInDateRange } from '@/lib/dateRangeFilters'
 import { formatNumberWithCommas, formatNumericInput, sanitizeNumericInput } from '@/lib/utils'
 import {
@@ -382,6 +383,7 @@ function CompletionDialog({
 }
 
 export default function GardenManagement() {
+  const { dateFilterDayBoundary } = useDateRange()
   const { t, i18n } = useTranslation()
   const { user } = useAuth()
   const { features, activeWorkspace } = useWorkspace()
@@ -451,10 +453,10 @@ export default function GardenManagement() {
   const visibleJobs = jobs
     .filter((job) => !job.isDeleted)
     .filter((job) => isAdmin || assignments.some((assignment) => assignment.jobId === job.id && assignment.userId === actorUserId && !assignment.unassignedAt && !assignment.isDeleted))
-    .filter((job) => isDateInDateRange(job.scheduledAt, dateRange, customDates))
+    .filter((job) => isDateInDateRange(job.scheduledAt, dateRange, customDates, new Date(), dateFilterDayBoundary))
     .sort((left, right) => left.scheduledAt.localeCompare(right.scheduledAt) || left.routeOrder - right.routeOrder)
-  const visibleProjects = projects.filter((project) => !project.isDeleted && isDateInDateRange(project.createdAt, dateRange, customDates)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  const visibleContracts = contracts.filter((contract) => !contract.isDeleted && isDateInDateRange(contract.createdAt, dateRange, customDates)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const visibleProjects = projects.filter((project) => !project.isDeleted && isDateInDateRange(project.createdAt, dateRange, customDates, new Date(), dateFilterDayBoundary)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const visibleContracts = contracts.filter((contract) => !contract.isDeleted && isDateInDateRange(contract.createdAt, dateRange, customDates, new Date(), dateFilterDayBoundary)).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   const siteById = new Map(sites.map((site) => [site.id, site]))
   const projectById = new Map(projects.map((project) => [project.id, project]))
   const contractById = new Map(contracts.map((contract) => [contract.id, contract]))

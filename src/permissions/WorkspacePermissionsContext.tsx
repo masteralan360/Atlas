@@ -34,7 +34,7 @@ export function WorkspacePermissionsProvider({
   children: ReactNode;
 }) {
   const { user, isAuthenticated } = useAuth();
-  const { hasCapability, isLocalMode } = useWorkspace();
+  const { hasCapability, hasFeature, isLocalMode } = useWorkspace();
   const [permissionKeys, setPermissionKeys] = useState<WorkspacePermissionKey[]>(
     [],
   );
@@ -44,9 +44,10 @@ export function WorkspacePermissionsProvider({
   const userId = user?.id ?? "";
   const userRole = user?.role;
   const permissionsEnabled = hasCapability("workspaceManagementPermissions");
+  const postalEnabled = hasFeature('postal_service');
 
   const refreshPermissions = useCallback(async () => {
-    if (!isAuthenticated || !workspaceId || !userId || !permissionsEnabled) {
+    if (!isAuthenticated || !workspaceId || !userId || (!permissionsEnabled && !postalEnabled)) {
       setPermissionKeys([]);
       setIsLoading(false);
       return;
@@ -127,7 +128,7 @@ export function WorkspacePermissionsProvider({
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, isLocalMode, permissionsEnabled, userId, userRole, workspaceId]);
+  }, [isAuthenticated, isLocalMode, permissionsEnabled, postalEnabled, userId, userRole, workspaceId]);
 
   useEffect(() => {
     void refreshPermissions();
@@ -140,7 +141,7 @@ export function WorkspacePermissionsProvider({
       !isAuthenticated ||
       !workspaceId ||
       !userId ||
-      !permissionsEnabled ||
+      (!permissionsEnabled && !postalEnabled) ||
       userRole === "admin"
     ) {
       return;
@@ -178,7 +179,7 @@ export function WorkspacePermissionsProvider({
         handlePermissionsChanged,
       );
     };
-  }, [isAuthenticated, isLocalMode, permissionsEnabled, refreshPermissions, userId, userRole, workspaceId]);
+  }, [isAuthenticated, isLocalMode, permissionsEnabled, postalEnabled, refreshPermissions, userId, userRole, workspaceId]);
 
   const permissionSet = useMemo(
     () => new Set<WorkspacePermissionKey>(permissionKeys),

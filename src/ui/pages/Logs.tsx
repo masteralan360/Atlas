@@ -111,7 +111,7 @@ export function Logs() {
     const [isLoading, setIsLoading] = useState(true)
     const [search, setSearch] = useState('')
     const deferredSearch = useDeferredValue(search)
-    const { dateRange, customDates, setDateRange, setCustomDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary, setDateRange, setCustomDates } = useDateRange()
     const pagination = usePaginationState({
         resetOn: [search, dateRange, customDates.start, customDates.end],
         initialPageSize: getLogsPageSize(localStorage.getItem('logs_page_size')),
@@ -145,7 +145,7 @@ export function Logs() {
         } finally {
             if (requestId === refreshRequestIdRef.current && showLoading) setIsLoading(false)
         }
-    }, [customDates, dateRange, deferredSearch, pagination.currentPage, pagination.pageSize])
+    }, [customDates, dateRange, dateFilterDayBoundary, deferredSearch, pagination.currentPage, pagination.pageSize])
 
     useEffect(() => {
         void refresh()

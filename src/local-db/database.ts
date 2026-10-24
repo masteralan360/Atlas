@@ -3894,6 +3894,8 @@ export class AtlasDatabase extends Dexie {
       })
     })
 
+    this.version(162).stores({ postal_cache: 'id, workspaceId, viewerId, table, fetchedAt' })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

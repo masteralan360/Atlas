@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { Calendar as CalendarIcon, Clock } from "lucide-react"
+import { dateMatchModifiers } from "react-day-picker"
 import { useTranslation } from "react-i18next"
 
 import {
@@ -58,6 +59,14 @@ export function DateTimePicker({
   const amPmRef = React.useRef<HTMLButtonElement>(null)
   const { t } = useTranslation()
   const [hourDisplayPreference, setHourDisplayPreference] = React.useState(getHourDisplayPreference)
+  const [today] = React.useState(() => new Date())
+  const [calendarMonth, setCalendarMonth] = React.useState(() => date ? new Date(date) : new Date(today))
+
+  React.useEffect(() => {
+    if (date) {
+      setCalendarMonth(new Date(date))
+    }
+  }, [date])
 
   React.useEffect(() => {
     if (typeof window === "undefined") {
@@ -99,6 +108,32 @@ export function DateTimePicker({
     setDate(nextDate)
   }
 
+  const isDateFieldDateAllowed = React.useCallback((candidate: Date) => {
+    const disabledDates = calendarProps?.disabled
+    if (disabledDates && dateMatchModifiers(candidate, disabledDates)) {
+      return false
+    }
+
+    const candidateMonth = candidate.getFullYear() * 12 + candidate.getMonth()
+    const startMonth = calendarProps?.startMonth
+    const endMonth = calendarProps?.endMonth
+    if (startMonth && candidateMonth < startMonth.getFullYear() * 12 + startMonth.getMonth()) {
+      return false
+    }
+    if (endMonth && candidateMonth > endMonth.getFullYear() * 12 + endMonth.getMonth()) {
+      return false
+    }
+
+    return true
+  }, [calendarProps?.disabled, calendarProps?.endMonth, calendarProps?.startMonth])
+
+  const dateFieldDisabled = Boolean(
+    disabled ||
+    calendarProps?.disableNavigation ||
+    calendarProps?.hideNavigation ||
+    calendarProps?.month
+  )
+
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
@@ -128,6 +163,17 @@ export function DateTimePicker({
           {hasDate ? (
             <Calendar
               {...calendarProps}
+              dateField={{
+                date: date ?? today,
+                onChange: handleSelectDate,
+                disabled: dateFieldDisabled,
+                isDateAllowed: isDateFieldDateAllowed,
+              }}
+              month={calendarProps?.month ?? calendarMonth}
+              onMonthChange={(month) => {
+                calendarProps?.onMonthChange?.(month)
+                setCalendarMonth(month)
+              }}
               showMonthNumber
               mode="single"
               selected={date}

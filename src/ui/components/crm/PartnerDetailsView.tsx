@@ -567,7 +567,7 @@ export function PartnerDetailsView({
     const paymentTransactions = usePaymentTransactions(workspaceId)
     const clinicalAppointments = useClinicalAppointments(workspaceId)
 
-    const { dateRange, customDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
     const [customPrintTemplates, setCustomPrintTemplates] = useState<StoredCustomTemplateRow[]>([])
     const [selectedPrintTemplate, setSelectedPrintTemplate] = useState<StoredCustomTemplateRow | null>(null)
     const [selectedPartnerPrintTemplateKey, setSelectedPartnerPrintTemplateKey] = useState<PartnerPrintTemplateKey>(PARTNER_DETAILS_TEMPLATE_KEY)
@@ -607,7 +607,7 @@ export function PartnerDetailsView({
     const dateBounds = useMemo(() => {
         const { start, end } = getDateRangeBounds(dateRange, customDates)
         return { startDate: start?.toISOString(), endDate: end?.toISOString() }
-    }, [dateRange, customDates])
+    }, [dateRange, customDates, dateFilterDayBoundary])
 
     const partnerLoans = useMemo(
         () => loans.filter((loan) => loan.linkedPartyType === 'business_partner' && loan.linkedPartyId === partner?.id),

@@ -445,7 +445,7 @@ export function PaymentAccounts() {
   const { toast } = useToast()
   const { user } = useAuth()
   const { features } = useWorkspace()
-  const { dateRange, customDates } = useDateRange()
+  const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
   const { exchangeData, eurRates, tryRates } = useExchangeRate()
   const workspaceId = user?.workspaceId
   const baseCurrency = features.default_currency
@@ -638,7 +638,7 @@ export function PaymentAccounts() {
   )
   const movementEntries = useMemo(
     () => allMovementEntries.filter(({ movement }) => isDateInDateRange(movement.occurredAt, dateRange, customDates)),
-    [allMovementEntries, customDates, dateRange],
+    [allMovementEntries, customDates, dateFilterDayBoundary, dateRange],
   )
   const filteredMovementEntries = useMemo(
     () => applyMovementFilters(movementEntries, movementFilters),
@@ -729,7 +729,7 @@ export function PaymentAccounts() {
       currentEnd,
       previousStart: new Date(currentStart.getTime() - duration),
     }
-  }, [customDates, dateRange, filteredMovementEntries])
+  }, [customDates, dateFilterDayBoundary, dateRange, filteredMovementEntries])
   const movementTrendStats = useMemo(() => {
     let currentInflow = 0
     let currentOutflow = 0

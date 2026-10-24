@@ -59,6 +59,7 @@ function createTauriSqliteConnection(database: {
 }
 
 export const LOCAL_MODE_SQLITE_TABLES = [
+  'postal_cache',
   "products",
   "product_storage_assignments",
   "product_uoms",

@@ -6,9 +6,6 @@ Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain En
 
 Allow inventory movement on offline mode
 
-Order Advancement slow
-Make inventory transactions faster
-
 Add by unit in adjustment
 
 Item line-based currency

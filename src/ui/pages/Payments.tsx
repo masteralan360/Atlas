@@ -275,7 +275,7 @@ export function Payments() {
     const { toast } = useToast()
     const { features, hasFeature, workspaceName } = useWorkspace()
     const { hasPermission, permissionKeys } = useWorkspacePermissions()
-    const { dateRange, customDates } = useDateRange()
+    const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
     const [, setLocation] = useLocation()
     const workspaceId = user?.workspaceId
     const hasPaymentsSurface = features.loans || features.crm || features.budget || features.hr || features.real_estate || features.activities || features.clinical_appointments || features.car_rental || features.travel_transportation || hasFeature('payment_accounts')
@@ -403,7 +403,7 @@ export function Payments() {
             filteredTransactions.filter((item) => isDateInDateRange(item.paidAt, dateRange, customDates)),
             latestUnreversedBySource
         ),
-        [customDates, dateRange, filteredTransactions, latestUnreversedBySource]
+        [customDates, dateFilterDayBoundary, dateRange, filteredTransactions, latestUnreversedBySource]
     )
     const transactionsPageCount = Math.max(1, Math.ceil(visibleTransactions.length / pagination.pageSize))
     const transactionsCurrentPage = clampPaginationPage(pagination.pages.transactions, transactionsPageCount)

@@ -79,6 +79,7 @@ export interface WorkspaceFeatures {
     agents: boolean
     sales_agent_commissions: boolean
     agent_sales_accounts: boolean
+    postal_service: boolean
     car_rental: boolean
     garden_management: boolean
     travel_transportation: boolean
@@ -190,6 +191,7 @@ const PLAN_DERIVED_FEATURE_KEYS: ModuleFeatureKey[] = [
     'agents',
     'sales_agent_commissions',
     'agent_sales_accounts',
+    'postal_service',
     'car_rental',
     'garden_management',
     'travel_transportation',
@@ -1296,6 +1298,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }, [isAuthenticated, user?.workspaceId])
 
     const hasFeature = (feature: ModuleFeatureKey): boolean => {
+        if (feature === 'postal_service') {
+            return (features.data_mode === 'cloud' || features.data_mode === 'hybrid') && planCapabilities.modules.includes('postal_service')
+        }
         if (feature === 'ecommerce') {
             return features.data_mode !== 'local'
                 && features.data_mode !== 'demo'

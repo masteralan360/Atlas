@@ -3,6 +3,7 @@ import { isSupportedWorkspacePermissionKey, WORKSPACE_PERMISSION_DEFINITIONS, ty
 
 /** Shared permission decision for the provider and independently authenticated route checks. */
 export function resolveWorkspacePermission(role: UserRole | undefined, enabled: boolean, keys: ReadonlySet<WorkspacePermissionKey>, permission: WorkspacePermissionKey | 'global.print') {
+    if (permission.startsWith('postService.')) return role === 'admin' || (role === 'staff' && keys.has(permission as WorkspacePermissionKey))
     if (permission === 'global.hideCosts') return role !== 'admin' && enabled && keys.has(permission)
     // Global printing is enabled by default; the workspace permission stores
     // only the explicit opt-out as `global.NOprint`.

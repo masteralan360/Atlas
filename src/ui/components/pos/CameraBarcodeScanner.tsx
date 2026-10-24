@@ -17,12 +17,14 @@ const CAMERA_SCAN_OPTIONS = {
     ],
     delay: 1000
 }
+const QR_SCAN_OPTIONS = { formats: ['qr_code'], delay: 250 }
 
 interface CameraBarcodeScannerProps {
     selectedCameraId: string
     onCapture: (barcodes: DetectedBarcode[]) => void
     onCameraStateChange?: (state: { isReady: boolean; error?: Error }) => void
     paused?: boolean
+    qrMode?: boolean
 }
 
 /**
@@ -30,7 +32,7 @@ interface CameraBarcodeScannerProps {
  * opens a new MediaStream whenever `trackConstraints` changes, so recreating
  * that object during ordinary POS renders makes the camera preview stutter.
  */
-export function CameraBarcodeScanner({ selectedCameraId, onCapture, onCameraStateChange, paused = false }: CameraBarcodeScannerProps) {
+export function CameraBarcodeScanner({ selectedCameraId, onCapture, onCameraStateChange, paused = false, qrMode = false }: CameraBarcodeScannerProps) {
     const videoRef = useRef<HTMLVideoElement>(null)
     const onCaptureRef = useRef(onCapture)
     const onCameraStateChangeRef = useRef(onCameraStateChange)
@@ -64,7 +66,7 @@ export function CameraBarcodeScanner({ selectedCameraId, onCapture, onCameraStat
     // reusable scanner dialog. The public BarcodeScanner component doesn't
     // expose its useCamera error state.
     const { isCameraReady, error } = useCamera(videoRef, trackConstraints)
-    const { detectedBarcodes, startScan, stopScan } = useScanning(videoRef, CAMERA_SCAN_OPTIONS)
+    const { detectedBarcodes, startScan, stopScan } = useScanning(videoRef, qrMode ? QR_SCAN_OPTIONS : CAMERA_SCAN_OPTIONS)
 
     useEffect(() => {
         if (detectedBarcodes !== undefined) {

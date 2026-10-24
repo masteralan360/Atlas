@@ -34,6 +34,8 @@ import {
 } from "lucide-react";
 
 export const WORKSPACE_PERMISSION_DEFINITIONS = [
+  { key: 'postService.merchant', module: 'postService', labelKey: 'postal.merchant', defaultLabel: 'Merchant', descriptionKey: 'postal.merchantPermission', defaultDescription: 'Create and track shipments for the assigned merchant organization.', icon: Store, section: 'sell-and-serve' },
+  { key: 'postService.officeEmployee', module: 'postService', labelKey: 'postal.officeEmployee', defaultLabel: 'Office Employee', descriptionKey: 'postal.officePermission', defaultDescription: 'Receive shipments and execute authorized operational transitions.', icon: Truck, section: 'sell-and-serve' },
   {
     key: "travelTransportation.access",
     module: "travelTransportation",

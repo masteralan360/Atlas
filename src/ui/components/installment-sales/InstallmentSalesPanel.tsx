@@ -1368,7 +1368,7 @@ export function InstallmentSalesPanel({
   const [, navigate] = useLocation();
   const { features } = useWorkspace();
   const { user } = useAuth();
-  const { dateRange, customDates } = useDateRange();
+  const { dateRange, customDates, dateFilterDayBoundary } = useDateRange();
   const dueStatusClock = useInstallmentSaleDueStatusClock();
   const sales = useInstallmentSales(workspaceId);
   const [createOpen, setCreateOpen] = useState(false);
@@ -1379,7 +1379,7 @@ export function InstallmentSalesPanel({
       sales.filter((sale) =>
         isDateInDateRange(sale.createdAt, dateRange, customDates),
       ),
-    [customDates, dateRange, sales],
+    [customDates, dateFilterDayBoundary, dateRange, sales],
   );
   const visible = useMemo(
     () =>
