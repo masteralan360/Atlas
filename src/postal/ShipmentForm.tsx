@@ -104,6 +104,7 @@ export function ShipmentForm({
     (field) => errors[field as ValidationField],
   ) as ValidationField[];
   const valid = invalidFields.length === 0;
+  const showNegativePrefix = negative && amount.length > 0;
   const fieldError = (field: ValidationField) => {
     if (!touched[field] || !errors[field]) return null;
     return (
@@ -226,23 +227,33 @@ export function ShipmentForm({
             <div className="space-y-2">
               <Label htmlFor="shipment-cod">{t("postal.codAmount")} *</Label>
               <div className="flex flex-wrap items-center gap-3">
-                <Input
-                  className="min-w-0 flex-1"
-                  id="shipment-cod"
-                  {...fieldValidation("cod_amount")}
-                  inputMode="numeric"
-                  placeholder="0"
-                  dir="ltr"
-                  required
-                  value={money}
-                  disabled={
-                    action.busy || (!!editing && source?.state !== "draft")
-                  }
-                  onChange={(e) => {
-                    const digits = e.target.value.replace(/,/g, "");
-                    if (/^\d{0,12}$/.test(digits)) setAmount(digits);
-                  }}
-                />
+                <div className="relative min-w-0 flex-1" dir="ltr">
+                  {showNegativePrefix && (
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute start-4 top-1/2 z-10 -translate-y-1/2 select-none font-medium text-foreground"
+                    >
+                      -
+                    </span>
+                  )}
+                  <Input
+                    className={showNegativePrefix ? "w-full ps-6" : "w-full"}
+                    id="shipment-cod"
+                    {...fieldValidation("cod_amount")}
+                    inputMode="numeric"
+                    placeholder="0"
+                    dir="ltr"
+                    required
+                    value={money}
+                    disabled={
+                      action.busy || (!!editing && source?.state !== "draft")
+                    }
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/,/g, "");
+                      if (/^\d{0,12}$/.test(digits)) setAmount(digits);
+                    }}
+                  />
+                </div>
                 <Label className="flex items-center gap-2">
                   <Checkbox
                     checked={negative}

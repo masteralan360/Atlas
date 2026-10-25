@@ -4,7 +4,7 @@ import { normalizeBarcodeScannerText } from '@/lib/barcodeScanner'
 import { cn } from '@/lib/utils'
 import { Button } from '../button'
 import { AppDialog, AppDialogBody, AppDialogContent, AppDialogFooter, AppDialogHeader, AppDialogTitle } from '../dialog'
-import { AlertCircle, Camera, CheckCircle2, Loader2, RotateCcw, ScanBarcode, X } from 'lucide-react'
+import { AlertCircle, Camera, CheckCircle2, ImageUp, Loader2, RotateCcw, ScanBarcode, X } from 'lucide-react'
 import { CameraBarcodeScanner } from './CameraBarcodeScanner'
 
 export type CameraBarcodeScanMode = 'single' | 'multiple'
@@ -34,6 +34,8 @@ export type CameraBarcodeScannerModalProps = {
     className?: string
     /** Dedicated QR recognition with one accepted result per scanner session. */
     qrMode?: boolean
+    /** Let QR workflows decode an image selected from the device. */
+    allowImageUpload?: boolean
 }
 
 type ScannerFeedback = 'ready' | 'processing' | 'success' | 'failure' | 'camera-error'
@@ -70,7 +72,8 @@ export function CameraBarcodeScannerModal({
     tabOptionsLabel,
     title,
     className,
-    qrMode = false
+    qrMode = false,
+    allowImageUpload = false
 }: CameraBarcodeScannerModalProps) {
     const { t } = useTranslation()
     const availableModes = useMemo<CameraBarcodeScanMode[]>(
@@ -91,6 +94,7 @@ export function CameraBarcodeScannerModal({
     const [cameraError, setCameraError] = useState<Error | undefined>()
     const [feedback, setFeedback] = useState<ScannerFeedback>('ready')
     const [lastBarcode, setLastBarcode] = useState('')
+    const [feedbackMessage, setFeedbackMessage] = useState('')
     const [isProcessing, setIsProcessing] = useState(false)
     const [isScanArmed, setIsScanArmed] = useState(false)
     const inFlightRef = useRef(false)
@@ -103,6 +107,7 @@ export function CameraBarcodeScannerModal({
     const audioContextRef = useRef<AudioContext | null>(null)
     const activeOscillatorsRef = useRef<Set<OscillatorNode>>(new Set())
     const lastSoundAtRef = useRef(0)
+    const imageInputRef = useRef<HTMLInputElement>(null)
 
     useEffect(() => {
         onScanRef.current = onScan
@@ -142,6 +147,7 @@ export function CameraBarcodeScannerModal({
         setMode(initialMode)
         setSelectedTabOptionId(initialTabOptionId)
         setLastBarcode('')
+        setFeedbackMessage('')
         setFeedback('ready')
         setCameraReady(false)
         setCameraError(undefined)
@@ -224,20 +230,24 @@ export function CameraBarcodeScannerModal({
         else if (state.isReady) setFeedback((current) => current === 'camera-error' ? 'ready' : current)
     }, [])
 
-    const handleCapture = useCallback(async (barcodes: Array<{ rawValue?: string }>) => {
-        const barcode = normalizeBarcodeScannerText(String(barcodes[0]?.rawValue ?? ''))
+    const processBarcode = useCallback(async (
+        rawBarcode: string,
+        activeMode: CameraBarcodeScanMode,
+        activeTabOptionId: string,
+        source: 'camera' | 'image',
+        lockAlreadyHeld = false
+    ) => {
+        const barcode = normalizeBarcodeScannerText(rawBarcode)
         if (
             !open ||
             !barcode ||
-            inFlightRef.current ||
+            (inFlightRef.current && !lockAlreadyHeld) ||
             (qrMode && acceptedQrRef.current) ||
             (mode === 'multiple' && !scanArmedRef.current) ||
             barcode === lastHandledBarcodeRef.current
         ) return
 
         const activeSession = sessionRef.current
-        const activeMode = mode
-        const activeTabOptionId = customTabs.find((option) => option.id === selectedTabOptionId)?.id ?? selectedTabOptionId
         inFlightRef.current = true
         if (activeMode === 'multiple') {
             scanArmedRef.current = false
@@ -245,6 +255,7 @@ export function CameraBarcodeScannerModal({
         }
         setIsProcessing(true)
         setFeedback('processing')
+        setFeedbackMessage(source === 'image' ? t('pos.cameraScanner.readingImage') : '')
         setLastBarcode(barcode)
 
         try {
@@ -265,17 +276,67 @@ export function CameraBarcodeScannerModal({
             if (!mountedRef.current || sessionRef.current !== activeSession) return
             playFeedbackSound('failure')
             setFeedback('failure')
+            setFeedbackMessage(source === 'image' ? t('pos.cameraScanner.scanFailed') : '')
         } finally {
             if (mountedRef.current && sessionRef.current === activeSession) {
                 inFlightRef.current = false
                 setIsProcessing(false)
             }
         }
-    }, [customTabs, mode, open, playFeedbackSound, requestOpenChange, selectedTabOptionId, qrMode])
+    }, [mode, open, playFeedbackSound, requestOpenChange, qrMode, t])
+
+    const handleCapture = useCallback((barcodes: Array<{ rawValue?: string }>) => {
+        const activeTabOptionId = customTabs.find((option) => option.id === selectedTabOptionId)?.id ?? selectedTabOptionId
+        void processBarcode(String(barcodes[0]?.rawValue ?? ''), mode, activeTabOptionId, 'camera')
+    }, [customTabs, mode, processBarcode, selectedTabOptionId])
+
+    const handleImageSelected = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.currentTarget.files?.[0]
+        event.currentTarget.value = ''
+        if (!file || !open || inFlightRef.current || acceptedQrRef.current) return
+
+        const activeSession = sessionRef.current
+        const activeTabOptionId = customTabs.find((option) => option.id === selectedTabOptionId)?.id ?? selectedTabOptionId
+        inFlightRef.current = true
+        lastHandledBarcodeRef.current = ''
+        setLastBarcode('')
+        setIsProcessing(true)
+        setFeedback('processing')
+        setFeedbackMessage(t('pos.cameraScanner.readingImage'))
+
+        let bitmap: ImageBitmap | undefined
+        try {
+            if (file.type && !file.type.startsWith('image/')) throw new Error('not-an-image')
+            bitmap = await createImageBitmap(file)
+            if (!mountedRef.current || sessionRef.current !== activeSession) return
+
+            const detector = new BarcodeDetector({ formats: ['qr_code'] })
+            const detected = await detector.detect(bitmap)
+            if (!mountedRef.current || sessionRef.current !== activeSession) return
+            const qrValue = detected.find((barcode) => barcode.format === 'qr_code')?.rawValue
+            if (!qrValue) throw new Error('image-qr-not-found')
+
+            await processBarcode(qrValue, 'single', activeTabOptionId, 'image', true)
+        } catch (error) {
+            if (!mountedRef.current || sessionRef.current !== activeSession) return
+            playFeedbackSound('failure')
+            setFeedback('failure')
+            setFeedbackMessage(error instanceof Error && error.message === 'image-qr-not-found'
+                ? t('pos.cameraScanner.imageQrNotFound')
+                : t('pos.cameraScanner.imageReadFailed'))
+        } finally {
+            bitmap?.close()
+            if (mountedRef.current && sessionRef.current === activeSession && inFlightRef.current) {
+                inFlightRef.current = false
+                setIsProcessing(false)
+            }
+        }
+    }, [customTabs, open, playFeedbackSound, processBarcode, selectedTabOptionId, t])
 
     const handleIntentionalRescan = () => {
         unlockAudio()
         lastHandledBarcodeRef.current = ''
+        setFeedbackMessage('')
         setFeedback(cameraReady ? 'ready' : cameraError ? 'camera-error' : 'ready')
     }
 
@@ -297,7 +358,7 @@ export function CameraBarcodeScannerModal({
     }
 
     const cameraErrorMessage = cameraError ? getCameraErrorMessage(cameraError, t) : ''
-    const statusMessage = feedback === 'processing'
+    const statusMessage = feedbackMessage || (feedback === 'processing'
         ? t('pos.cameraScanner.processing', { defaultValue: 'Processing barcode…' })
         : feedback === 'success'
             ? t('pos.cameraScanner.scanAccepted', { defaultValue: 'Barcode accepted.' })
@@ -307,7 +368,7 @@ export function CameraBarcodeScannerModal({
                     ? cameraErrorMessage
                     : cameraReady
                         ? t('pos.cameraScanner.ready', { defaultValue: 'Point the camera at a barcode.' })
-                        : t('pos.cameraScanner.startingCamera', { defaultValue: 'Starting camera…' })
+                        : t('pos.cameraScanner.startingCamera', { defaultValue: 'Starting camera…' }))
     const tabChoices = customTabs.length > 0
         ? customTabs.map((option) => ({ id: option.id, label: option.label, mode: option.mode }))
         : availableModes.map((availableMode) => ({
@@ -421,6 +482,32 @@ export function CameraBarcodeScannerModal({
                             <div className="pointer-events-none absolute inset-x-8 top-1/2 h-0.5 -translate-y-1/2 bg-primary/70 shadow-[0_0_16px_rgba(var(--primary),0.9)]" />
                         )}
                     </div>
+
+                    {allowImageUpload && qrMode && (
+                        <div className="space-y-2">
+                            <input
+                                ref={imageInputRef}
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(event) => void handleImageSelected(event)}
+                                tabIndex={-1}
+                                aria-hidden="true"
+                            />
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="min-h-11 w-full"
+                                disabled={isProcessing || acceptedQrRef.current}
+                                onClick={() => imageInputRef.current?.click()}
+                            >
+                                {isProcessing
+                                    ? <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                                    : <ImageUp className="me-2 h-4 w-4" />}
+                                {t('pos.cameraScanner.uploadQrImage')}
+                            </Button>
+                        </div>
+                    )}
 
                     <div className="flex min-h-12 items-start gap-3 rounded-xl border border-border bg-muted/30 p-3" role="status" aria-live="polite">
                         {feedback === 'processing'

@@ -109,7 +109,7 @@ export function LocationPicker({
         }}
       >
         <SmallDialogContent layout="structured">
-          <SmallDialogHeader>
+          <SmallDialogHeader layout="structured" className="shrink-0">
             <SmallDialogTitle>
               {t(`postal.${picker ?? 'governorate'}`)}
             </SmallDialogTitle>
@@ -208,7 +208,7 @@ export function BranchPicker({
       </Button>
       <SmallDialog open={open} onOpenChange={setOpen}>
         <SmallDialogContent layout="structured">
-          <SmallDialogHeader>
+          <SmallDialogHeader layout="structured" className="shrink-0">
             <SmallDialogTitle>{label}</SmallDialogTitle>
             <Input
               aria-label={t('common.search')}

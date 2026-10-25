@@ -51,12 +51,19 @@ export interface PostalPageInput extends PostalScope {
   pageSize: number
   search: string
   status?: string
+  codKind?: 'all' | 'collection' | 'settlement'
   start?: string
   end?: string
+}
+export interface PostalCodSummary {
+  collection_total: string
+  settlement_total: string
+  net_total: string
 }
 export interface PostalPage<T> {
   rows: T[]
   total: number
+  summary?: PostalCodSummary
 }
 export interface PostalSummaryInput extends PostalScope {
   search: string
@@ -171,17 +178,95 @@ function normalizeShipment(row: PostalShipment): PostalShipment {
     cod_amount: Number(row.cod_amount),
   }
 }
+function normalizePostalCodActivityPage(value: unknown): PostalPage<PostalCodRecord> {
+  if (!value || typeof value !== 'object')
+    throw new Error('postal_invalid_result')
+  const result = value as Record<string, unknown>
+  const summary = result.summary
+  if (!Array.isArray(result.rows) || !Number.isSafeInteger(result.total) || Number(result.total) < 0 || !summary || typeof summary !== 'object')
+    throw new Error('postal_invalid_result')
+  const totals = summary as Record<string, unknown>
+  for (const field of ['collection_total', 'settlement_total', 'net_total']) {
+    if (typeof totals[field] !== 'string' || !/^-?\d+$/.test(totals[field]))
+      throw new Error('postal_invalid_result')
+  }
+  const rows = result.rows.map((value) => {
+    if (!value || typeof value !== 'object')
+      throw new Error('postal_invalid_result')
+    const row = value as Record<string, unknown>
+    const shipment = row.postal_shipments
+    if (
+      typeof row.id !== 'string' ||
+      typeof row.shipment_id !== 'string' ||
+      typeof row.organization_id !== 'string' ||
+      (row.kind !== 'collection' && row.kind !== 'settlement') ||
+      !Number.isSafeInteger(Number(row.signed_amount)) ||
+      Number(row.signed_amount) === 0 ||
+      typeof row.created_at !== 'string' ||
+      !shipment || typeof shipment !== 'object'
+    ) throw new Error('postal_invalid_result')
+    const shipmentRow = shipment as Record<string, unknown>
+    if (
+      !Number.isSafeInteger(Number(shipmentRow.shipment_number)) ||
+      Number(shipmentRow.shipment_number) <= 0 ||
+      typeof shipmentRow.created_at !== 'string' ||
+      typeof shipmentRow.recipient_name !== 'string' ||
+      typeof shipmentRow.primary_phone !== 'string'
+    ) throw new Error('postal_invalid_result')
+    return {
+      ...row,
+      signed_amount: Number(row.signed_amount),
+      postal_shipments: {
+        shipment_number: Number(shipmentRow.shipment_number),
+        created_at: shipmentRow.created_at,
+        recipient_name: shipmentRow.recipient_name,
+        primary_phone: shipmentRow.primary_phone,
+      },
+    } as PostalCodRecord
+  })
+  return {
+    rows,
+    total: Number(result.total),
+    summary: {
+      collection_total: totals.collection_total as string,
+      settlement_total: totals.settlement_total as string,
+      net_total: totals.net_total as string,
+    },
+  }
+}
 export function usePostalPage<T>(input: PostalPageInput, enabled = true) {
   return useQuery({
     queryKey: queryKeys.postal.page(input),
     enabled: enabled && !!input.workspaceId,
     queryFn: async ({ signal }): Promise<PostalPage<T>> => {
       const table = postalTables[input.kind]
-      const trackedTables =
-        input.kind === 'cod' ? [table, 'postal_shipments'] : table
+      if (input.kind === 'cod') {
+        return tracked(
+          input,
+          [table, 'postal_shipments', 'postal_organizations'],
+          signal,
+          async () => {
+            const { data, error } = await supabase.rpc('postal_cod_activity_page', {
+              p_workspace_id: input.workspaceId,
+              p_page: input.page,
+              p_page_size: input.pageSize,
+              p_search: sanitizePostalSearch(input.search),
+              p_kind: input.codKind ?? 'all',
+              p_start: input.start ?? null,
+              p_end: input.end ?? null,
+            }).abortSignal(signal)
+            if (error) return { data: null, error }
+            return {
+              data: normalizePostalCodActivityPage(data) as PostalPage<T>,
+              error: null,
+            }
+          },
+          (result) => result.rows.length,
+        )
+      }
       return tracked(
         input,
-        trackedTables,
+        table,
         signal,
         async () => {
           let query = supabase
@@ -235,54 +320,7 @@ export function usePostalPage<T>(input: PostalPageInput, enabled = true) {
             )
             .abortSignal(signal)
           if (error) return { data: null, error }
-          let rows: unknown[] = data ?? []
-          if (input.kind === 'cod' && rows.length > 0) {
-            const codRows = rows as Array<Record<string, unknown>>
-            const shipmentIds = Array.from(
-              new Set(
-                codRows
-                  .map((row) => row.shipment_id)
-                  .filter((id): id is string => typeof id === 'string'),
-              ),
-            )
-            if (shipmentIds.length > 0) {
-              const { data: shipments, error: shipmentsError } = await supabase
-                .from('postal_shipments')
-                .select('id,shipment_number,created_at')
-                .eq('workspace_id', input.workspaceId)
-                .in('id', shipmentIds)
-                .abortSignal(signal)
-              if (shipmentsError) return { data: null, error: shipmentsError }
-              const shipmentsById = new Map<
-                string,
-                { shipment_number: number; created_at: string }
-              >()
-              for (const shipment of shipments ?? []) {
-                const number = Number(shipment.shipment_number)
-                if (
-                  !Number.isSafeInteger(number) ||
-                  number <= 0 ||
-                  typeof shipment.created_at !== 'string'
-                )
-                  throw new Error('postal_invalid_result')
-                shipmentsById.set(shipment.id, {
-                  shipment_number: number,
-                  created_at: shipment.created_at,
-                })
-              }
-              rows = codRows.map((row) => {
-                const shipmentId = row.shipment_id
-                const shipment =
-                  typeof shipmentId === 'string'
-                    ? shipmentsById.get(shipmentId)
-                    : undefined
-                return {
-                  ...row,
-                  postal_shipments: shipment ?? null,
-                }
-              })
-            }
-          }
+          const rows: unknown[] = data ?? []
           const normalizedRows =
             input.kind === 'shipments'
               ? rows.map((row) =>

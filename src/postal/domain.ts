@@ -110,7 +110,14 @@ export interface PostalCodRecord {
   postal_shipments?: {
     shipment_number: number;
     created_at: string;
+    recipient_name?: string;
+    primary_phone?: string;
   } | null;
+  organization_name?: string;
+  payment_direction?: "incoming" | "outgoing" | null;
+  payment_method?: string | null;
+  account_name_snapshot?: string | null;
+  reference_label?: string | null;
 }
 export interface ShipmentInput {
   recipient_name: string;

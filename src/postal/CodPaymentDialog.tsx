@@ -1,7 +1,7 @@
 import { usePostalAction } from './usePostalAccess'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Loader2, Wallet } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, Loader2, Wallet } from 'lucide-react'
 import {
   AppDialog,
   AppDialogBody,
@@ -13,11 +13,6 @@ import {
   Input,
   Label,
   Textarea,
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
 } from '@/ui/components'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { PaymentMethodSelector } from '@/ui/components/PaymentMethodSelector'
@@ -53,19 +48,33 @@ export function CodPaymentDialog({
       ? shipment.cod_amount - summary.collected
       : summary.collected - summary.settled
   const [digits, setDigits] = useState(String(Math.abs(remaining)))
-  const [direction, setDirection] = useState('')
   const [method, setMethod] = useState<PaymentMethodOption>('cash')
   const [account, setAccount] = useState<PaymentAccount | null>(null)
   const [notes, setNotes] = useState('')
   const action = usePostalAction()
   const amount = signedIqd(digits, remaining < 0)
+  const directionSign = amount ?? (remaining < 0 ? -1 : 1)
+  const direction: 'incoming' | 'outgoing' =
+    kind === 'settlement'
+      ? directionSign < 0
+        ? 'incoming'
+        : 'outgoing'
+      : directionSign < 0
+        ? 'outgoing'
+        : 'incoming'
+  const directionAction =
+    kind === 'settlement'
+      ? direction === 'outgoing'
+        ? 'settlementPayMerchant'
+        : 'settlementReceiveFromMerchant'
+      : direction === 'outgoing'
+        ? 'collectionPayRecipient'
+        : 'collectionCollectFromRecipient'
   const valid =
     amount !== null &&
     amount !== 0 &&
     Math.abs(amount) <= Math.abs(remaining) &&
-    !!direction &&
-    (kind !== 'collection' ||
-      direction === (amount < 0 ? 'outgoing' : 'incoming'))
+    (kind !== 'collection' || direction === (amount < 0 ? 'outgoing' : 'incoming'))
   const payload = {
     id: shipment.id,
     revision: shipment.revision,
@@ -92,7 +101,7 @@ export function CodPaymentDialog({
         </AppDialogHeader>
         <AppDialogBody className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            {t('postal.paymentHint')}
+            {t(kind === 'settlement' ? 'postal.settlementPaymentHint' : 'postal.paymentHint')}
           </p>
           <p className="font-semibold">
             {t('postal.remaining')}: {remaining.toLocaleString()}{' '}
@@ -115,21 +124,25 @@ export function CodPaymentDialog({
               }}
             />
           </div>
-          <div className="space-y-2">
-            <Label>{t('postal.cashDirection')} *</Label>
-            <Select
-              value={direction}
-              onValueChange={setDirection}
-              disabled={action.busy}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={t('postal.select')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="incoming">{t('postal.incoming')}</SelectItem>
-                <SelectItem value="outgoing">{t('postal.outgoing')}</SelectItem>
-              </SelectContent>
-            </Select>
+          <div
+            aria-live="polite"
+            className="flex items-start gap-3 rounded-xl border bg-muted/30 p-3"
+          >
+            <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${direction === 'outgoing' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'}`}>
+              {direction === 'outgoing' ? (
+                <ArrowUpRight className="h-5 w-5" aria-hidden="true" />
+              ) : (
+                <ArrowDownLeft className="h-5 w-5" aria-hidden="true" />
+              )}
+            </span>
+            <div className="min-w-0">
+              <p className="font-semibold">
+                {t(`postal.${directionAction}`)}
+              </p>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                {t(`postal.${directionAction}Hint`)}
+              </p>
+            </div>
           </div>
           <div className="space-y-2">
             <Label>{t('postal.paymentMethod')} *</Label>

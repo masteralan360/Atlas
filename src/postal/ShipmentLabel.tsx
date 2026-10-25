@@ -45,20 +45,17 @@ export function ShipmentLabel({
         width: '100mm',
         minHeight: '150mm',
         boxSizing: 'border-box',
-        padding: '6mm',
+        padding: '4mm',
         background: '#fff',
         color: '#000',
         fontFamily: 'Arial, sans-serif',
         overflowWrap: 'anywhere',
       }}
     >
-      <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>
-        {t('postal.shipmentLabel')}
-      </h1>
       <div
-        style={{ display: 'flex', justifyContent: 'center', margin: '3mm 0' }}
+        style={{ display: 'flex', justifyContent: 'center', margin: '0 0 1mm' }}
       >
-        <ShipmentQr qrId={shipment.qr_id} size={220} />
+        <ShipmentQr qrId={shipment.qr_id} size={300} />
       </div>
       <p
         style={{ margin: '1mm 0', fontFamily: 'monospace', fontSize: 9 }}

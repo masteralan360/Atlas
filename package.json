@@ -101,6 +101,7 @@
     "@tauri-apps/plugin-sql": "^2.3.2",
     "@tauri-apps/plugin-updater": "^2.9.0",
     "@types/crypto-js": "^4.2.2",
+    "@undecaf/zbar-wasm": "^0.11.0",
     "@untitledui/file-icons": "^0.0.9",
     "@untitledui/icons": "^0.0.22",
     "@wasm-audio-decoders/flac": "0.2.10",

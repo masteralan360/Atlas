@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useCamera, useScanning, type DetectedBarcode } from 'react-barcode-scanner'
+import { setModuleArgs } from '@undecaf/zbar-wasm'
+import zbarWasmUrl from '@undecaf/zbar-wasm/dist/zbar.wasm?url'
 import 'react-barcode-scanner/polyfill'
+
+// Vite serves the scanner as a bundled module, so the WASM file is not
+// alongside the generated JavaScript. Point the ZBar loader at Vite's asset
+// URL instead of letting it request a missing relative URL that falls back to
+// the app's HTML shell.
+setModuleArgs({
+    locateFile: (filename, directory) => filename.endsWith('.wasm') ? zbarWasmUrl : `${directory}${filename}`
+})
 
 const CAMERA_SCAN_OPTIONS = {
     formats: [

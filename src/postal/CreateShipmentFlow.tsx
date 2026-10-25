@@ -71,6 +71,7 @@ export function CreateShipmentFlow({
         <CameraBarcodeScannerModal
           open
           qrMode
+          allowImageUpload
           modes={SINGLE}
           title={t('postal.readShipmentQr')}
           onScan={async (raw) => {
