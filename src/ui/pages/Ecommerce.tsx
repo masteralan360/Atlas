@@ -1,8 +1,18 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { getCoreRowModel, useReactTable, type ColumnDef, type SortingState } from '@tanstack/react-table'
+import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
+import { queryKeys } from '@/query/queryKeys'
+import { useMarketplaceOrderDetail, useMarketplaceOrderPage, useMarketplaceOrderSummary } from '@/local-db/marketplaceOrderHooks'
+import type { MarketplaceOrderSortColumn, MarketplaceOrderSummary } from '@/local-db/marketplaceOrders'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useLocation, useRoute } from 'wouter'
 import {
     BadgeCheck,
+    ArrowLeft,
+    ArrowDown,
+    ArrowUp,
+    ArrowUpDown,
     CircleDollarSign,
     Clock3,
     Eye,
@@ -34,7 +44,6 @@ import {
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import {
     getMarketplaceOrderDisplayStatus,
-    type MarketplaceSalesOrderReturnStatus
 } from '@/lib/marketplaceOrderPresentation'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
@@ -51,21 +60,13 @@ import {
     db,
     fetchTableFromSupabase,
     recordObligationSettlement,
-    useProducts,
+    useProductsByIds,
     type CurrencyCode,
     type PaymentObligation,
     type SalesOrder,
     type WorkspacePaymentMethod
 } from '@/local-db'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
-import {
-    cancelWorkspaceDataHydration,
-    completeWorkspaceDataHydration,
-    failWorkspaceDataHydration,
-    recordWorkspaceDataFetch,
-    startWorkspaceDataHydration,
-    updateWorkspaceDataHydrationProgress
-} from '@/workspace/workspaceDataFreshness'
 import { EcommerceDetailView } from '@/ui/components/ecommerce/EcommerceDetailView'
 import {
     MarketplaceOrderAdvancementDialog,
@@ -101,6 +102,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  AppPagination,
   Table,
   TableBody,
   TableCell,
@@ -120,75 +122,6 @@ const DeveloperTestButton = import.meta.env.DEV && __ATLAS_DEV_TESTING__
 
 type MarketplaceOrderFilter = 'all' | MarketplaceOrderStatus
 
-const JUMLA_KHALEEJ_STOREFRONT_KEY = 'jumla-khaleej'
-const JUMLA_KHALEEJ_DELIVERY_METADATA_TYPE = 'jumla_khaleej_delivery_fee'
-
-type MarketplaceOrderDatabaseRecord = Omit<MarketplaceOrderRecord, 'delivery_fee' | 'sales_order_return_status' | 'sales_order_returned_at'> & {
-    website_storefront_key: string | null
-}
-
-type MarketplaceSalesOrderReturnRecord = {
-    id: string
-    return_status: MarketplaceSalesOrderReturnStatus
-    returned_at: string | null
-}
-
-const MARKETPLACE_ORDER_SELECT = `
-    id,
-    workspace_id,
-    order_number,
-    business_partner_id,
-    customer_id,
-    sales_order_id,
-    customer_name,
-    customer_phone,
-    customer_email,
-    customer_address,
-    customer_city,
-    customer_notes,
-    inquiry_pdf_storage_id,
-    inquiry_pdf_document_number,
-    inquiry_pdf_uploaded_at,
-    website_storefront_key,
-    items,
-    subtotal,
-    total,
-    currency,
-    status,
-    confirmed_at,
-    processing_at,
-    shipped_at,
-    shipped_by,
-    shipped_by_name,
-    delivered_at,
-    delivered_by,
-    delivered_by_name,
-    cancelled_at,
-    cancel_reason,
-    inventory_deducted,
-    created_at,
-    updated_at
-`
-
-function isMarketplaceOrderItem(value: unknown): value is MarketplaceOrderItemRecord {
-    return Boolean(value
-        && typeof value === 'object'
-        && typeof (value as { product_id?: unknown }).product_id === 'string'
-        && (value as { product_id: string }).product_id.length > 0)
-}
-
-function getJumlaKhaleejDeliveryFee(items: unknown[], storefrontKey: string | null) {
-    if (storefrontKey !== JUMLA_KHALEEJ_STOREFRONT_KEY) return null
-
-    const metadata = items.find((item) => Boolean(
-        item
-        && typeof item === 'object'
-        && (item as { metadata_type?: unknown }).metadata_type === JUMLA_KHALEEJ_DELIVERY_METADATA_TYPE
-    )) as { delivery_fee?: unknown } | undefined
-    const fee = Number(metadata?.delivery_fee)
-    return Number.isInteger(fee) && fee > 0 ? fee : null
-}
-
 const statusFilterIcons = {
     all: ListFilter,
     pending: Clock3,
@@ -199,23 +132,24 @@ const statusFilterIcons = {
     cancelled: XCircle
 } satisfies Record<MarketplaceOrderFilter, LucideIcon>
 
-function filterEcommerceOrdersByDate<T>(
-    orders: T[],
-    dateRange: DateRangeType,
-    customDates: { start: string; end: string },
-    getDate: (order: T) => string | null | undefined
-) {
-    const { start, end } = getDateRangeBounds(dateRange, customDates)
-    if (!start && !end) return orders
+const ECOMMERCE_PAGE_SIZE_KEY = 'ecommerce_orders_page_size'
+const ECOMMERCE_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
+const MARKETPLACE_ORDER_TABLE_COLUMNS: ColumnDef<MarketplaceOrderRecord>[] = [
+    { id: 'order_number', accessorFn: (order) => order.order_number },
+    { id: 'customer_name', accessorFn: (order) => order.customer_name },
+    { id: 'total', accessorFn: (order) => order.total },
+    { id: 'created_at', accessorFn: (order) => order.created_at }
+]
 
-    return orders.filter((order) => {
-        const date = getDate(order)
-        if (!date) return false
-        const orderDate = new Date(date)
-        if (start && orderDate < start) return false
-        if (end && orderDate >= end) return false
-        return true
-    })
+function readEcommercePageSize() {
+    const stored = Number(localStorage.getItem(ECOMMERCE_PAGE_SIZE_KEY))
+    return ECOMMERCE_PAGE_SIZE_OPTIONS.includes(stored) ? stored : 20
+}
+
+function saveEcommercePageSize(pageSize: number) {
+    if (ECOMMERCE_PAGE_SIZE_OPTIONS.includes(pageSize)) {
+        localStorage.setItem(ECOMMERCE_PAGE_SIZE_KEY, String(pageSize))
+    }
 }
 
 function getPreviousDateRange(dateRange: DateRangeType, customDates: { start: string; end: string }) {
@@ -330,7 +264,7 @@ function EcommerceProductMosaic({
     )
 }
 
-function EcommerceSummaryCards({ orders, totalOrdersTrend }: { orders: MarketplaceOrderRecord[]; totalOrdersTrend: number | null }) {
+function EcommerceSummaryCards({ summary, totalOrdersTrend }: { summary: MarketplaceOrderSummary | undefined; totalOrdersTrend: number | null }) {
     const { t } = useTranslation()
     const { features } = useWorkspace()
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
@@ -340,26 +274,19 @@ function EcommerceSummaryCards({ orders, totalOrdersTrend }: { orders: Marketpla
         tryRates
     }), [exchangeData, eurRates, tryRates])
     const workspaceCurrency = (features.default_currency || 'usd') as CurrencyCode
-    const orderValueOrders = orders.filter((order) => order.status !== 'cancelled')
-    const orderValueByCurrency = orderValueOrders.reduce<Record<string, number>>((totals, order) => {
-        totals[order.currency] = (totals[order.currency] || 0) + order.total
-        return totals
-    }, {})
-    const orderValueEntries = Object.entries(orderValueByCurrency).sort(([left], [right]) => {
+    const orderValueEntries = [...(summary?.orderValueByCurrency ?? [])].sort(({ currency: left }, { currency: right }) => {
         if (left === workspaceCurrency) return -1
         if (right === workspaceCurrency) return 1
         return left.localeCompare(right)
     })
-    const orderValueInWorkspaceCurrency = orderValueOrders.reduce(
-        (total, order) => total + convertCurrencyAmountWithLiveRates(order.total, order.currency as CurrencyCode, workspaceCurrency, liveRates),
+    const orderValueInWorkspaceCurrency = orderValueEntries.reduce(
+        (total, entry) => total + convertCurrencyAmountWithLiveRates(entry.total, entry.currency as CurrencyCode, workspaceCurrency, liveRates),
         0
     )
-    const pendingCount = orders.filter((order) => order.status === 'pending').length
-    const pendingFulfillmentCount = orders.filter((order) =>
-        order.status === 'pending' || order.status === 'confirmed' || order.status === 'processing'
-    ).length
-    const deliveredCount = orders.filter((order) => order.status === 'delivered').length
-    const cancelledCount = orders.filter((order) => order.status === 'cancelled').length
+    const pendingCount = summary?.pendingCount ?? '—'
+    const pendingFulfillmentCount = summary?.pendingFulfillmentCount ?? '—'
+    const deliveredCount = summary?.deliveredCount ?? '—'
+    const cancelledCount = summary?.cancelledCount
 
     return (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -374,7 +301,7 @@ function EcommerceSummaryCards({ orders, totalOrdersTrend }: { orders: Marketpla
                 </CardHeader>
                 <CardContent className="pt-0">
                     <div className="flex items-center gap-2">
-                        <div className="text-3xl font-black tracking-tight">{orders.length}</div>
+                        <div className="text-3xl font-black tracking-tight">{summary?.totalCount ?? '—'}</div>
                         {totalOrdersTrend !== null ? (
                             <span className={cn(
                                 'rounded-full px-2 py-1 text-xs font-bold',
@@ -408,7 +335,7 @@ function EcommerceSummaryCards({ orders, totalOrdersTrend }: { orders: Marketpla
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <div className="cursor-help">
-                                    {orderValueEntries.length > 0 ? orderValueEntries.map(([currency, value], index) => (
+                                    {summary && orderValueEntries.length > 0 ? orderValueEntries.map(({ currency, total }, index) => (
                                         <div
                                             key={currency}
                                             className={cn(
@@ -416,11 +343,13 @@ function EcommerceSummaryCards({ orders, totalOrdersTrend }: { orders: Marketpla
                                                 index === 0 ? 'text-3xl' : 'mt-1 text-base text-muted-foreground'
                                             )}
                                         >
-                                            {formatCurrency(value, currency, features.iqd_display_preference)}
+                                            {formatCurrency(total, currency, features.iqd_display_preference)}
                                         </div>
                                     )) : (
                                         <div className="text-3xl font-black tracking-tight">
-                                            {formatCurrency(0, workspaceCurrency, features.iqd_display_preference)}
+                                            {summary
+                                                ? formatCurrency(0, workspaceCurrency, features.iqd_display_preference)
+                                                : '—'}
                                         </div>
                                     )}
                                 </div>
@@ -433,7 +362,9 @@ function EcommerceSummaryCards({ orders, totalOrdersTrend }: { orders: Marketpla
                                     })}
                                 </div>
                                 <div className="text-base font-black">
-                                    {formatCurrency(orderValueInWorkspaceCurrency, workspaceCurrency, features.iqd_display_preference)}
+                                    {summary
+                                        ? formatCurrency(orderValueInWorkspaceCurrency, workspaceCurrency, features.iqd_display_preference)
+                                        : '—'}
                                 </div>
                             </TooltipContent>
                         </Tooltip>
@@ -467,9 +398,11 @@ function EcommerceSummaryCards({ orders, totalOrdersTrend }: { orders: Marketpla
                 <CardContent className="pt-0">
                     <div className="text-3xl font-black tracking-tight">{deliveredCount}</div>
                     <p className="mt-1.5 text-xs text-muted-foreground">
-                        {cancelledCount > 0
-                            ? `${cancelledCount} ${t('ecommerce.summary.cancelled', { defaultValue: 'cancelled' })}`
-                            : t('ecommerce.summary.noCancellations', { defaultValue: 'No cancellations' })}
+                        {summary
+                            ? cancelledCount && cancelledCount > 0
+                                ? `${cancelledCount} ${t('ecommerce.summary.cancelled', { defaultValue: 'cancelled' })}`
+                                : t('ecommerce.summary.noCancellations', { defaultValue: 'No cancellations' })
+                            : '—'}
                     </p>
                 </CardContent>
             </Card>
@@ -478,15 +411,13 @@ function EcommerceSummaryCards({ orders, totalOrdersTrend }: { orders: Marketpla
 }
 
 function EcommerceListView({
-    orders,
-    productImageUrls,
-    isLoading,
-    onRefresh
+    workspaceId,
+    userId,
+    userRole
 }: {
-    orders: MarketplaceOrderRecord[]
-    productImageUrls: MarketplaceProductImageUrls
-    isLoading: boolean
-    onRefresh: () => Promise<void>
+    workspaceId?: string
+    userId?: string
+    userRole?: string | null
 }) {
     const { t, i18n } = useTranslation()
     const pageDirection = getLanguageDirection(i18n.resolvedLanguage || i18n.language)
@@ -496,47 +427,101 @@ function EcommerceListView({
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => (localStorage.getItem('ecommerce_view_mode') as 'table' | 'grid') || 'table')
     const [search, setSearch] = useState('')
     const [statusFilter, setStatusFilter] = useState<MarketplaceOrderFilter>('all')
+    const [sorting, setSorting] = useState<SortingState>([{ id: 'created_at', desc: true }])
 
     useEffect(() => {
         localStorage.setItem('ecommerce_view_mode', viewMode)
     }, [viewMode])
 
-    const dateFilteredOrders = useMemo(
-        () => filterEcommerceOrdersByDate(orders, dateRange, customDates, (order) => order.created_at),
-        [orders, dateRange, customDates, dateFilterDayBoundary]
-    )
-
-    const filteredOrders = useMemo(() => {
-        let items = [...dateFilteredOrders]
-
-        if (statusFilter !== 'all') {
-            items = items.filter((order) => order.status === statusFilter)
-        }
-
-        const query = search.trim().toLowerCase()
-        if (!query) return items
-
-        return items.filter((order) =>
-            `${order.order_number} ${order.customer_name} ${order.customer_phone} ${order.customer_city || ''}`
-                .toLowerCase()
-                .includes(query)
-        )
-    }, [dateFilteredOrders, search, statusFilter])
-
+    const dateBounds = getDateRangeBounds(dateRange, customDates)
+    const createdFrom = dateBounds.start?.toISOString()
+    const createdBefore = dateBounds.end?.toISOString()
     const previousDateRange = useMemo(
         () => getPreviousDateRange(dateRange, customDates),
         [dateRange, customDates, dateFilterDayBoundary]
     )
-    const previousOrderCount = useMemo(() => {
-        if (!previousDateRange) return null
-        return orders.filter((order) => {
-            const createdAt = new Date(order.created_at)
-            return createdAt >= previousDateRange.start && createdAt < previousDateRange.end
-        }).length
-    }, [previousDateRange, orders])
-    const totalOrdersTrend = previousOrderCount && previousOrderCount > 0
-        ? ((dateFilteredOrders.length - previousOrderCount) / previousOrderCount) * 100
+    const previousFrom = previousDateRange?.start.toISOString()
+    const previousBefore = previousDateRange?.end.toISOString()
+    const sortBy = (['created_at', 'order_number', 'customer_name', 'total'] as string[]).includes(sorting[0]?.id ?? '')
+        ? sorting[0].id as MarketplaceOrderSortColumn
+        : 'created_at'
+    const sortDirection: 'asc' | 'desc' = sorting[0]?.desc === false ? 'asc' : 'desc'
+    const pagination = usePaginationState({
+        resetOn: [workspaceId, search, statusFilter, dateRange, customDates.start, customDates.end, dateFilterDayBoundary, createdFrom, createdBefore, sortBy, sortDirection],
+        initialPageSize: readEcommercePageSize(),
+        onPageSizeChange: saveEcommercePageSize
+    })
+    const pageQuery = workspaceId ? {
+        workspaceId,
+        page: pagination.currentPage,
+        pageSize: pagination.pageSize,
+        search,
+        status: statusFilter,
+        createdFrom,
+        createdBefore,
+        sortBy,
+        sortDirection
+    } : null
+    const summaryQuery = workspaceId ? {
+        workspaceId,
+        createdFrom,
+        createdBefore,
+        previousFrom,
+        previousBefore
+    } : null
+    const viewer = { userId, role: userRole }
+    const canLoadOrders = features.data_mode === 'cloud' || features.data_mode === 'hybrid'
+    const page = useMarketplaceOrderPage(pageQuery, viewer, canLoadOrders)
+    const summary = useMarketplaceOrderSummary(summaryQuery, viewer, canLoadOrders)
+    const pageBounds = usePaginationBounds({
+        currentPage: pagination.currentPage,
+        setCurrentPage: pagination.setCurrentPage,
+        totalCount: page.data?.totalCount,
+        pageSize: pagination.pageSize,
+        isLoading: page.isLoading,
+        error: page.error
+    })
+    const table = useReactTable({
+        data: page.data?.items ?? [],
+        columns: MARKETPLACE_ORDER_TABLE_COLUMNS,
+        getRowId: (order) => order.id,
+        getCoreRowModel: getCoreRowModel(),
+        manualPagination: true,
+        manualFiltering: true,
+        manualSorting: true,
+        enableMultiSort: false,
+        rowCount: page.data?.totalCount ?? 0,
+        state: {
+            pagination: { pageIndex: pageBounds.currentPage - 1, pageSize: pagination.pageSize },
+            globalFilter: search,
+            sorting
+        },
+        onPaginationChange: (updater) => {
+            const next = typeof updater === 'function'
+                ? updater({ pageIndex: pageBounds.currentPage - 1, pageSize: pagination.pageSize })
+                : updater
+            if (next.pageSize !== pagination.pageSize) pagination.setPageSize(next.pageSize)
+            else pagination.setCurrentPage(next.pageIndex + 1)
+        },
+        onSortingChange: (updater) => setSorting((current) => typeof updater === 'function' ? updater(current) : updater)
+    })
+    const visibleOrders = table.getRowModel().rows.map((row) => row.original)
+    const pageProductIds = useMemo(() => [...new Set((page.data?.items ?? []).flatMap((order) =>
+        order.items.map((item) => item.product_id)
+    ))], [page.data?.items])
+    const pageProducts = useProductsByIds(workspaceId, pageProductIds)
+    const productImageUrls = useMemo(
+        () => createMarketplaceProductImageUrls(pageProducts),
+        [pageProducts]
+    )
+    const totalOrdersTrend = summary.data?.previousCount && summary.data.previousCount > 0
+        ? ((summary.data.totalCount - summary.data.previousCount) / summary.data.previousCount) * 100
         : null
+
+    const refresh = async () => {
+        if (!canLoadOrders) return
+        await Promise.all([page.refetch(), summary.refetch()])
+    }
 
     const getDateDisplay = () => {
         if (dateRange === 'today' || dateRange === 'yesterday') {
@@ -550,10 +535,9 @@ function EcommerceListView({
             return formatLocalizedMonthYear(new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1), i18n.language)
         }
         if (dateRange === 'custom') {
-            if (dateFilteredOrders.length > 0) {
-                const dates = dateFilteredOrders.map((order) => new Date(order.created_at).getTime())
-                const minDate = new Date(Math.min(...dates))
-                const maxDate = new Date(Math.max(...dates))
+            if (summary.data?.minCreatedAt && summary.data.maxCreatedAt) {
+                const minDate = new Date(summary.data.minCreatedAt)
+                const maxDate = new Date(summary.data.maxCreatedAt)
                 return `${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
             }
             if (customDates.start || customDates.end) {
@@ -564,15 +548,31 @@ function EcommerceListView({
             }
         }
         if (dateRange === 'allTime') {
-            if (dateFilteredOrders.length > 0) {
-                const dates = dateFilteredOrders.map((order) => new Date(order.created_at).getTime())
-                const minDate = new Date(Math.min(...dates))
-                const maxDate = new Date(Math.max(...dates))
+            if (summary.data?.minCreatedAt && summary.data.maxCreatedAt) {
+                const minDate = new Date(summary.data.minCreatedAt)
+                const maxDate = new Date(summary.data.maxCreatedAt)
                 return `${t('performance.filters.from')} ${formatDate(minDate)} ${t('performance.filters.to')} ${formatDate(maxDate)}`
             }
             return t('performance.filters.allTime') || 'All Time'
         }
         return ''
+    }
+
+    const renderSortableHeader = (columnId: MarketplaceOrderSortColumn, label: string) => {
+        const column = table.getColumn(columnId)
+        const direction = column?.getIsSorted()
+        const SortIcon = direction === 'asc' ? ArrowUp : direction === 'desc' ? ArrowDown : ArrowUpDown
+        return (
+            <Button
+                variant="ghost"
+                size="sm"
+                className="-ms-3 h-8 gap-1 px-3 font-semibold"
+                onClick={column?.getToggleSortingHandler()}
+            >
+                {label}
+                <SortIcon className="h-3.5 w-3.5" />
+            </Button>
+        )
     }
 
     function renderOrderTable() {
@@ -581,23 +581,23 @@ function EcommerceListView({
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHead>{t('orders.table.orderNumber') || 'Order #'}</TableHead>
-                            <TableHead>{t('ecommerce.customer', { defaultValue: 'Customer' })}</TableHead>
+                            <TableHead>{renderSortableHeader('order_number', t('orders.table.orderNumber') || 'Order #')}</TableHead>
+                            <TableHead>{renderSortableHeader('customer_name', t('ecommerce.customer', { defaultValue: 'Customer' }))}</TableHead>
                             <TableHead>{t('orders.table.items') || 'Items'}</TableHead>
                             <TableHead>{t('common.status') || 'Status'}</TableHead>
-                            <TableHead>{t('common.total') || 'Total'}</TableHead>
-                            <TableHead>{t('orders.form.date') || 'Date'}</TableHead>
+                            <TableHead>{renderSortableHeader('total', t('common.total') || 'Total')}</TableHead>
+                            <TableHead>{renderSortableHeader('created_at', t('orders.form.date') || 'Date')}</TableHead>
                             <TableHead className="text-end">{t('common.actions') || 'Actions'}</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {filteredOrders.length === 0 ? (
+                        {visibleOrders.length === 0 ? (
                             <TableRow>
                                 <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">
                                     {t('common.noData') || 'No data available'}
                                 </TableCell>
                             </TableRow>
-                        ) : filteredOrders.map((order) => (
+                        ) : visibleOrders.map((order) => (
                             <TableRow key={order.id} className="hover:bg-muted/40">
                                 <TableCell className="font-semibold">
                                     <div className="flex min-w-[11rem] items-center gap-3">
@@ -640,11 +640,11 @@ function EcommerceListView({
                 "grid gap-4 p-4 bg-muted/5",
                 viewMode === 'grid' && !isMobile() ? "md:grid-cols-2 xl:grid-cols-3" : "grid-cols-1"
             )}>
-                {filteredOrders.length === 0 ? (
+                {visibleOrders.length === 0 ? (
                     <div className="text-center text-muted-foreground py-12 bg-background rounded-lg border">
                         {t('common.noData') || 'No data available'}
                     </div>
-                ) : filteredOrders.map((order) => (
+                ) : visibleOrders.map((order) => (
                     <div
                         key={order.id}
                         className="p-4 border shadow-sm space-y-4 transition-all active:scale-[0.98] rounded-2xl bg-background"
@@ -725,8 +725,10 @@ function EcommerceListView({
                             onCustomDatesChange={setCustomDates}
                         />
                     </div>
-                    <Button variant="outline" className="gap-2 self-start rounded-xl sm:self-auto" onClick={onRefresh}>
-                        <RefreshCw className="h-4 w-4" />
+                    <Button variant="outline" className="gap-2 self-start rounded-xl sm:self-auto" onClick={refresh} disabled={!canLoadOrders || page.isFetching || summary.isFetching}>
+                        {page.isFetching || summary.isFetching
+                            ? <Loader2 className="h-4 w-4 animate-spin" />
+                            : <RefreshCw className="h-4 w-4" />}
                         {t('common.refresh', { defaultValue: 'Refresh' })}
                     </Button>
                 </div>
@@ -742,7 +744,10 @@ function EcommerceListView({
                 </Card>
             )}
 
-            <EcommerceSummaryCards orders={dateFilteredOrders} totalOrdersTrend={totalOrdersTrend} />
+            <EcommerceSummaryCards summary={summary.data} totalOrdersTrend={totalOrdersTrend} />
+            {(summary.error || (page.error && page.data)) && (
+                <p role="alert" className="text-sm text-destructive">{t('ecommerce.loadOrdersFailed')}</p>
+            )}
 
             <Card>
                 <CardHeader className="gap-4 lg:flex-row lg:items-center lg:justify-between">
@@ -817,15 +822,32 @@ function EcommerceListView({
                                 />
                             </div>
                         </div>
+                        <AppPagination
+                            currentPage={pageBounds.currentPage}
+                            pageCount={pageBounds.pageCount}
+                            totalCount={page.data?.totalCount ?? 0}
+                            pageSize={pagination.pageSize}
+                            onPageChange={(pageNumber) => table.setPageIndex(pageNumber - 1)}
+                            onPageSizeChange={(pageSize) => table.setPageSize(pageSize)}
+                            pageSizeOptions={ECOMMERCE_PAGE_SIZE_OPTIONS}
+                        />
                     </div>
                 </CardHeader>
 
-                {isLoading ? (
-                    <div className="flex items-center gap-3 rounded-2xl border border-border/60 bg-card/70 p-5 text-muted-foreground mx-5 mb-5">
+                {page.isLoading && !page.data ? (
+                    <div className="mx-5 mb-5 flex min-h-48 items-center justify-center gap-3 rounded-2xl border border-border/60 bg-card/70 p-5 text-muted-foreground">
                         <Loader2 className="h-4 w-4 animate-spin" />
                         {t('common.loading', { defaultValue: 'Loading...' })}
                     </div>
-                ) : filteredOrders.length === 0 ? (
+                ) : page.error && !page.data ? (
+                    <div className="mx-5 mb-5 flex min-h-48 flex-col items-center justify-center gap-3 rounded-2xl border border-border/60 bg-card/70 p-5 text-center">
+                        <p className="text-sm text-muted-foreground">{t('ecommerce.loadOrdersFailed')}</p>
+                        <Button variant="outline" className="gap-2" onClick={refresh}>
+                            <RefreshCw className="h-4 w-4" />
+                            {t('common.refresh', { defaultValue: 'Refresh' })}
+                        </Button>
+                    </div>
+                ) : visibleOrders.length === 0 ? (
                     <div className="px-5 pb-5">
                         <Card className="border-dashed border-border/60 bg-card/50">
                             <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
@@ -849,14 +871,9 @@ export function Ecommerce() {
     const { t } = useTranslation()
     const { toast } = useToast()
     const { user } = useAuth()
+    const queryClient = useQueryClient()
     const [detailMatch, params] = useRoute('/ecommerce/:orderId')
-    const [orders, setOrders] = useState<MarketplaceOrderRecord[]>([])
-    const products = useProducts(user?.workspaceId)
-    const productImageUrls = useMemo(
-        () => createMarketplaceProductImageUrls(products),
-        [products]
-    )
-    const [isLoading, setIsLoading] = useState(true)
+    const [, navigate] = useLocation()
     const [isSaving, setIsSaving] = useState(false)
     const [advancementProgress, setAdvancementProgress] = useState<MarketplaceOrderAdvancementProgress | null>(null)
     const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
@@ -865,141 +882,23 @@ export function Ecommerce() {
     const isOpeningCollectionRef = useRef(false)
     const isSavingRef = useRef(false)
     const deferredOrderRefreshRef = useRef(false)
-    const loadRequestRef = useRef(0)
+    const activeOrderId = detailMatch ? params?.orderId : undefined
+    const detailQuery = useMarketplaceOrderDetail(user?.workspaceId, activeOrderId, {
+        userId: user?.id,
+        role: user?.role
+    })
+    const activeOrder = detailQuery.data ?? null
+    const detailProductIds = useMemo(() => [...new Set(activeOrder?.items.map((item) => item.product_id) ?? [])], [activeOrder])
+    const detailProducts = useProductsByIds(user?.workspaceId, detailProductIds)
+    const detailProductImageUrls = useMemo(
+        () => createMarketplaceProductImageUrls(detailProducts),
+        [detailProducts]
+    )
 
-    const loadOrders = useCallback(async ({
-        background = false,
-        showError = true
-    }: {
-        background?: boolean
-        showError?: boolean
-    } = {}): Promise<boolean> => {
-        if (!user?.workspaceId) {
-            return false
-        }
-
-        const workspaceId = user.workspaceId
-        const requestId = ++loadRequestRef.current
-        const operationId = `ecommerce-order-list-${requestId}`
-        let marketplaceOrdersHydrated = false
-        let salesOrdersHydrated = false
-        const isCurrentRequest = () => loadRequestRef.current === requestId
-
-        startWorkspaceDataHydration(workspaceId, 'supabase', 'marketplace_orders', operationId)
-        startWorkspaceDataHydration(workspaceId, 'supabase', 'crm.sales_orders', operationId)
-        if (!background) setIsLoading(true)
-
-        try {
-            const { data, error } = await runSupabaseAction('ecommerce.fetchOrders', () =>
-                supabase
-                    .from('marketplace_orders')
-                    .select(MARKETPLACE_ORDER_SELECT)
-                    .order('created_at', { ascending: false })
-            ) as { data: MarketplaceOrderDatabaseRecord[] | null; error: Error | null }
-
-            if (error) {
-                throw error
-            }
-
-            const marketplaceOrders = data ?? []
-            updateWorkspaceDataHydrationProgress(workspaceId, 'supabase', 'marketplace_orders', marketplaceOrders.length, operationId)
-            completeWorkspaceDataHydration(workspaceId, 'supabase', 'marketplace_orders', undefined, operationId)
-            recordWorkspaceDataFetch(workspaceId, 'supabase', undefined, 'marketplace_orders')
-            marketplaceOrdersHydrated = true
-
-            const salesOrderIds = [...new Set(
-                marketplaceOrders
-                    .map((order) => order.sales_order_id)
-                    .filter((salesOrderId): salesOrderId is string => Boolean(salesOrderId))
-            )]
-            const salesOrderReturnsById = new Map<string, MarketplaceSalesOrderReturnRecord>()
-
-            if (salesOrderIds.length > 0) {
-                const { data: salesOrderReturns, error: salesOrderReturnsError } = await runSupabaseAction(
-                    'ecommerce.fetchLinkedSalesOrderReturns',
-                    () => supabase
-                        .schema('crm')
-                        .from('sales_orders')
-                        .select('id, return_status, returned_at')
-                        .eq('workspace_id', user.workspaceId)
-                        .in('id', salesOrderIds)
-                ) as { data: MarketplaceSalesOrderReturnRecord[] | null; error: Error | null }
-
-                if (salesOrderReturnsError) {
-                    throw salesOrderReturnsError
-                }
-
-                updateWorkspaceDataHydrationProgress(workspaceId, 'supabase', 'crm.sales_orders', salesOrderReturns?.length ?? 0, operationId)
-                for (const salesOrder of salesOrderReturns ?? []) {
-                    salesOrderReturnsById.set(salesOrder.id, salesOrder)
-                }
-            }
-
-            completeWorkspaceDataHydration(workspaceId, 'supabase', 'crm.sales_orders', undefined, operationId)
-            recordWorkspaceDataFetch(workspaceId, 'supabase', undefined, 'crm.sales_orders')
-            salesOrdersHydrated = true
-
-            if (!isCurrentRequest()) {
-                return false
-            }
-
-            setOrders(marketplaceOrders.map((order) => {
-                const rawItems: unknown[] = Array.isArray(order.items) ? order.items : []
-                const salesOrderReturn = order.sales_order_id
-                    ? salesOrderReturnsById.get(order.sales_order_id)
-                    : undefined
-                return {
-                    ...order,
-                    items: rawItems.filter(isMarketplaceOrderItem),
-                    delivery_fee: getJumlaKhaleejDeliveryFee(rawItems, order.website_storefront_key),
-                    sales_order_return_status: salesOrderReturn?.return_status ?? 'none',
-                    sales_order_returned_at: salesOrderReturn?.returned_at ?? null
-                }
-            }))
-            return true
-        } catch (error) {
-            if (!isCurrentRequest()) {
-                return false
-            }
-
-            if (showError) {
-                toast({
-                    title: t('common.error', { defaultValue: 'Error' }),
-                    description: error instanceof Error ? error.message : 'Failed to load marketplace orders',
-                    variant: 'destructive'
-                })
-            }
-            return false
-        } finally {
-            if (!marketplaceOrdersHydrated) {
-                if (isCurrentRequest()) {
-                    failWorkspaceDataHydration(workspaceId, 'supabase', 'marketplace_orders', undefined, operationId)
-                } else {
-                    cancelWorkspaceDataHydration(workspaceId, 'supabase', 'marketplace_orders', operationId)
-                }
-            }
-            if (!salesOrdersHydrated) {
-                if (isCurrentRequest()) {
-                    failWorkspaceDataHydration(workspaceId, 'supabase', 'crm.sales_orders', undefined, operationId)
-                } else {
-                    cancelWorkspaceDataHydration(workspaceId, 'supabase', 'crm.sales_orders', operationId)
-                }
-            }
-            if (isCurrentRequest() && !background) {
-                setIsLoading(false)
-            }
-        }
-    }, [t, toast, user?.workspaceId])
-
-    useEffect(() => {
-        void loadOrders()
-        return () => {
-            // Any response that resolves after the page or workspace has
-            // changed must only cancel its freshness operation, never replace
-            // newer visible state.
-            loadRequestRef.current += 1
-        }
-    }, [loadOrders])
+    const invalidateMarketplaceOrders = async () => {
+        if (!user?.workspaceId) return
+        await queryClient.invalidateQueries({ queryKey: queryKeys.ecommerce.all(user.workspaceId) })
+    }
 
     useEffect(() => {
         const handleMarketplaceOrderChange = (event: Event) => {
@@ -1015,12 +914,12 @@ export function Ecommerce() {
                 deferredOrderRefreshRef.current = true
                 return
             }
-            void loadOrders({ background: true })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.ecommerce.all(user?.workspaceId) })
         }
 
         window.addEventListener(MARKETPLACE_ORDER_REFRESH_EVENT, handleMarketplaceOrderChange)
         return () => window.removeEventListener(MARKETPLACE_ORDER_REFRESH_EVENT, handleMarketplaceOrderChange)
-    }, [loadOrders, user?.workspaceId])
+    }, [user?.workspaceId, queryClient])
 
     const openRecordCollection = async (salesOrderId: string) => {
         if (!user?.workspaceId) {
@@ -1099,7 +998,7 @@ export function Ecommerce() {
             })
 
             setSettlementTarget(null)
-            await loadOrders()
+            await invalidateMarketplaceOrders()
             if (user?.workspaceId) {
                 notifyMarketplaceOrdersChanged({
                     workspaceId: user.workspaceId,
@@ -1135,29 +1034,33 @@ export function Ecommerce() {
             cancelReason
         }))
 
-        // The RPC has already committed at this point. Reflect that status
-        // immediately, then replace it with the fully refreshed record below.
-        setOrders((currentOrders) => currentOrders.map((order) => order.id === orderId
-            ? { ...order, status: result?.status ?? nextStatus }
-            : order))
-
         return result
     }
 
     const refreshAfterOrderTransition = async () => {
-        const refreshed = await loadOrders({ background: true, showError: false })
-        if (!refreshed) {
+        if (!user?.workspaceId) {
             throw new Error(t('ecommerce.transitionRefreshFailed', {
                 defaultValue: 'The order advanced, but its updated status could not be loaded. Automatic advancement stopped.'
             }))
         }
 
-        if (user?.workspaceId) {
-            notifyMarketplaceOrdersChanged({
-                workspaceId: user.workspaceId,
-                source: 'local'
-            })
+        const namespace = queryKeys.ecommerce.all(user.workspaceId)
+        await queryClient.invalidateQueries({ queryKey: namespace, refetchType: 'none' })
+        await queryClient.refetchQueries({ queryKey: namespace, type: 'active' }, { throwOnError: true })
+        const refreshedDetail = detailMatch && params?.orderId
+            ? queryClient.getQueryData<MarketplaceOrderRecord | null>(queryKeys.ecommerce.detail(
+                user.workspaceId,
+                params.orderId,
+                { userId: user.id, role: user.role }
+            ))
+            : undefined
+        if (detailMatch && params?.orderId && !refreshedDetail) {
+            throw new Error(t('ecommerce.transitionRefreshFailed', {
+                defaultValue: 'The order advanced, but its updated status could not be loaded. Automatic advancement stopped.'
+            }))
         }
+
+        notifyMarketplaceOrdersChanged({ workspaceId: user.workspaceId, source: 'local' })
     }
 
     const beginOrderTransition = () => {
@@ -1172,7 +1075,7 @@ export function Ecommerce() {
         setIsSaving(false)
         if (deferredOrderRefreshRef.current) {
             deferredOrderRefreshRef.current = false
-            void loadOrders({ background: true })
+            void invalidateMarketplaceOrders()
         }
     }
 
@@ -1281,7 +1184,7 @@ const editMarketplaceOrderItems = async (orderId: string, items: MarketplaceOrde
                 throw error
             }
 
-            await loadOrders()
+            await invalidateMarketplaceOrders()
             if (user?.workspaceId) {
                 notifyMarketplaceOrdersChanged({
                     workspaceId: user.workspaceId,
@@ -1309,16 +1212,12 @@ const editMarketplaceOrderItems = async (orderId: string, items: MarketplaceOrde
         return null
     }
 
-    const activeOrder = detailMatch && params?.orderId
-        ? orders.find((order) => order.id === params.orderId) || null
-        : null
-
     if (detailMatch && params?.orderId && activeOrder) {
         return (
             <>
                 <EcommerceDetailView
                     order={activeOrder}
-                    productImageUrls={productImageUrls}
+                    productImageUrls={detailProductImageUrls}
                     isSaving={isSaving}
                     isOpeningCollection={isOpeningCollection}
                     onAdvance={(targetStatus, mode = 'manual') => advanceOrderToStatus(
@@ -1348,15 +1247,34 @@ const editMarketplaceOrderItems = async (orderId: string, items: MarketplaceOrde
         )
     }
 
+    if (detailMatch && params?.orderId) {
+        return (
+            <Card className="min-h-56">
+                <CardContent className="flex min-h-56 flex-col items-center justify-center gap-4 text-center">
+                    {detailQuery.isLoading
+                        ? <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                        : <PackageSearch className="h-8 w-8 text-muted-foreground/60" />}
+                    <p className="text-sm text-muted-foreground">
+                        {detailQuery.isLoading ? t('common.loading', { defaultValue: 'Loading...' })
+                            : detailQuery.error ? t('ecommerce.loadOrdersFailed') : t('common.noData', { defaultValue: 'No data available' })}
+                    </p>
+                    {!detailQuery.isLoading && (
+                        <Button variant="outline" className="gap-2" onClick={() => navigate('/ecommerce')}>
+                            <ArrowLeft className="h-4 w-4" />
+                            {t('common.back', { defaultValue: 'Back' })}
+                        </Button>
+                    )}
+                </CardContent>
+            </Card>
+        )
+    }
+
     return (
         <>
             <EcommerceListView
-                orders={orders}
-                productImageUrls={productImageUrls}
-                isLoading={isLoading}
-                onRefresh={async () => {
-                    await loadOrders()
-                }}
+                workspaceId={user.workspaceId}
+                userId={user.id}
+                userRole={user.role}
             />
 
             <MarketplaceOrderAdvancementDialog progress={advancementProgress} />

@@ -1855,6 +1855,7 @@
   "ecommerce": {
     "title": "E-Commerce",
     "subtitle": "Track and manage marketplace orders",
+    "loadOrdersFailed": "Unable to load marketplace orders. Refresh to try again.",
     "orders": "Orders",
     "noOrders": "No marketplace orders yet",
     "noOrdersHint": "New inquiry orders from your public store will appear here.",

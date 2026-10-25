@@ -930,11 +930,13 @@ export function useProductsByIds(workspaceId: string | undefined, productIds: st
             if (storageAccess.isAdmin) return accessFilteredRows
 
             const [inventoryRows, assignmentRows] = await Promise.all([
-                db.inventory
-                    .where('workspaceId')
-                    .equals(workspaceId)
-                    .and((row) => !row.isDeleted)
-                    .toArray(),
+                accessFilteredRows.length > 0
+                    ? db.inventory
+                        .where('[workspaceId+productId]')
+                        .anyOf(accessFilteredRows.map((product) => [workspaceId, product.id]))
+                        .and((row) => !row.isDeleted)
+                        .toArray()
+                    : Promise.resolve([]),
                 getProductStorageAssignments(workspaceId, accessFilteredRows.map((product) => product.id))
             ])
             return filterProductsByStorageAccess(accessFilteredRows, inventoryRows, storageAccess, assignmentRows)

@@ -1,4 +1,5 @@
 import type { OrdersListPageQuery } from '@/local-db/ordersList'
+import type { MarketplaceOrderPageQuery, MarketplaceOrderSummaryQuery } from '@/local-db/marketplaceOrders'
 
 export const queryKeys = {
   postal: {
@@ -104,6 +105,41 @@ export const queryKeys = {
         viewer?.userId ?? null,
       ] as const
     },
+  },
+  ecommerce: {
+    all: (workspaceId: string | undefined) =>
+      ['atlas', 'workspace', workspaceId ?? 'unscoped', 'ecommerce-orders'] as const,
+    page: (query: MarketplaceOrderPageQuery, viewer: { userId?: string | null; role?: string | null }) => [
+      ...queryKeys.ecommerce.all(query.workspaceId),
+      'page',
+      query.page,
+      query.pageSize,
+      query.search.trim(),
+      query.status,
+      query.createdFrom ?? null,
+      query.createdBefore ?? null,
+      query.sortBy,
+      query.sortDirection,
+      viewer.userId ?? null,
+      viewer.role ?? null,
+    ] as const,
+    summary: (query: MarketplaceOrderSummaryQuery, viewer: { userId?: string | null; role?: string | null }) => [
+      ...queryKeys.ecommerce.all(query.workspaceId),
+      'summary',
+      query.createdFrom ?? null,
+      query.createdBefore ?? null,
+      query.previousFrom ?? null,
+      query.previousBefore ?? null,
+      viewer.userId ?? null,
+      viewer.role ?? null,
+    ] as const,
+    detail: (workspaceId: string | undefined, orderId: string | undefined, viewer: { userId?: string | null; role?: string | null }) => [
+      ...queryKeys.ecommerce.all(workspaceId),
+      'detail',
+      orderId ?? null,
+      viewer.userId ?? null,
+      viewer.role ?? null,
+    ] as const,
   },
   invoiceHistory: {
     all: (workspaceId: string | undefined) =>

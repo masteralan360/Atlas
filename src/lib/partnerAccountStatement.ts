@@ -1192,7 +1192,7 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
         loanCategory: loan.loanCategory
       }
     }
-    const orderSaleItems = isOrderSaleLoan && data.itemizeSalesOrders === true
+    const orderSaleItems = linkedSalesOrder && isOrderSaleLoan && data.itemizeSalesOrders === true
       ? (linkedSalesOrder.items || []).filter((item) => Number(item.quantity || 0) > 0)
       : []
     const posSaleItems = isPosSaleLoan && loan.saleId && data.itemizePosSaleLoans === true
