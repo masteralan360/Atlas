@@ -50,7 +50,7 @@ import {
     syncProductBarcodeCachesForWorkspace,
     updateProductBarcode,
     updateProduct,
-    useCategories,
+    useCategoriesState,
     usePriceBookCatalogState,
     usePriceBookUomPrices,
     useProductCommissionCatalogState,
@@ -58,7 +58,7 @@ import {
     useProductBarcodes,
     useProducts,
     useProductVariants,
-    useStorages,
+    useStoragesState,
     useUnits,
     useProductUomCatalogState,
     type Product,
@@ -149,6 +149,13 @@ import {
   useToast,
 } from '@/ui/components'
 import { getProductSkuFromCameraCapture } from '@/lib/productSkuCameraScan'
+import {
+    applyProductFormInitializationRules,
+    clearProductFormInitializationRules,
+    readProductFormInitializationRules,
+    saveProductFormInitializationRules,
+} from '@/lib/productFormInitialization'
+import { ProductFormInitializationRulesDialog } from '@/ui/components/products/ProductFormInitializationRulesDialog'
 
 type ProductScannerTarget = 'none' | 'sku' | 'barcode' | 'variantSku'
 
@@ -371,13 +378,13 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const hideCosts = useHideCosts()
     const [, navigate] = useLocation()
     const { toast } = useToast()
-    const categories = useCategories(user?.workspaceId)
-    const storages = useStorages(user?.workspaceId)
+    const { rows: categories, isReady: areCategoriesReady } = useCategoriesState(user?.workspaceId)
+    const { rows: storages, isReady: areStoragesReady } = useStoragesState(user?.workspaceId)
     const product = useProduct(productId)
     const parentProduct = useProduct(product?.parentProductId || undefined)
     const isOnline = useNetworkStatus()
     const workspaceId = user?.workspaceId || ''
-    const { isDynamicUnit, options: unitOptions } = useUnitRegistry(workspaceId)
+    const { isDynamicUnit, options: unitOptions, isReady: areUnitsReady, dynamicCodes: dynamicUnitCodes } = useUnitRegistry(workspaceId)
     const customUnits = useUnits(workspaceId)
     const productUomCatalog = useProductUomCatalogState(workspaceId || undefined)
     const productUomRows = productUomCatalog.rows
@@ -486,6 +493,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         () => mode === 'create' && readStoredBoolean(PRODUCT_AUTO_SKU_GENERATION_ENABLED_KEY)
     )
     const [isCreateFormInitialized, setIsCreateFormInitialized] = useState(false)
+    const [initializationRulesOpen, setInitializationRulesOpen] = useState(false)
     const [isCameraSkuScannerOpen, setIsCameraSkuScannerOpen] = useState(false)
     const [activeScannerTarget, setActiveScannerTarget] = useState<ProductScannerTarget>(() => readStoredScannerTarget())
     const [variantSkuScannerPreference, setVariantSkuScannerPreference] = useState(() => readStoredBoolean(PRODUCT_VARIANT_SKU_SCANNER_ENABLED_KEY))
@@ -516,6 +524,10 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const initializedProductCommissionRuleKeyRef = useRef<string | null>(null)
     const initialProductCommissionSnapshotRef = useRef<string | null>(null)
     const createdProductIdRef = useRef<string | null>(null)
+
+    const hasSavedInitializationRules = mode === 'create'
+        && !!readProductFormInitializationRules(workspaceId)
+    const areInitializationCatalogsReady = areCategoriesReady && areStoragesReady && areUnitsReady
 
     useEffect(() => {
         setIsMinimumSellingPriceVisible(false)
@@ -682,7 +694,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
 
     useEffect(() => {
         const nextKey = mode === 'create'
-            ? `create:${hideCosts ? 'hidden' : 'visible'}`
+            ? `create:${workspaceId}:${hideCosts ? 'hidden' : 'visible'}`
             : product
                 ? `${mode}:${product.id}:${product.updatedAt}:${hideCosts ? 'hidden' : 'visible'}`
                 : null
@@ -691,10 +703,27 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             return
         }
 
+        const initializationRules = mode === 'create'
+            ? readProductFormInitializationRules(workspaceId)
+            : null
+        if (initializationRules && !areInitializationCatalogsReady) {
+            return
+        }
+
         let nextFormData: ProductFormData
 
         if (mode === 'create') {
-            nextFormData = createInitialFormData(features.default_currency, '')
+            const baseFormData = createInitialFormData(features.default_currency, '')
+            nextFormData = initializationRules
+                ? {
+                    ...baseFormData,
+                    ...applyProductFormInitializationRules(baseFormData, initializationRules, {
+                        units: unitOptions.map((option) => option.value),
+                        categories,
+                        storages,
+                    }),
+                }
+                : baseFormData
         } else {
             if (!product) {
                 return
@@ -711,7 +740,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         if (mode === 'create') {
             setIsCreateFormInitialized(true)
         }
-    }, [features.default_currency, hideCosts, mode, product, storages])
+    }, [areInitializationCatalogsReady, categories, features.default_currency, hideCosts, mode, product, storages, unitOptions, workspaceId])
 
     useEffect(() => {
         if (mode !== 'create' || storages.length !== 1 || formData.storageId) {
@@ -1732,6 +1761,10 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         || (isEditing && !productUomCatalog.isReady)
         || (priceBooksEnabled && !isPriceBookCatalogReady)
         || Boolean(productCommissionValidationMessage)
+    const isWaitingForConfiguredInitialization = mode === 'create'
+        && hasSavedInitializationRules
+        && (!areInitializationCatalogsReady
+            || initializedKeyRef.current !== `create:${workspaceId}:${hideCosts ? 'hidden' : 'visible'}`)
 
     const handleUnitSelectionChange = (value: string) => {
         const unit = normalizeUnitCode(value)
@@ -1804,6 +1837,15 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             ? t('products.form.generateUpcOnDoubleClick', { defaultValue: 'Double-click to generate a unique UPC' })
             : t('products.form.generateUpc', { defaultValue: 'Generate a unique UPC' })
 
+    if (isWaitingForConfiguredInitialization) {
+        return (
+            <div className="flex min-h-64 w-full items-center justify-center gap-3 text-sm text-muted-foreground">
+                <LoaderCircle className="h-5 w-5 animate-spin" />
+                {t('common.loading') || 'Loading...'}
+            </div>
+        )
+    }
+
     if (mode !== 'create' && !product) {
         return (
             <div className="mx-auto max-w-5xl space-y-6">
@@ -1831,7 +1873,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     }
 
     return (
-        <div className="mx-auto w-full max-w-[1600px] space-y-3 pb-8">
+        <div className="w-full space-y-3 pb-8">
             <header className="flex flex-col gap-3 border-b border-border/60 px-1 pb-3 pt-1 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex min-w-0 items-center gap-2 sm:gap-4">
                     <Button variant="ghost" className="h-10 shrink-0 gap-2 px-2 sm:px-3" allowViewer={true} onClick={goToProducts}>
@@ -1842,6 +1884,20 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                     <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                             <h1 className="truncate text-xl font-black tracking-tight text-foreground sm:text-2xl">{title}</h1>
+                            {mode === 'create' && (
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    aria-label={t('products.initializationRules.open')}
+                                    title={t('products.initializationRules.open')}
+                                    onClick={() => setInitializationRulesOpen(true)}
+                                    disabled={!areInitializationCatalogsReady}
+                                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-primary"
+                                >
+                                    <Settings className="h-4 w-4" />
+                                </Button>
+                            )}
                             <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-primary">
                                 {statusLabel}
                             </span>
@@ -1880,6 +1936,22 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                     )}
                 </div>
             </header>
+
+            {mode === 'create' && (
+                <ProductFormInitializationRulesDialog
+                    open={initializationRulesOpen}
+                    onOpenChange={setInitializationRulesOpen}
+                    workspaceId={workspaceId}
+                    unitOptions={unitOptions}
+                    categories={categories}
+                    storages={storages}
+                    catalogsReady={areInitializationCatalogsReady}
+                    dynamicUnitCodes={dynamicUnitCodes}
+                    isAutoSkuGenerationEnabled={isAutoSkuGenerationEnabled}
+                    onSave={saveProductFormInitializationRules}
+                    onReset={() => clearProductFormInitializationRules(workspaceId)}
+                />
+            )}
 
             <section className="grid gap-5 rounded-2xl border border-border/60 bg-card p-4 shadow-sm sm:p-5 md:grid-cols-[190px_minmax(0,1fr)]">
                 <button

@@ -1,13 +1,30 @@
 import { useCallback, useMemo } from 'react'
 
-import { useUnits } from '@/local-db/hooks'
-import { DEFAULT_UNITS, normalizeUnitCode } from '@/local-db/models'
+import { useUnits, useUnitsState } from '@/local-db/hooks'
+import { DEFAULT_UNITS, normalizeUnitCode, type Unit } from '@/local-db/models'
 import { ProductUnitIcon } from '@/ui/components/ProductUnitIcon'
 
 export interface WorkspaceUnitOption {
     value: string
     isDynamic: boolean
     icon: string | null
+}
+
+function buildWorkspaceUnitOptions(customUnits: Unit[]): WorkspaceUnitOption[] {
+    const builtInOptions: WorkspaceUnitOption[] = DEFAULT_UNITS.map((def) => ({
+        value: normalizeUnitCode(def.code),
+        isDynamic: def.isDynamic,
+        icon: def.icon ?? null,
+    }))
+    const customOptions: WorkspaceUnitOption[] = customUnits.map((unit) => ({
+        value: normalizeUnitCode(unit.code),
+        isDynamic: unit.isDynamic,
+        icon: unit.icon ?? null,
+    }))
+    return [
+        ...builtInOptions.sort((left, right) => left.value.localeCompare(right.value)),
+        ...customOptions.sort((left, right) => left.value.localeCompare(right.value)),
+    ]
 }
 
 /**
@@ -17,26 +34,7 @@ export interface WorkspaceUnitOption {
  */
 export function useWorkspaceUnits(workspaceId: string | undefined): WorkspaceUnitOption[] {
     const customUnits = useUnits(workspaceId)
-
-    return useMemo(() => {
-        const builtInOptions: WorkspaceUnitOption[] = DEFAULT_UNITS.map((def) => ({
-            value: normalizeUnitCode(def.code),
-            isDynamic: def.isDynamic,
-            icon: def.icon ?? null,
-        }))
-
-        const customOptions: WorkspaceUnitOption[] = customUnits.map((unit) => ({
-            value: normalizeUnitCode(unit.code),
-            isDynamic: unit.isDynamic,
-            icon: unit.icon ?? null,
-        }))
-
-        const options = [
-            ...builtInOptions.sort((left, right) => left.value.localeCompare(right.value)),
-            ...customOptions.sort((left, right) => left.value.localeCompare(right.value)),
-        ]
-        return options
-    }, [customUnits])
+    return useMemo(() => buildWorkspaceUnitOptions(customUnits), [customUnits])
 }
 
 export function isUnitDynamic(unit: string | undefined, dynamicCodes: readonly string[]): unit is string {
@@ -64,12 +62,14 @@ export function getQuantityStep(unit: string | undefined | null, dynamicCodes: r
 export interface UnitRegistry {
     options: WorkspaceUnitOption[]
     dynamicCodes: string[]
+    isReady: boolean
     isDynamicUnit: (unit: string | undefined) => unit is string
     getUnitIcon: (unit: string, className?: string) => React.ReactElement
 }
 
 export function useUnitRegistry(workspaceId: string | undefined): UnitRegistry {
-    const options = useWorkspaceUnits(workspaceId)
+    const { rows: customUnits, isReady } = useUnitsState(workspaceId)
+    const options = useMemo(() => buildWorkspaceUnitOptions(customUnits), [customUnits])
     const dynamicCodes = useMemo(
         () => options.filter((option) => option.isDynamic).map((option) => option.value),
         [options],
@@ -85,5 +85,5 @@ export function useUnitRegistry(workspaceId: string | undefined): UnitRegistry {
         },
         [options],
     )
-    return { options, dynamicCodes, isDynamicUnit, getUnitIcon }
+    return { options, dynamicCodes, isReady, isDynamicUnit, getUnitIcon }
 }

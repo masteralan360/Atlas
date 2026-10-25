@@ -323,8 +323,9 @@ const LOAN_SETTLEMENT_TRANSACTION_SOURCE_TYPES: PaymentTransactionSourceType[] =
 // CATEGORIES HOOKS
 // ===================
 
-export function useCategories(workspaceId: string | undefined) {
+export function useCategoriesState(workspaceId: string | undefined) {
     const isOnline = useNetworkStatus()
+    const [hydratedWorkspaceId, setHydratedWorkspaceId] = useState<string | null>(null)
 
     // 1. Local Cache (Always Source of Truth for UI)
     const categories = useLiveQuery(
@@ -335,13 +336,35 @@ export function useCategories(workspaceId: string | undefined) {
     // 2. Online: Fetch fresh data from Supabase & cleanup cache
     useEffect(() => {
         if (!isOnline || !workspaceId || !shouldUseCloudBusinessData(workspaceId)) {
+            setHydratedWorkspaceId(workspaceId ?? '')
             return
         }
 
+        let cancelled = false
+        setHydratedWorkspaceId(null)
         void fetchTableFromSupabase('categories', db.categories, workspaceId)
+            .catch((error) => {
+                console.error('[Categories] Failed to hydrate categories:', error)
+            })
+            .finally(() => {
+                if (!cancelled) setHydratedWorkspaceId(workspaceId)
+            })
+
+        return () => {
+            cancelled = true
+        }
     }, [isOnline, workspaceId])
 
-    return categories ?? []
+    const isCloudHydrationRequired = isOnline && !!workspaceId && shouldUseCloudBusinessData(workspaceId)
+    return {
+        rows: categories ?? [],
+        isReady: categories !== undefined
+            && (!isCloudHydrationRequired || hydratedWorkspaceId === workspaceId),
+    }
+}
+
+export function useCategories(workspaceId: string | undefined) {
+    return useCategoriesState(workspaceId).rows
 }
 
 async function createCategoryInternal(workspaceId: string, data: Omit<Category, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>): Promise<Category> {
@@ -552,8 +575,9 @@ function toSupabaseUnitPayload(unit: Partial<Unit>) {
     })
 }
 
-export function useUnits(workspaceId: string | undefined) {
+export function useUnitsState(workspaceId: string | undefined) {
     const isOnline = useNetworkStatus()
+    const [hydratedWorkspaceId, setHydratedWorkspaceId] = useState<string | null>(null)
 
     // 1. Local Cache (Always Source of Truth for UI)
     // Built-in units are hardcoded in DEFAULT_UNITS and never stored here.
@@ -571,22 +595,45 @@ export function useUnits(workspaceId: string | undefined) {
     // 2. Online: Fetch fresh data from Supabase & cleanup cache
     useEffect(() => {
         if (!isOnline || !workspaceId || !shouldUseCloudBusinessData(workspaceId)) {
+            setHydratedWorkspaceId(workspaceId ?? '')
             return
         }
 
-        void fetchTableFromSupabase('units', db.units, workspaceId).then(() => {
-            // Drop any legacy seeded built-in rows that were synced before the
-            // units table became custom-only. Built-in codes are reserved, so
-            // these rows can never be legitimate custom units.
-            return db.units
-                .where('workspaceId')
-                .equals(workspaceId)
-                .filter((unit) => !unit.isDeleted && isReservedUnitCode(unit.code))
-                .delete()
-        })
+        let cancelled = false
+        setHydratedWorkspaceId(null)
+        void fetchTableFromSupabase('units', db.units, workspaceId)
+            .then(() => {
+                // Drop any legacy seeded built-in rows that were synced before the
+                // units table became custom-only. Built-in codes are reserved, so
+                // these rows can never be legitimate custom units.
+                return db.units
+                    .where('workspaceId')
+                    .equals(workspaceId)
+                    .filter((unit) => !unit.isDeleted && isReservedUnitCode(unit.code))
+                    .delete()
+            })
+            .catch((error) => {
+                console.error('[Units] Failed to hydrate units:', error)
+            })
+            .finally(() => {
+                if (!cancelled) setHydratedWorkspaceId(workspaceId)
+            })
+
+        return () => {
+            cancelled = true
+        }
     }, [isOnline, workspaceId])
 
-    return units ?? []
+    const isCloudHydrationRequired = isOnline && !!workspaceId && shouldUseCloudBusinessData(workspaceId)
+    return {
+        rows: units ?? [],
+        isReady: units !== undefined
+            && (!isCloudHydrationRequired || hydratedWorkspaceId === workspaceId),
+    }
+}
+
+export function useUnits(workspaceId: string | undefined) {
+    return useUnitsState(workspaceId).rows
 }
 
 function assertCustomUnitCode(code: string): void {
@@ -3685,9 +3732,10 @@ export function useDashboardStats(workspaceId: string | undefined) {
 
 import type { Storage } from './models'
 
-export function useStorages(workspaceId: string | undefined) {
+export function useStoragesState(workspaceId: string | undefined) {
     const online = useNetworkStatus()
     const storageAccess = useStorageAccess(workspaceId)
+    const [hydratedWorkspaceId, setHydratedWorkspaceId] = useState<string | null>(null)
 
     const storages = useLiveQuery(
         async () => {
@@ -3712,16 +3760,36 @@ export function useStorages(workspaceId: string | undefined) {
 
     useEffect(() => {
         if (!online || !workspaceId || !shouldUseCloudBusinessData(workspaceId)) {
+            setHydratedWorkspaceId(workspaceId ?? '')
             return
         }
 
+        let cancelled = false
+        setHydratedWorkspaceId(null)
         void fetchTableFromSupabase('storages', db.storages, workspaceId)
             .catch((error) => {
                 console.error('[Storages] Failed to hydrate storages:', error)
             })
+            .finally(() => {
+                if (!cancelled) setHydratedWorkspaceId(workspaceId)
+            })
+
+        return () => {
+            cancelled = true
+        }
     }, [online, workspaceId])
 
-    return storages ?? []
+    const isCloudHydrationRequired = online && !!workspaceId && shouldUseCloudBusinessData(workspaceId)
+    return {
+        rows: storages ?? [],
+        isReady: storages !== undefined
+            && storageAccess.isReady !== false
+            && (!isCloudHydrationRequired || hydratedWorkspaceId === workspaceId),
+    }
+}
+
+export function useStorages(workspaceId: string | undefined) {
+    return useStoragesState(workspaceId).rows
 }
 
 export class DuplicateStorageNameError extends Error {

@@ -2489,6 +2489,23 @@
       "storageAssignmentNeedsReview": "Storage assignment needs review",
       "workspaceWideStorage": "All storages"
     },
+    "initializationRules": {
+      "title": "Form Initialization Rules",
+      "description": "Choose which values are filled when you open a new product form. These settings apply the next time you add a product.",
+      "open": "Configure form initialization rules",
+      "always": "Always",
+      "alwaysEmpty": "Always Empty",
+      "edit": "Edit",
+      "skuAutomatic": "Automatic SKU generation is enabled. The existing generator will fill the SKU when the form opens.",
+      "skuEmpty": "SKU starts empty because automatic SKU generation is off.",
+      "onlyStorage": "This is the only available workspace storage.",
+      "noStorages": "No workspace storages are available. The existing form behavior will be kept.",
+      "unavailableValue": "Unavailable selection ({{value}})",
+      "reset": "Reset to Defaults",
+      "nameRequired": "Enter a product name or choose Always Empty.",
+      "invalidNumber": "Enter a valid non-negative value for {{field}}.",
+      "saveError": "The settings could not be saved on this device. Try again."
+    },
     "minimumSellingPrice": {
       "staffViolation": "Price for {{productName}} cannot be lower than the minimum selling price of {{minimumPrice}}.",
       "orderLineViolation": "Minimum selling price for this product is {{minimumPrice}}.",
