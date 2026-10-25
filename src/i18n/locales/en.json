@@ -2984,6 +2984,7 @@
         "directReceipt": "Direct receipt",
         "directPayment": "Direct payment",
         "saleOrderByPaymentMethod": "Sale Order By {{paymentMethod}}",
+        "purchaseOrderByPaymentMethod": "Purchase Order By {{paymentMethod}}",
         "paymentMethods": {
           "cash": "Cash",
           "fib": "FIB",

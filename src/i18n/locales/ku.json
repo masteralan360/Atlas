@@ -6732,6 +6732,7 @@
         "directReceipt": "وەرگرتنی ڕاستەوخۆ",
         "directPayment": "پارەدانی ڕاستەوخۆ",
         "saleOrderByPaymentMethod": "داواکاریی فرۆشتن بە {{paymentMethod}}",
+        "purchaseOrderByPaymentMethod": "داواکاریی کڕین بە {{paymentMethod}}",
         "paymentMethods": {
           "cash": "نەقد",
           "fib": "FIB",

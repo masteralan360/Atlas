@@ -123,7 +123,7 @@ export type PartnerAccountStatementEntryKind =
   'sales_order' | 'sales_order_return' | 'purchase_order' | 'incoming_payment' | 'outgoing_payment' | 'direct_transaction' | 'loan_disbursal' | 'loan_repayment' | 'pos_sale_loan' | 'pos_sale_installment_loan' | 'installment_sale' | 'agent_sales_activity' | 'agent_commission' | 'partner_settlement'
 
 export type PartnerAccountStatementEntryDescriptionKey =
-  'salesOrder' | 'salesOrderReturn' | 'purchaseOrder' | 'paymentReceived' | 'advancePaymentReceived' | 'orderLoanDownPaymentReceived' | 'paymentMade' | 'commissionPaid' | 'commissionRecovered' | 'commissionSettledAutomatically' | 'commissionEarned' | 'commissionReversed' | 'commissionAdjustment' | 'marketplaceDeliveryProductCommission' | 'marketplaceShippingProductCommission' | 'directReceipt' | 'directPayment' | 'saleOrderByPaymentMethod' | 'posSaleLoanProvided' | 'posSaleLoanReceived' | 'loanProvided' | 'loanReceived' | 'loanRepaymentReceived' | 'loanRepaymentMade' | 'installmentSale' | 'sellerCreatedSalesOrder' | 'sellerCreatedPosSale' | 'sellerCreatedInstallmentSale' | 'sellerReturnedSalesOrder' | 'sellerReturnedPosSale' | 'paymentReversal' | 'orderReturnRefund' | 'loanRepaymentRefund' | 'financingDownPaymentRefund' | 'fullSaleReturnRefund' | 'returnCredit' | 'cashCollection' | 'cashPaid' | 'partnerSettlement'
+'salesOrder' | 'salesOrderReturn' | 'purchaseOrder' | 'paymentReceived' | 'advancePaymentReceived' | 'orderLoanDownPaymentReceived' | 'paymentMade' | 'commissionPaid' | 'commissionRecovered' | 'commissionSettledAutomatically' | 'commissionEarned' | 'commissionReversed' | 'commissionAdjustment' | 'marketplaceDeliveryProductCommission' | 'marketplaceShippingProductCommission' | 'directReceipt' | 'directPayment' | 'saleOrderByPaymentMethod' | 'purchaseOrderByPaymentMethod' | 'posSaleLoanProvided' | 'posSaleLoanReceived' | 'loanProvided' | 'loanReceived' | 'loanRepaymentReceived' | 'loanRepaymentMade' | 'installmentSale' | 'sellerCreatedSalesOrder' | 'sellerCreatedPosSale' | 'sellerCreatedInstallmentSale' | 'sellerReturnedSalesOrder' | 'sellerReturnedPosSale' | 'paymentReversal' | 'orderReturnRefund' | 'loanRepaymentRefund' | 'financingDownPaymentRefund' | 'fullSaleReturnRefund' | 'returnCredit' | 'cashCollection' | 'cashPaid' | 'partnerSettlement'
 
 export type PartnerAccountStatementEntrySource =
   { recordType: 'order'; recordId: string } | { recordType: 'loan'; recordId: string; loanCategory: Loan['loanCategory'] } | { recordType: 'installment_sale'; recordId: string } | { recordType: 'sale'; recordId: string } | { recordType: 'payment_transaction'; recordId: string }
@@ -1093,9 +1093,15 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
   const settlementOperationsById = new Map(
     (data.settlementOperations || []).filter((operation) => !operation.isDeleted).map((operation) => [operation.id, operation])
   )
+  const statementOrders = data.statementOrders || [...data.salesOrders, ...data.purchaseOrders]
   const salesOrderById = new Map(
-    (data.statementOrders || data.salesOrders)
+    statementOrders
       .filter(isSalesOrder)
+      .map((order) => [order.id, order])
+  )
+  const purchaseOrderById = new Map(
+    statementOrders
+      .filter((order): order is PurchaseOrder => !isSalesOrder(order))
       .map((order) => [order.id, order])
   )
   const isProjectedSalesOrderLoan = (loan: Loan | undefined) => Boolean(
@@ -1131,16 +1137,21 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
     if (loan.isDeleted || loan.status === 'cancelled') continue
     const lent = loan.direction !== 'borrowed'
     const linkedSalesOrder = loan.orderId ? salesOrderById.get(loan.orderId) : undefined
-    const isOrderSaleLoan = loan.source === 'order' && linkedSalesOrder != null
+    const linkedPurchaseOrder = loan.orderId ? purchaseOrderById.get(loan.orderId) : undefined
+    const isOrderPurchaseLoan = loan.source === 'order'
+      && (loan.orderType === 'purchase' || linkedPurchaseOrder != null)
+    const isOrderSaleLoan = loan.source === 'order' && !isOrderPurchaseLoan
+      && (loan.orderType === 'sales' || linkedSalesOrder != null)
+    const linkedOrder = isOrderPurchaseLoan ? linkedPurchaseOrder : linkedSalesOrder
     const paymentMethod = loan.source === 'order'
-      ? linkedSalesOrder?.paymentMethod || 'loan'
+      ? linkedOrder?.paymentMethod || 'loan'
       : undefined
     const linkedOrderCode = loan.orderId ? data.linkedOrderCodes?.[loan.orderId]?.trim() : undefined
     const linkedPosSaleCode = loan.saleId ? data.linkedPosSaleCodes?.[loan.saleId]?.trim() : undefined
     const linkedDocumentCode = linkedOrderCode || linkedPosSaleCode
     const isPosSaleLoan = loan.source === 'pos'
     const kind: PartnerAccountStatementEntryKind = loan.source === 'order'
-      ? 'sales_order'
+      ? isOrderPurchaseLoan ? 'purchase_order' : 'sales_order'
       : isPosSaleLoan
         ? loan.loanCategory === 'simple'
           ? 'pos_sale_loan'
@@ -1149,7 +1160,7 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
     const reference = linkedDocumentCode ? `${linkedDocumentCode} · ${loan.loanNo}` : loan.loanNo
     const descriptionKey: PartnerAccountStatementEntryDescriptionKey =
       loan.source === 'order'
-        ? 'saleOrderByPaymentMethod'
+        ? isOrderPurchaseLoan ? 'purchaseOrderByPaymentMethod' : 'saleOrderByPaymentMethod'
         : isPosSaleLoan
           ? lent
             ? 'posSaleLoanProvided'
@@ -1163,7 +1174,7 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
       kind,
       description:
         loan.source === 'order'
-          ? 'Sale Order By {{paymentMethod}}'
+          ? isOrderPurchaseLoan ? 'Purchase Order By {{paymentMethod}}' : 'Sale Order By {{paymentMethod}}'
           : isPosSaleLoan
             ? lent
               ? 'POS sale loan provided'

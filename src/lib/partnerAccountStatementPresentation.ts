@@ -43,7 +43,7 @@ export function getPartnerAccountStatementEntryDescription(
 ) {
     const translationKey = getPartnerAccountStatementDescriptionTranslationKey(entry)
     if (!translationKey) return entry.description
-    if (entry.descriptionKey === 'saleOrderByPaymentMethod') {
+    if (entry.descriptionKey === 'saleOrderByPaymentMethod' || entry.descriptionKey === 'purchaseOrderByPaymentMethod') {
         return t(translationKey, {
             defaultValue: entry.description,
             paymentMethod: getStatementPaymentMethodLabel(entry.paymentMethod, t)

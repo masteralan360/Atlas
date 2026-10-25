@@ -6734,6 +6734,7 @@
         "directReceipt": "استلام مباشر",
         "directPayment": "دفع مباشر",
         "saleOrderByPaymentMethod": "طلب بيع عبر {{paymentMethod}}",
+        "purchaseOrderByPaymentMethod": "طلب شراء عبر {{paymentMethod}}",
         "paymentMethods": {
           "cash": "نقدي",
           "fib": "FIB",
