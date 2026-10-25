@@ -294,7 +294,7 @@
       "noAgentAttribution": "No agent attribution",
       "agentFallback": "Agent",
       "agentUnavailable": "unavailable",
-      "agentAttributionHint": "If selected, the order's Created By uses the agent's linked user account. Leave this empty to use your account."
+      "agentAttributionHint": "The selected agent is saved as attribution. If they have a linked user, that account is used for Created By; otherwise your account is used."
     },
     "data": {
       "title": "Data center",
@@ -397,7 +397,7 @@
       "nameRequired": "Enter a name.",
       "coachRequired": "Select an existing agent.",
       "coachExists": "This agent is already linked as a coach.",
-      "agentCreatorInvalid": "This agent no longer has a valid linked user. Choose another agent or clear the selection.",
+      "agentCreatorInvalid": "This agent's linked user is no longer valid. Choose another agent or clear the selection.",
       "agentCreatorConnectionRequired": "Connect to verify the selected agent before creating this order.",
       "paymentAccountUnavailable": "This payment account is no longer available. Choose another account or select ledger only."
     },

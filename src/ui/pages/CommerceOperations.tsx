@@ -478,7 +478,7 @@ function OrdersSection({
                       <div className="min-w-0 space-y-1">
                         <div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{record.title}</p><Badge variant="outline">{t(`commerceOperations.platforms.${String(payload.platform || 'other')}`)}</Badge><Badge variant={order?.isPaid ? 'default' : 'secondary'}>{t(order?.isPaid ? 'commerceOperations.orders.paid' : 'commerceOperations.orders.unpaid')}</Badge></div>
                         <p className="truncate text-sm text-muted-foreground">{String(payload.buyerName || '')} · {String(payload.buyerPhone || '')}{payload.city ? ` · ${String(payload.city)}` : ''}</p>
-                        <p className="text-xs text-muted-foreground">{new Date(record.recordDate).toLocaleString()} · {String(payload.seller || t('commerceOperations.orders.sellerUnavailable'))}</p>
+                        <p className="text-xs text-muted-foreground">{new Date(record.recordDate).toLocaleString()} · {String(payload.seller || t('commerceOperations.orders.sellerUnavailable'))}{payload.agentNameSnapshot ? ` · ${t('commerceOperations.fields.agent')}: ${String(payload.agentNameSnapshot)}` : ''}</p>
                       </div>
                       <div className="flex items-center justify-between gap-3 sm:justify-end">
                         <div className="text-end"><p className="font-bold">{amountLabel(Number(payload.total || order?.total || 0), currency, currencyPreference)}</p><p className="text-xs text-muted-foreground">{String(payload.orderNumber || order?.orderNumber || '')}</p></div>
@@ -724,15 +724,15 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
   const selectedCity = city === 'other'
     ? otherCity.trim()
     : selectedCityOption ? t(selectedCityOption.key) : ''
-  const linkedAgents = useMemo(() => agents.flatMap((agent) => {
-    const linkedUserId = agent.linkedUserId?.trim()
-    if (agent.workspaceId !== workspaceId || agent.isDeleted || !linkedUserId) return []
+  const coachAgents = useMemo(() => agents.flatMap((agent) => {
+    if (agent.workspaceId !== workspaceId || agent.isDeleted) return []
+    const linkedUserId = agent.linkedUserId?.trim() || null
     const partner = businessPartners.find((candidate) => candidate.id === agent.businessPartnerId && !candidate.isDeleted)
     const label = partner?.partnerName?.trim() || t('commerceOperations.order.agentFallback')
     return [{ id: agent.id, label, zone: agent.zone?.trim() || '', linkedUserId }]
   }), [agents, businessPartners, t, workspaceId])
-  const selectedLinkedAgent = linkedAgents.find((agent) => agent.id === agentId)
-  const selectedAgentAvailable = !agentId || Boolean(selectedLinkedAgent)
+  const selectedAgent = coachAgents.find((agent) => agent.id === agentId)
+  const selectedAgentAvailable = !agentId || Boolean(selectedAgent)
   const discountInvalid = lineSubtotal > 0 && discountAmount / lineSubtotal * 100 > maxDiscountPercent
   const paymentRequired = total !== null && total > 0.000001
   const selectedPaymentAccount = paymentAccount
@@ -905,21 +905,23 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
     try {
       let orderCreatorId = userId ?? null
       if (channel === 'social' && platform === 'coach' && agentId) {
-        if (!agentsLoaded || !selectedAgentAvailable) {
+        if (!agentsLoaded || !selectedAgent) {
           toast({ title: t('commerceOperations.toast.orderFailed'), description: t('commerceOperations.validation.agentCreatorInvalid'), variant: 'destructive' })
           return
         }
-        try {
-          orderCreatorId = await resolveSocialOrderAgentCreator(workspaceId, agentId)
-        } catch (error) {
-          const message = error instanceof Error ? error.message : ''
-          const description = message === 'social_order_agent_creator_requires_connection'
-            ? t('commerceOperations.validation.agentCreatorConnectionRequired')
-            : message === 'social_order_agent_creator_invalid'
-              ? t('commerceOperations.validation.agentCreatorInvalid')
-              : t('commerceOperations.toast.tryAgain')
-          toast({ title: t('commerceOperations.toast.orderFailed'), description, variant: 'destructive' })
-          return
+        if (selectedAgent.linkedUserId) {
+          try {
+            orderCreatorId = await resolveSocialOrderAgentCreator(workspaceId, agentId)
+          } catch (error) {
+            const message = error instanceof Error ? error.message : ''
+            const description = message === 'social_order_agent_creator_requires_connection'
+              ? t('commerceOperations.validation.agentCreatorConnectionRequired')
+              : message === 'social_order_agent_creator_invalid'
+                ? t('commerceOperations.validation.agentCreatorInvalid')
+                : t('commerceOperations.toast.tryAgain')
+            toast({ title: t('commerceOperations.toast.orderFailed'), description, variant: 'destructive' })
+            return
+          }
         }
       }
       const feeExchangeRates = paymentFeeExchangeRates ?? []
@@ -1011,6 +1013,10 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
           relatedOrderId: order.id, relatedPartnerId: partner.id, createdBy: userId ?? null,
           payload: {
             channel, platform: channel === 'social' ? platform : 'other',
+            agentId: channel === 'social' && platform === 'coach' ? agentId || null : null,
+            agentNameSnapshot: channel === 'social' && platform === 'coach' && agentId
+              ? selectedAgent?.label || agentNameSnapshot || null
+              : null,
             seller: seller.trim(), buyerName: buyerName.trim(), buyerPhone: buyerPhone.trim(),
             city: selectedCity, address: address.trim(), deliveryFee: fee, deliveryFeeCurrency: 'iqd', discount: discountAmount,
             subtotal, total: orderTotal, currency: totalCurrency, orderNumber: order.orderNumber,
@@ -1108,7 +1114,7 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
                     setAgentNameSnapshot('')
                     return
                   }
-                  const selected = linkedAgents.find((agent) => agent.id === value)
+                  const selected = coachAgents.find((agent) => agent.id === value)
                   if (!selected) return
                   setAgentId(selected.id)
                   setAgentNameSnapshot(selected.label)
@@ -1116,8 +1122,8 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
                   <SelectTrigger id="commerce-agent"><SelectValue placeholder={t('commerceOperations.placeholders.agent')} /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">{t('commerceOperations.order.noAgentAttribution')}</SelectItem>
-                    {agentId && !selectedLinkedAgent ? <SelectItem value={agentId} disabled>{agentNameSnapshot || t('commerceOperations.order.agentFallback')} · {t('commerceOperations.order.agentUnavailable')}</SelectItem> : null}
-                    {linkedAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.zone ? `${agent.label} · ${agent.zone}` : agent.label}</SelectItem>)}
+                    {agentId && !selectedAgent ? <SelectItem value={agentId} disabled>{agentNameSnapshot || t('commerceOperations.order.agentFallback')} · {t('commerceOperations.order.agentUnavailable')}</SelectItem> : null}
+                    {coachAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.zone ? `${agent.label} · ${agent.zone}` : agent.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">{t('commerceOperations.order.agentAttributionHint')}</p>
