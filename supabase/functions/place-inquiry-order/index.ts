@@ -14,7 +14,10 @@ import {
     sanitizeMarketplaceText,
     sanitizeNullableMarketplaceText
 } from '../_shared/marketplace.ts'
-import { selectStorefrontProductSources } from '../_shared/storefrontCatalogRules.ts'
+import {
+    selectStorefrontProductSources,
+    type StorefrontStorageAssignmentRow
+} from '../_shared/storefrontCatalogRules.ts'
 import { getCanonicalProductImagePath } from '../_shared/productImagePath.ts'
 
 type PlaceInquiryOrderRequest = {
@@ -51,7 +54,7 @@ type ProductRow = {
     image_url: string | null
 }
 
-type InventoryRow = { product_id: string; storage_id: string; quantity: number | null }
+type InventoryRow = { product_id: string; storage_id: string; quantity: number | string | null }
 
 const WORKSPACE_WITHOUT_MARKETPLACE_EMAIL = '0b342f6c-bcdc-45a9-bcda-9d21360ff3c9'
 
@@ -266,11 +269,19 @@ Deno.serve(async (req) => {
         const productIds = Array.from(normalizedItems.keys())
         const [
             { data: inventoryRows, error: inventoryError },
+            { data: assignmentRows, error: assignmentError },
             { data: products, error: productsError }
         ] = await Promise.all([
             adminClient
                 .from('inventory')
                 .select('product_id, storage_id, quantity')
+                .eq('workspace_id', resolvedWorkspace.id)
+                .in('storage_id', storefrontStorageIds)
+                .eq('is_deleted', false)
+                .in('product_id', productIds),
+            adminClient
+                .from('product_storage_assignments')
+                .select('product_id, storage_id')
                 .eq('workspace_id', resolvedWorkspace.id)
                 .in('storage_id', storefrontStorageIds)
                 .eq('is_deleted', false)
@@ -287,6 +298,10 @@ Deno.serve(async (req) => {
             return errorResponse(inventoryError.message, 500)
         }
 
+        if (assignmentError) {
+            return errorResponse(assignmentError.message, 500)
+        }
+
         if (productsError) {
             return errorResponse(productsError.message, 500)
         }
@@ -296,11 +311,16 @@ Deno.serve(async (req) => {
                 .filter((entry): entry is [string, { quantity: number; storageId: string }] => Boolean(entry[1].storageId))
                 .map(([productId, item]) => [productId, item.storageId] as const)
         )
+        const requestedQuantities = new Map(
+            Array.from(normalizedItems.entries()).map(([productId, item]) => [productId, item.quantity] as const)
+        )
         const sourceStorageIdByProductId = selectStorefrontProductSources(
             productIds,
             storefrontStorageIds,
             (inventoryRows ?? []) as InventoryRow[],
-            requestedStorageIds
+            requestedStorageIds,
+            (assignmentRows ?? []) as StorefrontStorageAssignmentRow[],
+            requestedQuantities
         )
         if (!sourceStorageIdByProductId) {
             return errorResponse('Some products are no longer available in this store', 409)

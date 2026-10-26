@@ -3,13 +3,14 @@ import { corsHeaders, errorResponse, jsonResponse } from '../_shared/http.ts'
 import {
     listMarketplaceAssetUrls,
     resolvePublicAssetUrl,
+    resolveStorefrontStorageIds,
     resolveStorefrontVisibleProductIds,
     sanitizeMarketplaceText,
     type StorefrontCatalogRule
 } from '../_shared/marketplace.ts'
-import { getStorefrontStorageIds } from '../_shared/storefrontCatalogRules.ts'
 
 const STORE_PAGE_SIZE = 30
+const PRODUCT_VISIBILITY_BATCH_SIZE = 200
 
 type WorkspaceRow = {
     id: string
@@ -31,9 +32,9 @@ type StorefrontEntry = {
     default_currency: string | null
     storefrontId: string | null
 }
-type WorkspaceStorageRow = { id: string; workspace_id: string; is_marketplace: boolean | null }
 type ProductSummaryRow = { id: string; workspace_id: string; category_id: string | null }
 type InventoryRow = { workspace_id: string; storage_id: string; product_id: string }
+type StorageAssignmentRow = { workspace_id: string; storage_id: string; product_id: string }
 type StoreCursor = { name: string; slug: string }
 
 function encodeCursor(cursor: StoreCursor) {
@@ -59,6 +60,31 @@ function decodeCursor(value: string | null): StoreCursor | null {
 
 function compareEntries(left: Pick<StorefrontEntry, 'name' | 'slug'>, right: StoreCursor) {
     return left.name.localeCompare(right.name) || left.slug.localeCompare(right.slug)
+}
+
+async function resolveStorefrontVisibleProductIdsInBatches(
+    adminClient: ReturnType<typeof createAdminClient>,
+    workspaceId: string,
+    candidateProductIds: string[],
+    options: { storefrontId: string | null; rules: StorefrontCatalogRule[] }
+) {
+    if (candidateProductIds.length <= PRODUCT_VISIBILITY_BATCH_SIZE) {
+        return resolveStorefrontVisibleProductIds(adminClient, workspaceId, candidateProductIds, options)
+    }
+
+    const visibleProductIds = new Set<string>()
+    for (let offset = 0; offset < candidateProductIds.length; offset += PRODUCT_VISIBILITY_BATCH_SIZE) {
+        const batchResult = await resolveStorefrontVisibleProductIds(
+            adminClient,
+            workspaceId,
+            candidateProductIds.slice(offset, offset + PRODUCT_VISIBILITY_BATCH_SIZE),
+            options
+        )
+        if (batchResult === null) return null
+        for (const productId of batchResult) visibleProductIds.add(productId)
+    }
+
+    return visibleProductIds
 }
 
 Deno.serve(async (req) => {
@@ -127,28 +153,12 @@ Deno.serve(async (req) => {
         }
 
         const workspaceIds = Array.from(new Set(pageEntries.map((entry) => entry.workspaceId)))
-        const [{ data: storageRows, error: storageError }, { data: products, error: productError }, { data: ruleRows, error: rulesError }] = await Promise.all([
-            adminClient.from('storages').select('id, workspace_id, is_marketplace').in('workspace_id', workspaceIds).eq('is_deleted', false),
-            adminClient.from('products').select('id, workspace_id, category_id').in('workspace_id', workspaceIds).eq('is_deleted', false),
-            adminClient.from('workspace_storefront_catalog_rules').select('workspace_id, storefront_id, rule_type, target_type, price_book_id, storage_id, override_prices').in('workspace_id', workspaceIds)
-        ])
-        if (storageError) return errorResponse(storageError.message, 500)
-        if (productError) return errorResponse(productError.message, 500)
+        const { data: ruleRows, error: rulesError } = await adminClient
+            .from('workspace_storefront_catalog_rules')
+            .select('workspace_id, storefront_id, rule_type, target_type, price_book_id, storage_id, override_prices')
+            .in('workspace_id', workspaceIds)
         if (rulesError) return errorResponse(rulesError.message, 500)
 
-        const activeStorageIdsByWorkspace = new Map<string, string[]>()
-        const defaultStorageIdsByWorkspace = new Map<string, string[]>()
-        for (const row of (storageRows ?? []) as WorkspaceStorageRow[]) {
-            const activeStorageIds = activeStorageIdsByWorkspace.get(row.workspace_id) ?? []
-            activeStorageIds.push(row.id)
-            activeStorageIdsByWorkspace.set(row.workspace_id, activeStorageIds)
-            if (row.is_marketplace) {
-                const defaultStorageIds = defaultStorageIdsByWorkspace.get(row.workspace_id) ?? []
-                defaultStorageIds.push(row.id)
-                defaultStorageIdsByWorkspace.set(row.workspace_id, defaultStorageIds)
-            }
-        }
-        const productById = new Map(((products ?? []) as ProductSummaryRow[]).map((product) => [product.id, product] as const))
         const rulesByKey = new Map<string, StorefrontCatalogRule[]>()
         for (const row of (ruleRows ?? []) as {
             workspace_id: string
@@ -176,34 +186,100 @@ Deno.serve(async (req) => {
         }
 
         const storageIdsByStorefrontKey = new Map<string, string[]>()
-        for (const entry of pageEntries) {
+        await Promise.all(pageEntries.map(async (entry) => {
             const key = `${entry.workspaceId}:${entry.storefrontId ?? ''}`
             const rules = rulesByKey.get(key) ?? []
-            const activeIds = new Set(activeStorageIdsByWorkspace.get(entry.workspaceId) ?? [])
-            const storageIds = getStorefrontStorageIds(defaultStorageIdsByWorkspace.get(entry.workspaceId) ?? [], rules)
-                .filter((storageId) => activeIds.has(storageId))
+            const storageIds = await resolveStorefrontStorageIds(adminClient, entry.workspaceId, {
+                storefrontId: entry.storefrontId,
+                rules
+            })
             storageIdsByStorefrontKey.set(key, storageIds)
-        }
+        }))
 
         const sourceStorageIds = Array.from(new Set(Array.from(storageIdsByStorefrontKey.values()).flat()))
         const productIdsByStorageId = new Map<string, Set<string>>()
+        const candidateProductIdsByWorkspace = new Map<string, Set<string>>()
         if (sourceStorageIds.length > 0) {
-            const { data: inventoryRows, error: inventoryError } = await adminClient
-                .from('inventory')
-                .select('workspace_id, storage_id, product_id')
-                .in('workspace_id', workspaceIds)
-                .in('storage_id', sourceStorageIds)
-                .eq('is_deleted', false)
-                .gt('quantity', 0)
-            if (inventoryError) return errorResponse(inventoryError.message, 500)
-            for (const row of (inventoryRows ?? []) as InventoryRow[]) {
-                if (!(activeStorageIdsByWorkspace.get(row.workspace_id) ?? []).includes(row.storage_id)) continue
-                const product = productById.get(row.product_id)
-                if (!product || product.workspace_id !== row.workspace_id) continue
-                const current = productIdsByStorageId.get(row.storage_id) ?? new Set<string>()
-                current.add(product.id)
-                productIdsByStorageId.set(row.storage_id, current)
+            const inventoryPageSize = 1000
+            for (let offset = 0; ; offset += inventoryPageSize) {
+                const { data: inventoryRows, error: inventoryError } = await adminClient
+                    .from('inventory')
+                    .select('workspace_id, storage_id, product_id')
+                    .in('workspace_id', workspaceIds)
+                    .in('storage_id', sourceStorageIds)
+                    .eq('is_deleted', false)
+                    .order('workspace_id', { ascending: true })
+                    .order('storage_id', { ascending: true })
+                    .order('product_id', { ascending: true })
+                    .range(offset, offset + inventoryPageSize - 1)
+                if (inventoryError) return errorResponse(inventoryError.message, 500)
+
+                const inventoryRowsPage = (inventoryRows ?? []) as InventoryRow[]
+                for (const row of inventoryRowsPage) {
+                    const storageProducts = productIdsByStorageId.get(row.storage_id) ?? new Set<string>()
+                    storageProducts.add(row.product_id)
+                    productIdsByStorageId.set(row.storage_id, storageProducts)
+
+                    const workspaceProducts = candidateProductIdsByWorkspace.get(row.workspace_id) ?? new Set<string>()
+                    workspaceProducts.add(row.product_id)
+                    candidateProductIdsByWorkspace.set(row.workspace_id, workspaceProducts)
+                }
+                if (inventoryRowsPage.length < inventoryPageSize) break
             }
+
+            const assignmentPageSize = 1000
+            for (let offset = 0; ; offset += assignmentPageSize) {
+                const { data: assignmentRows, error: assignmentError } = await adminClient
+                    .from('product_storage_assignments')
+                    .select('workspace_id, storage_id, product_id')
+                    .in('workspace_id', workspaceIds)
+                    .in('storage_id', sourceStorageIds)
+                    .eq('is_deleted', false)
+                    .order('workspace_id', { ascending: true })
+                    .order('storage_id', { ascending: true })
+                    .order('product_id', { ascending: true })
+                    .range(offset, offset + assignmentPageSize - 1)
+                if (assignmentError) return errorResponse(assignmentError.message, 500)
+
+                const assignmentRowsPage = (assignmentRows ?? []) as StorageAssignmentRow[]
+                for (const row of assignmentRowsPage) {
+                    const storageProducts = productIdsByStorageId.get(row.storage_id) ?? new Set<string>()
+                    storageProducts.add(row.product_id)
+                    productIdsByStorageId.set(row.storage_id, storageProducts)
+
+                    const workspaceProducts = candidateProductIdsByWorkspace.get(row.workspace_id) ?? new Set<string>()
+                    workspaceProducts.add(row.product_id)
+                    candidateProductIdsByWorkspace.set(row.workspace_id, workspaceProducts)
+                }
+                if (assignmentRowsPage.length < assignmentPageSize) break
+            }
+        }
+
+        const productById = new Map<string, ProductSummaryRow>()
+        const productIdBatchSize = 200
+        for (const [workspaceId, candidateProductIds] of candidateProductIdsByWorkspace) {
+            const productIds = Array.from(candidateProductIds)
+            for (let offset = 0; offset < productIds.length; offset += productIdBatchSize) {
+                const productIdBatch = productIds.slice(offset, offset + productIdBatchSize)
+                const { data: products, error: productError } = await adminClient
+                    .from('products')
+                    .select('id, workspace_id, category_id')
+                    .eq('workspace_id', workspaceId)
+                    .eq('is_deleted', false)
+                    .in('id', productIdBatch)
+                if (productError) return errorResponse(productError.message, 500)
+
+                for (const product of (products ?? []) as ProductSummaryRow[]) {
+                    productById.set(product.id, product)
+                }
+            }
+        }
+
+        for (const [storageId, productIds] of productIdsByStorageId) {
+            for (const productId of productIds) {
+                if (!productById.has(productId)) productIds.delete(productId)
+            }
+            if (productIds.size === 0) productIdsByStorageId.delete(storageId)
         }
 
         const logoUrlByWorkspace = new Map<string, string | null>()
@@ -221,7 +297,7 @@ Deno.serve(async (req) => {
             const rules = rulesByKey.get(key) ?? []
             const sourceStorageIds = storageIdsByStorefrontKey.get(key) ?? []
             const candidateProductIds = new Set(sourceStorageIds.flatMap((storageId) => Array.from(productIdsByStorageId.get(storageId) ?? [])))
-            const visibleProductIds = await resolveStorefrontVisibleProductIds(
+            const visibleProductIds = await resolveStorefrontVisibleProductIdsInBatches(
                 adminClient,
                 entry.workspaceId,
                 Array.from(candidateProductIds),

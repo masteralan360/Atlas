@@ -30,6 +30,10 @@ export function MarketplaceApp() {
             <Route path="/s/:slug">
                 <StorefrontShopRoute />
             </Route>
+            {/* Vite serves the marketplace entry at /marketplace in local development. */}
+            <Route path="/marketplace">
+                <MarketplaceGallery />
+            </Route>
             <Route path="/">
                 <MarketplaceGallery />
             </Route>

@@ -293,7 +293,8 @@ export function MobileStoreCart({
                                                         <span className="font-bold text-sm min-w-[1rem] text-center">{item.quantity}</span>
                                                         <button
                                                             type="button"
-                                                            className="p-1.5 hover:bg-background rounded-lg transition-colors text-primary"
+                                                            disabled={Number.isFinite(item.stock_quantity) && item.quantity >= Number(item.stock_quantity)}
+                                                            className="p-1.5 hover:bg-background rounded-lg transition-colors text-primary disabled:cursor-not-allowed disabled:opacity-40"
                                                             onClick={() => cart.setQuantity(item.product_id, item.quantity + 1)}
                                                         >
                                                             <Plus className="h-3.5 w-3.5" />

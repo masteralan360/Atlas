@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'wouter'
 import { Banknote, Grid2X2, Minus, Search, Sparkles, Store } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -16,6 +16,7 @@ import {
   useToast,
 } from '@/ui/components'
 import { cn, formatCurrency } from '@/lib/utils'
+import { useDebounce } from '@/lib/hooks'
 
 import { CartDrawer } from '../components/CartDrawer'
 import { CheckoutForm } from '../components/CheckoutForm'
@@ -26,7 +27,7 @@ import { ProductCard } from '../components/ProductCard'
 import { StoreAvatar } from '../components/StoreAvatar'
 import { StorefrontLayout } from '../components/StorefrontLayout'
 import { StoreQrDialog } from '../components/StoreQrDialog'
-import { useCart } from '../hooks/useCart'
+import { hasInsufficientMarketplaceStock, useCart } from '../hooks/useCart'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { useStoreCatalog } from '../hooks/useStoreCatalog'
 import { getMarketplaceProductImageUrl } from '../lib/assets'
@@ -79,9 +80,9 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
     const [checkoutMode, setCheckoutMode] = useState(false)
     const [submitting, setSubmitting] = useState(false)
     const [confirmation, setConfirmation] = useState<{ orderNumber: string; phone: string } | null>(null)
-    const deferredSearch = useDeferredValue(search.trim().toLowerCase())
+    const debouncedSearch = useDebounce(search.trim().toLowerCase(), 300)
     const { catalog, isLoading, isLoadingMore, hasMore, error, loadMoreError, loadMore } = useStoreCatalog(storeSlug, {
-        search: deferredSearch,
+        search: debouncedSearch,
         sort: sortMode,
         priceMax: priceFilter === 'under-threshold' ? getUnderPriceThreshold(knownStoreCurrency) : undefined,
         currency: priceFilter === 'under-threshold' ? knownStoreCurrency : undefined
@@ -108,7 +109,7 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
 
     useEffect(() => {
         window.scrollTo({ top: 0, behavior: 'auto' })
-    }, [deferredSearch, priceFilter, sortMode])
+    }, [priceFilter, sortMode])
 
     const closeCart = () => {
         setCartOpen(false)
@@ -138,12 +139,16 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
     const handleAddToCart = (product: MarketplaceProduct) => {
         const result = cart.addItem(product)
 
-        if (!result.ok && result.reason === 'mixed-currency') {
+        if (!result.ok) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: t('marketplace.mixedCurrency', {
-                    defaultValue: 'This store currently supports inquiry orders with one currency per cart.'
-                }),
+                description: result.reason === 'mixed-currency'
+                    ? t('marketplace.mixedCurrency', {
+                        defaultValue: 'This store currently supports inquiry orders with one currency per cart.'
+                    })
+                    : t('marketplace.orderStorageChanged', {
+                        defaultValue: 'Some products are sold out, have insufficient stock, or are no longer available from this store. Refresh the catalog and try again.'
+                    }),
                 variant: 'destructive'
             })
             return
@@ -161,6 +166,17 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
         notes?: string
     }) => {
         if (!catalog || cart.items.length === 0) {
+            return
+        }
+
+        if (hasInsufficientMarketplaceStock(cart.items)) {
+            toast({
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: t('marketplace.orderStorageChanged', {
+                    defaultValue: 'Some products are sold out, have insufficient stock, or are no longer available from this store. Refresh the catalog and try again.'
+                }),
+                variant: 'destructive'
+            })
             return
         }
 
@@ -190,7 +206,7 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
             })
         } catch (submitError) {
             const description = submitError instanceof MarketplaceApiError && submitError.status === 409
-                ? t('marketplace.orderStorageChanged', { defaultValue: 'Some products are no longer available from this store. Refresh the catalog and try again.' })
+                ? t('marketplace.orderStorageChanged', { defaultValue: 'Some products are sold out, have insufficient stock, or are no longer available from this store. Refresh the catalog and try again.' })
                 : submitError instanceof Error
                     ? submitError.message
                     : t('marketplace.orderSubmitFailed', { defaultValue: 'Failed to submit order' })
@@ -218,7 +234,7 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
             onShopClick={handleShopClick}
             onNewArrivalsClick={handleNewArrivalsClick}
         >
-            {isLoading ? (
+            {isLoading && !catalog ? (
                 <div className="mx-auto grid max-w-[1180px] gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
                     <div className="h-[520px] animate-pulse rounded-[2.5rem] border border-[#e3e8ef] bg-white" />
                     <div className="space-y-6">
@@ -376,7 +392,13 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
                             </div>
                         </div>
 
-                        {displayedProducts.length === 0 ? (
+                        {isLoading ? (
+                            <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+                                {Array.from({ length: 6 }).map((_, index) => (
+                                    <div key={index} className="h-[360px] animate-pulse rounded-[2.5rem] border border-[#e3e8ef] bg-white" />
+                                ))}
+                            </div>
+                        ) : displayedProducts.length === 0 ? (
                             <Card className="rounded-[2.5rem] border-[#e3e8ef] bg-[#fbfbfd]">
                                 <CardContent className="p-10 text-center">
                                     <h3 className="text-xl font-black">
@@ -497,7 +519,8 @@ export function StorePage({ storeSlug, rules = {} }: StorePageProps) {
                                                                         <span className="px-3 text-sm font-semibold">{item.quantity}</span>
                                                                         <button
                                                                             type="button"
-                                                                            className="px-3 py-2 text-sm font-bold"
+                                                                            disabled={Number.isFinite(item.stock_quantity) && item.quantity >= Number(item.stock_quantity)}
+                                                                            className="px-3 py-2 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40"
                                                                             onClick={() => cart.setQuantity(item.product_id, item.quantity + 1)}
                                                                         >
                                                                             +

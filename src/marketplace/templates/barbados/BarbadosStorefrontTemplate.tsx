@@ -1,8 +1,9 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Coffee, Search, Store } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { cn, formatCurrency } from '@/lib/utils'
+import { useDebounce } from '@/lib/hooks'
 
 import { usePageMeta } from '../../hooks/usePageMeta'
 import { MarketplaceVirtualGrid } from '../../components/MarketplaceVirtualGrid'
@@ -69,6 +70,7 @@ function BarbadosMenuCard({
 }) {
     const imageUrl = getMarketplaceProductImageUrl(product.image_url)
     const [hasImageError, setHasImageError] = useState(false)
+    const isSoldOut = Number.isFinite(product.stock_quantity) && Number(product.stock_quantity) <= 0
     const hasDiscount = typeof product.discount_price === 'number' && product.discount_price < product.price
 
     useEffect(() => {
@@ -82,7 +84,7 @@ function BarbadosMenuCard({
                     <img
                         src={imageUrl}
                         alt={product.name}
-                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
+                        className={`h-full w-full object-cover transition-transform duration-500 ${isSoldOut ? 'grayscale opacity-60' : 'group-hover:scale-[1.04]'}`}
                         loading="lazy"
                         onError={() => setHasImageError(true)}
                     />
@@ -125,9 +127,9 @@ function BarbadosMenuPage({ slug, rules }: StorefrontTemplatePageProps) {
     const [search, setSearch] = useState('')
     const [hasHeroImageError, setHasHeroImageError] = useState(false)
     const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null)
-    const deferredSearch = useDeferredValue(search.trim().toLocaleLowerCase())
+    const debouncedSearch = useDebounce(search.trim().toLocaleLowerCase(), 300)
     const { catalog, isLoading, isLoadingMore, hasMore, error, loadMoreError, loadMore } = useStoreCatalog(slug, {
-        search: deferredSearch,
+        search: debouncedSearch,
         categoryId: activeCategoryId
     })
     const iqdPreference: 'IQD' | 'د.ع' = i18n.language === 'en' ? 'IQD' : 'د.ع'
@@ -163,11 +165,11 @@ function BarbadosMenuPage({ slug, rules }: StorefrontTemplatePageProps) {
 
     useEffect(() => {
         scrollParent?.scrollTo({ top: 0, behavior: 'auto' })
-    }, [activeCategoryId, deferredSearch, scrollParent])
+    }, [activeCategoryId, scrollParent])
 
     usePageMeta(storeName, storeDescription)
 
-    if (isLoading) {
+    if (isLoading && !catalog) {
         return <BarbadosLoadingState />
     }
 
@@ -316,12 +318,28 @@ function BarbadosMenuPage({ slug, rules }: StorefrontTemplatePageProps) {
                                 {activeCategoryName || t('marketplace.menuitems', { defaultValue: 'All Menu Items' })}
                             </h2>
                         </div>
-                        <p className="hidden text-sm text-[#b99e89] sm:block">
-                            {catalog.total_products} {t('marketplace.products', { defaultValue: 'items' }).toLowerCase()}
-                        </p>
+                        {isLoading ? (
+                            <span aria-hidden="true" className="hidden h-4 w-14 animate-pulse rounded bg-[#623926] sm:block" />
+                        ) : (
+                            <p className="hidden text-sm text-[#b99e89] sm:block">
+                                {catalog.total_products} {t('marketplace.products', { defaultValue: 'items' }).toLowerCase()}
+                            </p>
+                        )}
                     </div>
 
-                    {displayedProducts.length === 0 ? (
+                    {isLoading ? (
+                        <div className="mx-auto grid w-full max-w-md grid-cols-1 gap-3 sm:mx-0 sm:max-w-none sm:grid-cols-2 sm:gap-5 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                            {Array.from({ length: 8 }).map((_, index) => (
+                                <div key={index} className="overflow-hidden rounded-[1.5rem] border border-[#623926] bg-[#331b10]">
+                                    <div className="aspect-[4/3] animate-pulse bg-[#462616]" />
+                                    <div className="space-y-2 p-4">
+                                        <div className="h-4 w-3/4 animate-pulse rounded bg-[#623926]" />
+                                        <div className="h-3 w-1/2 animate-pulse rounded bg-[#623926]" />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : displayedProducts.length === 0 ? (
                         <div className="rounded-[1.5rem] border border-dashed border-[#79452d] bg-[#331b10] px-6 py-16 text-center text-[#cdb8a7]">
                             <Coffee className="mx-auto h-8 w-8 text-[#f5bc24]" />
                             <p className="mt-3 text-sm font-semibold">

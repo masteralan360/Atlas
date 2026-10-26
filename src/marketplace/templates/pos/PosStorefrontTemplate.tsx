@@ -1,16 +1,17 @@
-import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link } from 'wouter'
 import { ArrowLeft, ChevronRight, MapPin, Minus, Phone, Plus, Search, ShoppingCart, Store, Trash2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button, useToast } from '@/ui/components'
 import { cn, formatCurrency } from '@/lib/utils'
+import { useDebounce } from '@/lib/hooks'
 
 import { CartDrawer } from '../../components/CartDrawer'
 import { MarketplaceVirtualGrid } from '../../components/MarketplaceVirtualGrid'
 import { CheckoutForm } from '../../components/CheckoutForm'
 import { OrderConfirmation } from '../../components/OrderConfirmation'
-import { useCart } from '../../hooks/useCart'
+import { hasInsufficientMarketplaceStock, useCart } from '../../hooks/useCart'
 import { usePageMeta } from '../../hooks/usePageMeta'
 import { useStoreCatalog } from '../../hooks/useStoreCatalog'
 import { getMarketplaceAssetUrl, getMarketplaceProductImageUrl } from '../../lib/assets'
@@ -267,6 +268,7 @@ function PosProductCard({
     const { t } = useTranslation()
     const imageUrl = getMarketplaceProductImageUrl(product.image_url)
     const [hasImageError, setHasImageError] = useState(false)
+    const isSoldOut = Number.isFinite(product.stock_quantity) && Number(product.stock_quantity) <= 0
     const hasDiscount = typeof product.discount_price === 'number' && product.discount_price < product.price
 
     useEffect(() => {
@@ -287,7 +289,7 @@ function PosProductCard({
                         loading="lazy"
                         decoding="async"
                         onError={() => setHasImageError(true)}
-                        className="h-full w-full object-cover"
+                        className={cn('h-full w-full object-cover', isSoldOut && 'grayscale opacity-60')}
                     />
                 ) : (
                     <div className="flex h-full w-full items-center justify-center">
@@ -322,11 +324,21 @@ function PosProductCard({
                         )}
                         <button
                             type="button"
+                            disabled={isSoldOut}
                             onClick={() => onAdd(product)}
-                            aria-label={`${t('marketplace.addToCart', { defaultValue: 'Add to Cart' })} ${product.name}`}
-                            className="flex h-full w-[58px] shrink-0 items-center justify-center border-s border-border bg-secondary text-primary transition-colors hover:bg-primary hover:text-primary-foreground active:bg-primary/90 md:w-[46px]"
+                            aria-label={isSoldOut
+                                ? `${t('marketplace.soldOut', { defaultValue: 'Sold Out' })}: ${product.name}`
+                                : `${t('marketplace.addToCart', { defaultValue: 'Add to Cart' })} ${product.name}`}
+                            className={cn(
+                                'flex h-full shrink-0 items-center justify-center border-s border-border transition-colors',
+                                isSoldOut
+                                    ? 'w-auto min-w-[86px] cursor-not-allowed bg-slate-200 px-2 text-xs font-bold text-slate-500 opacity-100 hover:bg-slate-200 disabled:opacity-100'
+                                    : 'w-[58px] bg-secondary text-primary hover:bg-primary hover:text-primary-foreground active:bg-primary/90 md:w-[46px]'
+                            )}
                         >
-                            <Plus className="h-5 w-5 md:h-[17px] md:w-[17px]" />
+                            {isSoldOut
+                                ? t('marketplace.soldOut', { defaultValue: 'Sold Out' })
+                                : <Plus className="h-5 w-5 md:h-[17px] md:w-[17px]" />}
                         </button>
                     </div>
                 )}
@@ -335,19 +347,21 @@ function PosProductCard({
     )
 }
 
-function PosLoadingGrid() {
+function PosLoadingGrid({ includeCategories = true }: { includeCategories?: boolean }) {
     return (
         <div className="space-y-6">
-            <div className="grid grid-cols-[repeat(10,minmax(0,1fr))] gap-1 sm:grid-cols-[repeat(14,minmax(0,1fr))] sm:gap-1.5 md:grid-cols-[repeat(20,minmax(0,1fr))] lg:grid-cols-[repeat(24,minmax(0,1fr))] lg:gap-2">
-                {Array.from({ length: 12 }).map((_, index) => (
-                    <div key={index} className="overflow-hidden rounded-lg border border-border/60 bg-card shadow-[0_1px_4px_rgba(0,0,0,0.06)]">
-                        <div className="aspect-[3/4] animate-pulse bg-muted" />
-                        <div className="flex items-center justify-center border-t border-border px-1 py-1.5">
-                            <div className="h-2 w-3/4 animate-pulse rounded bg-muted" />
+            {includeCategories && (
+                <div className="grid grid-cols-[repeat(10,minmax(0,1fr))] gap-1 sm:grid-cols-[repeat(14,minmax(0,1fr))] sm:gap-1.5 md:grid-cols-[repeat(20,minmax(0,1fr))] lg:grid-cols-[repeat(24,minmax(0,1fr))] lg:gap-2">
+                    {Array.from({ length: 12 }).map((_, index) => (
+                        <div key={index} className="overflow-hidden rounded-lg border border-border/60 bg-card shadow-[0_1px_4px_rgba(0,0,0,0.06)]">
+                            <div className="aspect-[3/4] animate-pulse bg-muted" />
+                            <div className="flex items-center justify-center border-t border-border px-1 py-1.5">
+                                <div className="h-2 w-3/4 animate-pulse rounded bg-muted" />
+                            </div>
                         </div>
-                    </div>
-                ))}
-            </div>
+                    ))}
+                </div>
+            )}
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 sm:gap-3 md:grid-cols-4 lg:grid-cols-5 min-[1200px]:grid-cols-8">
             {Array.from({ length: 16 }).map((_, index) => (
                 <div key={index} className="overflow-hidden rounded-xl border border-border/60 bg-card shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
@@ -484,9 +498,10 @@ function PosCartContent({ cart, storeCurrency, iqdPreference, checkoutMode, setC
                                         <span className="min-w-4 text-center text-sm font-bold text-foreground">{item.quantity}</span>
                                         <button
                                             type="button"
+                                            disabled={Number.isFinite(item.stock_quantity) && item.quantity >= Number(item.stock_quantity)}
                                             onClick={() => cart.setQuantity(item.product_id, item.quantity + 1)}
                                             aria-label={t('marketplace.cart.increase', { defaultValue: 'Increase quantity' })}
-                                            className="rounded p-1.5 text-primary transition-colors hover:bg-card hover:text-primary/90"
+                                            className="rounded p-1.5 text-primary transition-colors hover:bg-card hover:text-primary/90 disabled:cursor-not-allowed disabled:opacity-40"
                                         >
                                             <Plus className="h-3.5 w-3.5" />
                                         </button>
@@ -527,9 +542,9 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
     const [checkoutMode, setCheckoutMode] = useState(false)
     const [submitting, setSubmitting] = useState(false)
     const [confirmation, setConfirmation] = useState<{ orderNumber: string; phone: string } | null>(null)
-    const deferredSearch = useDeferredValue(search.trim().toLocaleLowerCase())
+    const debouncedSearch = useDebounce(search.trim().toLocaleLowerCase(), 300)
     const { catalog, isLoading, isLoadingMore, hasMore, error, loadMoreError, loadMore } = useStoreCatalog(slug, {
-        search: deferredSearch,
+        search: debouncedSearch,
         categoryId: activeCategoryId
     })
     const cart = useCart(slug)
@@ -577,7 +592,7 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
 
     useEffect(() => {
         window.scrollTo({ top: 0, behavior: 'auto' })
-    }, [activeCategoryId, deferredSearch])
+    }, [activeCategoryId])
 
     const storeName = catalog?.store.name || t('marketplace.storeTitle', { defaultValue: 'Store' })
     const storeDescription = catalog?.store.description || t('marketplace.storeSubtitle', { defaultValue: 'Browse products and send an inquiry order directly to the store.' })
@@ -587,12 +602,16 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
     const handleAddToCart = (product: MarketplaceProduct) => {
         const result = cart.addItem(product)
 
-        if (!result.ok && result.reason === 'mixed-currency') {
+        if (!result.ok) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: t('marketplace.mixedCurrency', {
-                    defaultValue: 'This store currently supports inquiry orders with one currency per cart.'
-                }),
+                description: result.reason === 'mixed-currency'
+                    ? t('marketplace.mixedCurrency', {
+                        defaultValue: 'This store currently supports inquiry orders with one currency per cart.'
+                    })
+                    : t('marketplace.orderStorageChanged', {
+                        defaultValue: 'Some products are sold out, have insufficient stock, or are no longer available from this store. Refresh the catalog and try again.'
+                    }),
                 variant: 'destructive'
             })
             return
@@ -615,6 +634,17 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
         notes?: string
     }) => {
         if (!catalog || cart.items.length === 0) {
+            return
+        }
+
+        if (hasInsufficientMarketplaceStock(cart.items)) {
+            toast({
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: t('marketplace.orderStorageChanged', {
+                    defaultValue: 'Some products are sold out, have insufficient stock, or are no longer available from this store. Refresh the catalog and try again.'
+                }),
+                variant: 'destructive'
+            })
             return
         }
 
@@ -644,7 +674,7 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
             })
         } catch (submitError) {
             const description = submitError instanceof MarketplaceApiError && submitError.status === 409
-                ? t('marketplace.orderStorageChanged', { defaultValue: 'Some products are no longer available from this store. Refresh the catalog and try again.' })
+                ? t('marketplace.orderStorageChanged', { defaultValue: 'Some products are sold out, have insufficient stock, or are no longer available from this store. Refresh the catalog and try again.' })
                 : submitError instanceof Error
                     ? submitError.message
                     : t('marketplace.orderSubmitFailed', { defaultValue: 'Failed to submit order' })
@@ -688,7 +718,7 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
                             onBackToStore={() => setConfirmation(null)}
                         />
                     </div>
-                ) : isLoading ? (
+                ) : isLoading && !catalog ? (
                     <PosLoadingGrid />
                 ) : error || !catalog ? (
                     <PosErrorState message={error || undefined} />
@@ -700,7 +730,9 @@ function PosShopPage({ slug, rules }: StorefrontTemplatePageProps) {
                             activeCategoryId={activeCategoryId}
                             onSelect={setActiveCategoryId}
                         />
-                        {displayedProducts.length === 0 ? (
+                        {isLoading ? (
+                            <PosLoadingGrid includeCategories={false} />
+                        ) : displayedProducts.length === 0 ? (
                             <div className="rounded-xl border border-dashed border-border bg-card px-6 py-16 text-center text-muted-foreground">
                                 <Search className="mx-auto h-8 w-8 opacity-25" />
                                 <p className="mt-3 text-sm font-semibold">

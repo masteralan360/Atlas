@@ -40,6 +40,7 @@ type ProductRow = {
 type CategoryRow = { id: string; name: string }
 type ContactRow = { type: string; value: string; label: string | null; is_primary: boolean | null }
 type InventoryRow = { product_id: string; storage_id: string; quantity: number | string | null; created_at: string | null }
+type StorageAssignmentRow = { product_id: string; storage_id: string }
 type StorefrontRow = { id: string; workspace_id: string; slug: string; description: string | null; visibility: string }
 type CatalogSort = 'featured' | 'newest'
 type ProductCursor = { sort: CatalogSort; name: string; id: string; addedAt: number }
@@ -207,19 +208,29 @@ Deno.serve(async (req) => {
             return jsonResponse(emptyPayload, { headers: { 'Cache-Control': 'public, max-age=30, s-maxage=120' } })
         }
 
-        const [{ data: inventoryRows, error: inventoryError }, discountResults] = await Promise.all([
+        const [
+            { data: inventoryRows, error: inventoryError },
+            { data: assignmentRows, error: assignmentError },
+            discountResults
+        ] = await Promise.all([
             adminClient.from('inventory').select('product_id, storage_id, quantity, created_at').eq('workspace_id', resolved.workspace.id).in('storage_id', storefrontStorageIds).eq('is_deleted', false),
+            adminClient.from('product_storage_assignments').select('product_id, storage_id').eq('workspace_id', resolved.workspace.id).in('storage_id', storefrontStorageIds).eq('is_deleted', false),
             Promise.all(storefrontStorageIds.map((storageId) => adminClient.rpc('get_active_discounts_for_marketplace_storage', {
                 p_workspace_id: resolved.workspace.id,
                 p_storage_id: storageId
             })))
         ])
         if (inventoryError) return errorResponse(inventoryError.message, 500)
+        if (assignmentError) return errorResponse(assignmentError.message, 500)
         for (const result of discountResults) {
             if (result.error) return errorResponse(result.error.message, 500)
         }
 
-        const inventorySources = selectStorefrontInventorySources(storefrontStorageIds, (inventoryRows ?? []) as InventoryRow[])
+        const inventorySources = selectStorefrontInventorySources(
+            storefrontStorageIds,
+            (inventoryRows ?? []) as InventoryRow[],
+            (assignmentRows ?? []) as StorageAssignmentRow[]
+        )
         let visibleProductIds = Array.from(inventorySources.sourceStorageIdByProductId.keys())
         const storefrontVisibility = await resolveStorefrontVisibleProductIds(adminClient, resolved.workspace.id, visibleProductIds, {
             storefrontId: resolved.storefrontId,

@@ -32,6 +32,9 @@ export function useStoreCatalog(slug: string, query: MarketplaceCatalogQuery = {
     const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
     const loadMoreInFlight = useRef(false)
     const requestGeneration = useRef(0)
+    const [catalogSlug, setCatalogSlug] = useState<string | null>(null)
+    const [loadedRequestKey, setLoadedRequestKey] = useState<string | null>(null)
+    const [settledRequestKey, setSettledRequestKey] = useState<string | null>(null)
     const language = (i18n.language || 'en') as MarketplaceLanguage
     const queryKey = JSON.stringify({
         search: query.search?.trim() || '',
@@ -41,10 +44,14 @@ export function useStoreCatalog(slug: string, query: MarketplaceCatalogQuery = {
         currency: query.currency?.toLowerCase() || null,
         includeProducts: query.includeProducts !== false
     })
+    const requestKey = JSON.stringify({ slug, language, queryKey })
 
     useEffect(() => {
         if (!slug) {
             setCatalog(null)
+            setCatalogSlug(null)
+            setLoadedRequestKey(null)
+            setSettledRequestKey(null)
             setIsLoading(false)
             setIsLoadingMore(false)
             setHasMore(false)
@@ -71,12 +78,17 @@ export function useStoreCatalog(slug: string, query: MarketplaceCatalogQuery = {
                 })
                 if (!isCancelled && generation === requestGeneration.current) {
                     setCatalog(result)
+                    setCatalogSlug(slug)
+                    setLoadedRequestKey(requestKey)
+                    setSettledRequestKey(requestKey)
                     setHasMore(result.has_more)
                     setNextCursor(result.next_cursor)
                 }
             } catch (fetchError) {
                 if (!isCancelled && generation === requestGeneration.current && !(fetchError instanceof DOMException && fetchError.name === 'AbortError')) {
                     setCatalog(null)
+                    setCatalogSlug(null)
+                    setSettledRequestKey(requestKey)
                     setError(fetchError instanceof Error ? fetchError.message : 'Failed to load store catalog')
                 }
             } finally {
@@ -86,7 +98,6 @@ export function useStoreCatalog(slug: string, query: MarketplaceCatalogQuery = {
             }
         }
 
-        setCatalog(null)
         setHasMore(false)
         setNextCursor(null)
         setLoadMoreError(null)
@@ -98,7 +109,7 @@ export function useStoreCatalog(slug: string, query: MarketplaceCatalogQuery = {
             isCancelled = true
             controller.abort()
         }
-    }, [language, queryKey, slug])
+    }, [language, queryKey, requestKey, slug])
 
     const loadMore = useCallback(async () => {
         if (!hasMore || !nextCursor || loadMoreInFlight.current || !slug) {
@@ -133,13 +144,17 @@ export function useStoreCatalog(slug: string, query: MarketplaceCatalogQuery = {
         }
     }, [hasMore, language, nextCursor, queryKey, slug])
 
+    const visibleCatalog = catalogSlug === slug ? catalog : null
+    const isCurrentRequestLoaded = loadedRequestKey === requestKey
+    const isCurrentRequestSettled = settledRequestKey === requestKey
+
     return {
-        catalog,
-        isLoading,
-        isLoadingMore,
-        hasMore,
-        error,
-        loadMoreError,
+        catalog: visibleCatalog,
+        isLoading: Boolean(slug) && (isLoading || !isCurrentRequestSettled),
+        isLoadingMore: isCurrentRequestLoaded && isLoadingMore,
+        hasMore: isCurrentRequestLoaded && hasMore,
+        error: isCurrentRequestSettled ? error : null,
+        loadMoreError: isCurrentRequestLoaded ? loadMoreError : null,
         loadMore
     }
 }

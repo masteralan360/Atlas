@@ -30,6 +30,7 @@ export function ProductCard({
     const { t, i18n } = useTranslation()
     const resolvedImageUrl = getMarketplaceProductImageUrl(product.image_url)
     const [hasImageError, setHasImageError] = useState(false)
+    const isSoldOut = Number.isFinite(product.stock_quantity) && Number(product.stock_quantity) <= 0
     const hasDiscount = typeof product.discount_price === 'number' && product.discount_price < product.price
     const endsAt = product.discount_ends_at ? new Date(product.discount_ends_at) : null
     const endsSoon = !!endsAt
@@ -61,7 +62,7 @@ export function ProductCard({
                             <img
                                 src={resolvedImageUrl}
                                 alt={product.name}
-                                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                                className={`h-full w-full object-cover transition-transform duration-500 ${isSoldOut ? 'grayscale opacity-60' : 'group-hover:scale-[1.03]'}`}
                                 loading="lazy"
                                 onError={() => setHasImageError(true)}
                             />
@@ -111,7 +112,7 @@ export function ProductCard({
                                     )}
                                 </div>
                             ) : <span />}
-                            {showStockInsteadOfAddToCart ? (
+                            {showStockInsteadOfAddToCart && !isSoldOut ? (
                                 <span
                                     aria-label={t('marketplace.stockQuantity', {
                                         quantity: formattedStockQuantity,
@@ -122,8 +123,18 @@ export function ProductCard({
                                     <Package2 className="h-4 w-4 shrink-0" />
                                     <span className="truncate">{formattedStockQuantity}</span>
                                 </span>
+                            ) : isSoldOut && (showStockInsteadOfAddToCart || (showAddToCart && onAdd && addToCartLabel)) ? (
+                                <Button
+                                    type="button"
+                                    disabled
+                                    aria-label={`${t('marketplace.soldOut', { defaultValue: 'Sold Out' })}: ${product.name}`}
+                                    className="h-9 cursor-not-allowed rounded-full bg-slate-200 px-5 text-sm font-black text-slate-500 opacity-100 shadow-none hover:bg-slate-200 disabled:opacity-100"
+                                >
+                                    {t('marketplace.soldOut', { defaultValue: 'Sold Out' })}
+                                </Button>
                             ) : showAddToCart && onAdd && addToCartLabel && (
                                 <Button
+                                    type="button"
                                     className="h-9 rounded-full bg-[#d3e7e1] px-5 text-sm font-black text-[#00756f] shadow-none hover:bg-[#c4ded7]"
                                     onClick={() => onAdd(product)}
                                 >
