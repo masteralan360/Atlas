@@ -1197,11 +1197,21 @@ const editMarketplaceOrderItems = async (orderId: string, items: MarketplaceOrde
             })
         } catch (error) {
             const message = normalizeSupabaseActionError(error).message
+            const normalizedMessage = message.toLocaleLowerCase()
+            const storageSelectionFailed = normalizedMessage.includes('storage') && (
+                normalizedMessage.includes('not available')
+                || normalizedMessage.includes('not assigned')
+                || normalizedMessage.includes('required')
+            )
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
                 description: message.includes('Shipped, delivered, and cancelled marketplace orders cannot be edited')
                     ? t('ecommerce.shippedOrderItemsBlocked', { defaultValue: 'Items cannot be changed after the order ships.' })
-                    : t('ecommerce.editItemsFailed', { defaultValue: 'Failed to update order items.' }),
+                    : storageSelectionFailed
+                        ? t('ecommerce.addItemStorageSaveFailed', {
+                            defaultValue: 'The product is no longer available in that storage. Remove it and add it again using an available storage.'
+                        })
+                        : t('ecommerce.editItemsFailed', { defaultValue: 'Failed to update order items.' }),
                 variant: 'destructive'
             })
             throw error

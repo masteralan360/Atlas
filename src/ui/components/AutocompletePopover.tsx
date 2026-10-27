@@ -9,6 +9,7 @@ interface AutocompletePopoverProps {
     anchor: ReactNode
     children: ReactNode
     className?: string
+    allowScrollInModal?: boolean
 }
 
 /**
@@ -20,7 +21,8 @@ export function AutocompletePopover({
     onOpenChange,
     anchor,
     children,
-    className
+    className,
+    allowScrollInModal = false
 }: AutocompletePopoverProps) {
     const isAnchorInteraction = (target: EventTarget | null) => (
         target instanceof Element && Boolean(target.closest('[data-autocomplete-popover-anchor]'))
@@ -51,8 +53,13 @@ export function AutocompletePopover({
                             event.preventDefault()
                         }
                     }}
+                    // Radix Dialog's RemoveScroll sees this portaled popover as outside its content shard.
+                    // Stop these events before they reach that document listener without cancelling native scrolling.
+                    onWheel={allowScrollInModal ? (event) => event.stopPropagation() : undefined}
+                    onTouchMove={allowScrollInModal ? (event) => event.stopPropagation() : undefined}
                     className={cn(
                         'z-[60] max-h-[min(14rem,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-content-available-width)] overflow-y-auto p-0',
+                        allowScrollInModal && 'overscroll-contain',
                         className
                     )}
                 >

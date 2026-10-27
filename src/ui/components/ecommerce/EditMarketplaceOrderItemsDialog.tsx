@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Minus, PackageSearch, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Loader2, Minus, PackageSearch, Plus, Trash2, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { cn, formatCurrency } from '@/lib/utils'
+import { useOptionalAuth } from '@/auth'
+import { cn, formatCurrency, generateId } from '@/lib/utils'
 import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { getMarketplaceProductImageUrl, type MarketplaceProductImageUrls } from '@/lib/marketplaceProductImages'
+import { useStoragesState } from '@/local-db'
+import type { Product } from '@/local-db/models'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { Button } from '@/ui/components/button'
+import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
 import {
   Dialog,
   DialogBody,
@@ -14,6 +18,12 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/ui/components'
 
 export interface EditableMarketplaceOrderItem {
@@ -25,6 +35,8 @@ export interface EditableMarketplaceOrderItem {
     unit?: string | null
     quantity: number
     line_total: number
+    original_unit_price?: number | null
+    cost_price?: number | null
     image_url?: string | null
     storage_id?: string | null
     allocation_group_id?: string | null
@@ -56,6 +68,12 @@ type DraftGroup = {
     lineTotal: number
 }
 
+type ProductPickerRow = {
+    id: string
+    query: string
+    storageId: string
+}
+
 function lineKey(line: EditableMarketplaceOrderItem) {
     return `${line.product_id}::${line.storage_id || ''}::${line.allocation_group_id || ''}`
 }
@@ -65,7 +83,7 @@ function buildDraftGroups(lines: EditableMarketplaceOrderItem[]): DraftGroup[] {
 
     for (const [index, line] of lines.entries()) {
         const key = line.allocation_group_id
-            ? `allocation:${line.allocation_group_id}`
+            ? `allocation:${line.allocation_group_id}::storage:${line.storage_id || ''}`
             : `line:${index}`
         const existing = groups.get(key)
 
@@ -129,12 +147,34 @@ export function EditMarketplaceOrderItemsDialog({
 }: EditMarketplaceOrderItemsDialogProps) {
     const { t } = useTranslation()
     const { features } = useWorkspace()
+    const user = useOptionalAuth()?.user
+    const { rows: storages, isReady: isStoragesReady } = useStoragesState(isOpen ? user?.workspaceId : undefined)
     const [draftLines, setDraftLines] = useState<EditableMarketplaceOrderItem[]>([])
+    const [productPickerRows, setProductPickerRows] = useState<ProductPickerRow[]>([])
+    const [selectedProductImages, setSelectedProductImages] = useState<Map<string, string | null>>(() => new Map())
+    const [isSubmitting, setIsSubmitting] = useState(false)
+    const saveInProgressRef = useRef(false)
+    const isBusy = isSaving || isSubmitting
+    const orderStorageId = order.items.find((line) => line.storage_id)?.storage_id || undefined
 
     useEffect(() => {
         if (!isOpen) return
         setDraftLines(order.items.map((line) => ({ ...line })))
+        setProductPickerRows([])
+        setSelectedProductImages(new Map())
     }, [isOpen, order])
+
+    const displayProductImageUrls = useMemo(
+        () => new Map([...productImageUrls, ...selectedProductImages]),
+        [productImageUrls, selectedProductImages]
+    )
+    const isProductSelectable = useCallback((product: Product) => (
+        !product.isService
+        && product.currency.toLowerCase() === order.currency.toLowerCase()
+    ), [order.currency])
+    const isStorageAvailable = useCallback((storageId: string | null | undefined) => (
+        Boolean(storageId && isStoragesReady && storages.some((storage) => storage.id === storageId))
+    ), [isStoragesReady, storages])
 
     const groups = useMemo(() => buildDraftGroups(draftLines), [draftLines])
     const subtotal = useMemo(
@@ -153,6 +193,12 @@ export function EditMarketplaceOrderItemsDialog({
         }
         return Array.from(expectedQuantities.values()).some((quantity) => quantity !== 0)
     }, [order.items, draftLines])
+    const hasUnavailableAddedStorage = useMemo(() => {
+        const originalLineKeys = new Set(order.items.map(lineKey))
+        return isStoragesReady && draftLines.some((line) => (
+            !originalLineKeys.has(lineKey(line)) && !isStorageAvailable(line.storage_id)
+        ))
+    }, [draftLines, isStorageAvailable, isStoragesReady, order.items])
 
     function removeGroup(groupKey: string) {
         setDraftLines((current) => {
@@ -186,7 +232,67 @@ export function EditMarketplaceOrderItemsDialog({
         })
     }
 
+    function increaseGroup(groupKey: string) {
+        setDraftLines((current) => {
+            const group = buildDraftGroups(current).find((entry) => entry.key === groupKey)
+            const lineToIncrease = group?.lines[0]
+            if (!lineToIncrease) return current
+
+            const targetIndex = group.key.startsWith('line:')
+                ? Number(group.key.slice('line:'.length))
+                : current.findIndex((line) => lineKey(line) === lineKey(lineToIncrease))
+            return current.map((line, index) => index === targetIndex
+                ? { ...line, quantity: Math.trunc(Number(line.quantity || 0)) + 1 }
+                : line
+            )
+        })
+    }
+
+    function handleSelectProduct(pickerId: string, product: Product, storageId: string) {
+        if (!isProductSelectable(product) || !isStorageAvailable(storageId)) return
+
+        setSelectedProductImages((current) => new Map(current).set(product.id, product.imageUrl || null))
+        setDraftLines((current) => {
+            const existingGroup = buildDraftGroups(current).find((group) => (
+                group.productId === product.id
+                && group.lines.some((line) => line.storage_id === storageId)
+            ))
+            if (existingGroup) {
+                const lineToIncrease = existingGroup.lines[0]
+                const targetIndex = existingGroup.key.startsWith('line:')
+                    ? Number(existingGroup.key.slice('line:'.length))
+                    : current.findIndex((line) => lineKey(line) === lineKey(lineToIncrease))
+                return current.map((line, index) => index === targetIndex
+                    ? { ...line, quantity: Math.trunc(Number(line.quantity || 0)) + 1 }
+                    : line
+                )
+            }
+
+            const unitPrice = roundAmount(Number(product.price || 0))
+            return [...current, {
+                product_id: product.id,
+                name: product.name,
+                sku: product.sku || '',
+                unit_price: unitPrice,
+                original_unit_price: unitPrice,
+                cost_price: product.costPrice,
+                currency: product.currency.toLowerCase(),
+                unit: product.unit || null,
+                quantity: 1,
+                line_total: unitPrice,
+                image_url: product.imageUrl || null,
+                storage_id: storageId,
+                allocation_group_id: product.id
+            }]
+        })
+        setProductPickerRows((current) => current.filter((row) => row.id !== pickerId))
+    }
+
     async function handleSave() {
+        if (isBusy || saveInProgressRef.current || productPickerRows.length > 0 || groups.length === 0 || !isDirty) return
+
+        saveInProgressRef.current = true
+        setIsSubmitting(true)
         const items = groups.flatMap((group) => group.lines).map((line) => ({
             ...line,
             line_total: roundLineTotal(line.unit_price, line.quantity)
@@ -196,23 +302,151 @@ export function EditMarketplaceOrderItemsDialog({
             onOpenChange(false)
         } catch {
             // The caller surfaces the error toast and keeps the dialog open.
+        } finally {
+            saveInProgressRef.current = false
+            setIsSubmitting(false)
         }
     }
 
+    function handleOpenChange(open: boolean) {
+        if (!open && (isBusy || saveInProgressRef.current)) return
+        onOpenChange(open)
+    }
+
     return (
-        <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent layout="structured" className="sm:max-w-xl">
+        <Dialog open={isOpen} onOpenChange={handleOpenChange}>
+            <DialogContent layout="structured" className="sm:max-w-3xl">
                 <DialogHeader layout="structured">
-                    <DialogTitle>{t('ecommerce.editItems', { defaultValue: 'Edit Order Items' })}</DialogTitle>
-                    <DialogDescription>
-                        {t('ecommerce.editItemsHint', {
-                            defaultValue: 'Quantities can only be reduced or items removed before the order is shipped.'
-                        })}
-                    </DialogDescription>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:pr-12">
+                        <div className="min-w-0 flex-1">
+                            <DialogTitle>{t('ecommerce.editItems', { defaultValue: 'Edit Order Items' })}</DialogTitle>
+                            <DialogDescription>
+                                {t('ecommerce.editItemsHint', {
+                                    defaultValue: 'Quantities can be increased or reduced, items added, or items removed before the order is shipped.'
+                                })}
+                            </DialogDescription>
+                        </div>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-9 shrink-0 self-start"
+                            disabled={isBusy}
+                            onClick={() => setProductPickerRows((current) => [...current, {
+                                id: generateId(),
+                                query: '',
+                                storageId: orderStorageId || (storages.length === 1 ? storages[0].id : '')
+                            }])}
+                        >
+                            <Plus className="h-4 w-4" />
+                            {t('ecommerce.addItem', { defaultValue: 'Add item' })}
+                        </Button>
+                    </div>
                 </DialogHeader>
 
                 <DialogBody className="space-y-3">
-                    {groups.length === 0 ? (
+                    {productPickerRows.map((row) => (
+                        <div key={row.id} className="flex items-start gap-3 rounded-2xl border border-dashed border-primary/30 bg-primary/5 p-3">
+                            <div className="mt-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-muted/40">
+                                <PackageSearch className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+                            </div>
+                            <div className="min-w-0 flex-1 space-y-3">
+                                <div className="text-sm font-semibold">
+                                    {t('ecommerce.selectProductToAdd', { defaultValue: 'Select a product to add' })}
+                                </div>
+                                <div className="grid gap-3 lg:grid-cols-[minmax(10.5rem,0.8fr)_minmax(18rem,1.2fr)]">
+                                    <div className="min-w-0 space-y-1.5">
+                                        <Label htmlFor={`ecommerce-add-item-storage-${row.id}`}>
+                                            {t('orders.form.selectStorage', { defaultValue: 'Select Storage' })}{' '}
+                                            <span className="text-destructive">*</span>
+                                        </Label>
+                                        <Select
+                                            value={row.storageId}
+                                            onValueChange={(storageId) => setProductPickerRows((current) => current.map((entry) => (
+                                                entry.id === row.id ? { ...entry, storageId, query: '' } : entry
+                                            )))}
+                                            disabled={isBusy || !isStoragesReady || storages.length === 0}
+                                        >
+                                            <SelectTrigger id={`ecommerce-add-item-storage-${row.id}`} className="w-full">
+                                                <SelectValue placeholder={!isStoragesReady
+                                                    ? t('common.loading', { defaultValue: 'Loading...' })
+                                                    : t('orders.form.selectStorage', { defaultValue: 'Select Storage' })} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {row.storageId && (!isStoragesReady || !storages.some((storage) => storage.id === row.storageId)) && (
+                                                    <SelectItem value={row.storageId} disabled>
+                                                        {!isStoragesReady
+                                                            ? t('common.loading', { defaultValue: 'Loading...' })
+                                                            : `${t('settings.marketplace.catalogRuleUnavailableStorage', { defaultValue: 'Unavailable storage' })} (${row.storageId})`}
+                                                    </SelectItem>
+                                                )}
+                                                {storages.map((storage) => (
+                                                    <SelectItem key={storage.id} value={storage.id}>
+                                                        {storage.isSystem ? (t(`storages.${storage.name.toLowerCase()}`) || storage.name) : storage.name}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="min-w-0 space-y-1.5">
+                                        <Label htmlFor={`ecommerce-add-item-product-${row.id}`}>{t('ecommerce.addItemProduct', { defaultValue: 'Product' })}</Label>
+                                        <ProductAutocompleteInput
+                                            id={`ecommerce-add-item-product-${row.id}`}
+                                            value={row.query}
+                                            onChange={(query) => setProductPickerRows((current) => current.map((entry) => (
+                                                entry.id === row.id ? { ...entry, query } : entry
+                                            )))}
+                                            onSelectProduct={(product) => handleSelectProduct(row.id, product, row.storageId)}
+                                            placeholder={isStorageAvailable(row.storageId)
+                                                ? t('ecommerce.addItemSearch', { defaultValue: 'Search products...' })
+                                                : t('ecommerce.addItemSelectStorageFirst', { defaultValue: 'Select a storage before searching for products.' })}
+                                            disabled={isBusy || !isStorageAvailable(row.storageId)}
+                                            hasSelection={false}
+                                            allowScrollInModal
+                                            storageId={row.storageId || undefined}
+                                            storageScopeId={row.storageId || undefined}
+                                            isProductAvailable={isProductSelectable}
+                                            className="w-full"
+                                        />
+                                    </div>
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                    {t('ecommerce.addItemHint', {
+                                        defaultValue: 'Choose a storage and a product priced in {{currency}}; one unit will be added.',
+                                        currency: order.currency.toUpperCase()
+                                    })}
+                                </p>
+                            </div>
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-9 w-9 shrink-0"
+                                disabled={isBusy}
+                                onClick={() => setProductPickerRows((current) => current.filter((entry) => entry.id !== row.id))}
+                                aria-label={t('common.remove', { defaultValue: 'Remove' })}
+                                title={t('common.remove', { defaultValue: 'Remove' })}
+                            >
+                                <X className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    ))}
+
+                    {productPickerRows.length > 0 && storages.length === 0 && isStoragesReady && (
+                        <p className="text-sm text-muted-foreground">
+                            {t('settings.marketplace.catalogRuleNoStorages', { defaultValue: 'No available storages were found in this workspace.' })}
+                        </p>
+                    )}
+
+                    {hasUnavailableAddedStorage && (
+                        <p role="alert" className="text-sm text-destructive">
+                            {t('ecommerce.addItemStorageUnavailable', {
+                                defaultValue: 'An added item’s storage is no longer available. Remove it and add the product again.'
+                            })}
+                        </p>
+                    )}
+
+                    {groups.length === 0 && productPickerRows.length === 0 ? (
                         <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border/60 bg-card/50 p-8 text-center text-muted-foreground">
                             <PackageSearch className="h-8 w-8 opacity-50" />
                             <p className="text-sm">
@@ -223,7 +457,7 @@ export function EditMarketplaceOrderItemsDialog({
                         </div>
                     ) : groups.map((group) => {
                         const imageUrl = getProductImageDisplayUrl(
-                            getMarketplaceProductImageUrl(group.productId, productImageUrls)
+                            getMarketplaceProductImageUrl(group.productId, displayProductImageUrls)
                         )
 
                         return <div key={group.key} className="flex items-center gap-3 rounded-2xl border border-border/60 bg-card/60 p-3">
@@ -254,7 +488,7 @@ export function EditMarketplaceOrderItemsDialog({
                                     variant="outline"
                                     size="icon"
                                     className={cn('h-9 w-9 rounded-xl', group.quantity <= 1 && 'pointer-events-none opacity-40')}
-                                    disabled={isSaving || group.quantity <= 1}
+                                    disabled={isBusy || group.quantity <= 1}
                                     onClick={() => decreaseGroup(group.key)}
                                     aria-label={`${t('common.decrease', { defaultValue: 'Decrease' })} ${group.name}`}
                                 >
@@ -265,8 +499,19 @@ export function EditMarketplaceOrderItemsDialog({
                                     type="button"
                                     variant="outline"
                                     size="icon"
+                                    className="h-9 w-9 rounded-xl"
+                                    disabled={isBusy}
+                                    onClick={() => increaseGroup(group.key)}
+                                    aria-label={`${t('common.increase', { defaultValue: 'Increase' })} ${group.name}`}
+                                >
+                                    <Plus className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon"
                                     className="h-9 w-9 rounded-xl border-rose-500/30 text-rose-600 hover:bg-rose-500/10 hover:text-rose-600 dark:text-rose-300"
-                                    disabled={isSaving}
+                                    disabled={isBusy}
                                     onClick={() => removeGroup(group.key)}
                                     aria-label={`${t('common.remove', { defaultValue: 'Remove' })} ${group.name}`}
                                 >
@@ -285,11 +530,19 @@ export function EditMarketplaceOrderItemsDialog({
                         </span>
                     </span>
                     <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                        <Button variant="outline" disabled={isSaving} onClick={() => onOpenChange(false)}>
+                        <Button type="button" variant="outline" disabled={isBusy} onClick={() => onOpenChange(false)}>
                             {t('common.cancel', { defaultValue: 'Cancel' })}
                         </Button>
-                        <Button disabled={isSaving || groups.length === 0 || !isDirty} onClick={handleSave}>
-                            {t('common.save', { defaultValue: 'Save' })}
+                        <Button
+                            type="button"
+                            disabled={isBusy || productPickerRows.length > 0 || hasUnavailableAddedStorage || groups.length === 0 || !isDirty}
+                            aria-busy={isBusy}
+                            onClick={handleSave}
+                        >
+                            {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                            {isSubmitting
+                                ? t('common.saving', { defaultValue: 'Saving...' })
+                                : t('common.save', { defaultValue: 'Save' })}
                         </Button>
                     </div>
                 </DialogFooter>

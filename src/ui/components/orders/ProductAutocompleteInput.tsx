@@ -19,6 +19,7 @@ import { AutocompletePopover } from '@/ui/components/AutocompletePopover'
 import { useDebouncedAutocompleteSearch } from '@/ui/components/useDebouncedAutocompleteSearch'
 
 interface ProductAutocompleteInputProps {
+    id?: string
     value: string
     onChange: (value: string) => void
     onSelectProduct: (product: Product) => void
@@ -27,6 +28,7 @@ interface ProductAutocompleteInputProps {
     inputClassName?: string
     disabled?: boolean
     hasSelection?: boolean
+    allowScrollInModal?: boolean
     linkedLabel?: string
     linkedTooltip?: string
     showLinkedIndicator?: boolean
@@ -68,6 +70,7 @@ function ProductThumbnail({ url, name }: { url?: string; name: string }) {
 }
 
 export function ProductAutocompleteInput({
+    id,
     value,
     onChange,
     onSelectProduct,
@@ -76,6 +79,7 @@ export function ProductAutocompleteInput({
     inputClassName,
     disabled,
     hasSelection,
+    allowScrollInModal = false,
     linkedLabel = 'Linked',
     linkedTooltip,
     showLinkedIndicator = true,
@@ -225,10 +229,12 @@ export function ProductAutocompleteInput({
             onOpenChange={(open) => {
                 setIsFocused(open)
             }}
+            allowScrollInModal={allowScrollInModal}
             className="w-[max(var(--radix-popover-trigger-width),18rem)]"
             anchor={(
                 <div data-autocomplete-popover-anchor className={cn('relative w-full group', className)}>
                     <Input
+                        id={id}
                         ref={inputRef}
                         value={value}
                         onChange={handleInputChange}
