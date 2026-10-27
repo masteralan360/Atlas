@@ -26,10 +26,13 @@ export function getJumlaKhaleejDeliveryCity(key: string | null | undefined) {
     return jumlaKhaleejDeliveryCities.find((city) => city.key === key) ?? null
 }
 
-export function createJumlaKhaleejDeliveryMetadata(city: typeof jumlaKhaleejDeliveryCities[number]) {
+export function createJumlaKhaleejDeliveryMetadata(
+    city: typeof jumlaKhaleejDeliveryCities[number],
+    deliveryFee = city.fee
+) {
     return {
         metadata_type: JUMLA_KHALEEJ_DELIVERY_METADATA_TYPE,
-        delivery_fee: city.fee,
+        delivery_fee: deliveryFee,
         delivery_currency: 'iqd',
         delivery_city_key: city.key
     }

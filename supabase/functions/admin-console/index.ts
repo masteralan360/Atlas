@@ -1,5 +1,6 @@
 import { createAdminClient, getAuthenticatedUser } from '../_shared/supabase.ts'
 import { corsHeaders, errorResponse, jsonResponse, readJson } from '../_shared/http.ts'
+import { validateJumlaKhaleejRewardMilestones } from '../_shared/jumlaKhaleejOrderRewards.ts'
 import { resolveWorkspaceUsageOwnerId } from './workspaceUsagePresence.ts'
 
 type VerifyRequest = {
@@ -217,6 +218,26 @@ type DeleteStorefrontPromoCodeRequest = {
     promoCodeId?: string
 }
 
+type ListStorefrontOrderRewardSetsRequest = {
+    action: 'listStorefrontOrderRewardSets'
+    passkey?: string
+}
+
+type SaveStorefrontOrderRewardSetRequest = {
+    action: 'saveStorefrontOrderRewardSet'
+    passkey?: string
+    ruleSetId?: string
+    shoppingMode?: string
+    isEnabled?: boolean
+    milestones?: unknown
+}
+
+type DeleteStorefrontOrderRewardSetRequest = {
+    action: 'deleteStorefrontOrderRewardSet'
+    passkey?: string
+    ruleSetId?: string
+}
+
 type ListWorkspacePaymentTransactionsRequest = {
     action: 'listWorkspacePaymentTransactions'
     passkey?: string
@@ -295,6 +316,9 @@ type AdminConsoleRequest =
     | CreateStorefrontPromoCodeRequest
     | GenerateStorefrontPromoCodeRequest
     | DeleteStorefrontPromoCodeRequest
+    | ListStorefrontOrderRewardSetsRequest
+    | SaveStorefrontOrderRewardSetRequest
+    | DeleteStorefrontOrderRewardSetRequest
     | ListWorkspacePaymentTransactionsRequest
     | ReviewWorkspacePaymentTransactionRequest
     | ListBillingOperationsRequest
@@ -726,6 +750,151 @@ async function deleteStorefrontPromoCode(
     if (error) return errorResponse(error.message, 500)
     if (!data) return errorResponse('This promo code no longer exists.', 404)
     return jsonResponse({ deleted: true, id: promoCodeId })
+}
+
+async function listStorefrontOrderRewardSets(adminClient: ReturnType<typeof createAdminClient>) {
+    let workspaceId: string
+    try {
+        workspaceId = await storefrontPromoWorkspaceId(adminClient)
+    } catch (error) {
+        return errorResponse(error instanceof Error ? error.message : 'Unable to load the storefront.', 500)
+    }
+
+    const { data: ruleSets, error: ruleSetsError } = await adminClient
+        .from('storefront_order_reward_sets')
+        .select('id, shopping_mode, is_enabled, updated_at')
+        .eq('workspace_id', workspaceId)
+        .eq('site_key', 'jumla-khaleej')
+        .order('shopping_mode', { ascending: true })
+
+    if (ruleSetsError) return errorResponse(ruleSetsError.message, 500)
+    const ids = (ruleSets ?? []).map((ruleSet) => String(ruleSet.id))
+    if (ids.length === 0) return jsonResponse([])
+
+    const { data: milestones, error: milestonesError } = await adminClient
+        .from('storefront_order_reward_milestones')
+        .select('id, rule_set_id, threshold, node_type, node_types')
+        .in('rule_set_id', ids)
+        .order('threshold', { ascending: true })
+
+    if (milestonesError) return errorResponse(milestonesError.message, 500)
+    const milestonesByRuleSet = new Map<string, Array<Record<string, unknown>>>()
+    for (const milestone of milestones ?? []) {
+        const ruleSetId = String(milestone.rule_set_id)
+        const rows = milestonesByRuleSet.get(ruleSetId) ?? []
+        rows.push({
+            id: String(milestone.id),
+            threshold: String(milestone.threshold),
+            node_type: String(milestone.node_type),
+            node_types: Array.isArray(milestone.node_types)
+                ? milestone.node_types.map((nodeType) => String(nodeType))
+                : [String(milestone.node_type)]
+        })
+        milestonesByRuleSet.set(ruleSetId, rows)
+    }
+
+    return jsonResponse((ruleSets ?? []).map((ruleSet) => ({
+        id: String(ruleSet.id),
+        shopping_mode: String(ruleSet.shopping_mode),
+        is_enabled: Boolean(ruleSet.is_enabled),
+        updated_at: String(ruleSet.updated_at),
+        milestones: milestonesByRuleSet.get(String(ruleSet.id)) ?? []
+    })))
+}
+
+async function saveStorefrontOrderRewardSet(
+    adminClient: ReturnType<typeof createAdminClient>,
+    body: SaveStorefrontOrderRewardSetRequest
+) {
+    if (body.shoppingMode !== 'retail' && body.shoppingMode !== 'wholesale') {
+        return errorResponse('Choose a valid shopping mode.', 400)
+    }
+    if (typeof body.isEnabled !== 'boolean') {
+        return errorResponse('Choose whether this rule set is enabled.', 400)
+    }
+
+    const validation = validateJumlaKhaleejRewardMilestones(body.milestones)
+    if (validation.error) return errorResponse(validation.error, 400)
+
+    let workspaceId: string
+    try {
+        workspaceId = await storefrontPromoWorkspaceId(adminClient)
+    } catch (error) {
+        return errorResponse(error instanceof Error ? error.message : 'Unable to load the storefront.', 500)
+    }
+
+    if (body.ruleSetId !== undefined) {
+        if (typeof body.ruleSetId !== 'string' || !UUID_PATTERN.test(body.ruleSetId.trim())) {
+            return errorResponse('Choose a valid rule set to edit.', 400)
+        }
+        const { data: existingRuleSet, error: existingRuleSetError } = await adminClient
+            .from('storefront_order_reward_sets')
+            .select('id')
+            .eq('id', body.ruleSetId.trim())
+            .eq('workspace_id', workspaceId)
+            .eq('site_key', 'jumla-khaleej')
+            .eq('shopping_mode', body.shoppingMode)
+            .maybeSingle()
+        if (existingRuleSetError) return errorResponse(existingRuleSetError.message, 500)
+        if (!existingRuleSet) return errorResponse('This rule set no longer exists for the selected shopping mode.', 404)
+    } else {
+        const { data: existingRuleSet, error: existingRuleSetError } = await adminClient
+            .from('storefront_order_reward_sets')
+            .select('id')
+            .eq('workspace_id', workspaceId)
+            .eq('site_key', 'jumla-khaleej')
+            .eq('shopping_mode', body.shoppingMode)
+            .maybeSingle()
+        if (existingRuleSetError) return errorResponse(existingRuleSetError.message, 500)
+        if (existingRuleSet) {
+            return errorResponse('A rule set already exists for this shopping mode. Edit the existing rule set.', 409)
+        }
+    }
+
+    const { data, error } = await adminClient.rpc('save_jumla_khaleej_order_reward_set', {
+        p_workspace_id: workspaceId,
+        p_shopping_mode: body.shoppingMode,
+        p_is_enabled: body.isEnabled,
+        p_milestones: validation.milestones,
+        p_rule_set_id: body.ruleSetId ?? null
+    })
+
+    if (error) {
+        const status = ['23505', '23514', '22023'].includes(error.code ?? '') ? 409 : 400
+        if (error.code === '23505') {
+            return errorResponse('A rule set already exists for this shopping mode. Edit the existing rule set.', status)
+        }
+        return errorResponse(error.message, status, { code: error.code })
+    }
+    return jsonResponse({ id: String(data), shopping_mode: body.shoppingMode })
+}
+
+async function deleteStorefrontOrderRewardSet(
+    adminClient: ReturnType<typeof createAdminClient>,
+    body: DeleteStorefrontOrderRewardSetRequest
+) {
+    const ruleSetId = typeof body.ruleSetId === 'string' ? body.ruleSetId.trim() : ''
+    if (!UUID_PATTERN.test(ruleSetId)) return errorResponse('Choose a valid rule set.', 400)
+
+    let workspaceId: string
+    try {
+        workspaceId = await storefrontPromoWorkspaceId(adminClient)
+    } catch (error) {
+        return errorResponse(error instanceof Error ? error.message : 'Unable to load the storefront.', 500)
+    }
+
+    const { data, error } = await adminClient
+        .from('storefront_order_reward_sets')
+        .delete()
+        .eq('workspace_id', workspaceId)
+        .eq('site_key', 'jumla-khaleej')
+        .eq('id', ruleSetId)
+        .select('id')
+        .maybeSingle()
+
+    if (error) return errorResponse(error.message, 500)
+    if (!data) return errorResponse('This rule set no longer exists.', 404)
+    return jsonResponse({ deleted: true, id: ruleSetId })
 }
 
 async function listUsers(adminClient: ReturnType<typeof createAdminClient>) {
@@ -1973,6 +2142,25 @@ Deno.serve(async (req) => {
                 return await deleteStorefrontPromoCode(adminClient, body)
             }
             return await createStorefrontPromoCode(adminClient, body)
+        }
+
+        if (body.action === 'listStorefrontOrderRewardSets'
+            || body.action === 'saveStorefrontOrderRewardSet'
+            || body.action === 'deleteStorefrontOrderRewardSet') {
+            const access = await requireValidPasskey(
+                adminClient,
+                body.passkey,
+                'jumla_khaleej_admin_passkey'
+            )
+            if (!access.ok) return access.response
+
+            if (body.action === 'listStorefrontOrderRewardSets') {
+                return await listStorefrontOrderRewardSets(adminClient)
+            }
+            if (body.action === 'deleteStorefrontOrderRewardSet') {
+                return await deleteStorefrontOrderRewardSet(adminClient, body)
+            }
+            return await saveStorefrontOrderRewardSet(adminClient, body)
         }
 
         const access = await requireValidPasskey(adminClient, body.passkey)

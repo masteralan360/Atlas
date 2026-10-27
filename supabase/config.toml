@@ -15,6 +15,9 @@ verify_jwt = false
 [functions.get-bound-storefront-catalog]
 verify_jwt = false
 
+[functions.get-bound-storefront-order-rewards]
+verify_jwt = false
+
 [functions.place-inquiry-order]
 verify_jwt = false
 

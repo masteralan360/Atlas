@@ -34,10 +34,12 @@ export function MarketplaceDeliveryFeeBadge({ fee }: { fee: number | null }) {
     return (
         <span className="inline-flex items-center gap-1 rounded-full border border-violet-500/25 bg-violet-500/10 px-2.5 py-1 text-[10px] font-black tracking-wide text-violet-700 dark:text-violet-300">
             <Truck className="h-3 w-3" aria-hidden="true" />
-            {t('ecommerce.deliveryFeeBadge', {
-                amount: formatCurrency(fee, 'iqd', features.iqd_display_preference),
-                defaultValue: '+{{amount}} Delivery'
-            })}
+            {fee === 0
+                ? t('ecommerce.deliveryFeeWaived', { defaultValue: 'Free delivery reward' })
+                : t('ecommerce.deliveryFeeBadge', {
+                    amount: formatCurrency(fee, 'iqd', features.iqd_display_preference),
+                    defaultValue: '+{{amount}} Delivery'
+                })}
         </span>
     )
 }

@@ -10,6 +10,10 @@ import {
 } from '../_shared/marketplace.ts'
 import { getCanonicalProductImagePath } from '../_shared/productImagePath.ts'
 import {
+    evaluateJumlaKhaleejOrderRewards,
+    type JumlaKhaleejRewardMilestone
+} from '../_shared/jumlaKhaleejOrderRewards.ts'
+import {
     evaluateStorefrontPromoCode,
     normalizeStorefrontPromoCode,
     roundStorefrontOrderAmount,
@@ -317,6 +321,38 @@ Deno.serve(async (req) => {
         }
 
         subtotal = roundStorefrontOrderAmount(subtotal)
+        const { data: rewardRuleSet, error: rewardRuleSetError } = await adminClient
+            .from('storefront_order_reward_sets')
+            .select('id')
+            .eq('workspace_id', context.workspace.id)
+            .eq('site_key', JUMLA_KHALEEJ_SITE_KEY)
+            .eq('shopping_mode', mode)
+            .eq('is_enabled', true)
+            .maybeSingle()
+
+        if (rewardRuleSetError) return errorResponse(rewardRuleSetError.message, 500)
+
+        let deliveryFee = deliveryCity.fee
+        if (rewardRuleSet) {
+            const { data: rewardRows, error: rewardRowsError } = await adminClient
+                .from('storefront_order_reward_milestones')
+                .select('id, threshold, node_type, node_types')
+                .eq('rule_set_id', rewardRuleSet.id)
+                .order('threshold', { ascending: true })
+
+            if (rewardRowsError) return errorResponse(rewardRowsError.message, 500)
+            const milestones: JumlaKhaleejRewardMilestone[] = (rewardRows ?? []).map((row) => ({
+                id: String(row.id),
+                threshold: String(row.threshold),
+                node_type: row.node_type as JumlaKhaleejRewardMilestone['node_type'],
+                node_types: (Array.isArray(row.node_types) ? row.node_types : [row.node_type]) as JumlaKhaleejRewardMilestone['node_types']
+            }))
+            // Use the product subtotal after product discounts, before promo
+            // discounts and delivery, so the threshold cannot be circular.
+            const rewards = evaluateJumlaKhaleejOrderRewards(milestones, subtotal)
+            if (rewards.deliveryFeeWaived) deliveryFee = 0
+        }
+
         let promoCode: string | null = null
         let discountAmount = 0
         if (body.promo_code !== undefined && body.promo_code !== null) {
@@ -355,7 +391,7 @@ Deno.serve(async (req) => {
         // append it only after subtotal has been calculated from product lines.
         // marketplace_orders.total and every downstream financial flow retain
         // the product-only subtotal value.
-        orderItems.push(createJumlaKhaleejDeliveryMetadata(deliveryCity))
+        orderItems.push(createJumlaKhaleejDeliveryMetadata(deliveryCity, deliveryFee))
         const { data: insertedOrder, error: insertError } = await adminClient
             .from('marketplace_orders')
             .insert({

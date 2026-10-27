@@ -1885,6 +1885,7 @@
     "editItemsEmpty": "هەموو کاڵاکان سڕانەوە. داواکاری دەبێت لانیکەم یەک کاڵا هەبێت.",
     "deliveryFee": "کرێی گەیاندن",
     "deliveryFeeBadge": "+{{amount}} گەیاندن",
+      "deliveryFeeWaived": "پاداشی گەیاندنی بەخۆڕایی",
     "deliveryFeeExcluded": "بە جیاواز نیشان دەدرێت و لە کۆی داواکاری زیاد ناکرێت.",
     "timeline": "هێڵی کاتی دۆخ",
     "timelineSubmitted": "نێردراوە",

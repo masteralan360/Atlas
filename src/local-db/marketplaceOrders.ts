@@ -1,4 +1,5 @@
 import { supabase } from '@/auth/supabase'
+import { getJumlaKhaleejMarketplaceDeliveryFee } from '@/lib/marketplaceOrderDelivery'
 import type { MarketplaceSalesOrderReturnStatus } from '@/lib/marketplaceOrderPresentation'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 import type { MarketplaceOrderItemRecord, MarketplaceOrderRecord, MarketplaceOrderStatus } from '@/ui/components/ecommerce/MarketplaceOrderTypes'
@@ -63,8 +64,6 @@ type MarketplaceSalesOrderReturnRecord = {
 const MARKETPLACE_ORDER_STATUSES: MarketplaceOrderStatus[] = [
     'pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'
 ]
-const JUMLA_KHALEEJ_STOREFRONT_KEY = 'jumla-khaleej'
-const JUMLA_KHALEEJ_DELIVERY_METADATA_TYPE = 'jumla_khaleej_delivery_fee'
 let marketplaceHydrationSequence = 0
 
 export type MarketplaceOrderSortColumn = 'created_at' | 'order_number' | 'customer_name' | 'total'
@@ -117,17 +116,6 @@ function isMarketplaceOrderItem(value: unknown): value is MarketplaceOrderItemRe
         && (value as { product_id: string }).product_id.length > 0)
 }
 
-function getJumlaKhaleejDeliveryFee(items: unknown[], storefrontKey: string | null) {
-    if (storefrontKey !== JUMLA_KHALEEJ_STOREFRONT_KEY) return null
-    const metadata = items.find((item) => Boolean(
-        item
-        && typeof item === 'object'
-        && (item as { metadata_type?: unknown }).metadata_type === JUMLA_KHALEEJ_DELIVERY_METADATA_TYPE
-    )) as { delivery_fee?: unknown } | undefined
-    const fee = Number(metadata?.delivery_fee)
-    return Number.isInteger(fee) && fee > 0 ? fee : null
-}
-
 function normalizeMarketplaceOrder(
     order: MarketplaceOrderDatabaseRecord,
     salesOrderReturn?: MarketplaceSalesOrderReturnRecord,
@@ -150,7 +138,7 @@ function normalizeMarketplaceOrder(
         promo_code: typeof order.promo_code === 'string' && order.promo_code.trim() ? order.promo_code : null,
         discount_amount: discountAmount,
         items: rawItems.filter(isMarketplaceOrderItem),
-        delivery_fee: getJumlaKhaleejDeliveryFee(rawItems, order.website_storefront_key),
+        delivery_fee: getJumlaKhaleejMarketplaceDeliveryFee(rawItems, order.website_storefront_key),
         sales_order_return_status: salesOrderReturn?.return_status ?? 'none',
         sales_order_returned_at: salesOrderReturn?.returned_at ?? null
     }

@@ -1882,6 +1882,7 @@
     "editItemsEmpty": "تمت إزالة جميع العناصر. يجب أن يحتوي الطلب على عنصر واحد على الأقل.",
     "deliveryFee": "رسوم التوصيل",
     "deliveryFeeBadge": "+{{amount}} توصيل",
+      "deliveryFeeWaived": "مكافأة توصيل مجاني",
     "deliveryFeeExcluded": "تُعرض بشكل منفصل ولا تدخل في إجمالي الطلب.",
     "timeline": "المخطط الزمني للحالة",
     "timelineSubmitted": "تم الإرسال",

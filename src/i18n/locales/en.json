@@ -1894,6 +1894,7 @@
     "editItemsEmpty": "All items were removed. An order must keep at least one item.",
     "deliveryFee": "Delivery fee",
     "deliveryFeeBadge": "+{{amount}} Delivery",
+      "deliveryFeeWaived": "Free delivery reward",
     "deliveryFeeExcluded": "Shown separately; not included in the order total.",
     "timeline": "Status Timeline",
     "timelineSubmitted": "Submitted",
