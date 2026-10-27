@@ -29,7 +29,6 @@ import {
     getOrderLineUnitFactor
 } from '@/lib/orderLineItems'
 import { isPositiveQuantity, quantitiesEqual, roundQuantity } from '@/lib/quantity'
-import { getMissingPriceBookCostMessage, hasValidProductCost } from '@/lib/productCost'
 import { canBePurchased, isService } from '@/lib/catalogItem'
 import { getPartnerSyncWriteRpc, getSupabaseClientForTable, getSupabaseRemoteTableName } from '@/lib/supabaseSchema'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
@@ -1180,10 +1179,6 @@ async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: str
             continue
         }
 
-        if (!hasValidProductCost(product.costPrice)) {
-            throw new Error(`${product.name} cannot be sold until a cost is added.`)
-        }
-
         const storageId = resolveSalesOrderItemStorageId(order, item)
         if (!storageId) {
             throw new Error(`Select a source storage for ${item.productName}`)
@@ -1278,51 +1273,24 @@ async function assertSalesOrderServiceAccess(order: SalesOrder, products?: Array
     }
 }
 
-async function assertSalesProductsHaveCosts(order: SalesOrder) {
+async function assertSalesOrderProductsAvailable(order: SalesOrder) {
     const productIds = Array.from(new Set(order.items.map((item) => item.productId)))
     const products = await db.products.bulkGet(productIds)
     const productMap = new Map(products.filter((product): product is Product => !!product).map((product) => [product.id, product]))
     await assertSalesOrderServiceAccess(order, products)
 
-    for (const item of order.items) {
+    order.items = order.items.map((item) => {
         const product = productMap.get(item.productId)
         if (!product || product.isDeleted) {
             throw new Error(`Product not found: ${item.productName}`)
         }
-        if (!isService(product) && !hasValidProductCost(product.costPrice)) {
-            throw new Error(`${product.name} cannot be sold until a cost is added.`)
+        const costPrice = item.costPrice ?? item.uomCostPrice ?? product.costPrice ?? 0
+        return {
+            ...item,
+            costPrice,
+            convertedCostPrice: item.convertedCostPrice ?? item.convertedUomCostPrice ?? costPrice
         }
-    }
-
-    const partner = order.businessPartnerId
-        ? await db.business_partners.get(order.businessPartnerId)
-        : undefined
-    const priceBook = partner?.priceBookId
-        ? await db.price_books.get(partner.priceBookId)
-        : undefined
-
-    if (!priceBook || priceBook.isDeleted) {
-        return
-    }
-
-    const priceBookItems = await db.price_book_items
-        .where('[priceBookId+productId]')
-        .anyOf(productIds.map((productId) => [priceBook.id, productId]))
-        .and((item) => item.workspaceId === order.workspaceId)
-        .toArray()
-    const itemsByProductId = new Map(
-        priceBookItems
-            .filter((item) => !item.isDeleted)
-            .map((item) => [item.productId, item])
-    )
-
-    for (const item of order.items) {
-        const product = productMap.get(item.productId)
-        const priceBookItem = itemsByProductId.get(item.productId)
-        if (priceBookItem && !isService(product) && !hasValidProductCost(priceBookItem.costPrice)) {
-            throw new Error(getMissingPriceBookCostMessage(product?.name || item.productName, priceBook.name))
-        }
-    }
+    })
 }
 
 async function assertPurchaseOrderItemsAreInventoryProducts(order: PurchaseOrder) {
@@ -3491,17 +3459,16 @@ async function createSalesOrderInternal(
     const status = order.status
 
     await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderMinimumPrices', 'application', () => assertSalesOrderMinimumPrices(order, options))
-    // The hosted write checks current products, service access and assigned
-    // Price Book costs atomically. A confirmed draft save need not wait on a
+    // The hosted write checks current products and service access atomically. A confirmed draft save need not wait on a
     // catalog-wide IndexedDB hydration before submitting that same validation.
     // Other paths must validate locally before any financial/inventory effect
     // or before accepting a write for offline replay.
-    const validatesCostsWithHostedDraft = status === 'draft'
+    const usesHostedProductValidationForDraft = status === 'draft'
         && options?.requireRemoteConfirmation
         && shouldUseCloudBusinessData(workspaceId)
         && isOnline(workspaceId)
-    if (!validatesCostsWithHostedDraft) {
-        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderProductCosts', 'data', () => assertSalesProductsHaveCosts(order))
+    if (!usesHostedProductValidationForDraft) {
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderProductAvailability', 'data', () => assertSalesOrderProductsAvailable(order))
     }
 
     if (status === 'pending' || status === 'completed') {
@@ -3729,7 +3696,7 @@ async function completePaidQuickSalesOrderAtomically(
         trace?: CrudTraceHandle
     }
 ) {
-    await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesProductsHaveCosts(order))
+    await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesOrderProductsAvailable(order))
     options?.onProgress?.('reserving')
     await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesStockAvailable(order))
     options?.onProgress?.('completing')
@@ -4069,7 +4036,7 @@ async function updateSalesOrderInternal(id: string, data: Partial<SalesOrder>, o
     await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', async () => {
         await assertOrderStorageAccess(updated)
         await assertSalesOrderMinimumPrices(updated, options)
-        await assertSalesProductsHaveCosts(updated)
+        await assertSalesOrderProductsAvailable(updated)
     })
     reportOrderSaveProgress(options, 'payment')
     await measureSalesOrderStage(
@@ -4433,7 +4400,7 @@ async function updateSalesOrderStatusOnce(
     let workingOrder = existing
     let linkedLoanId = existing.linkedLoanId || null
     if (status === 'pending') {
-        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderProductCosts', 'application', () => assertSalesProductsHaveCosts(existing))
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderProductAvailability', 'application', () => assertSalesOrderProductsAvailable(existing))
         await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderStockAvailability', 'data', () => assertSalesStockAvailable(existing, existing.id))
         linkedLoanId = await measureSalesOrderStage(
             options?.trace,
@@ -4482,7 +4449,7 @@ async function updateSalesOrderStatusOnce(
 
     let completedRemotely = false
     if (status === 'completed') {
-        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesProductsHaveCosts(updated))
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesOrderProductsAvailable(updated))
         await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesStockAvailable(updated, workingOrder.id))
         const fulfillment = await measureSalesOrderStage(
             options?.trace,
@@ -4548,7 +4515,7 @@ async function approveSalesOrderRequestInternal(id: string, reviewedBy: string |
         ...buildApprovalReviewPatch(existing, reviewedBy)
     }
 
-    await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesProductsHaveCosts(updated))
+    await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesOrderProductsAvailable(updated))
     await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderPayment', 'unknown', () => appendInitialOrderPaymentTransaction('sales', updated), 'crudDebugger.details.salesOrderPaymentBoundary')
     await measureSalesOrderStage(trace, 'crudDebugger.stages.salesOrderLocalWrite', 'persistence', () => db.sales_orders.put(updated), 'crudDebugger.details.dexiePersistence')
     await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId, { trace })

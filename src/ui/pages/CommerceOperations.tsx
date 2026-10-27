@@ -861,10 +861,6 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
       return
     }
     const costPrice = bookItem?.costPrice ?? (currency === product.currency ? product.costPrice : null)
-    if (!product.isService && costPrice == null) {
-      toast({ title: t('commerceOperations.toast.costRequired'), description: t('commerceOperations.toast.costRequiredDetail'), variant: 'destructive' })
-      return
-    }
     setLines((current) => current.map((line) => line.id === lineId ? {
       ...line,
       product,

@@ -39,7 +39,6 @@ import { getProductImageDisplayUrl } from '@/lib/productImageStorage'
 import { useKdsStream } from '@/hooks/useKdsStream'
 import { createVerificationSale, verifySale } from '@/lib/saleVerification'
 import { convertCurrencyAmountWithAvailableSnapshot } from '@/lib/orderCurrency'
-import { getMissingProductCostMessage, hasValidProductCost } from '@/lib/productCost'
 import { mapSaleToUniversal } from '@/lib/mappings'
 import { INSTANT_HISTORY_RECEIPT_TEMPLATE_KEY } from '@/lib/customTemplates'
 import { formatCookOrderTicketTimestamp } from '@/lib/cookOrderTicket'
@@ -1599,14 +1598,6 @@ export function InstantPOS() {
         const effectiveCost = selectedUom?.costPrice ?? (baseUnitCost == null
             ? null
             : baseUnitCost * (selectedUom?.coefficient ?? 1))
-        if (!isService(product) && !hasValidProductCost(effectiveCost)) {
-            toast({
-                title: t('common.error') || 'Error',
-                description: getMissingProductCostMessage(product.name),
-                variant: 'destructive'
-            })
-            return
-        }
         if (!isService(product) && product.quantity <= 0) {
             toast({
                 title: t('common.error') || 'Error',
@@ -1956,21 +1947,6 @@ export function InstantPOS() {
                     : restrictedProductExists
                         ? t('businessPartners.agent.productCategoryExcluded', { defaultValue: 'This product category is not available to this user.' })
                         : t('orders.form.errors.productNotFound', { defaultValue: 'Selected product was not found.' }),
-                variant: 'destructive'
-            })
-            setIsCheckoutLoading(false)
-            return
-        }
-
-        const missingCostItem = activeTicket.items.find((item) => {
-            const product = resolveTicketProduct(item)
-            return product ? !isService(product) && !hasValidProductCost(item.uomCostPrice ?? product.costPrice) : false
-        })
-        if (missingCostItem) {
-            const product = resolveTicketProduct(missingCostItem)
-            toast({
-                title: t('common.error') || 'Error',
-                description: getMissingProductCostMessage(product?.name || missingCostItem.name),
                 variant: 'destructive'
             })
             setIsCheckoutLoading(false)

@@ -544,6 +544,26 @@ export function EcommerceDetailView({
                                     <div className="font-semibold">{order.currency.toUpperCase()}</div>
                                 </div>
                             </div>
+                            {order.promo_code && order.discount_amount > 0 ? (
+                                <div className="mt-4 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+                                    <div className="flex flex-wrap items-start justify-between gap-4">
+                                        <div>
+                                            <div className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">
+                                                {t('ecommerce.promoCode', { defaultValue: 'Promo code' })}
+                                            </div>
+                                            <div className="mt-1 text-lg font-black tracking-wide">{order.promo_code}</div>
+                                        </div>
+                                        <div className="text-end">
+                                            <div className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">
+                                                {t('ecommerce.promoDiscount', { defaultValue: 'Promo discount' })}
+                                            </div>
+                                            <div className="mt-1 text-lg font-black text-emerald-700 dark:text-emerald-300">
+                                                −{formatCurrency(order.discount_amount, order.currency, features.iqd_display_preference)}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : null}
                             {order.delivery_fee !== null ? (
                                 <div className="mt-4 flex items-center justify-between gap-3 border-t border-violet-500/20 pt-3">
                                     <div>

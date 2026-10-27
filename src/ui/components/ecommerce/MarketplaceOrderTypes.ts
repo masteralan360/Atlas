@@ -25,6 +25,8 @@ export type MarketplaceOrderRecord = {
     items: MarketplaceOrderItemRecord[]
     delivery_fee: number | null
     subtotal: number
+    promo_code: string | null
+    discount_amount: number
     total: number
     currency: string
     status: MarketplaceOrderStatus

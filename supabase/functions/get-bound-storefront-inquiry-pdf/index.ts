@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
 
         let orderQuery = adminClient
             .from('marketplace_orders')
-            .select('id, order_number, tracking_code, customer_name, customer_phone, customer_email, customer_address, customer_city, customer_notes, items, currency, storefront_mode, created_at')
+            .select('id, order_number, tracking_code, customer_name, customer_phone, customer_email, customer_address, customer_city, customer_notes, items, currency, storefront_mode, promo_code, discount_amount, created_at')
             .eq('workspace_id', context.workspace.id)
             .eq('website_storefront_key', JUMLA_KHALEEJ_SITE_KEY)
             .eq('source_domain', context.config.primary_domain)
@@ -186,6 +186,11 @@ Deno.serve(async (req) => {
                 notes: text(order.customer_notes, 500)
             },
             items: Array.from(groupedItems.values()),
+            promoCode: text(order.promo_code, 80) || null,
+            discountAmount: Math.min(
+                Math.max(0, finiteNumber(order.discount_amount)),
+                Math.max(0, Array.from(groupedItems.values()).reduce((sum, item) => sum + item.line_total, 0))
+            ),
             deliveryFee: finiteNumber(deliveryMetadata?.delivery_fee),
             deliveryCurrency: text(deliveryMetadata?.delivery_currency, 16).toLowerCase() || 'iqd',
             store: {

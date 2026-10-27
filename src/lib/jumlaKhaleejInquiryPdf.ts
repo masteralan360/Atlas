@@ -16,6 +16,8 @@ export type JumlaKhaleejInquirySnapshot = {
   items: Array<CartItem & { line_total: number }>
   deliveryFee: number
   deliveryCurrency: string
+  promoCode?: string | null
+  discountAmount?: number
   store: {
     name: string
     logo_url: string | null
@@ -76,6 +78,8 @@ export function isJumlaKhaleejInquirySnapshot(value: unknown): value is JumlaKha
   if (typeof value.trackingCode !== 'string' || !/^[1-9][0-9]{8}$/.test(value.trackingCode)) return false
   if (typeof value.createdAt !== 'string' || !value.createdAt) return false
   if (value.mode !== 'retail' && value.mode !== 'wholesale') return false
+  if (value.promoCode !== undefined && value.promoCode !== null && typeof value.promoCode !== 'string') return false
+  if (value.discountAmount !== undefined && !isFiniteNumber(value.discountAmount)) return false
   if (!isCustomer(value.customer)) return false
   if (!Array.isArray(value.items) || value.items.length === 0 || !value.items.every(isItem)) return false
   if (!isFiniteNumber(value.deliveryFee) || typeof value.deliveryCurrency !== 'string') return false
@@ -130,6 +134,8 @@ export async function generateJumlaKhaleejInquiryPdf(request: InquirySnapshotReq
     mode: createFreshStorefrontPdfAssetMode(snapshot.mode),
     deliveryFee: snapshot.deliveryFee,
     deliveryCurrency: snapshot.deliveryCurrency,
+    promoCode: snapshot.promoCode ?? null,
+    discountAmount: snapshot.discountAmount ?? 0,
     store: snapshot.store
   })
   const bytes = new Uint8Array(await generated.blob.arrayBuffer())

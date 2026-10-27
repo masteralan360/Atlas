@@ -4,7 +4,9 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 
 import type { CartItem, CustomerForm } from '@/components/storefront-ui-types'
+import i18n, { i18nReady } from '@/i18n/config'
 import { getJumlaKhaleejDeliveryCity } from '@/lib/storefront-delivery'
+import { calculateStorefrontInquiryPdfSummary } from '@/lib/storefrontInquiryPdfSummary'
 import { storefrontApiUrl } from '@/lib/storefront-runtime'
 import './storefront-atlas-standard-pdf.css'
 
@@ -22,6 +24,8 @@ type PrintInput = {
   /** Immutable delivery values are supplied when rendering an existing order. */
   deliveryFee?: number
   deliveryCurrency?: string
+  promoCode?: string | null
+  discountAmount?: number
   customerCityLabel?: string
   createdAt?: string
   trackingCode?: string
@@ -61,7 +65,7 @@ const ATLAS_STANDARD_LAYOUT = {
   texts: [
     { x: 72.64808095494308, y: 7.303630757229554, id: 'xsq58ogzs', text: 'لبيع مواد كوزمتيك بالجملة', color: '#000000', width: 57.98220465695479, fontSize: 16, rotation: 0 },
     { x: 14.174189035072654, y: 2.8938927452822334, id: 'j8jtek824', text: '0771 450 4323', color: '#000000', width: 84, fontSize: 16, rotation: 0 },
-    { x: 3.414287245750817, y: 10.963713335918598, id: 've07n55bx', text: 'کەرکووک بارتوخانە قرب مول زانا و توانا', color: '#000000', width: 74.959918567247, fontSize: 16, rotation: 0 }
+    { x: 3.414287245750817, y: 10.963713335918598, id: 've07n55bx', text: 'کەرکووک باروتخانە قرب مول زانا و توانا', color: '#000000', width: 74.959918567247, fontSize: 16, rotation: 0 }
   ],
   componentPositions: {
     atlasStandardWorkspaceLogo: { x: -35.45, y: 5.29, scale: 1 },
@@ -81,6 +85,7 @@ const ATLAS_STANDARD_LAYOUT = {
     'atlasStandard.financialSummary': [
       'atlasStandard.financialSummary.outstanding',
       'atlasStandard.financialSummary.deliveryFee',
+      'atlasStandard.financialSummary.discount',
       'atlasStandard.financialSummary.orderTotalWithDeliveryFee',
       'atlasStandard.financialSummary.amountInWords',
       'atlasStandard.financialSummary.currentBalance',
@@ -163,6 +168,20 @@ function localizedPrintUnit(unit: string | null | undefined, language = ATLAS_ST
   const code = unit?.trim() || ''
   const labels = PRINT_UNIT_LABELS[language as keyof typeof PRINT_UNIT_LABELS]
   return labels?.[code as keyof typeof labels] || code
+}
+
+function storefrontInquiryPdfLabels() {
+  const t = i18n.getFixedT('ku')
+  return {
+    subtotal: t('storefrontInquiryPdf.subtotal'),
+    deliveryFee: t('storefrontInquiryPdf.deliveryFee'),
+    discount: t('storefrontInquiryPdf.discount'),
+    promoCode: t('storefrontInquiryPdf.promoCode'),
+    orderTotal: t('storefrontInquiryPdf.orderTotal'),
+    orderTotalWithDeliveryFee: t('storefrontInquiryPdf.orderTotalWithDeliveryFee'),
+    orderTotalAfterDiscount: t('storefrontInquiryPdf.orderTotalAfterDiscount'),
+    orderTotalWithDeliveryFeeAfterDiscount: t('storefrontInquiryPdf.orderTotalWithDeliveryFeeAfterDiscount')
+  }
 }
 
 function atlasMoney(value: number, currency: string) {
@@ -349,12 +368,23 @@ function AtlasItemsTable({
 }
 
 function StorefrontAtlasStandardTemplate({ input, createdAt, documentNumber }: { input: PrintInput; createdAt: Date; documentNumber: string }) {
-  const total = input.items.reduce((sum, item) => sum + item.price * item.quantity, 0)
-  const deliveryCity = getJumlaKhaleejDeliveryCity(input.customer.city)
-  const deliveryFee = Number.isFinite(input.deliveryFee) ? Number(input.deliveryFee) : deliveryCity?.fee ?? 0
-  // Display-only PDF value. The marketplace order total remains product-only.
-  const orderTotalWithDeliveryFee = total + deliveryFee
   const currency = input.items[0]?.currency || 'iqd'
+  const deliveryCity = getJumlaKhaleejDeliveryCity(input.customer.city)
+  const deliveryFeeValue = Number.isFinite(input.deliveryFee) ? Number(input.deliveryFee) : deliveryCity?.fee ?? 0
+  const deliveryCurrency = (input.deliveryCurrency || 'iqd').toLowerCase()
+  const summary = calculateStorefrontInquiryPdfSummary({
+    subtotal: input.items.reduce((sum, item) => sum + item.price * item.quantity, 0),
+    deliveryFee: deliveryFeeValue,
+    discountAmount: input.discountAmount ?? 0,
+    orderCurrency: currency,
+    deliveryCurrency
+  })
+  const { subtotal, deliveryFee, discountAmount, total: finalTotal } = summary
+  const summaryLabels = storefrontInquiryPdfLabels()
+  const orderTotalLabel = summaryLabels[summary.totalLabel]
+  const discountLabel = input.promoCode?.trim()
+    ? `${summaryLabels.discount} (${summaryLabels.promoCode}: ${input.promoCode.trim()})`
+    : summaryLabels.discount
   const dateTime = formatDateTime(createdAt)
   const footerAddress = contactValue(input.store.contacts, 'address')
   const footerPhone = contactValue(input.store.contacts, 'phone')
@@ -380,16 +410,25 @@ function StorefrontAtlasStandardTemplate({ input, createdAt, documentNumber }: {
   ]
   const financialFields: PrintField[] = [
     { key: 'atlasStandard.financialSummary.paidAmount', label: label.paidAmount, value: atlasMoney(0, currency), span: 4 },
-    { key: 'atlasStandard.financialSummary.outstanding', label: label.outstanding, value: atlasMoney(total, currency), span: 2 },
-    { key: 'atlasStandard.financialSummary.deliveryFee', label: label.deliveryFee, value: atlasMoney(deliveryFee, input.deliveryCurrency || 'iqd'), span: 2 },
-    { key: 'atlasStandard.financialSummary.orderTotalWithDeliveryFee', label: label.orderTotalWithDeliveryFee, value: atlasMoney(orderTotalWithDeliveryFee, input.deliveryCurrency || 'iqd'), span: 4 },
+    { key: 'atlasStandard.financialSummary.outstanding', label: summaryLabels.subtotal, value: atlasMoney(subtotal, currency), span: 2 },
+    { key: 'atlasStandard.financialSummary.deliveryFee', label: summaryLabels.deliveryFee, value: atlasMoney(deliveryFee, deliveryCurrency), span: 2 },
+    { key: 'atlasStandard.financialSummary.orderTotalWithDeliveryFee', label: orderTotalLabel, value: atlasMoney(finalTotal, currency), span: 4 },
     { key: 'atlasStandard.financialSummary.currentBalance', label: 'باڵانسی ئێستای هاوبەش', value: '-', span: 4 },
     { key: 'atlasStandard.financialSummary.paymentMethod', label: label.paymentMethod, value: '-', span: 2 },
-    { key: 'atlasStandard.financialSummary.amountInWords', label: label.amountInWords, value: numberToKurdishWords(total), span: 2, showLabel: false },
+    { key: 'atlasStandard.financialSummary.amountInWords', label: label.amountInWords, value: numberToKurdishWords(finalTotal), span: 2, showLabel: false },
     { key: 'atlasStandard.financialSummary.printedBy', label: label.printedBy, value: '-', span: 2 },
     { key: 'atlasStandard.financialSummary.notes', label: label.notes, value: input.customer.notes, span: 4, multiline: true },
     { key: 'atlasStandard.financialSummary.trackingCode', label: label.trackingCode, value: input.trackingCode ? input.trackingCode.replace(/^(\d{3})(\d{3})(\d{3})$/, '$1-$2-$3') : '-', span: 4 }
   ]
+  if (discountAmount > 0) {
+    const discountField: PrintField = {
+      key: 'atlasStandard.financialSummary.discount',
+      label: discountLabel,
+      value: `−${atlasMoney(discountAmount, currency)}`,
+      span: 2
+    }
+    financialFields.splice(3, 0, discountField)
+  }
 
   return (
     <div className="storefront-atlas-standard" dir="rtl">
@@ -406,7 +445,7 @@ function StorefrontAtlasStandardTemplate({ input, createdAt, documentNumber }: {
 
         <AtlasFieldsSection fields={invoiceDetailFields} />
 
-        <AtlasItemsTable items={itemChunks[0]} rowStart={0} allItems={input.items} total={total} currency={currency} />
+        <AtlasItemsTable items={itemChunks[0]} rowStart={0} allItems={input.items} total={subtotal} currency={currency} />
 
         <AtlasFieldsSection fields={financialFields} fieldOrder={ATLAS_STANDARD_LAYOUT.fieldOrders['atlasStandard.financialSummary']} className="storefront-atlas-financial" />
 
@@ -424,7 +463,7 @@ function StorefrontAtlasStandardTemplate({ input, createdAt, documentNumber }: {
         </div>
       </section>
 
-      {itemChunks.slice(1).map((chunk, index) => <section className="storefront-atlas-page storefront-atlas-continuation-page" key={`items-page-${index + 2}`}><AtlasItemsTable items={chunk} rowStart={(index + 1) * maxRowsPerTable} allItems={input.items} total={total} currency={currency} /></section>)}
+      {itemChunks.slice(1).map((chunk, index) => <section className="storefront-atlas-page storefront-atlas-continuation-page" key={`items-page-${index + 2}`}><AtlasItemsTable items={chunk} rowStart={(index + 1) * maxRowsPerTable} allItems={input.items} total={subtotal} currency={currency} /></section>)}
     </div>
   )
 }
@@ -633,6 +672,8 @@ export async function createStorefrontInquiryPdf(input: PrintInput & {
   documentNumber: string
   onProgress?: (value: number) => void
 }) {
+  await i18nReady
+  await i18n.loadLanguages('ku')
   const reportProgress = (value: number) => input.onProgress?.(Math.max(0, Math.min(100, value)))
   const parsedCreatedAt = input.createdAt ? new Date(input.createdAt) : null
   const now = parsedCreatedAt && Number.isFinite(parsedCreatedAt.getTime()) ? parsedCreatedAt : new Date()

@@ -69,7 +69,6 @@ import { CartItem } from '@/types'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { type WorkspaceFeatures } from '@/workspace'
 import { useHideCosts, useWorkspacePermissions } from '@/permissions'
-import { getMissingProductCostMessage, hasValidProductCost } from '@/lib/productCost'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import {
     BARCODE_SCANNER_ACTIVE_FAST_KEY_COUNT,
@@ -2191,15 +2190,6 @@ export function POS() {
             hapticTrigger('error')
             return false
         }
-        if (!isInfiniteActivity && !isNonInventoryService && !hasValidProductCost(effectiveCostPrice)) {
-            toast({
-                variant: 'destructive',
-                title: t('messages.error'),
-                description: getMissingProductCostMessage(product.name)
-            })
-            hapticTrigger('error')
-            return false
-        }
         const committedInventoryQuantity = cart
             .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
             .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
@@ -2352,15 +2342,6 @@ export function POS() {
                 variant: 'destructive',
                 title: t('messages.error'),
                 description: t('businessPartners.agent.productCategoryExcluded', { defaultValue: 'This product category is not available to this user.' })
-            })
-            hapticTrigger('error')
-            return false
-        }
-        if (!isNonInventoryService && !hasValidProductCost(effectiveCostPrice)) {
-            toast({
-                variant: 'destructive',
-                title: t('messages.error'),
-                description: getMissingProductCostMessage(product.name)
             })
             hapticTrigger('error')
             return false
@@ -3435,20 +3416,6 @@ export function POS() {
                     : productExistsInAccessibleStorage
                         ? t('businessPartners.agent.productCategoryExcluded', { defaultValue: 'This product category is not available to this user.' })
                         : t('orders.form.errors.productNotFound', { defaultValue: 'Selected product was not found.' })
-            })
-            return
-        }
-
-        const missingCostCartItem = cart.find((item) => {
-            const product = findStockProduct(item.product_id, item.storageId)
-            return product ? !isService(product) && !hasValidProductCost(product.costPrice) : false
-        })
-        if (missingCostCartItem) {
-            const product = findStockProduct(missingCostCartItem.product_id, missingCostCartItem.storageId)
-            toast({
-                variant: 'destructive',
-                title: t('messages.error'),
-                description: getMissingProductCostMessage(product?.name || missingCostCartItem.name)
             })
             return
         }

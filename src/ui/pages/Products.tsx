@@ -652,11 +652,16 @@ export function Products() {
 
     const getProductCostWarningMessage = (product: Product) => {
         if (!hasValidProductCost(product.costPrice)) {
-            return 'This product has no cost and cannot be sold.'
+            return t('products.costWarning.product', {
+                defaultValue: 'No product cost is saved. Sales will use another available cost, or 0 if none is saved.'
+            })
         }
 
         const priceBookNames = missingPriceBookCostsByProduct.get(product.id) ?? []
-        return `This product has no cost in ${priceBookNames.join(', ')} and cannot be sold to partners linked to that Price Book.`
+        return t('products.costWarning.priceBook', {
+            priceBooks: priceBookNames.join(', '),
+            defaultValue: 'No cost is saved in {{priceBooks}}. Sales will use another available cost, or 0 if none is saved.'
+        })
     }
 
     const cachedInventoryRows = useInventory(workspaceId, {
@@ -2443,7 +2448,7 @@ export function Products() {
                                                                             isLinkedVariant && 'rounded-[1.5rem] p-3',
                                                                             isAttachedVariant && 'relative z-10 rounded-t-none border-t-0 shadow-none',
                                                                             isProductSelectionMode && selectedProductIds.has(product.id) && 'border-primary/50 bg-primary/5',
-                                                                            hasProductCostWarning(product) && 'border-destructive/40 bg-destructive/10'
+                                                                            hasProductCostWarning(product) && 'border-amber-500/40 bg-amber-500/10'
                                                                         )}
                                                                     >
                                                                         {isProductSelectionMode && (isBarcodeSelectionMode
@@ -2473,7 +2478,7 @@ export function Products() {
                                                                                 <TooltipProvider>
                                                                                     <Tooltip delayDuration={150}>
                                                                                         <TooltipTrigger asChild>
-                                                                                            <span className="shrink-0 cursor-help text-destructive" aria-label="Product cannot be sold without a cost"><CircleAlert className="h-5 w-5" /></span>
+                                                                                            <span className="shrink-0 cursor-help text-amber-600" aria-label={t('products.costWarning.label', { defaultValue: 'Sales will use a cost of 0 if no cost is available.' })}><CircleAlert className="h-5 w-5" /></span>
                                                                                         </TooltipTrigger>
                                                                                         <TooltipContent>{getProductCostWarningMessage(product)}</TooltipContent>
                                                                                     </Tooltip>
@@ -2609,7 +2614,7 @@ export function Products() {
                                                             className={cn(
                                                                 'group relative flex flex-col gap-4 overflow-hidden rounded-[1.5rem] border border-border/50 bg-card p-4 transition-all duration-300 hover:-translate-y-1 hover:bg-accent/5 hover:shadow-2xl hover:shadow-primary/5',
                                                                 isProductSelectionMode && selectedProductIds.has(product.id) && 'border-primary/50 bg-primary/5 shadow-lg shadow-primary/10',
-                                                                hasProductCostWarning(product) && 'border-destructive/40 bg-destructive/10 hover:bg-destructive/15'
+                                                                hasProductCostWarning(product) && 'border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/15'
                                                             )}
                                                         >
                                                             {isProductSelectionMode && (isBarcodeSelectionMode
@@ -2651,7 +2656,7 @@ export function Products() {
                                                                     <TooltipProvider>
                                                                         <Tooltip delayDuration={150}>
                                                                             <TooltipTrigger asChild>
-                                                                                <span className="absolute left-2 top-2 cursor-help text-destructive"><CircleAlert className="h-5 w-5 fill-background" /></span>
+                                                                                <span className="absolute left-2 top-2 cursor-help text-amber-600"><CircleAlert className="h-5 w-5 fill-background" /></span>
                                                                             </TooltipTrigger>
                                                                             <TooltipContent>{getProductCostWarningMessage(product)}</TooltipContent>
                                                                         </Tooltip>
@@ -2847,7 +2852,7 @@ export function Products() {
                                                                 className={cn(
                                                                 isProductSelectionMode && selectedProductIds.has(product.id) && 'bg-primary/5',
                                                                 isVariant && 'bg-primary/[0.02] hover:bg-primary/[0.05]',
-                                                                hasProductCostWarning(product) && 'bg-destructive/10 hover:bg-destructive/15'
+                                                                hasProductCostWarning(product) && 'bg-amber-500/10 hover:bg-amber-500/15'
                                                             )}>
                                                                 {isProductSelectionMode && (
                                                                     <TableCell>{(isBarcodeSelectionMode
@@ -2887,7 +2892,7 @@ export function Products() {
                                                                             <TooltipProvider>
                                                                                 <Tooltip delayDuration={150}>
                                                                                     <TooltipTrigger asChild>
-                                                                                        <span className="inline-flex cursor-help text-destructive" aria-label="Product cannot be sold without a cost">
+                                                                                        <span className="inline-flex cursor-help text-amber-600" aria-label={t('products.costWarning.label', { defaultValue: 'Sales will use a cost of 0 if no cost is available.' })}>
                                                                                             <CircleAlert className="h-5 w-5" />
                                                                                         </span>
                                                                                     </TooltipTrigger>

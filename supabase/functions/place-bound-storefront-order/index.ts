@@ -10,6 +10,13 @@ import {
 } from '../_shared/marketplace.ts'
 import { getCanonicalProductImagePath } from '../_shared/productImagePath.ts'
 import {
+    evaluateStorefrontPromoCode,
+    normalizeStorefrontPromoCode,
+    roundStorefrontOrderAmount,
+    type StorefrontPromoCodeRow,
+    type StorefrontPromoStatus
+} from '../_shared/storefrontPromoCodes.ts'
+import {
     getTrustedStorefrontClientIp,
     isWebsiteStorefrontGatewayRequest,
     JUMLA_KHALEEJ_SITE_KEY,
@@ -41,6 +48,7 @@ type PlaceStorefrontOrderRequest = {
     }>
     checkout_request_id?: string
     lang?: string
+    promo_code?: string | null
 }
 
 function countDigits(value: string) {
@@ -308,6 +316,40 @@ Deno.serve(async (req) => {
             }
         }
 
+        subtotal = roundStorefrontOrderAmount(subtotal)
+        let promoCode: string | null = null
+        let discountAmount = 0
+        if (body.promo_code !== undefined && body.promo_code !== null) {
+            if (typeof body.promo_code !== 'string') return errorResponse('Promo code is invalid', 422, { promo_status: 'invalid' })
+            promoCode = normalizeStorefrontPromoCode(body.promo_code)
+            if (!promoCode || promoCode.length > 80) {
+                return errorResponse('Promo code is invalid', 422, { promo_status: 'invalid' })
+            }
+
+            const { data: promoData, error: promoError } = await adminClient
+                .from('storefront_promo_codes')
+                .select('code, discount_type, discount_value, is_active, expires_at, max_uses, used_count')
+                .eq('workspace_id', context.workspace.id)
+                .eq('code', promoCode)
+                .maybeSingle()
+            if (promoError) return errorResponse(promoError.message, 500)
+            if (!promoData) return errorResponse('Promo code is invalid', 422, { promo_status: 'invalid' })
+
+            const evaluation = evaluateStorefrontPromoCode(promoData as StorefrontPromoCodeRow, subtotal)
+            if (evaluation.status !== 'valid') {
+                const messages: Record<Exclude<StorefrontPromoStatus, 'valid'>, string> = {
+                    invalid: 'Promo code is invalid',
+                    inactive: 'Promo code is inactive',
+                    expired: 'Promo code has expired',
+                    exhausted: 'Promo code has reached its order limit',
+                    ineligible: 'Promo code cannot be applied to this order'
+                }
+                return errorResponse(messages[evaluation.status], 422, { promo_status: evaluation.status })
+            }
+            discountAmount = evaluation.discount_amount
+        }
+        const orderTotal = Math.max(0, roundStorefrontOrderAmount(subtotal - discountAmount))
+
         const currency = orderItems[0]?.currency ?? (context.workspace.default_currency ?? 'iqd').toLowerCase()
         // Delivery is immutable display metadata, never an item. Deliberately
         // append it only after subtotal has been calculated from product lines.
@@ -326,7 +368,9 @@ Deno.serve(async (req) => {
                 customer_notes: customerNotes,
                 items: orderItems,
                 subtotal,
-                total: subtotal,
+                promo_code: promoCode,
+                discount_amount: discountAmount,
+                total: orderTotal,
                 currency,
                 request_ip_hash: requestIpHash,
                 website_storefront_key: JUMLA_KHALEEJ_SITE_KEY,
@@ -339,6 +383,9 @@ Deno.serve(async (req) => {
             .single()
 
         if (insertError || !insertedOrder) {
+            if (insertError?.code === 'P0001' && insertError.message.includes('promo_code_limit_reached')) {
+                return errorResponse('Promo code has reached its order limit', 422, { promo_status: 'exhausted' })
+            }
             if (insertError?.code === '23505') {
                 const { data: duplicateOrder } = await adminClient
                     .from('marketplace_orders')

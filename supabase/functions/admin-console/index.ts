@@ -1,9 +1,18 @@
-import { createAdminClient } from '../_shared/supabase.ts'
+import { createAdminClient, getAuthenticatedUser } from '../_shared/supabase.ts'
 import { corsHeaders, errorResponse, jsonResponse, readJson } from '../_shared/http.ts'
 import { resolveWorkspaceUsageOwnerId } from './workspaceUsagePresence.ts'
 
 type VerifyRequest = {
     action: 'verify'
+    passkey?: string
+}
+
+type VerifyStorefrontPromoAdminRequest = {
+    action: 'verifyStorefrontPromoAdmin'
+}
+
+type VerifyJumlaKhaleejAdminRequest = {
+    action: 'verifyJumlaKhaleejAdmin'
     passkey?: string
 }
 
@@ -169,6 +178,45 @@ type CreatePaygProfileRequest = {
     checkpoints?: Array<{ gb?: number; amountIqd?: number }>
 }
 
+type StorefrontPromoCodeRow = {
+    id: string
+    code: string
+    discount_type: 'percentage' | 'fixed'
+    discount_value: number | string
+    max_uses: number
+    used_count: number
+    is_active: boolean
+    expires_at: string | null
+    created_at: string
+}
+
+type ListStorefrontPromoCodesRequest = {
+    action: 'listStorefrontPromoCodes'
+    passkey?: string
+}
+
+type CreateStorefrontPromoCodeRequest = {
+    action: 'createStorefrontPromoCode'
+    passkey?: string
+    code?: string
+    discountType?: 'percentage' | 'fixed'
+    discountValue?: number
+    maxUses?: number
+    isActive?: boolean
+    expiresAt?: string | null
+}
+
+type GenerateStorefrontPromoCodeRequest = {
+    action: 'generateStorefrontPromoCode'
+    passkey?: string
+}
+
+type DeleteStorefrontPromoCodeRequest = {
+    action: 'deleteStorefrontPromoCode'
+    passkey?: string
+    promoCodeId?: string
+}
+
 type ListWorkspacePaymentTransactionsRequest = {
     action: 'listWorkspacePaymentTransactions'
     passkey?: string
@@ -220,6 +268,8 @@ type AdjustBillingOperationRequest = {
 
 type AdminConsoleRequest =
     | VerifyRequest
+    | VerifyStorefrontPromoAdminRequest
+    | VerifyJumlaKhaleejAdminRequest
     | ListUsersRequest
     | ListWorkspacesRequest
     | DeleteUserRequest
@@ -241,6 +291,10 @@ type AdminConsoleRequest =
     | PublishPaygPricingScheduleRequest
     | ListPaygProfilesRequest
     | CreatePaygProfileRequest
+    | ListStorefrontPromoCodesRequest
+    | CreateStorefrontPromoCodeRequest
+    | GenerateStorefrontPromoCodeRequest
+    | DeleteStorefrontPromoCodeRequest
     | ListWorkspacePaymentTransactionsRequest
     | ReviewWorkspacePaymentTransactionRequest
     | ListBillingOperationsRequest
@@ -460,11 +514,15 @@ function normalizeUsagePeriodStart(value: unknown): { value: string; error?: str
     return { value }
 }
 
-async function isValidAdminPasskey(adminClient: ReturnType<typeof createAdminClient>, passkey: string) {
+async function isValidAdminPasskey(
+    adminClient: ReturnType<typeof createAdminClient>,
+    passkey: string,
+    keyName = 'super_admin_passkey'
+) {
     const { data, error } = await adminClient
         .from('app_permissions')
         .select('key_value')
-        .eq('key_name', 'super_admin_passkey')
+        .eq('key_name', keyName)
         .maybeSingle()
 
     if (error) {
@@ -476,19 +534,198 @@ async function isValidAdminPasskey(adminClient: ReturnType<typeof createAdminCli
 
 async function requireValidPasskey(
     adminClient: ReturnType<typeof createAdminClient>,
-    passkey?: string
+    passkey?: string,
+    keyName = 'super_admin_passkey'
 ): Promise<AdminPasskeyAccess> {
     const normalizedPasskey = passkey?.trim() ?? ''
     if (!normalizedPasskey) {
         return { ok: false, response: errorResponse('Admin passkey is required', 403) }
     }
 
-    const valid = await isValidAdminPasskey(adminClient, normalizedPasskey)
+    const valid = await isValidAdminPasskey(adminClient, normalizedPasskey, keyName)
     if (!valid) {
         return { ok: false, response: errorResponse('Unauthorized: Invalid admin passkey', 403) }
     }
 
     return { ok: true, response: null }
+}
+
+async function storefrontPromoWorkspaceId(adminClient: ReturnType<typeof createAdminClient>) {
+    const { data, error } = await adminClient
+        .from('website_storefront_configs')
+        .select('workspace_id')
+        .eq('site_key', 'jumla-khaleej')
+        .maybeSingle()
+
+    if (error) throw error
+    if (!data?.workspace_id) throw new Error('Jumla Khaleej storefront is not configured')
+    return String(data.workspace_id)
+}
+
+type StorefrontPromoAdminAccess =
+    | { ok: true; user: { id: string; email: string | null; name: string } }
+    | { ok: false; response: Response }
+
+async function requireStorefrontPromoAdmin(req: Request): Promise<StorefrontPromoAdminAccess> {
+    const { user } = await getAuthenticatedUser(req)
+    if (!user) {
+        return { ok: false, response: errorResponse('Authentication required', 401) }
+    }
+
+    // app_metadata is managed by Supabase Auth Admin and cannot be edited by the user.
+    if (user.app_metadata?.admin_console !== true) {
+        return {
+            ok: false,
+            response: errorResponse('This Supabase account is not authorized for the admin console.', 403)
+        }
+    }
+
+    return {
+        ok: true,
+        user: {
+            id: user.id,
+            email: user.email ?? null,
+            name: user.email || 'Administrator'
+        }
+    }
+}
+
+async function listStorefrontPromoCodes(adminClient: ReturnType<typeof createAdminClient>) {
+    const workspaceId = await storefrontPromoWorkspaceId(adminClient)
+    const { data, error } = await adminClient
+        .from('storefront_promo_codes')
+        .select('id, code, discount_type, discount_value, max_uses, used_count, is_active, expires_at, created_at')
+        .eq('workspace_id', workspaceId)
+        .order('created_at', { ascending: false })
+        .limit(200)
+
+    if (error) return errorResponse(error.message, 500)
+    return jsonResponse((data ?? []) as StorefrontPromoCodeRow[])
+}
+
+function normalizePromoCode(value: unknown) {
+    return typeof value === 'string' ? value.trim().toUpperCase() : ''
+}
+
+function generatedPromoCode() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    const random = new Uint8Array(8)
+    crypto.getRandomValues(random)
+    return 'JK-' + Array.from(random, (value) => alphabet[value % alphabet.length]).join('')
+}
+
+async function generateStorefrontPromoCode(adminClient: ReturnType<typeof createAdminClient>) {
+    const workspaceId = await storefrontPromoWorkspaceId(adminClient)
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+        const code = generatedPromoCode()
+        const { data, error } = await adminClient
+            .from('storefront_promo_codes')
+            .select('id')
+            .eq('workspace_id', workspaceId)
+            .eq('code', code)
+            .maybeSingle()
+
+        if (error) return errorResponse(error.message, 500)
+        if (!data) return jsonResponse({ code })
+    }
+    return errorResponse('Unable to generate a unique promo code. Please try again.', 503)
+}
+
+async function createStorefrontPromoCode(
+    adminClient: ReturnType<typeof createAdminClient>,
+    body: CreateStorefrontPromoCodeRequest
+) {
+    const code = normalizePromoCode(body.code)
+    const discountType = body.discountType
+    const discountValue = Number(body.discountValue)
+    const maxUses = body.maxUses === undefined ? 1 : Number(body.maxUses)
+    const roundedDiscountValue = Math.round(discountValue * 1_000) / 1_000
+    const isActive = body.isActive
+    const expiresAt = body.expiresAt ?? null
+
+    if (!code || code.length > 80) {
+        return errorResponse('Enter a code containing between 1 and 80 characters.', 400)
+    }
+    if (discountType !== 'percentage' && discountType !== 'fixed') {
+        return errorResponse('Choose a valid discount type.', 400)
+    }
+    if (!Number.isFinite(discountValue) || discountValue <= 0 || discountValue > 999999999999
+        || !Number.isFinite(roundedDiscountValue) || roundedDiscountValue <= 0) {
+        return errorResponse('Enter a discount value greater than zero.', 400)
+    }
+    if (discountType === 'percentage' && discountValue > 100) {
+        return errorResponse('A percentage discount cannot exceed 100%.', 400)
+    }
+    if (!Number.isSafeInteger(maxUses) || maxUses < 1 || maxUses > 1_000_000_000) {
+        return errorResponse('Order submits must be a whole number between 1 and 1,000,000,000.', 400)
+    }
+    if (typeof isActive !== 'boolean') {
+        return errorResponse('Choose whether this promo code is active.', 400)
+    }
+
+    let normalizedExpiration: string | null = null
+    if (expiresAt !== null) {
+        if (typeof expiresAt !== 'string' || !Number.isFinite(Date.parse(expiresAt))) {
+            return errorResponse('Enter a valid expiration date.', 400)
+        }
+        normalizedExpiration = new Date(expiresAt).toISOString()
+    }
+
+    let workspaceId: string
+    try {
+        workspaceId = await storefrontPromoWorkspaceId(adminClient)
+    } catch (error) {
+        return errorResponse(error instanceof Error ? error.message : 'Unable to load the storefront.', 500)
+    }
+
+    const { data, error } = await adminClient
+        .from('storefront_promo_codes')
+        .insert({
+            workspace_id: workspaceId,
+            code,
+            discount_type: discountType,
+            discount_value: roundedDiscountValue,
+            max_uses: maxUses,
+            is_active: isActive,
+            expires_at: normalizedExpiration
+        })
+        .select('id, code, discount_type, discount_value, max_uses, used_count, is_active, expires_at, created_at')
+        .single()
+
+    if (error) {
+        if (error.code === '23505') {
+            return errorResponse('That promo code already exists. Edit it or generate another code.', 409)
+        }
+        return errorResponse(error.message, 500)
+    }
+    return jsonResponse(data as StorefrontPromoCodeRow, { status: 201 })
+}
+
+async function deleteStorefrontPromoCode(
+    adminClient: ReturnType<typeof createAdminClient>,
+    body: DeleteStorefrontPromoCodeRequest
+) {
+    const promoCodeId = typeof body.promoCodeId === 'string' ? body.promoCodeId.trim() : ''
+    if (!UUID_PATTERN.test(promoCodeId)) return errorResponse('Choose a valid promo code.', 400)
+
+    let workspaceId: string
+    try {
+        workspaceId = await storefrontPromoWorkspaceId(adminClient)
+    } catch (error) {
+        return errorResponse(error instanceof Error ? error.message : 'Unable to load the storefront.', 500)
+    }
+
+    const { data, error } = await adminClient
+        .from('storefront_promo_codes')
+        .delete()
+        .eq('workspace_id', workspaceId)
+        .eq('id', promoCodeId)
+        .select('id')
+        .maybeSingle()
+
+    if (error) return errorResponse(error.message, 500)
+    if (!data) return errorResponse('This promo code no longer exists.', 404)
+    return jsonResponse({ deleted: true, id: promoCodeId })
 }
 
 async function listUsers(adminClient: ReturnType<typeof createAdminClient>) {
@@ -1698,6 +1935,44 @@ Deno.serve(async (req) => {
         if (body.action === 'verify') {
             const valid = await isValidAdminPasskey(adminClient, body.passkey?.trim() ?? '')
             return jsonResponse({ valid })
+        }
+
+        if (body.action === 'verifyJumlaKhaleejAdmin') {
+            const valid = await isValidAdminPasskey(
+                adminClient,
+                body.passkey?.trim() ?? '',
+                'jumla_khaleej_admin_passkey'
+            )
+            return jsonResponse({ valid })
+        }
+
+        if (body.action === 'verifyStorefrontPromoAdmin') {
+            const access = await requireStorefrontPromoAdmin(req)
+            if (!access.ok) return access.response
+            return jsonResponse({ authorized: true, user: access.user })
+        }
+
+        if (body.action === 'listStorefrontPromoCodes'
+            || body.action === 'generateStorefrontPromoCode'
+            || body.action === 'createStorefrontPromoCode'
+            || body.action === 'deleteStorefrontPromoCode') {
+            const access = await requireValidPasskey(
+                adminClient,
+                body.passkey,
+                'jumla_khaleej_admin_passkey'
+            )
+            if (!access.ok) return access.response
+
+            if (body.action === 'listStorefrontPromoCodes') {
+                return await listStorefrontPromoCodes(adminClient)
+            }
+            if (body.action === 'generateStorefrontPromoCode') {
+                return await generateStorefrontPromoCode(adminClient)
+            }
+            if (body.action === 'deleteStorefrontPromoCode') {
+                return await deleteStorefrontPromoCode(adminClient, body)
+            }
+            return await createStorefrontPromoCode(adminClient, body)
         }
 
         const access = await requireValidPasskey(adminClient, body.passkey)

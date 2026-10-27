@@ -96,7 +96,7 @@
       "salesOrderStorageAccess": "Storage access validation",
       "salesOrderCancellationGuard": "Pending cancellation check",
       "salesOrderMinimumPrices": "Minimum selling price validation",
-      "salesOrderProductCosts": "Product cost validation",
+      "salesOrderProductAvailability": "Sales product availability validation",
       "salesOrderStockAvailability": "Stock availability and reservations",
       "salesOrderFinancing": "Order financing activation and refresh",
       "salesOrderPaymentReferences": "Order payment reference synchronization",
@@ -376,8 +376,6 @@
       "recordFailed": "Could not save record",
       "coachSaved": "Coach profile linked",
       "coachFailed": "Could not save coach profile",
-      "costRequired": "Product cost is missing",
-      "costRequiredDetail": "Add a product cost or a cost to the selected price book before including this product in an order.",
       "currencyMismatch": "Choose products that use the same currency.",
       "deliveryFeeRateFailed": "The delivery fee could not be converted to the order currency. Check exchange rates and try again.",
       "tryAgain": "Please try again."
@@ -1876,6 +1874,8 @@
     "currency": "Currency",
     "orderNumber": "E-commerce order number",
     "orderItems": "Order Items",
+    "promoCode": "Promo code",
+    "promoDiscount": "Promo discount",
     "inquiryPdf": "Inquiry PDF",
     "generatingInquiryPdf": "Generating inquiry PDF…",
     "inquiryPdfUnavailable": "This inquiry PDF could not be generated.",
@@ -2173,6 +2173,11 @@
       }
     },
     "title": "Products",
+    "costWarning": {
+      "label": "Sales use a cost of 0 if no cost is available.",
+      "product": "No product cost is saved. Sales will use another available cost, or 0 if none is saved.",
+      "priceBook": "No cost is saved in {{priceBooks}}. Sales will use another available cost, or 0 if none is saved."
+    },
     "catalogLoadError": "Could not load the matching products. Check your connection and try again.",
     "filters": {
       "title": "Filters",

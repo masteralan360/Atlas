@@ -96,7 +96,7 @@
       "salesOrderStorageAccess": "التحقق من صلاحية الوصول إلى المخزن",
       "salesOrderCancellationGuard": "التحقق من الإلغاء المعلق",
       "salesOrderMinimumPrices": "التحقق من الحد الأدنى لسعر البيع",
-      "salesOrderProductCosts": "التحقق من تكلفة المنتجات",
+      "salesOrderProductAvailability": "التحقق من توفر منتجات البيع",
       "salesOrderStockAvailability": "توفر المخزون والحجوزات",
       "salesOrderFinancing": "تفعيل تمويل الطلب وتحديث بياناته",
       "salesOrderPaymentReferences": "مزامنة مراجع مدفوعات الطلب",
@@ -376,8 +376,6 @@
       "recordFailed": "تعذر حفظ السجل",
       "coachSaved": "تم ربط ملف المدرب",
       "coachFailed": "تعذر حفظ ملف المدرب",
-      "costRequired": "تكلفة المنتج غير محددة",
-      "costRequiredDetail": "أضف تكلفة للمنتج أو لقائمة الأسعار المحددة قبل إدراجه في الطلب.",
       "currencyMismatch": "اختر منتجات تستخدم العملة نفسها.",
       "deliveryFeeRateFailed": "تعذر تحويل رسوم التوصيل إلى عملة الطلب. تحقق من أسعار الصرف وحاول مرة أخرى.",
       "tryAgain": "يرجى المحاولة مرة أخرى."
@@ -1864,6 +1862,8 @@
     "currency": "العملة",
     "orderNumber": "رقم طلب التجارة الإلكترونية",
     "orderItems": "عناصر الطلب",
+    "promoCode": "الرمز الترويجي",
+    "promoDiscount": "خصم الرمز الترويجي",
     "inquiryPdf": "PDF الاستفسار",
     "generatingInquiryPdf": "يتم إنشاء PDF الاستفسار…",
     "inquiryPdfUnavailable": "تعذر إنشاء PDF الاستفسار هذا.",
@@ -2161,6 +2161,11 @@
       }
     },
     "title": "المنتجات",
+    "costWarning": {
+      "label": "ستُسجل المبيعات بتكلفة 0 إذا لم تتوفر تكلفة.",
+      "product": "لا توجد تكلفة محفوظة للمنتج. ستستخدم المبيعات تكلفة أخرى متاحة، أو 0 إذا لم توجد.",
+      "priceBook": "لا توجد تكلفة محفوظة في {{priceBooks}}. ستستخدم المبيعات تكلفة أخرى متاحة، أو 0 إذا لم توجد."
+    },
     "catalogLoadError": "تعذر تحميل المنتجات المطابقة. تحقق من الاتصال وحاول مرة أخرى.",
     "barcodePrint": {
       "action": "طباعة الباركود",

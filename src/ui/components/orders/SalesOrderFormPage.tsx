@@ -78,7 +78,6 @@ import { resolvePartnerPriceBookUnitPrice } from '@/lib/priceBooks'
 import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
 import { isRemoteOrderSaveConfirmationError, ORDER_SUMMARY_RECOVERY_PERSISTENCE_ERROR, type OrderSaveProgress } from '@/lib/orderSaveProgress'
 import { hasEffectiveSalesAgentCommissionPermission, useHideCosts, useWorkspacePermissions } from '@/permissions'
-import { getMissingPriceBookCostMessage, getMissingProductCostMessage, hasValidProductCost } from '@/lib/productCost'
 import {
     assertValidOrderUnitQuantity,
     buildProductUomOrderOptions,
@@ -733,20 +732,6 @@ export function SalesOrderFormPage({
         ),
         [priceBookItems, priceBooks, priceBooksEnabled])
 
-    const getPartnerPriceBookName = useCallback((partner: Pick<BusinessPartner, 'priceBookId'> | null | undefined) => {
-        if (!priceBooksEnabled || !partner?.priceBookId) return undefined
-        return priceBooks.find((priceBook) => priceBook.id === partner.priceBookId && !priceBook.isDeleted)?.name
-    }, [priceBooks, priceBooksEnabled])
-
-    const hasMissingPartnerPriceBookCost = useCallback((
-        partner: Pick<BusinessPartner, 'priceBookId'> | null | undefined,
-        productId: string
-    ) => {
-        if (!getPartnerPriceBookName(partner)) return false
-        const priceBookItem = getPriceBookItemForPartner(partner, productId)
-        return !!priceBookItem && !hasValidProductCost(priceBookItem.costPrice)
-    }, [getPartnerPriceBookName, getPriceBookItemForPartner])
-
     const getSalesProductOptions = (storageId: string, selectedProductId: string) => {
         const availableIds = availableSalesProductIdsByStorage.get(storageId) ?? new Set<string>()
         const isServicesSource = storageId === SERVICES_VIRTUAL_STORAGE_ID
@@ -755,8 +740,6 @@ export function SalesOrderFormPage({
             return (product.id === selectedProductId
                 || availableIds.has(product.id)
                 || serviceInServicesSource)
-                && (serviceInServicesSource || hasValidProductCost(product.costPrice))
-                && (serviceInServicesSource || !hasMissingPartnerPriceBookCost(selectedCustomer, product.id))
         })
     }
 
@@ -1203,22 +1186,6 @@ export function SalesOrderFormPage({
     }
 
     const selectProductForItem = (clientId: string, product: typeof products[number]) => {
-        if (!isService(product) && !hasValidProductCost(product.costPrice)) {
-            toast({
-                title: t('common.error') || 'Error',
-                description: getMissingProductCostMessage(product.name),
-                variant: 'destructive'
-            })
-            return
-        }
-        if (hasMissingPartnerPriceBookCost(selectedCustomer, product.id)) {
-            toast({
-                title: t('common.error') || 'Error',
-                description: getMissingPriceBookCostMessage(product.name, getPartnerPriceBookName(selectedCustomer)),
-                variant: 'destructive'
-            })
-            return
-        }
         updateItem(clientId, {
             productId: product.id,
             productSearch: product.name,
@@ -1446,9 +1413,6 @@ export function SalesOrderFormPage({
                     const product = products.find((entry) => entry.id === item.productId)
                     if (!product) {
                         throw new Error(t('orders.form.errors.productNotFound', { defaultValue: 'Selected product was not found.' }))
-                    }
-                    if (hasMissingPartnerPriceBookCost(customer, product.id)) {
-                        throw new Error(getMissingPriceBookCostMessage(product.name, getPartnerPriceBookName(customer)))
                     }
                     const service = isService(product)
                     if (!service && !item.storageId) {
@@ -2802,22 +2766,6 @@ export function SalesOrderFormPage({
                 }}
                 onSelectProduct={(product, storageId, batchId) => {
                     if (productsViewItemId === null) return
-                    if (!isService(product) && !hasValidProductCost(product.costPrice)) {
-                        toast({
-                            title: t('common.error') || 'Error',
-                            description: getMissingProductCostMessage(product.name),
-                            variant: 'destructive'
-                        })
-                        return
-                    }
-                    if (hasMissingPartnerPriceBookCost(selectedCustomer, product.id)) {
-                        toast({
-                            title: t('common.error') || 'Error',
-                            description: getMissingPriceBookCostMessage(product.name, getPartnerPriceBookName(selectedCustomer)),
-                            variant: 'destructive'
-                        })
-                        return
-                    }
                     setHighlightedStorageItemId(null)
                     updateItem(productsViewItemId, {
                         productId: product.id,

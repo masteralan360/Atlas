@@ -21,6 +21,9 @@ verify_jwt = false
 [functions.place-bound-storefront-order]
 verify_jwt = false
 
+[functions.verify-bound-storefront-promo-code]
+verify_jwt = false
+
 [functions.get-bound-storefront-inquiry-pdf]
 verify_jwt = false
 

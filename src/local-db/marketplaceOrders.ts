@@ -30,6 +30,8 @@ const MARKETPLACE_ORDER_SELECT = `
     website_storefront_key,
     items,
     subtotal,
+    promo_code,
+    discount_amount,
     total,
     currency,
     status,
@@ -131,9 +133,12 @@ function normalizeMarketplaceOrder(
     salesOrderReturn?: MarketplaceSalesOrderReturnRecord,
     expectedWorkspaceId?: string
 ): MarketplaceOrderRecord {
+    const subtotal = Number(order.subtotal)
+    const discountAmount = Number(order.discount_amount ?? 0)
     if (!order.id || !order.workspace_id || (expectedWorkspaceId && order.workspace_id !== expectedWorkspaceId)
         || !isMarketplaceOrderStatus(order.status)
-        || !Number.isFinite(Number(order.total)) || !Number.isFinite(Number(order.subtotal))
+        || !Number.isFinite(Number(order.total)) || !Number.isFinite(subtotal)
+        || !Number.isFinite(discountAmount) || discountAmount < 0 || discountAmount > subtotal
         || !Number.isFinite(Date.parse(order.created_at))) {
         throw new Error('Invalid marketplace order result')
     }
@@ -141,7 +146,9 @@ function normalizeMarketplaceOrder(
     return {
         ...order,
         total: Number(order.total),
-        subtotal: Number(order.subtotal),
+        subtotal,
+        promo_code: typeof order.promo_code === 'string' && order.promo_code.trim() ? order.promo_code : null,
+        discount_amount: discountAmount,
         items: rawItems.filter(isMarketplaceOrderItem),
         delivery_fee: getJumlaKhaleejDeliveryFee(rawItems, order.website_storefront_key),
         sales_order_return_status: salesOrderReturn?.return_status ?? 'none',
