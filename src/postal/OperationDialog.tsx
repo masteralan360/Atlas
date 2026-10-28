@@ -1,7 +1,7 @@
 import { usePostalAction } from './usePostalAccess'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Loader2, ShieldCheck } from 'lucide-react'
+import { Check, Loader2, Package, ShieldCheck } from 'lucide-react'
 import {
   AppDialog,
   AppDialogBody,
@@ -22,6 +22,7 @@ import { useWorkspace } from '@/workspace'
 import { useWorkspacePermissions } from '@/permissions'
 */
 import type { PostalShipment, PostalBranch, PostalTransfer } from './domain'
+import { postalTariffOptions } from './domain'
 import { BranchPicker } from './shared'
 
 export function OperationDialog({
@@ -63,6 +64,14 @@ export function OperationDialog({
     hasPermission('agents.access')
   */
   const action = usePostalAction()
+  const tariffs =
+    operation === 'receive'
+      ? postalTariffOptions(shipment.governorate, shipment.area)
+      : []
+  const [selectedTariff, setSelectedTariff] = useState<string | null>(null)
+  const tariff = tariffs.find(
+    (option) => `${option.size}:${option.fee}` === selectedTariff,
+  )
   const needsBranch =
     operation === 'receive' ||
     operation === 'authorize_transfer' ||
@@ -76,11 +85,14 @@ export function OperationDialog({
     // Driver selection is disabled and must not block confirmation.
     // (!driverText || !!driver) &&
     (!needsBranch || validBranch) &&
+    (operation !== 'receive' || !!tariff) &&
     (operation !== 'cancel' || notes.trim().length > 0)
   const payload = {
     id: shipment.id,
     revision: shipment.revision,
     branch_id: branch?.id,
+    tariff_size: tariff?.size,
+    delivery_fee: tariff?.fee,
     notes: notes.trim(),
     // driver_id: driver?.agentFacetId,
   }
@@ -107,6 +119,51 @@ export function OperationDialog({
               disabled={action.busy}
               onChange={setBranch}
             />
+          )}
+          {operation === 'receive' && (
+            <div className="space-y-2">
+              <label className="text-sm font-medium">
+                {t('postal.shipmentSize')} *
+              </label>
+              <p className="text-sm text-muted-foreground">
+                {t('postal.tariffAssignmentHint')}
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label={t('postal.shipmentSize')}>
+                {tariffs.map((option) => {
+                  const value = `${option.size}:${option.fee}`
+                  const selected = selectedTariff === value
+                  return (
+                    <Button
+                      key={value}
+                      type="button"
+                      variant={selected ? 'default' : 'outline'}
+                      className="h-auto min-h-20 justify-between gap-3 p-4 text-start"
+                      disabled={action.busy}
+                      aria-pressed={selected}
+                      onClick={() => setSelectedTariff(value)}
+                    >
+                      <span className="flex items-start gap-3">
+                        <Package className="mt-0.5 h-5 w-5 shrink-0" />
+                        <span className="space-y-1">
+                          <span className="block font-semibold">
+                            {t(`postal.shipmentSizes.${option.size}`)}
+                          </span>
+                          {option.zone && (
+                            <span className="block text-xs opacity-80">
+                              {t(`postal.tariffZones.${option.zone}`)}
+                            </span>
+                          )}
+                          <span className="block text-sm">
+                            {option.fee.toLocaleString()} {t('postal.iqd')}
+                          </span>
+                        </span>
+                      </span>
+                      {selected && <Check className="h-5 w-5 shrink-0" />}
+                    </Button>
+                  )
+                })}
+              </div>
+            </div>
           )}
           {operation === 'arrive' && (
             <p className="break-all text-sm">

@@ -39,6 +39,89 @@ The cards clear old figures while new filters load and show retryable failures i
 
 ## UI and printing
 
+### Organization account statement
+
+`/post-service/account-statement` is the **Account Statement** tab. It inherits the
+existing `postal_service` workspace grant and Cloud/Hybrid restriction. Access is
+limited to administrators and Staff with `postService.officeEmployee` (the existing
+Office Employee permission). The route, tab, client data functions, and both new
+invoker RPCs enforce this scope; merchants cannot call the statement or its
+organization-search endpoint, even for their own organization. The existing RLS
+policies remain in force on all source tables.
+
+Migration `20261028021022_postal_organization_account_statement.sql` was applied to
+ERP (`eboispangcayxxheoufy`) on 2026-10-28. Its local filename matches the hosted
+migration history. For other environments, apply it after the shipment
+tariff/delivery-fee migration. Hosted verification exercised authenticated
+organization search and statement reads against an existing organization,
+reconciled counts and balances to source records, and checked cross-workspace and
+unauthorized-user denial. Both RPCs remain invokers with anonymous execution
+revoked; the security advisor reported no findings for either new function.
+Verification changed no business records. Local PostgreSQL/PGlite and browser
+regression coverage remains in place.
+
+The organization selector uses the shared debounced autocomplete and popover,
+searches real organization names/codes, requires three characters, and returns at
+most eight options. Changing text or unlinking explicitly clears the selection;
+loading, refreshing, unavailable records, and connection failures preserve the
+selected organization until the user changes it.
+
+The statement is a COD funds control account from the postal operator's perspective:
+
+- A signed recipient COD collection changes the organization's balance by that
+  amount. Positive collections credit the organization's payable; negative COD
+  payouts debit it.
+- A signed organization settlement changes the balance by its negative. Positive
+  payouts debit the payable; negative settlements received from the organization
+  credit it. Partial payments remain individual entries linked to the original
+  `payment_transactions` records.
+- `balance = sum(COD collections) - sum(organization settlements)`. A positive
+  balance is due to the organization; a negative balance is due from it.
+- Recipient delivery-fee collections are shown as separate cash movements with
+  zero organization-account debit/credit. No tariff is deducted from organization
+  funds or asserted to be organization debt. The current workflow collects these
+  fees from recipients independently of COD.
+
+Dates filter the immutable financial record's `created_at`, with an inclusive
+start and exclusive end. The opening balance includes all earlier COD movements;
+period debits/credits reconcile to the closing balance. Oldest-first running
+balances are calculated in PostgreSQL before search/type filters or pagination,
+ordered by time, UUID, and record kind. Summaries always describe the whole period;
+search/type only narrow the visible rows and filtered count. Even empty or
+out-of-range pages retain the correct totals. All monetary aggregates are numeric
+SQL results serialized as integer text and formatted using `BigInt` in the UI.
+
+A separate current summary covers all recorded dates. Amounts due to/from the
+organization are split per shipment before netting, so opposing balances remain
+visible. Remaining recipient COD and refunds include delivered, undeleted
+shipments only; they are operational amounts, not funds already held for the
+organization. Historical statement entries are never removed merely because a
+shipment's current state changes. The statement does not infer historical opening
+balances, unrecorded payments, organization fee agreements, or missing tariffs.
+Shipment status/contact details are current values, not historical snapshots.
+
+The shared Query client scopes reads by workspace, viewer, role, permission,
+organization, dates, filters, and page. Existing postal command and Realtime
+invalidation refresh the statement after changes. Only canonical organization
+search results enter the existing Dexie cache; derived balances remain in memory.
+Freshness tracks the organization, shipment, COD, delivery-fee, and payment tables
+through start/progress/completion/cancellation/failure events. Loading or failed
+requests hide stale statement amounts.
+
+Verification:
+
+```powershell
+npx vitest run src/postal src/local-db/postalStatementData.test.ts src/local-db/postalSummary.test.ts
+npm run type-check
+# With Vite listening on port 5188:
+node scripts/postal-browser/statement-check.mjs
+```
+
+The isolated browser fixture runs real statement RPC SQL in PostgreSQL/PGlite,
+including autocomplete selection, keyboard interaction, loading/failure/retry,
+unlinking, desktop/mobile layout, and Arabic/Kurdish RTL. It does not use hosted
+credentials or write verification records to the production database.
+
 Merchant screens prioritize creation, QR scanning, shipment details and printing. Administrator tabs provide branch, organization and settlement management. All UI copy is localized in English, Arabic and Kurdish. Amount inputs preserve an invalid empty state and use thousands separators.
 
 Print goes through `PrintSelectionModal` directly into `PrintPreviewEditorPage`. The module has a dedicated 100 × 150 mm label with a four-module QR quiet zone. The preview generates the final PDF from current edits before invoking the print callback; repeated printing preserves identity. Camera capture uses the shared scanner's opt-in QR single-scan mode; other barcode consumers retain their current behavior.

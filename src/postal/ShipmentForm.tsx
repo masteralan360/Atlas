@@ -267,6 +267,9 @@ export function ShipmentForm({
               </div>
               {fieldError("cod_amount")}
               <p className="text-xs text-muted-foreground">
+                {t("postal.codAmountHint")}
+              </p>
+              <p className="text-xs text-muted-foreground">
                 {t("postal.negativeHint")}
               </p>
             </div>

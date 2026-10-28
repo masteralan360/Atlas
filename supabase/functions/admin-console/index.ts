@@ -282,7 +282,6 @@ type AdjustBillingOperationRequest = {
     voucherCode?: string
     expectedLiveRevisionId?: string
     snapshot?: Record<string, unknown>
-    reason?: string
     idempotencyKey?: string
     administratorName?: string
 }
@@ -2023,10 +2022,7 @@ async function createBillingOperation(
     }
     const idempotencyKey = body.idempotencyKey?.trim() ?? ''
     if (!UUID_PATTERN.test(idempotencyKey)) return errorResponse('A valid operation identifier is required')
-    const administratorName = body.administratorName?.trim() ?? ''
-    if (administratorName.length < 2 || administratorName.length > 100) {
-        return errorResponse('Enter the responsible administrator name', 400, { code: 'administratorNameRequired' })
-    }
+    const administratorName = body.administratorName?.trim() || 'Platform administrator'
     if (body.snapshot.billing_mode !== body.billingMode) {
         return errorResponse('Billing mode does not match the billing details')
     }
@@ -2058,20 +2054,15 @@ async function adjustBillingOperation(
     if (!body.snapshot || typeof body.snapshot !== 'object' || Array.isArray(body.snapshot)) {
         return errorResponse('Updated billing details are required')
     }
-    const reason = body.reason?.trim() ?? ''
-    if (reason.length < 3 || reason.length > 1000) return errorResponse('Enter an adjustment reason')
     const idempotencyKey = body.idempotencyKey?.trim() ?? ''
     if (!UUID_PATTERN.test(idempotencyKey)) return errorResponse('A valid operation identifier is required')
-    const administratorName = body.administratorName?.trim() ?? ''
-    if (administratorName.length < 2 || administratorName.length > 100) {
-        return errorResponse('Enter the responsible administrator name', 400, { code: 'administratorNameRequired' })
-    }
+    const administratorName = body.administratorName?.trim() || 'Platform administrator'
 
     const { data, error } = await adminClient.rpc('admin_adjust_billing_operation', {
         p_voucher_code: voucherCode,
         p_expected_live_revision_id: expectedLiveRevisionId,
         p_snapshot: body.snapshot,
-        p_reason: reason,
+        p_reason: null,
         p_idempotency_key: idempotencyKey,
         p_actor_label: administratorName
     })

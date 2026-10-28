@@ -4,6 +4,8 @@ import type { MarketplaceOrderPageQuery, MarketplaceOrderSummaryQuery } from '@/
 export const queryKeys = {
   postal: {
     all: (workspaceId: string) => ['atlas', 'workspace', workspaceId, 'postal'] as const,
+    statement: (input: import('@/local-db/postalStatement').PostalStatementInput) => [...queryKeys.postal.all(input.workspaceId), 'statement', input] as const,
+    statementOrganizations: (scope: import('@/local-db/postal').PostalScope, search: string) => [...queryKeys.postal.all(scope.workspaceId), 'statement-organizations', scope, search] as const,
     page: (input: import('@/local-db/postal').PostalPageInput) => [...queryKeys.postal.all(input.workspaceId), 'page', input] as const,
     summary: (input: import('@/local-db/postal').PostalSummaryInput) => [...queryKeys.postal.all(input.workspaceId), 'summary', input] as const,
     detail: (scope: import('@/local-db/postal').PostalScope, id: string) => [...queryKeys.postal.all(scope.workspaceId), 'detail', scope, id] as const,

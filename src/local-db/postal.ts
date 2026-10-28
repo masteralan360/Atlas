@@ -27,6 +27,7 @@ import {
   type PostalEvent,
   type PostalTransfer,
   type PostalCodRecord,
+  type PostalDeliveryFeeRecord,
 } from '@/postal/domain'
 
 export const postalTables = {
@@ -72,7 +73,7 @@ export interface PostalSummaryInput extends PostalScope {
   end?: string
 }
 
-async function tracked<T>(
+export async function tracked<T>(
   scope: PostalScope,
   table: string | readonly string[],
   signal: AbortSignal | undefined,
@@ -163,19 +164,29 @@ async function tracked<T>(
   }
 }
 function normalizeShipment(row: PostalShipment): PostalShipment {
+  const deliveryFee =
+    row.delivery_fee === null || row.delivery_fee === undefined
+      ? null
+      : Number(row.delivery_fee)
   if (
     !row.id ||
     !row.qr_id ||
     !Number.isSafeInteger(Number(row.shipment_number)) ||
     Number(row.shipment_number) <= 0 ||
     !postalStates.includes(row.state) ||
-    !Number.isSafeInteger(Number(row.cod_amount))
+    !Number.isSafeInteger(Number(row.cod_amount)) ||
+    (deliveryFee !== null &&
+      (!Number.isSafeInteger(deliveryFee) || deliveryFee <= 0)) ||
+    (row.shipment_size != null &&
+      !['carton', 'ship', 'small_package'].includes(row.shipment_size)) ||
+    (row.tariff_zone != null && !['center', 'outside'].includes(row.tariff_zone))
   )
     throw new Error('postal_invalid_result')
   return {
     ...row,
     shipment_number: Number(row.shipment_number),
     cod_amount: Number(row.cod_amount),
+    delivery_fee: deliveryFee,
   }
 }
 function normalizePostalCodActivityPage(value: unknown): PostalPage<PostalCodRecord> {
@@ -407,7 +418,13 @@ export function usePostalDetail(scope: PostalScope, shipmentId: string) {
               .abortSignal(signal),
           (x) => x.length,
         ),
-        tracked<{ collected: number; settled: number; record_count: number }>(
+        tracked<{
+          collected: number
+          settled: number
+          record_count: number
+          delivery_fee_collected: number
+          delivery_fee_record_count: number
+        }>(
           scope,
           'postal_cod_records',
           signal,
@@ -424,9 +441,49 @@ export function usePostalDetail(scope: PostalScope, shipmentId: string) {
         summary: {
           collected: Number(summary.collected),
           settled: Number(summary.settled),
+          deliveryFeeCollected: Number(summary.delivery_fee_collected ?? 0),
         },
       }
     },
+  })
+}
+export function usePostalDeliveryFeeHistory(scope: PostalScope, id: string) {
+  return useInfiniteQuery({
+    queryKey: [...queryKeys.postal.detail(scope, id), 'delivery-fee-history'],
+    enabled: !!id,
+    initialPageParam: 0,
+    queryFn: async ({ signal, pageParam }) => {
+      const rows = await tracked<PostalDeliveryFeeRecord[]>(
+        scope,
+        'postal_delivery_fee_records',
+        signal,
+        () =>
+          supabase
+            .from('postal_delivery_fee_records')
+            .select('*')
+            .eq('workspace_id', scope.workspaceId)
+            .eq('shipment_id', id)
+            .order('created_at')
+            .order('id')
+            .range(pageParam, pageParam + 99)
+            .abortSignal(signal),
+        (rows) => rows.length,
+      )
+      return rows.map((row) => {
+        const amount = Number(row.signed_amount)
+        if (
+          !row.id ||
+          !row.shipment_id ||
+          !Number.isSafeInteger(amount) ||
+          amount <= 0 ||
+          !row.created_at
+        )
+          throw new Error('postal_invalid_result')
+        return { ...row, signed_amount: amount }
+      })
+    },
+    getNextPageParam: (last, pages) =>
+      last.length === 100 ? pages.length * 100 : undefined,
   })
 }
 export function usePostalCodHistory(scope: PostalScope, id: string) {
@@ -602,7 +659,11 @@ export async function postalCommand<T>(
   await queryClient.invalidateQueries({
     queryKey: queryKeys.postal.all(scope.workspaceId),
   })
-  if (command === 'collection' || command === 'settlement') {
+  if (
+    command === 'collection' ||
+    command === 'settlement' ||
+    command === 'delivery_fee_collection'
+  ) {
     window.dispatchEvent(new CustomEvent('payment-transactions:changed'))
   }
   return data as T

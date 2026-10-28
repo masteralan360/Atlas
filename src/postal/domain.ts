@@ -11,6 +11,8 @@ export const postalStates = [
 ] as const;
 export type PostalState = (typeof postalStates)[number];
 export type PostalRole = "admin" | "office" | "merchant";
+export type PostalShipmentSize = "carton" | "ship" | "small_package";
+export type PostalTariffZone = "center" | "outside";
 export interface PostalShipment {
   id: string;
   shipment_number: number;
@@ -24,6 +26,11 @@ export interface PostalShipment {
   area: string;
   address: string | null;
   cod_amount: number;
+  shipment_size?: PostalShipmentSize | null;
+  tariff_zone?: PostalTariffZone | null;
+  delivery_fee?: number | null;
+  tariff_assigned_by?: string | null;
+  tariff_assigned_at?: string | null;
   pieces: number | null;
   fragile: boolean;
   delivery_notes: string | null;
@@ -119,6 +126,16 @@ export interface PostalCodRecord {
   account_name_snapshot?: string | null;
   reference_label?: string | null;
 }
+export interface PostalDeliveryFeeRecord {
+  id: string;
+  shipment_id: string;
+  organization_id: string;
+  signed_amount: number;
+  payment_transaction_id: string;
+  actor_id: string;
+  notes: string | null;
+  created_at: string;
+}
 export interface ShipmentInput {
   recipient_name: string;
   primary_phone: string;
@@ -132,6 +149,35 @@ export interface ShipmentInput {
   delivery_notes: string;
 }
 export const locations = directory.governorates;
+export interface PostalTariffOption {
+  size: PostalShipmentSize;
+  fee: number;
+  zone: PostalTariffZone | null;
+}
+export function postalTariffOptions(
+  governorate: string,
+  area: string,
+): PostalTariffOption[] {
+  if (["sulaymaniyah", "erbil", "duhok"].includes(governorate)) {
+    const center = /center|centre/i.test(area);
+    return [
+      {
+        size: "small_package",
+        fee: center ? 5000 : 6000,
+        zone: center ? "center" : "outside",
+      },
+    ];
+  }
+  return [
+    { size: "carton", fee: 8000, zone: null },
+    { size: "carton", fee: 12000, zone: null },
+    { size: "carton", fee: 15000, zone: null },
+    { size: "ship", fee: 15000, zone: null },
+    { size: "ship", fee: 24000, zone: null },
+    { size: "ship", fee: 35000, zone: null },
+    { size: "ship", fee: 55000, zone: null },
+  ];
+}
 export function locationLabel(
   id: string,
   language: string,

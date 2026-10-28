@@ -23,6 +23,7 @@ import {
   Scale,
   Loader2,
   CircleDollarSign,
+  FileText,
 } from 'lucide-react'
 import {
   Button,
@@ -73,6 +74,8 @@ import { BranchDialog, OrganizationDialog } from '@/postal/ManagementDialogs'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { getPaymentMethodLabel } from '@/lib/paymentMethods'
 import type { PaymentMethodOption } from '@/lib/paymentMethods'
+import { OrganizationAccountStatement } from '@/postal/OrganizationAccountStatement'
+import { canReadPostalStatement } from '@/local-db/postalStatement'
 
 type Row = PostalShipment | PostalBranch | PostalOrganization | PostalCodRecord
 const SINGLE = ['single'] as const
@@ -81,7 +84,7 @@ function formatCodIqd(value: string, language: string, currency: string) {
   return `${new Intl.NumberFormat(language).format(BigInt(value))} ${currency}`
 }
 
-export default function PostalServicePage() {
+export default function PostalServicePage({ accountStatement = false }: { accountStatement?: boolean }) {
   const { t, i18n } = useTranslation()
   const scope = usePostalScope()
   const [, navigate] = useLocation()
@@ -129,7 +132,7 @@ export default function PostalServicePage() {
     ...(tab === 'shipments' || tab === 'cod'
       ? { start: dates.start?.toISOString(), end: dates.end?.toISOString() }
       : {}),
-  })
+  }, !accountStatement)
   const summary = usePostalSummary(
     {
       ...scope,
@@ -138,7 +141,7 @@ export default function PostalServicePage() {
       start: dates.start?.toISOString(),
       end: dates.end?.toISOString(),
     },
-    tab === 'shipments',
+    !accountStatement && tab === 'shipments',
   )
   const bounds = usePaginationBounds({
     ...pagination,
@@ -425,6 +428,7 @@ export default function PostalServicePage() {
         ]
       : []),
     { key: 'cod', icon: Wallet },
+    ...(canReadPostalStatement(scope) ? [{ key: 'accountStatement', icon: FileText }] : []),
   ] as const
   return (
     <div className="w-full min-w-0 space-y-5 p-3 sm:p-6">
@@ -436,7 +440,7 @@ export default function PostalServicePage() {
               scope.role === 'merchant' ? 'postal.myShipments' : 'postal.title',
             )}
           </h1>
-          <ModulePageFreshness
+          {!accountStatement && <ModulePageFreshness
             tableNames={
               tab === 'shipments'
                 ? postalSummaryTables
@@ -444,7 +448,7 @@ export default function PostalServicePage() {
                   ? ['postal_cod_records', 'postal_shipments', 'postal_organizations']
                   : [postalTables[tab]]
             }
-          />
+          />}
         </div>
         <div className="flex flex-wrap gap-2">
           {scope.role === 'admin' && (
@@ -476,17 +480,23 @@ export default function PostalServicePage() {
         {tabs.map(({ key, icon: Icon }) => (
           <Button
             role="tab"
-            aria-selected={tab === key}
+            aria-selected={accountStatement ? key === 'accountStatement' : tab === key}
             key={key}
-            variant={tab === key ? 'default' : 'outline'}
-            onClick={() => setTab(key as keyof typeof postalTables)}
+            variant={(accountStatement ? key === 'accountStatement' : tab === key) ? 'default' : 'outline'}
+            onClick={() => {
+              if (key === 'accountStatement') navigate('/post-service/account-statement')
+              else {
+                setTab(key as keyof typeof postalTables)
+                if (accountStatement) navigate('/post-service')
+              }
+            }}
           >
             <Icon className="me-2 h-4 w-4" />
             {t(`postal.${key}`)}
           </Button>
         ))}
       </div>
-      <div className="space-y-4 rounded-xl border bg-card p-3 sm:p-4">
+      {accountStatement ? canReadPostalStatement(scope) && <OrganizationAccountStatement scope={scope} /> : <div className="space-y-4 rounded-xl border bg-card p-3 sm:p-4">
         <div className="flex flex-wrap items-center gap-3">
           {(tab === 'shipments' || tab === 'cod') && (
             <div className="relative min-w-40 flex-1">
@@ -628,7 +638,7 @@ export default function PostalServicePage() {
             </Table>
           </div>
         )}
-      </div>
+      </div>}
       {creating && (
         <CreateShipmentFlow
           scope={scope}

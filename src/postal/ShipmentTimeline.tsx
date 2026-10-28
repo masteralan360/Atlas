@@ -6,7 +6,6 @@ import {
   Building2,
   Truck,
   Warehouse,
-  Bike,
   CheckCircle2,
   Wallet,
   History,
@@ -19,10 +18,11 @@ const icons: Record<string, typeof Circle> = {
   receive: Building2,
   dispatch: Truck,
   arrive: Warehouse,
-  out_for_delivery: Bike,
+  out_for_delivery: Truck,
   deliver: CheckCircle2,
   merchant_account_updated: Wallet,
   cod_recorded: Wallet,
+  delivery_fee_recorded: Wallet,
   admin_correction: ShieldCheck,
 }
 export function ShipmentTimeline({
@@ -52,7 +52,7 @@ export function ShipmentTimeline({
       : null
   const physicalIndex = events.reduce(
     (last, event, index) =>
-      !['merchant_account_updated', 'cod_recorded'].includes(
+      !['merchant_account_updated', 'cod_recorded', 'delivery_fee_recorded'].includes(
         event.event_type,
       ) && event.resulting_state === state
         ? index
@@ -90,6 +90,7 @@ export function ShipmentTimeline({
             const financial = [
               'merchant_account_updated',
               'cod_recorded',
+              'delivery_fee_recorded',
             ].includes(event.event_type)
             return (
               <li

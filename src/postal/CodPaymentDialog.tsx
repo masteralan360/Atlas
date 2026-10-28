@@ -38,15 +38,22 @@ export function CodPaymentDialog({
 }: {
   scope: PostalScope
   shipment: PostalShipment
-  summary: { collected: number; settled: number }
-  kind: 'collection' | 'settlement'
+  summary: {
+    collected: number
+    settled: number
+    deliveryFeeCollected?: number
+  }
+  kind: 'collection' | 'settlement' | 'delivery_fee'
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const feeCollected = Number(summary.deliveryFeeCollected ?? 0)
   const remaining =
-    kind === 'collection'
-      ? shipment.cod_amount - summary.collected
-      : summary.collected - summary.settled
+    kind === 'delivery_fee'
+      ? Number(shipment.delivery_fee ?? 0) - feeCollected
+      : kind === 'collection'
+        ? shipment.cod_amount - summary.collected
+        : summary.collected - summary.settled
   const [digits, setDigits] = useState(String(Math.abs(remaining)))
   const [method, setMethod] = useState<PaymentMethodOption>('cash')
   const [account, setAccount] = useState<PaymentAccount | null>(null)
@@ -55,26 +62,33 @@ export function CodPaymentDialog({
   const amount = signedIqd(digits, remaining < 0)
   const directionSign = amount ?? (remaining < 0 ? -1 : 1)
   const direction: 'incoming' | 'outgoing' =
-    kind === 'settlement'
-      ? directionSign < 0
-        ? 'incoming'
-        : 'outgoing'
-      : directionSign < 0
-        ? 'outgoing'
-        : 'incoming'
+    kind === 'delivery_fee'
+      ? 'incoming'
+      : kind === 'settlement'
+        ? directionSign < 0
+          ? 'incoming'
+          : 'outgoing'
+        : directionSign < 0
+          ? 'outgoing'
+          : 'incoming'
   const directionAction =
-    kind === 'settlement'
-      ? direction === 'outgoing'
-        ? 'settlementPayMerchant'
-        : 'settlementReceiveFromMerchant'
-      : direction === 'outgoing'
-        ? 'collectionPayRecipient'
-        : 'collectionCollectFromRecipient'
+    kind === 'delivery_fee'
+      ? 'deliveryFeeCollectFromRecipient'
+      : kind === 'settlement'
+        ? direction === 'outgoing'
+          ? 'settlementPayMerchant'
+          : 'settlementReceiveFromMerchant'
+        : direction === 'outgoing'
+          ? 'collectionPayRecipient'
+          : 'collectionCollectFromRecipient'
   const valid =
     amount !== null &&
     amount !== 0 &&
     Math.abs(amount) <= Math.abs(remaining) &&
-    (kind !== 'collection' || direction === (amount < 0 ? 'outgoing' : 'incoming'))
+    (kind === 'delivery_fee'
+      ? amount > 0 && direction === 'incoming'
+      : kind !== 'collection' ||
+        direction === (amount < 0 ? 'outgoing' : 'incoming'))
   const payload = {
     id: shipment.id,
     revision: shipment.revision,
@@ -96,12 +110,22 @@ export function CodPaymentDialog({
         <AppDialogHeader>
           <AppDialogTitle className="flex gap-2">
             <Wallet className="h-5 w-5" />
-            {t(`postal.${kind}`)}
+            {t(
+              kind === 'delivery_fee'
+                ? 'postal.deliveryFeeCollection'
+                : `postal.${kind}`,
+            )}
           </AppDialogTitle>
         </AppDialogHeader>
         <AppDialogBody className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            {t(kind === 'settlement' ? 'postal.settlementPaymentHint' : 'postal.paymentHint')}
+            {t(
+              kind === 'delivery_fee'
+                ? 'postal.deliveryFeePaymentHint'
+                : kind === 'settlement'
+                  ? 'postal.settlementPaymentHint'
+                  : 'postal.paymentHint',
+            )}
           </p>
           <p className="font-semibold">
             {t('postal.remaining')}: {remaining.toLocaleString()}{' '}
@@ -177,7 +201,12 @@ export function CodPaymentDialog({
             disabled={action.busy || !valid}
             onClick={() =>
               void action.run(kind + JSON.stringify(payload), async (id) => {
-                await postalCommand(scope, kind, payload, id)
+                await postalCommand(
+                  scope,
+                  kind === 'delivery_fee' ? 'delivery_fee_collection' : kind,
+                  payload,
+                  id,
+                )
                 onClose()
               })
             }

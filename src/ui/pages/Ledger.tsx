@@ -189,6 +189,7 @@ type LedgerRelationRole = 'origin' | 'repayment' | 'settlement'
 type LedgerEntryType =
     | 'postal_cod'
     | 'postal_settlement'
+    | 'postal_delivery_fee'
     | 'pos_sale'
     | 'instant_pos_sale'
     | 'ecommerce_receivable'
@@ -1591,7 +1592,8 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
         case 'real_estate_installment':
             return null
         case 'postal_cod':
-        case 'postal_settlement': {
+        case 'postal_settlement':
+        case 'postal_delivery_fee': {
             const rawShipmentReference = transaction.metadata?.shipmentReference
             const shipmentReference = typeof rawShipmentReference === 'string' && /^PS-\d{4}-\d{6,}$/i.test(rawShipmentReference)
                 ? rawShipmentReference : null
@@ -1600,7 +1602,13 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
                 currency: transaction.currency, sourceModule: 'postal_service', referenceId: shipmentReference || '',
                 partner: transaction.counterpartyName || null, businessPartnerId: null,
                 paymentMethod: transaction.paymentMethod, notes: transaction.note || null,
-                description: t(transaction.sourceType === 'postal_cod' ? 'postal.collection' : 'postal.settlement'),
+                description: t(
+                    transaction.sourceType === 'postal_cod'
+                        ? 'postal.collection'
+                        : transaction.sourceType === 'postal_settlement'
+                            ? 'postal.settlement'
+                            : 'postal.deliveryFeeCollection',
+                ),
                 ...relation,
                 routePath: shipmentReference ? `/post-service/shipments/${shipmentReference}` : '/post-service' }
         }

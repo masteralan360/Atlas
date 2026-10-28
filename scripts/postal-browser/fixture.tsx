@@ -21,6 +21,7 @@ import { MembershipDialog } from '../../src/postal/MembershipDialog'
 import { CreateShipmentFlow } from '../../src/postal/CreateShipmentFlow'
 import { WorkspaceAccountCreation } from '../../src/ui/components/workspace/WorkspaceAccountCreation'
 import PostalServicePage from '../../src/ui/pages/PostalServicePage'
+import { OrganizationAccountStatement } from '../../src/postal/OrganizationAccountStatement'
 import { DateRangeProvider } from '../../src/context/DateRangeContext'
 import { UiAccessProvider } from '../../src/context/UiAccessContext'
 import { OperationDialog } from '../../src/postal/OperationDialog'
@@ -116,6 +117,11 @@ function Fixture() {
   const [open, setOpen] = useState(true)
   const [saved, setSaved] = useState<PostalShipment>()
   const [source, setSource] = useState<PostalShipment>()
+  if (view === 'statement')
+    return <Providers><DateRangeProvider><UiAccessProvider>
+      <main className="w-full min-w-0 p-3 sm:p-6"><OrganizationAccountStatement scope={{ ...scope,
+        userId: '00000000-0000-4000-8000-000000000012', role: 'office', permissionScope: 'postService.officeEmployee' }} /></main>
+    </UiAccessProvider></DateRangeProvider></Providers>
   if (view === 'dashboard')
     return (
       <QueryClientProvider client={queryClient}>

@@ -1688,6 +1688,9 @@ function App() {
                       <Route path="/post-service/shipments/:shipmentId">
                         {(params) => <ProtectedRoute allowedRoles={["admin", "staff"]} requiredFeature="postal_service" requiredAnyPermission={['postService.merchant','postService.officeEmployee']}><Layout><PostalShipmentPage shipmentId={params.shipmentId} /></Layout></ProtectedRoute>}
                       </Route>
+                      <Route path="/post-service/account-statement">
+                        <ProtectedRoute allowedRoles={["admin", "staff"]} requiredFeature="postal_service" requiredPermission="postService.officeEmployee"><Layout><PostalServicePage accountStatement /></Layout></ProtectedRoute>
+                      </Route>
                       <Route path="/post-service">
                         <ProtectedRoute allowedRoles={["admin", "staff"]} requiredFeature="postal_service" requiredAnyPermission={['postService.merchant','postService.officeEmployee']}><Layout><PostalServicePage /></Layout></ProtectedRoute>
                       </Route>

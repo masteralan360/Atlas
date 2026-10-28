@@ -76,6 +76,14 @@ export function ShipmentLabel({
       {shipment.address && (
         <p style={{ margin: '1mm 0', fontSize: 13 }}>{shipment.address}</p>
       )}
+      {shipment.shipment_size && (
+        <p style={{ margin: '1mm 0', fontSize: 13 }}>
+          {t('postal.shipmentSize')}:{' '}
+          {t(`postal.shipmentSizes.${shipment.shipment_size}`)}
+          {shipment.tariff_zone &&
+            ` · ${t('postal.tariffZone')}: ${t(`postal.tariffZones.${shipment.tariff_zone}`)}`}
+        </p>
+      )}
       <p
         style={{
           borderTop: '1px solid #000',
@@ -88,6 +96,27 @@ export function ShipmentLabel({
         {t('postal.codAmount')}:{' '}
         {shipment.cod_amount.toLocaleString(i18n.language)} {t('postal.iqd')}
       </p>
+      {shipment.delivery_fee !== null && shipment.delivery_fee !== undefined && (
+        <>
+          <p style={{ margin: '1mm 0', fontSize: 14 }}>
+            {t('postal.deliveryFee')}:{' '}
+            {shipment.delivery_fee.toLocaleString(i18n.language)} {t('postal.iqd')}
+          </p>
+          <p
+            style={{
+              borderTop: '1px solid #000',
+              paddingTop: '2mm',
+              margin: '2mm 0',
+              fontSize: 18,
+              fontWeight: 700,
+            }}
+          >
+            {t('postal.totalAtDelivery')}:{' '}
+            {(shipment.cod_amount + shipment.delivery_fee).toLocaleString(i18n.language)}{' '}
+            {t('postal.iqd')}
+          </p>
+        </>
+      )}
       <p style={{ margin: '1mm 0', fontSize: 13 }}>
         {t(shipment.fragile ? 'postal.fragile' : 'postal.nonFragile')}
         {shipment.pieces !== null &&

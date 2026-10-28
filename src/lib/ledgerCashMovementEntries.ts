@@ -147,6 +147,7 @@ export function getLedgerCashMovementFromPayment(
         case 'delivery_merchant_repayment':
         case 'postal_cod':
         case 'postal_settlement':
+        case 'postal_delivery_fee':
         case 'rental_payment':
         case 'rental_deposit':
         case 'rental_deposit_refund':

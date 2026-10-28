@@ -2330,6 +2330,7 @@ export type PaymentTransactionSourceModule =
 export type PaymentTransactionSourceType =
   | 'postal_cod'
   | 'postal_settlement'
+  | 'postal_delivery_fee'
   | 'sale_exchange'
   | 'pos_sale'
   | 'loan_origination'

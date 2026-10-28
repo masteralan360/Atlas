@@ -37,6 +37,7 @@ export function usePostalScope(): PostalScope {
       'postal_events',
       'postal_transfers',
       'postal_cod_records',
+      'postal_delivery_fee_records',
       'postal_branches',
       'postal_organizations',
       'postal_memberships',
@@ -107,13 +108,17 @@ export function usePostalAction() {
         e && typeof e === 'object' && 'message' in e ? String(e.message) : ''
       const key = message.includes('stale_shipment')
         ? 'stale'
-        : message.includes('invalid_transition')
-          ? 'invalidTransition'
-          : message.includes('invalid_payment')
-            ? 'invalidPayment'
-            : message.includes('cod_locked')
-              ? 'codLocked'
-              : 'failed'
+        : message.includes('invalid_tariff') || message.includes('tariff_required')
+          ? 'invalidTariff'
+          : message.includes('tariff_locked')
+            ? 'tariffLocked'
+            : message.includes('invalid_transition')
+              ? 'invalidTransition'
+              : message.includes('invalid_payment')
+                ? 'invalidPayment'
+                : message.includes('cod_locked')
+                  ? 'codLocked'
+                  : 'failed'
       toast({
         title: t('common.error'),
         description: t(`postal.errors.${key}`),
