@@ -1,6 +1,7 @@
 import { invalidatePartnerSummaries, stripPartnerSummaryFields } from './partnerSummaryState'
 import { useEffect, useRef } from 'react'
 import Dexie from 'dexie'
+import { normalizeStockReservationError } from '@/lib/stockReservationConflict'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { v5 as uuidv5 } from 'uuid'
 
@@ -590,6 +591,8 @@ async function syncUpsertEntities(
         }
     } catch (error) {
         console.error(`[Orders] Failed to sync ${tableName}:`, error)
+        const reservationError = normalizeStockReservationError(error)
+        if (reservationError) throw reservationError
 
         if (options.requireRemoteConfirmation) {
             throw createRemoteOrderSaveConfirmationError(error)
@@ -4338,7 +4341,7 @@ async function updateSalesOrderStatusOnce(
         minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
         trace?: CrudTraceHandle
     }
-) {
+): Promise<SalesOrder> {
     const existing = await measureSalesOrderStage(
         options?.trace,
         'crudDebugger.stages.salesOrderLocalRead',
@@ -4351,6 +4354,10 @@ async function updateSalesOrderStatusOnce(
     }
     options?.trace?.setEntityId(existing.id)
     options?.trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
+
+    if (isLocalWorkspaceMode(existing.workspaceId) && !Dexie.currentTransaction) {
+        return db.transaction('rw', db.tables, () => updateSalesOrderStatusOnce(id, status, options))
+    }
 
     if (status === 'cancelled') {
         await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesOrderServiceAccess(existing))
@@ -4465,6 +4472,12 @@ async function updateSalesOrderStatusOnce(
         }
     }
 
+    let reservationConfirmedRemotely = false
+    if (status === 'pending' && shouldUseCloudBusinessData(existing.workspaceId)) {
+        await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId, { trace: options?.trace, throwOnError: true })
+        reservationConfirmedRemotely = true
+        updated = { ...updated, syncStatus: 'synced', lastSyncedAt: now }
+    }
     await measureSalesOrderStage(
         options?.trace,
         'crudDebugger.stages.salesOrderLocalWrite',
@@ -4473,7 +4486,7 @@ async function updateSalesOrderStatusOnce(
         'crudDebugger.details.dexiePersistence'
     )
 
-    if (!completedRemotely) {
+    if (!completedRemotely && !reservationConfirmedRemotely) {
         await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId, { trace: options?.trace })
     }
     invalidateOrdersList(existing.workspaceId, 'sales')

@@ -37,7 +37,8 @@ export async function applyOfflinePosStockEffects(input: {
     "rw",
     [
       db.inventory, db.products, db.storages, db.stock_batches,
-      db.inventory_transactions,
+      db.inventory_transactions, db.sales_orders,
+      db.product_storage_assignments,
       db.users, db.profiles, db.storage_member_exclusions,
     ],
     async () => {

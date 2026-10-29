@@ -1,6 +1,7 @@
 import { isWeb } from '@/lib/platform'
 import { connectionManager } from '@/lib/connectionManager'
 import i18n from '@/i18n/config'
+import { normalizeStockReservationError } from '@/lib/stockReservationConflict'
 
 export const WEB_REQUEST_TIMEOUT_MS = 12000
 
@@ -127,6 +128,8 @@ function isNetworkLikeError(error: unknown): boolean {
 }
 
 export function normalizeSupabaseActionError(error: unknown): Error {
+    const reservationError = normalizeStockReservationError(error)
+    if (reservationError) return reservationError
     if (error instanceof SupabaseRequestTimeoutError || error instanceof SupabaseNetworkError) {
         return error
     }

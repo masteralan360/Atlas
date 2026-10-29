@@ -1,3 +1,5 @@
+import { useStockDemandGuard } from '@/local-db/stockReservations'
+import { StockReservationInfo, StockDemandNotice, SellableStockQuantity } from '@/ui/components/inventory/StockReservationInfo'
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense, type MouseEvent as ReactMouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
@@ -586,6 +588,7 @@ export function POS() {
         localStorage.getItem('scanner_device_auto_enabled') === 'true'
     ))
     const [cart, setCart] = useState<CartItem[]>([])
+    const reservationGuard = useStockDemandGuard(user?.workspaceId, cart.filter(item => !item.is_service && item.storageId && ![ACTIVITIES_VIRTUAL_STORAGE_ID, SERVICES_VIRTUAL_STORAGE_ID].includes(item.storageId)).map(item => ({ productId: item.product_id, storageId: item.storageId!, quantity: getCartInventoryQuantity(item) })))
     const hasCrossStorageCartItems = cart.some((item) => (
         !item.storageId
         || (item.storageId !== selectedStorageId
@@ -3373,6 +3376,7 @@ export function POS() {
 
         try {
         if (cart.length === 0 || !user) return
+        if (paymentType !== 'order') await reservationGuard.assert()
 
         if (unavailableServiceCartItem) {
             toast({
@@ -3818,6 +3822,7 @@ export function POS() {
         if (cart.length === 0 || !user) {
             throw new Error(t('pos.emptyCart', { defaultValue: 'Your cart is empty.' }))
         }
+        if (checkout.orderStatus !== 'draft') await reservationGuard.assert()
         const minimumViolation = cart.map((item) => getCartMinimumPriceViolation(item)).find(Boolean)
         if (minimumViolation) {
             throw new Error(minimumViolation.currencyUnavailable
@@ -4179,6 +4184,7 @@ export function POS() {
                         )}
                         {mobileView === 'grid' ? (
                             <MobileGrid
+                                workspaceId={user?.workspaceId}
                                 t={t}
                                 search={search}
                                 setSearch={setSearch}
@@ -4437,7 +4443,7 @@ export function POS() {
                                                                 : "bg-amber-400 text-amber-950"
                                                             : "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 backdrop-blur-md"
                                                 )} data-testid="pos-product-quantity">
-                                                    {remainingQuantity} <span className="text-[10px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
+                                                    <SellableStockQuantity workspaceId={user?.workspaceId} productId={product.id} storageId={product.storageId} inCart={inCartQuantity} /> <span className="text-[10px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
                                                 </div>}
 
                                                 {displayBatch && (
@@ -4478,6 +4484,7 @@ export function POS() {
                                                 )}
                                             </div>
 
+                                            {!isInfiniteActivity && !isServiceProduct && <StockReservationInfo workspaceId={user?.workspaceId} productId={product.id} storageId={product.storageId} interactive={false} />}
                                             {/* Product Info */}
                                             <div className="flex-1 space-y-2 flex flex-col">
                                                 <div className="flex items-center justify-between text-[10px] font-mono font-bold text-muted-foreground uppercase tracking-widest opacity-60 gap-2">
@@ -4627,7 +4634,7 @@ export function POS() {
                                                     key={itemKey}
                                                     ref={el => cartItemRefs.current[index] = el}
                                                     className={cn(
-                                                        "bg-background border border-border p-3 rounded-lg flex gap-3 group transition-all duration-200 scroll-m-2",
+                                                        "bg-background border border-border p-3 rounded-lg flex flex-wrap items-center gap-3 group transition-all duration-200 scroll-m-2",
                                                         (isPosKeyboardSelectionEnabled && focusedSection === 'cart' && focusedCartIndex === index) ? "ring-2 ring-primary ring-offset-2 ring-offset-background border-primary/50 shadow-md transform scale-[1.01]" : "",
                                                         minimumViolation && 'border-destructive bg-destructive/5 ring-1 ring-destructive/25'
                                                     )}
@@ -4645,9 +4652,10 @@ export function POS() {
                                                         </div>
                                                     )}
 
-                                                    <div className="flex-1 min-w-0">
+                                                    <div className="min-w-[8rem] flex-1">
                                                         <div className="min-w-0">
                                                             <div className="font-medium truncate"><bdi>{formatPosServiceName(item.name, item.is_service ? item.service_name_suffix : undefined)}</bdi></div>
+                                                            {!item.is_service && <StockReservationInfo workspaceId={user?.workspaceId} productId={item.product_id} storageId={item.storageId} required={reservationGuard.requiredByPosition.get(`${item.product_id}:${item.storageId}`)} />}
                                                             {showCartStorageLabels && (
                                                                 <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
                                                                     <Warehouse className="h-3 w-3 shrink-0" />
@@ -4715,7 +4723,7 @@ export function POS() {
                                                             )}
                                                         </div>
                                                     </div>
-                                                    <div className="flex flex-col items-end gap-1">
+                                                    <div className="flex shrink-0 flex-col items-end gap-1">
                                                         <div className="font-bold flex items-center gap-1">
                                                             <span>{formatCurrency(convertedPrice * item.quantity, settlementCurrency, features.iqd_display_preference)}</span>
                                                             <button
@@ -4753,7 +4761,7 @@ export function POS() {
                                                             </span>
                                                         )}
                                                     </div>
-                                                    <div className="flex items-center gap-1">
+                                                    <div className="ms-auto flex shrink-0 items-center gap-1">
                                                         {showOrderFreeBonus && (
                                                             <PosFreeBonusButton
                                                                 item={item}
@@ -5138,67 +5146,70 @@ export function POS() {
                                 </div>
                             )}
 
-                            <div className="flex gap-2">
-                                <Button
-                                    size="lg"
-                                    className="flex-[3] h-14 text-xl shadow-lg shadow-primary/20 rounded-2xl"
-                                    onClick={() => handleCheckout()}
-                                    disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates || hasMinimumSellingPriceViolation}
-                                >
-                                    {isLoading ? (
-                                        <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                                    ) : (
-                                        paymentType === 'order' ? (
-                                            <ClipboardCheck className="w-6 h-6 mr-2" />
-                                        ) : paymentType === 'digital' ? (
-                                            <Zap className="w-6 h-6 mr-2" />
-                                        ) : paymentType === 'loan' ? (
-                                            <Coins className="w-6 h-6 mr-2" />
+                            <div className="space-y-2">
+                                <StockDemandNotice workspaceId={user?.workspaceId} guard={reservationGuard} />
+                                <div className="flex min-w-0 items-center gap-2">
+                                    <Button
+                                        size="lg"
+                                        className="flex-[3] h-14 text-xl shadow-lg shadow-primary/20 rounded-2xl"
+                                        onClick={() => handleCheckout()}
+                                        disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates || hasMinimumSellingPriceViolation || (paymentType !== 'order' && reservationGuard.blocked)}
+                                    >
+                                        {isLoading ? (
+                                            <Loader2 className="w-6 h-6 animate-spin mr-2" />
                                         ) : (
-                                            <Banknote className="w-6 h-6 mr-2" />
-                                        )
+                                            paymentType === 'order' ? (
+                                                <ClipboardCheck className="w-6 h-6 mr-2" />
+                                            ) : paymentType === 'digital' ? (
+                                                <Zap className="w-6 h-6 mr-2" />
+                                            ) : paymentType === 'loan' ? (
+                                                <Coins className="w-6 h-6 mr-2" />
+                                            ) : (
+                                                <Banknote className="w-6 h-6 mr-2" />
+                                            )
+                                        )}
+                                        {paymentType === 'order'
+                                            ? t('orders.actions.order', { defaultValue: 'Order' })
+                                            : paymentType === 'digital'
+                                            ? t('pos.digitalCheckout') || 'Digital Checkout'
+                                            : paymentType === 'loan'
+                                                ? t('pos.processLoan') || 'Process Loan'
+                                                : t('pos.checkout') || 'Checkout'}
+                                    </Button>
+                                    {canPreprintReceipt && (
+                                        <Button
+                                            variant="outline"
+                                            size="lg"
+                                            className="w-14 h-14 rounded-2xl border-2 hover:bg-primary/5 hover:text-primary transition-all group flex-none px-0"
+                                            onClick={handlePreprintReceipt}
+                                            disabled={cart.length === 0 || isLoading || isPreprinting || isLoadingPreprintTemplate}
+                                            title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
+                                            aria-label={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
+                                        >
+                                            {isPreprinting || isLoadingPreprintTemplate
+                                                ? <Loader2 className="w-5 h-5 animate-spin" />
+                                                : <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />}
+                                        </Button>
                                     )}
-                                    {paymentType === 'order'
-                                        ? t('orders.actions.order', { defaultValue: 'Order' })
-                                        : paymentType === 'digital'
-                                        ? t('pos.digitalCheckout') || 'Digital Checkout'
-                                        : paymentType === 'loan'
-                                            ? t('pos.processLoan') || 'Process Loan'
-                                            : t('pos.checkout') || 'Checkout'}
-                                </Button>
-                                {canPreprintReceipt && (
+                                    {!showExchangeTicker && (
+                                        <PosDiscountButton
+                                            discountValue={discountValue}
+                                            setDiscountValue={setDiscountValue}
+                                            discountType={discountType}
+                                            setDiscountType={setDiscountType}
+                                        />
+                                    )}
                                     <Button
                                         variant="outline"
                                         size="lg"
                                         className="w-14 h-14 rounded-2xl border-2 hover:bg-primary/5 hover:text-primary transition-all group flex-none px-0"
-                                        onClick={handlePreprintReceipt}
-                                        disabled={cart.length === 0 || isLoading || isPreprinting || isLoadingPreprintTemplate}
-                                        title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
-                                        aria-label={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
+                                        onClick={handleHoldSale}
+                                        disabled={cart.length === 0 || isLoading}
+                                        title={t('pos.holdDescription', 'Put current sale on hold')}
                                     >
-                                        {isPreprinting || isLoadingPreprintTemplate
-                                            ? <Loader2 className="w-5 h-5 animate-spin" />
-                                            : <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />}
+                                        <Archive className="w-6 h-6 group-hover:scale-110 transition-transform" />
                                     </Button>
-                                )}
-                                {!showExchangeTicker && (
-                                    <PosDiscountButton
-                                        discountValue={discountValue}
-                                        setDiscountValue={setDiscountValue}
-                                        discountType={discountType}
-                                        setDiscountType={setDiscountType}
-                                    />
-                                )}
-                                <Button
-                                    variant="outline"
-                                    size="lg"
-                                    className="w-14 h-14 rounded-2xl border-2 hover:bg-primary/5 hover:text-primary transition-all group flex-none px-0"
-                                    onClick={handleHoldSale}
-                                    disabled={cart.length === 0 || isLoading}
-                                    title={t('pos.holdDescription', 'Put current sale on hold')}
-                                >
-                                    <Archive className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                                </Button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -6584,6 +6595,7 @@ function MobileHeader({
 }
 
 interface MobileGridProps {
+    workspaceId?: string
     t: any
     search: string
     setSearch: (s: string) => void
@@ -6620,7 +6632,7 @@ interface MobileGridProps {
     showCategories: boolean
 }
 
-function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, setIsCameraProductScannerOpen, isDeviceScannerAutoEnabled, filteredProducts, catalogColumns, gridRef, cart, selectCatalogProduct, getProductCardStockDisplay, getCartItemKey, onHoldForFreeOnlyOrder, canUseOrderFreeBonus, quickOrderEnabled, updateQuantity, features, getDisplayImageUrl, categories, selectedStorageId, selectedCategory, setSelectedCategory, getActiveDiscount, getPriceBookPricing, showQuantityIndicator, showCategories }: MobileGridProps) {
+function MobileGrid({ workspaceId, t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModalOpen, setIsCameraProductScannerOpen, isDeviceScannerAutoEnabled, filteredProducts, catalogColumns, gridRef, cart, selectCatalogProduct, getProductCardStockDisplay, getCartItemKey, onHoldForFreeOnlyOrder, canUseOrderFreeBonus, quickOrderEnabled, updateQuantity, features, getDisplayImageUrl, categories, selectedStorageId, selectedCategory, setSelectedCategory, getActiveDiscount, getPriceBookPricing, showQuantityIndicator, showCategories }: MobileGridProps) {
     const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const suppressCatalogClickRef = useRef(false)
     const productRows = useMemo(() => {
@@ -6803,6 +6815,7 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                                 if (canHoldForFreeOnlyOrder) event.preventDefault()
                             }}
                         >
+                            {!isInfiniteActivity && !isServiceProduct && <StockReservationInfo workspaceId={workspaceId} productId={product.id} storageId={product.storageId} interactive={false} />}
                             <div className="aspect-square bg-muted/30 rounded-[1.5rem] overflow-hidden relative">
                                 <ProductImage
                                     url={product.imageUrl}
@@ -6835,7 +6848,7 @@ function MobileGrid({ t, search, setSearch, setIsSkuModalOpen, setIsBarcodeModal
                                                 : "bg-amber-400 text-amber-950 border-amber-300/50"
                                             : "bg-primary/20 text-primary border-primary/20"
                                 )}>
-                                    {remainingQuantity} <span className="text-[9px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
+                                    <SellableStockQuantity workspaceId={workspaceId} productId={product.id} storageId={product.storageId} inCart={inCartQuantity} /> <span className="text-[9px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
                                 </div>}
 
                                 {displayBatch && (
@@ -7030,6 +7043,7 @@ function MobileCart({
     setDynamicUnitModal, setExactQuantity, unitRegistry,
     showOrderFreeBonus, onOpenFreeBonusEditor
 }: MobileCartProps) {
+    const reservationGuard = useStockDemandGuard(workspaceId, cart.filter(item => !item.is_service && item.storageId && ![ACTIVITIES_VIRTUAL_STORAGE_ID, SERVICES_VIRTUAL_STORAGE_ID].includes(item.storageId)).map(item => ({ productId: item.product_id, storageId: item.storageId!, quantity: getCartInventoryQuantity(item) })))
     const [isExpanded, setIsExpanded] = useState(false)
     const [isDragging, setIsDragging] = useState(false)
     const [startY, setStartY] = useState<number | null>(null)
@@ -7174,6 +7188,7 @@ function MobileCart({
                                             <div className="flex items-center justify-between gap-2">
                                                 <div className="min-w-0 flex-1">
                                                     <h3 className="font-bold text-sm truncate"><bdi>{formatPosServiceName(item.name, item.is_service ? item.service_name_suffix : undefined)}</bdi></h3>
+                                                    {!item.is_service && <StockReservationInfo workspaceId={workspaceId} productId={item.product_id} storageId={item.storageId} required={reservationGuard.requiredByPosition.get(`${item.product_id}:${item.storageId}`)} />}
                                                     {showCartStorageLabels && (
                                                         <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
                                                             <Warehouse className="h-3 w-3 shrink-0" />
@@ -7416,13 +7431,14 @@ function MobileCart({
                                         : <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />}
                                 </Button>
                             )}
+                            <StockDemandNotice workspaceId={workspaceId} guard={reservationGuard} />
                             <Button
                                 className="h-12 px-6 rounded-2xl font-black shadow-lg shadow-primary/20 active:scale-95 transition-all text-primary-foreground"
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     handleCheckout();
                                 }}
-                                disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates || hasMinimumSellingPriceViolation}
+                                disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates || hasMinimumSellingPriceViolation || (paymentType !== 'order' && reservationGuard.blocked)}
                             >
                                 {isLoading ? <Loader2 className="animate-spin w-5 h-5" /> : (
                                     <div className="flex items-center gap-2">
@@ -7628,57 +7644,60 @@ function MobileCart({
                                 </div>
                             </div>
 
-                            <div className="flex gap-2 pt-2">
-                                <Button
-                                    className="flex-[4] h-14 rounded-2xl text-lg font-black shadow-xl shadow-primary/20 active:scale-95 transition-all text-primary-foreground"
-                                    onClick={() => handleCheckout()}
-                                disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates || hasMinimumSellingPriceViolation}
-                                >
-                                    {isLoading ? <Loader2 className="animate-spin w-6 h-6" /> : (
-                                        <div className="flex items-center gap-2">
-                                            {paymentType === 'order' ? (
-                                                <ClipboardCheck className="w-6 h-6" />
-                                            ) : paymentType === 'digital' ? (
-                                                <Zap className="w-6 h-6" />
-                                            ) : paymentType === 'loan' ? (
-                                                <Coins className="w-6 h-6" />
-                                            ) : (
-                                                <Banknote className="w-6 h-6" />
-                                            )}
-                                            <span>
-                                                {paymentType === 'order'
-                                                    ? t('orders.actions.order', { defaultValue: 'Order' })
-                                                    : paymentType === 'digital'
-                                                    ? t('pos.digitalCheckout') || 'Digital Checkout'
-                                                    : paymentType === 'loan'
-                                                        ? t('pos.processLoan') || 'Process Loan'
-                                                        : t('pos.checkout') || 'Checkout'}
-                                            </span>
-                                        </div>
+                            <div className="space-y-2 pt-2">
+                                <StockDemandNotice workspaceId={workspaceId} guard={reservationGuard} />
+                                <div className="flex min-w-0 items-center gap-2">
+                                    <Button
+                                        className="flex-[4] h-14 rounded-2xl text-lg font-black shadow-xl shadow-primary/20 active:scale-95 transition-all text-primary-foreground"
+                                        onClick={() => handleCheckout()}
+                                    disabled={cart.length === 0 || cart.some(shouldRemovePosCartItem) || isLoading || hasTrulyMissingRates || hasMinimumSellingPriceViolation || (paymentType !== 'order' && reservationGuard.blocked)}
+                                    >
+                                        {isLoading ? <Loader2 className="animate-spin w-6 h-6" /> : (
+                                            <div className="flex items-center gap-2">
+                                                {paymentType === 'order' ? (
+                                                    <ClipboardCheck className="w-6 h-6" />
+                                                ) : paymentType === 'digital' ? (
+                                                    <Zap className="w-6 h-6" />
+                                                ) : paymentType === 'loan' ? (
+                                                    <Coins className="w-6 h-6" />
+                                                ) : (
+                                                    <Banknote className="w-6 h-6" />
+                                                )}
+                                                <span>
+                                                    {paymentType === 'order'
+                                                        ? t('orders.actions.order', { defaultValue: 'Order' })
+                                                        : paymentType === 'digital'
+                                                        ? t('pos.digitalCheckout') || 'Digital Checkout'
+                                                        : paymentType === 'loan'
+                                                            ? t('pos.processLoan') || 'Process Loan'
+                                                            : t('pos.checkout') || 'Checkout'}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </Button>
+                                    {canPreprintReceipt && (
+                                        <Button
+                                            variant="outline"
+                                            className="h-14 w-14 rounded-2xl border-2 hover:bg-primary/5 hover:text-primary transition-all group flex-none px-0"
+                                            onClick={handlePreprintReceipt}
+                                            disabled={cart.length === 0 || isLoading || isPreprinting || isLoadingPreprintTemplate}
+                                            title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
+                                            aria-label={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
+                                        >
+                                            {isPreprinting || isLoadingPreprintTemplate
+                                                ? <Loader2 className="w-5 h-5 animate-spin" />
+                                                : <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />}
+                                        </Button>
                                     )}
-                                </Button>
-                                {canPreprintReceipt && (
                                     <Button
                                         variant="outline"
-                                        className="h-14 w-14 rounded-2xl border-2 hover:bg-primary/5 hover:text-primary transition-all group flex-none px-0"
-                                        onClick={handlePreprintReceipt}
-                                        disabled={cart.length === 0 || isLoading || isPreprinting || isLoadingPreprintTemplate}
-                                        title={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
-                                        aria-label={t('pos.preprintReceipt', { defaultValue: 'Pre-print receipt' })}
+                                        className="flex-1 h-14 rounded-2xl border-2 hover:bg-primary/5 hover:text-primary transition-all group px-0"
+                                        onClick={handleHoldSale}
+                                        disabled={cart.length === 0 || isLoading}
                                     >
-                                        {isPreprinting || isLoadingPreprintTemplate
-                                            ? <Loader2 className="w-5 h-5 animate-spin" />
-                                            : <Receipt className="w-5 h-5 group-hover:scale-110 transition-transform" />}
+                                        <Archive className="w-6 h-6 group-hover:scale-110 transition-transform" />
                                     </Button>
-                                )}
-                                <Button
-                                    variant="outline"
-                                    className="flex-1 h-14 rounded-2xl border-2 hover:bg-primary/5 hover:text-primary transition-all group px-0"
-                                    onClick={handleHoldSale}
-                                    disabled={cart.length === 0 || isLoading}
-                                >
-                                    <Archive className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                                </Button>
+                                </div>
                             </div>
                         </div>
                     </div>

@@ -1,3 +1,6 @@
+import { useStockDemandGuard } from '@/local-db/stockReservations'
+import { StockDemandNotice } from '@/ui/components/inventory/StockReservationInfo'
+import { getCartInventoryQuantity } from '@/lib/productUoms'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { BadgeDollarSign, BadgePercent, CircleDollarSign, ClipboardList, Link2, Loader2, NotebookPen, ShoppingCart, UserRound, Warehouse, X } from 'lucide-react'
@@ -379,8 +382,10 @@ export function QuickOrderModal({
     const loanRepaymentSummary = getQuickOrderLoanRepaymentSummary(totalAmount, loanInitialRepaymentAmount)
     const paymentStatusPolicy = getQuickOrderPaymentStatusPolicy(paymentMethod, orderStatus)
     const orderCounterparty = selectedSalesAccount?.partner ?? customer
+    const reservationGuard = useStockDemandGuard(workspaceId, isOpen && orderStatus !== 'draft' ? cart.filter(item => !item.is_service && item.storageId).map(item => ({ productId: item.product_id, storageId: item.storageId!, quantity: getCartInventoryQuantity(item) })) : [])
     const isQuickOrderValid = Boolean(
         orderCounterparty
+        && !reservationGuard.blocked
         && orderStatus
         && (isFreeOnlyOrder || (paymentStatus && paymentMethod))
         && (!isInstallmentBased || (
@@ -545,6 +550,7 @@ export function QuickOrderModal({
             || hasConfiguredSalesOrderCommission(commissionSummaries)
             || hasAutomaticProductCommission
         try {
+            if (orderStatus !== 'draft') await reservationGuard.assert()
             await onSubmit({
                 customer: orderCounterparty!,
                 salesAccountAgentId: selectedSalesAccount?.agent.id ?? null,
@@ -1039,11 +1045,12 @@ export function QuickOrderModal({
             </AppDialogBody>
 
             <AppDialogFooter className="border-t bg-muted/10 px-6 py-4 sm:justify-between">
+                <StockDemandNotice workspaceId={workspaceId} guard={reservationGuard} />
                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
                     {t('common.cancel')}
                 </Button>
                 {!isCommissionPanelOpen ? (
-                    <Button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting || !isQuickOrderValid}>
+                    <Button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting || !isQuickOrderValid || reservationGuard.blocked}>
                         {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                         {t('pos.quickOrder.save')}
                     </Button>
@@ -1144,7 +1151,7 @@ export function QuickOrderModal({
                                 <Button type="button" variant="outline" onClick={closeCommissionPanel} disabled={isSubmitting}>
                                     {t('pos.quickOrder.backToQuickOrder')}
                                 </Button>
-                                <Button type="button" onClick={() => void handleSubmit(true)} disabled={isSubmitting}>
+                                <Button type="button" onClick={() => void handleSubmit(true)} disabled={isSubmitting || reservationGuard.blocked}>
                                     {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                                     {t('pos.quickOrder.save')}
                                 </Button>

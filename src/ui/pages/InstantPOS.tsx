@@ -1,3 +1,5 @@
+import { useStockDemandGuard } from '@/local-db/stockReservations'
+import { StockReservationInfo, StockDemandNotice, SellableStockQuantity } from '@/ui/components/inventory/StockReservationInfo'
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Virtuoso } from 'react-virtuoso'
@@ -94,6 +96,11 @@ type InstantPosItem = {
     discountSource?: 'product' | 'category'
     discountEndsAt?: string
     note?: string
+}
+
+function getTicketItemFactor(item: InstantPosItem) {
+    const value = Number(item.unitFactor ?? 1)
+    return Number.isFinite(value) && value > 0 ? value : 1
 }
 
 type InstantPosTicket = {
@@ -417,6 +424,9 @@ interface MobileTicketPanelProps {
     statusAction: { label: string, status: InstantPosStatus } | null
     activePendingTimeLeftMs: number | null
     isCheckoutLoading: boolean
+    reservationBlocked: boolean
+    workspaceId?: string
+    reservationNotice: React.ReactNode
     canPreprintReceipt: boolean
     isPreprinting: boolean
     isLoadingPreprintTemplate: boolean
@@ -445,7 +455,7 @@ interface MobileTicketPanelProps {
 
 function MobileTicketPanel({
     activeTicket, activeTicketTotals, minimumPriceViolations, settlementCurrency, features, t,
-    statusLabels, statusAction, activePendingTimeLeftMs, isCheckoutLoading,
+    statusLabels, statusAction, activePendingTimeLeftMs, isCheckoutLoading, reservationBlocked, workspaceId, reservationNotice,
     canPreprintReceipt, isPreprinting, isLoadingPreprintTemplate,
     canCookOrderTicket, isPrintingCookOrderTicket,
     getStorageLabel, checkoutTicket, handlePreprintReceipt, handleCookOrderTicket, setTicketStatus, extendPendingExpiry, clearActiveTicket,
@@ -542,6 +552,7 @@ function MobileTicketPanel({
                     <div className="w-12 h-1.5 bg-muted-foreground/20 rounded-full group-hover:bg-primary/30 transition-colors" />
                 </div>
 
+                {reservationNotice}
                 {/* Collapsed Header */}
                 <div className="flex items-center justify-between py-2 touch-none">
                     <div className="flex flex-col cursor-pointer" onClick={() => setIsExpanded(true)}>
@@ -620,7 +631,7 @@ function MobileTicketPanel({
                                 e.stopPropagation();
                                 checkoutTicket();
                             }}
-                            disabled={activeTicket.items.length === 0 || isCheckoutLoading || activeTicketTotals.hasMixedCurrency || minimumPriceViolations.size > 0}
+                            disabled={activeTicket.items.length === 0 || isCheckoutLoading || reservationBlocked || activeTicketTotals.hasMixedCurrency || minimumPriceViolations.size > 0}
                         >
                             {isCheckoutLoading ? <Loader2 className="animate-spin w-5 h-5" /> : (
                                 <div className="flex items-center gap-2">
@@ -740,6 +751,7 @@ function MobileTicketPanel({
                                                     </div>
                                                     <div>
                                                         <div className="text-sm font-semibold text-foreground">{item.name}</div>
+                                                        <StockReservationInfo workspaceId={workspaceId} productId={item.productId} storageId={item.storageId} required={soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item))} />
                                                         {item.note && (
                                                             <div className="text-[10px] italic text-primary/80 font-medium">
                                                                 --{stylizeText(item.note)}
@@ -843,7 +855,7 @@ function MobileTicketPanel({
                                                 : <ChefHat className="h-5 w-5" />}
                                         </Button>
                                     )}
-                                    <Button className={cn("h-14 rounded-2xl font-black text-lg gap-2", !canCookOrderTicket && "col-start-2")} onClick={checkoutTicket} disabled={activeTicket.items.length === 0 || isCheckoutLoading || activeTicketTotals.hasMixedCurrency || minimumPriceViolations.size > 0}>
+                                    <Button className={cn("h-14 rounded-2xl font-black text-lg gap-2", !canCookOrderTicket && "col-start-2")} onClick={checkoutTicket} disabled={activeTicket.items.length === 0 || isCheckoutLoading || reservationBlocked || activeTicketTotals.hasMixedCurrency || minimumPriceViolations.size > 0}>
                                         {isCheckoutLoading ? <Loader2 className="animate-spin" /> : <><CheckCircle2 className="w-5 h-5" /> {t('instantPos.checkout')}</>}
                                     </Button>
                                     {canPreprintReceipt && (
@@ -934,10 +946,7 @@ export function InstantPOS() {
         return Math.max(0, price - discount.discountValue)
     }
 
-    const getTicketItemFactor = (item: InstantPosItem) => {
-        const value = Number(item.unitFactor ?? 1)
-        return Number.isFinite(value) && value > 0 ? value : 1
-    }
+
 
     // KDS Streaming
     const { status: kdsStatus, startStream, broadcast } = useKdsStream(true)
@@ -1287,6 +1296,8 @@ export function InstantPOS() {
         const matches = ticketProducts.filter(product => product.id === item.productId)
         return matches.length === 1 ? matches[0] : undefined
     }, [ticketProducts])
+
+    const reservationGuard = useStockDemandGuard(user?.workspaceId, (activeTicket?.items ?? []).filter(item => !isService(resolveTicketProduct(item)) && (item.storageId || resolveTicketProduct(item)?.storageId)).map(item => ({ productId: item.productId, storageId: (item.storageId || resolveTicketProduct(item)?.storageId)!, quantity: soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item)) })))
 
     const filteredProducts = useMemo(() => {
         const term = search.trim().toLowerCase()
@@ -1979,6 +1990,12 @@ export function InstantPOS() {
             }
         }
 
+        try { await reservationGuard.assert() } catch (error) {
+            toast({ variant: 'destructive', title: t('common.error'), description: normalizeSupabaseActionError(error).message })
+            setIsCheckoutLoading(false)
+            return
+        }
+
         const inventoryDemandByProduct = new Map<string, { product: NonNullable<ReturnType<typeof resolveTicketProduct>>; quantity: number }>()
         for (const item of activeTicket.items) {
             const product = resolveTicketProduct(item)
@@ -2287,6 +2304,8 @@ export function InstantPOS() {
 
             if (isLocalMode) {
                 try {
+                    const saleDataOffline = await db.transaction('rw', db.tables, async () => {
+                    await reservationGuard.assert()
                     const localSequenceId = await generateLocalSaleSequenceId(user.workspaceId)
                     const localSaleItems = itemsWithMetadata.map((item) => ({
                         id: generateId(),
@@ -2455,6 +2474,9 @@ export function InstantPOS() {
                     } as any)
 
                     await addToOfflineMutations('sales', saleId, 'create', checkoutPayload, user.workspaceId)
+
+                    return saleDataOffline
+                    })
 
                     await finalizeTicket(activeTicket.id)
                     setIsCheckoutPaymentAccountSelectorOpen(false)
@@ -2878,7 +2900,7 @@ export function InstantPOS() {
                                                                 ? 'bg-amber-400 text-amber-950'
                                                                 : 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 backdrop-blur-md'
                                                     )}>
-                                                        {remainingQuantity}
+                                                        <SellableStockQuantity workspaceId={user?.workspaceId} productId={product.id} storageId={product.storageId} inCart={inTicketQuantity} unitFactor={defaultUom?.coefficient ?? 1} />
                                                     </div>
                                                 )}
                                                 {activeDiscount && (
@@ -2891,6 +2913,7 @@ export function InstantPOS() {
                                                 <div className="truncate text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/60">
                                                     {product.sku || (service ? t('services.title', { defaultValue: 'Services' }) : '---')}
                                                 </div>
+                                                {!service && <StockReservationInfo workspaceId={user?.workspaceId} productId={product.id} storageId={product.storageId} interactive={false} />}
                                                 <h3 className="line-clamp-2 text-sm font-bold leading-snug text-foreground transition-colors group-hover:text-primary">
                                                     {product.name}
                                                 </h3>
@@ -2921,6 +2944,7 @@ export function InstantPOS() {
                     </div>
 
                     {activeTicket && (
+                        <>
                         <MobileTicketPanel
                             activeTicket={activeTicket}
                             activeTicketTotals={activeTicketTotals}
@@ -2932,6 +2956,9 @@ export function InstantPOS() {
                             statusAction={statusAction}
                             activePendingTimeLeftMs={activePendingTimeLeftMs}
                             isCheckoutLoading={isCheckoutLoading}
+                            reservationBlocked={reservationGuard.blocked}
+                            workspaceId={user?.workspaceId}
+                            reservationNotice={<StockDemandNotice workspaceId={user?.workspaceId} guard={reservationGuard} />}
                             canPreprintReceipt={canPreprintReceipt}
                             isPreprinting={isPreprinting}
                             isLoadingPreprintTemplate={isLoadingPreprintTemplate}
@@ -2957,6 +2984,7 @@ export function InstantPOS() {
                             hideCloseTicket={hideRestaurantCloseTicket}
                             hideClearAll={hideRestaurantClearAll}
                         />
+                        </>
                     )}
             </div>
 
@@ -3067,6 +3095,7 @@ export function InstantPOS() {
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="min-w-0 flex-1">
                                                         <div className="truncate text-sm font-medium text-foreground">{item.name} {item.sellingUnitCode ? <span className="text-xs text-muted-foreground">· {item.sellingUnitCode}</span> : null}</div>
+                                                        {!isService(resolveTicketProduct(item)) && <StockReservationInfo workspaceId={user?.workspaceId} productId={item.productId} storageId={item.storageId || resolveTicketProduct(item)?.storageId} required={reservationGuard.requiredByPosition.get(`${item.productId}:${item.storageId || resolveTicketProduct(item)?.storageId}`)} />}
                                                         {item.note && (
                                                             <div className="text-[10px] italic text-primary/80 font-medium">
                                                                 --{stylizeText(item.note)}
@@ -3197,12 +3226,14 @@ export function InstantPOS() {
                                                 : <ChefHat className="h-4 w-4" />}
                                         </Button>
                                     )}
+                                    <StockDemandNotice workspaceId={user?.workspaceId} guard={reservationGuard} />
                                     <Button
                                         className="h-11 flex-1 rounded-xl"
                                         onClick={checkoutTicket}
                                         disabled={
                                             isCheckoutLoading
                                             || activeTicket.items.length === 0
+                                            || reservationGuard.blocked
                                             || activeTicketTotals.hasMixedCurrency
                                             || minimumPriceViolations.size > 0
                                         }

@@ -4,6 +4,13 @@ import type { StockAdjustmentPageQuery } from '@/local-db/stockAdjustments'
 import type { StockBatchGroupPageQuery } from '@/local-db/stockBatches'
 
 export const queryKeys = {
+  stockReservations: {
+    all: (workspaceId?: string) => ['atlas', 'workspace', workspaceId ?? 'unscoped', 'stock-reservations'] as const,
+    availability: (workspaceId: string | undefined, positions: readonly { productId: string; storageId: string }[], excludeOrderId?: string, userId?: string, role?: string) =>
+      [...queryKeys.stockReservations.all(workspaceId), 'availability', positions, excludeOrderId ?? null, userId ?? null, role ?? null] as const,
+    details: (workspaceId: string, productId: string, storageId: string, page: number, userId?: string, role?: string) =>
+      [...queryKeys.stockReservations.all(workspaceId), 'details', productId, storageId, page, userId ?? null, role ?? null] as const,
+  },
   postal: {
     all: (workspaceId: string) => ['atlas', 'workspace', workspaceId, 'postal'] as const,
     statement: (input: import('@/local-db/postalStatement').PostalStatementInput) => [...queryKeys.postal.all(input.workspaceId), 'statement', input] as const,

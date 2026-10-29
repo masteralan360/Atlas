@@ -7,6 +7,7 @@ import { isTauri } from "@/lib/platform";
 import { shouldMirrorToSqlite, isStrictLocalWorkspaceMode } from "@/workspace/workspaceMode";
 import { recordWorkspaceDataFetch } from "@/workspace/workspaceDataFreshness";
 import { isAllowedInventoryQuantityTransition } from "./inventoryDeficit";
+import { prepareSqliteReservationValidation } from './stockReservationsSqlite';
 import { runUsbBackupIfNeeded } from "./usbBackup";
 import { normalizeProductSku } from "./productSku";
 import type { PaymentTransaction } from "./models";
@@ -352,6 +353,10 @@ async function ensureCurrentWorkspaceColumn(connection: SqliteConnection) {
 }
 
 async function ensureInventoryDeficitTriggers(connection: SqliteConnection) {
+  await connection.execute(`CREATE INDEX IF NOT EXISTS local_order_reservation_scope
+    ON local_entities(workspace_id, json_extract(payload,'$.status')) WHERE entity_type='sales_orders'`);
+  await connection.execute(`CREATE INDEX IF NOT EXISTS local_inventory_reservation_position
+    ON local_entities(workspace_id,json_extract(payload,'$.productId'),json_extract(payload,'$.storageId')) WHERE entity_type='inventory'`);
   const localWorkspacePredicate = `EXISTS (
     SELECT 1
     FROM local_entities AS workspace
@@ -1478,6 +1483,7 @@ export async function commitLocalModeSqliteMutations(
   }
 
   await runLocalModeSqliteTransaction(async (connection) => {
+    const validateReservations = await prepareSqliteReservationValidation(connection, authoritativeMutations);
     for (const mutation of authoritativeMutations) {
       if (mutation.type === "upsert") {
         await persistEntity(cacheDb, mutation.tableName, mutation.row, {
@@ -1493,6 +1499,7 @@ export async function commitLocalModeSqliteMutations(
         });
       }
     }
+    await validateReservations();
   });
 }
 

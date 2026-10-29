@@ -11020,5 +11020,29 @@
     "driver": "سائق",
     "linked": "مرتبط",
     "unlink": "إلغاء الربط"
+  },
+  "stockReservations": {
+    "stockShortageMessage": "المتاح {{available}} وحدة فقط. طلبت {{required}}.",
+    "availableForOrderQuantity": "{{quantity}} متاح لتنفيذ الطلب",
+    "ownReservationQuantity": "{{quantity}} محجوز لهذا الطلب",
+    "detailsTitle": "عرض الحجوزات",
+    "visibilityHelp": "تظهر فقط الطلبات التي يُسمح لك بعرضها. تُحتسب جميع الحجوزات ضمن الكمية المتاحة. الكميات بوحدة المخزون الأساسية.",
+    "loadFailed": "تعذر التحقق من الكمية المتاحة. حدّث البيانات وحاول مجدداً.",
+    "reservedQuantity": "{{quantity}} محجوز",
+    "availableQuantity": "{{quantity}} متاح للبيع",
+    "onHandQuantity": "{{quantity}} موجود فعلياً",
+    "shortQuantity": "النقص {{quantity}}",
+    "checking": "جارٍ التحقق من المخزون…",
+    "noVisibleOrders": "لا توجد حجوزات يمكن عرضها بصلاحياتك الحالية.",
+    "conflictTitle": "بعض الأصناف تتجاوز المخزون المتاح",
+    "resolveHelp": "قلّل الكمية أو اختر مخزناً آخر أو راجع الحجوزات الحالية قبل المتابعة.",
+    "product": "المنتج",
+    "required": "المطلوب",
+    "onHand": "الموجود فعلياً",
+    "reserved": "المحجوز",
+    "available": "المتاح للبيع",
+    "reviewItems": "مراجعة الأصناف",
+    "retry": "تحديث الكمية المتاحة",
+    "conflictMessage": "المتاح للبيع {{available}} وحدة فقط. طلبت {{required}}. الوحدات الأخرى محجوزة لطلبات البيع."
   }
 }

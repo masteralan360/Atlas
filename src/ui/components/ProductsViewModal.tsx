@@ -1,3 +1,4 @@
+import { StockReservationInfo } from '@/ui/components/inventory/StockReservationInfo'
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, LayoutGrid, Package, Search, Warehouse } from 'lucide-react'
 
@@ -285,6 +286,7 @@ export function ProductsViewModal({
                                                 <ProductThumbnail product={product} />
                                                 <div className="min-w-0 flex-1">
                                                     <div className="truncate font-medium">{product.name}</div>
+                                                    <StockReservationInfo workspaceId={user?.workspaceId} productId={product.id} storageId={selectedStorageId} interactive={false} />
                                                     {product.sku ? (
                                                         <div className="mt-0.5 truncate text-xs text-muted-foreground">
                                                             {labels?.skuLabel || 'SKU'}: {product.sku}

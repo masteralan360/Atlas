@@ -455,6 +455,8 @@ export function Sales() {
                 sku: item.product?.sku || item.product_sku || null,
                 unit: item.selling_unit_code || item.product?.unit || null,
                 returnableQuantity,
+                storageId: item.storage_id ?? null,
+                unitFactor: Number(item.unit_factor ?? 1),
                 unitPrice: Number(item.converted_unit_price ?? item.unit_price ?? 0),
                 priceBookId: item.price_book_id ?? null,
             }]

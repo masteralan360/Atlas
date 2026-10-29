@@ -11082,5 +11082,29 @@
     "orderTotalWithDeliveryFee": "کۆی گشتی داواکاری لەگەڵ کرێی گەیاندن",
     "orderTotalAfterDiscount": "کۆی گشتی داواکاری دوای داشکاندن",
     "orderTotalWithDeliveryFeeAfterDiscount": "کۆی گشتی داواکاری دوای داشکاندن و کرێی گەیاندن"
+  },
+  "stockReservations": {
+    "stockShortageMessage": "تەنها {{available}} یەکە بەردەستە. تۆ {{required}} یەکەت داوا کردووە.",
+    "availableForOrderQuantity": "{{quantity}} بەردەست بۆ جێبەجێکردنی داواکاری",
+    "ownReservationQuantity": "{{quantity}} بۆ ئەم داواکارییە تەرخانکراوە",
+    "detailsTitle": "بینینی حیجزەکان",
+    "visibilityHelp": "تەنها ئەو داواکارییانە پیشان دەدرێن کە ڕێگەت پێدراوە بیانبینیت. هەموو حیجزەکان لە بڕی بەردەست هەژمار دەکرێن. بڕەکان بە یەکەی بنەڕەتی کۆگان.",
+    "loadFailed": "نەتوانرا بڕی بەردەست بپشکنرێت. نوێی بکەرەوە و دووبارە هەوڵ بدە.",
+    "reservedQuantity": "{{quantity}} تەرخانکراو",
+    "availableQuantity": "{{quantity}} بەردەست بۆ فرۆشتن",
+    "onHandQuantity": "{{quantity}} بڕی هەبوو",
+    "shortQuantity": "{{quantity}} کەمە",
+    "checking": "پشکنینی بڕی کۆگا…",
+    "noVisibleOrders": "بەپێی دەسەڵاتەکانت هیچ حیجزێک بۆ پیشاندان نییە.",
+    "conflictTitle": "بڕی هەندێک کاڵا لە بڕی بەردەست زیاترە",
+    "resolveHelp": "بڕەکە کەم بکەرەوە، کۆگایەکی تر هەڵبژێرە یان پێش بەردەوامبوون حیجزەکان بپشکنە.",
+    "product": "کاڵا",
+    "required": "پێویست",
+    "onHand": "بڕی هەبوو",
+    "reserved": "تەرخانکراو",
+    "available": "بەردەست بۆ فرۆشتن",
+    "reviewItems": "پشکنینی کاڵاکان",
+    "retry": "نوێکردنەوەی بڕی بەردەست",
+    "conflictMessage": "تەنها {{available}} یەکە بۆ فرۆشتن بەردەستە. تۆ {{required}} یەکەت داوا کردووە. یەکەکانی تر بۆ داواکارییەکانی فرۆشتن تەرخانکراون."
   }
 }

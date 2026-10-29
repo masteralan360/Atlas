@@ -1,4 +1,5 @@
 import i18n from '@/i18n/config'
+import { assertLocalStockDemands } from './stockReservationData'
 import { supabase } from '@/auth/supabase'
 import { generateId } from '@/lib/utils'
 import { isOnline } from '@/lib/network'
@@ -233,6 +234,9 @@ async function saveLocal(input: PosCheckoutInput, loanDependencies?: LoanBusines
             p.total_amount, p.settlement_currency, input.primaryRate?.rate ?? null,
             input.primaryRate?.source ?? null, p.items, input.exchangeRates
         ), { maxDiscountPercent: input.maxDiscountPercent })
+        await assertLocalStockDemands(p.workspace_id, p.items.filter(item => item.storage_id).map(item => ({
+            productId: item.product_id, storageId: item.storage_id!, quantity: item.inventory_quantity ?? item.quantity,
+        })))
         await db.sales.add({
             id: p.id, workspaceId: p.workspace_id, cashierId: input.user.id,
             totalAmount: p.total_amount, originalTotalAmount: p.total_amount, returnedAmount: 0,

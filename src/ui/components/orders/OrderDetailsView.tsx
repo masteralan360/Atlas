@@ -1,3 +1,5 @@
+import { StockReservationInfo, StockDemandNotice } from '@/ui/components/inventory/StockReservationInfo'
+import { useStockDemandGuard } from '@/local-db/stockReservations'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { Archive, ArrowLeft, BadgeCheck, BadgeDollarSign, CalendarDays, CircleAlert, CircleCheck, Clock3, CreditCard, Eye, LayoutGrid, List, Loader2, Lock, Package, PackageCheck, Pencil, Plus, Printer, Receipt, RotateCcw, ShoppingCart, Trash2, TrendingUp, Truck, UsersRound, Warehouse, XCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -448,6 +450,12 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         [resolved]
     )
     const orderProducts = useProductsByIds(workspaceId, orderProductIds)
+    const reservationGuard = useStockDemandGuard(workspaceId,
+        salesOrder && ['draft', 'pending'].includes(salesOrder.status) ? salesOrder.items.flatMap(item => {
+            const storageId = item.storageId || salesOrder.sourceStorageId
+            return storageId && !orderProducts.find(product => product.id === item.productId)?.isService
+                ? [{ productId: item.productId, storageId, quantity: getOrderLineInventoryQuantity(item) }] : []
+        }) : [], salesOrder?.id)
     const productUnits = useMemo(() => orderProducts.reduce<Record<string, string>>((units, product) => {
         const unit = normalizeUnitCode(product.unit)
         if (unit) units[product.id] = unit
@@ -1457,6 +1465,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         <div
             className="space-y-4"
         >
+            {isSales && <StockDemandNotice workspaceId={workspaceId} guard={reservationGuard} />}
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Link href="/orders" className="inline-flex items-center gap-1 hover:text-foreground">
@@ -1526,7 +1535,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                     <PressAndHoldButton
                                         variant={action.variant}
                                         icon={<ActionIcon className="mr-2 h-4 w-4" aria-hidden="true" />}
-                                        disabled={activeWorkflowAction !== null}
+                                        disabled={activeWorkflowAction !== null || (isSales && ['reserve', 'complete'].includes(action.key) && reservationGuard.blocked)}
                                         onPressStart={handleWorkflowPressStart}
                                         onComplete={() => {
                                             handleWorkflowAdvanceComplete()
@@ -1556,7 +1565,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             <Button
                                 key={action.key}
                                 variant={action.variant}
-                                disabled={activeWorkflowAction !== null}
+                                disabled={activeWorkflowAction !== null || (isSales && ['reserve', 'complete'].includes(action.key) && reservationGuard.blocked)}
                                 aria-busy={isActionLoading}
                                 onClick={action.onClick}
                             >
@@ -2312,6 +2321,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                                 />
                                                                 <div className="min-w-0">
                                                                     <div className={cn('font-semibold', isItemFullyReturned && 'line-through opacity-50')}>{item.productName}</div>
+                                                                    {isSales && order.status === 'pending' && <StockReservationInfo workspaceId={workspaceId} productId={item.productId} storageId={item.storageId || (order as SalesOrder).sourceStorageId} required={inventoryQuantity} excludeOrderId={order.id} />}
                                                                     <div className="text-xs text-muted-foreground">{item.productSku || 'N/A'}</div>
                                                                     {isSales && salesItem.batchAllocations?.length ? (
                                                                         <div className="mt-1 text-xs font-medium text-primary">

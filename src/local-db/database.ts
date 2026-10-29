@@ -190,6 +190,7 @@ function queueInventoryTransactionsChanged(workspaceId?: string | null) {
     inventoryTransactionChangeSuppressionDepth > 0 ||
     !workspaceId ||
     typeof window === 'undefined'
+    || typeof window.dispatchEvent !== 'function'
   ) {
     return
   }
@@ -213,6 +214,7 @@ function queueStockBatchesChanged(workspaceId?: string | null) {
     stockBatchChangeSuppressionDepth > 0 ||
     !workspaceId ||
     typeof window === 'undefined'
+    || typeof window.dispatchEvent !== 'function'
   ) {
     return
   }

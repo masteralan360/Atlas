@@ -53,6 +53,7 @@ import {
 } from "@/lib/updatePreference";
 import { checkForTauriUpdate } from "@/lib/tauriUpdater";
 import { QueryScopeBoundary } from "@/query/QueryScopeBoundary";
+import { GlobalStockReservationConflict } from '@/ui/components/inventory/StockReservationInfo';
 
 const CrudPerformanceDebugger = import.meta.env.DEV
   ? lazy(() => import("@/dev/crud-debugger/CrudPerformanceDebugger"))
@@ -2609,6 +2610,7 @@ function App() {
             </ExchangeRateProvider>
               )}
               <Toaster />
+              <GlobalStockReservationConflict />
               {CrudPerformanceDebugger && (
                 <Suspense fallback={null}>
                   <CrudPerformanceDebugger />

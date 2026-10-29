@@ -263,7 +263,7 @@ async function applyLocalSaleProductExchange(input: ProcessSaleProductExchangeIn
 
     await db.transaction('rw', [
         db.sales, db.sale_items, db.sale_returns, db.sale_return_items,
-        db.sale_product_exchanges, db.inventory, db.inventory_transactions, db.products, db.stock_batches,
+        db.sale_product_exchanges, db.inventory, db.inventory_transactions, db.products, db.stock_batches, db.sales_orders,
         db.storages, db.loans, db.loan_installments, db.loan_payments, db.payment_transactions,
         db.payment_accounts, db.payment_account_movements, db.payment_account_balances,
         db.users, db.profiles, db.service_access_category_members, db.service_access_category_services,

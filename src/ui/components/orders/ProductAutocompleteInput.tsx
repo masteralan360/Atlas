@@ -1,3 +1,4 @@
+import { StockReservationInfo } from '@/ui/components/inventory/StockReservationInfo'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, Check, GitBranch, Loader2, Package } from 'lucide-react'
@@ -298,7 +299,8 @@ export function ProductAutocompleteInput({
                             <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-1.5"><span className="break-words font-medium">{product.name}</span>{product.parentProductId && <span className="inline-flex items-center gap-1 rounded-md border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary"><GitBranch className="h-3 w-3" />{t('products.variants.variant', { defaultValue: 'Variant' })}</span>}</div>
                                 {product.sku ? (
-                                    <div className="break-words text-xs text-muted-foreground">{skuLabel}: {product.sku}</div>
+                                    <><div className="break-words text-xs text-muted-foreground">{skuLabel}: {product.sku}</div>
+                                    <StockReservationInfo workspaceId={user?.workspaceId} productId={product.id} storageId={storageId || storageScopeId} interactive={false} /></>
                                 ) : null}
                                 {product.parentProductId && productById.get(product.parentProductId) && (
                                     <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{t('products.variants.variantOf', { defaultValue: 'Variant of' })}: {productById.get(product.parentProductId)?.name}</div>

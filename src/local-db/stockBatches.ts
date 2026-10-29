@@ -1697,7 +1697,7 @@ async function fetchLocalStockBatchGroupPage(
         .anyOf(keys)
         .filter((batch) => !batch.isDeleted && canAccessStorage(batch.storageId, access))
         .toArray()
-    const selectedGroupByKey = new Map(selectedGroups.map((group) => [
+    const selectedGroupByKey = new Map<string, (typeof selectedGroups)[number]>(selectedGroups.map((group) => [
         `${group.productId}:${group.storageId}`,
         group,
     ] as const))

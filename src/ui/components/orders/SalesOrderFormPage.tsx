@@ -1,3 +1,4 @@
+import { StockReservationInfo } from '@/ui/components/inventory/StockReservationInfo'
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AlertTriangle, ArrowLeft, BadgeDollarSign, CalendarDays, Check, CreditCard, Link2, NotebookPen, Plus, ShoppingCart, Star, Trash2, Truck, Unlink, Users } from 'lucide-react'
@@ -2114,7 +2115,7 @@ export function SalesOrderFormPage({
                                                             )
                                                         ) : null}
                                                     </Label>
-                                                    <div className="flex items-center">
+                                                    <div className="flex min-w-0 items-center">
                                                         {canOpenProductsView ? (
                                                             <ProductsViewModalTrigger
                                                                 label={t('products.title', { defaultValue: 'Browse products' })}
@@ -2145,6 +2146,11 @@ export function SalesOrderFormPage({
                                                             onStorageMissingClick={() => handleStorageMissing(item.clientId)}
                                                         />
                                                     </div>
+                                                    {product && !isService(product) && (
+                                                        <div className="min-w-0">
+                                                            <StockReservationInfo workspaceId={workspaceId} productId={item.productId} storageId={item.storageId || sourceStorageId} />
+                                                        </div>
+                                                    )}
                                                     {item.productId && item.storageId && !isService(product) ? (
                                                         <div className="space-y-1.5 pt-1">
                                                             <Label className="text-xs">{t('orders.form.stockSource', { defaultValue: 'Stock source' })}</Label>

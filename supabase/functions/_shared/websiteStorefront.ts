@@ -1,3 +1,4 @@
+import { withSellableStock } from './sellableStock.ts'
 import { createAdminClient } from './supabase.ts'
 
 export const JUMLA_KHALEEJ_SITE_KEY = 'jumla-khaleej'
@@ -279,7 +280,7 @@ export async function loadVisibleModeProducts(
         throw inventoryError
     }
 
-    const resolvedInventoryRows = (inventoryRows ?? []) as MarketplaceInventoryRow[]
+    const resolvedInventoryRows = await withSellableStock(adminClient, context.workspace.id, (inventoryRows ?? []) as MarketplaceInventoryRow[])
     const inventoryQuantityByProductId = new Map<string, number>()
     const inventoryQuantityByProductAndStorage = new Map<string, Map<string, number>>()
     const marketplaceAddedAtByProductId = new Map<string, string | null>()

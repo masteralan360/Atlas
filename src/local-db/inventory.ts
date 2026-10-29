@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import i18n from '@/i18n/config'
+import { assertLocalStockDemands } from './stockReservationData'
 import { isOnline } from '@/lib/network'
 import { QUANTITY_EPSILON, isPositiveQuantity, quantitiesEqual, roundQuantity } from '@/lib/quantity'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
@@ -1328,13 +1329,19 @@ export async function adjustInventoryQuantity(input: {
         previousQuantity,
         nextQuantity,
     } = await db.transaction('rw', [
-        db.inventory, db.products, db.storages, db.inventory_transactions,
+        db.inventory, db.products, db.storages, db.inventory_transactions, db.sales_orders, db.product_storage_assignments,
         ...(isLocalWorkspaceMode(input.workspaceId)
             ? [db.users, db.profiles, db.storage_member_exclusions]
             : [])
     ], async () => {
         const currentQuantity = await getInventoryQuantityForProductStorage(input.productId, input.storageId)
         const computedNextQuantity = roundQuantity(currentQuantity + input.quantityDelta)
+
+        if (syncSource === 'local' && isLocalWorkspaceMode(input.workspaceId) && input.quantityDelta < 0
+            && !['stock_adjustment', 'inventory_change', 'initial_stock'].includes(input.movement?.transactionType || '')) {
+            await assertLocalStockDemands(input.workspaceId, [{ productId: input.productId, storageId: input.storageId, quantity: -input.quantityDelta }],
+                input.movement?.referenceType === 'sales_order' ? input.movement.referenceId ?? undefined : undefined)
+        }
 
         if (computedNextQuantity < 0) {
             throw new Error('Insufficient inventory')

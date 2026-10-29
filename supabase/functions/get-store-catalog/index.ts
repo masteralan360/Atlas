@@ -1,3 +1,4 @@
+import { withSellableStock } from '../_shared/sellableStock.ts'
 import { createAdminClient } from '../_shared/supabase.ts'
 import { computeDiscountPrice, type ResolvedWorkspaceDiscountRow } from '../_shared/discounts.ts'
 import { corsHeaders, errorResponse, jsonResponse } from '../_shared/http.ts'
@@ -228,7 +229,7 @@ Deno.serve(async (req) => {
 
         const inventorySources = selectStorefrontInventorySources(
             storefrontStorageIds,
-            (inventoryRows ?? []) as InventoryRow[],
+            await withSellableStock(adminClient, resolved.workspace.id, (inventoryRows ?? []) as InventoryRow[]),
             (assignmentRows ?? []) as StorageAssignmentRow[]
         )
         let visibleProductIds = Array.from(inventorySources.sourceStorageIdByProductId.keys())

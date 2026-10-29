@@ -1,4 +1,5 @@
 import type { TFunction } from 'i18next'
+import { normalizeStockReservationError } from './stockReservationConflict'
 
 const ORDER_ERROR_TRANSLATIONS: Record<string, { key: string; fallback: string }> = {
     return_request_identity_mismatch: {
@@ -52,6 +53,8 @@ const ORDER_ERROR_TRANSLATIONS: Record<string, { key: string; fallback: string }
 }
 
 export function getLocalizedOrderError(error: unknown, t: TFunction, fallback = 'Action failed') {
+    const reservationError = normalizeStockReservationError(error)
+    if (reservationError) return reservationError.message
     const message = error instanceof Error
         ? error.message
         : typeof error === 'string'

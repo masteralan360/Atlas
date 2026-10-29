@@ -1,3 +1,5 @@
+import { useStockDemandGuard } from '@/local-db/stockReservations'
+import { StockReservationInfo, StockDemandNotice } from '@/ui/components/inventory/StockReservationInfo'
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, ArrowDownToLine, ArrowRightLeft, ArrowUpFromLine, CircleCheck, Loader2, LockKeyhole, PackageCheck, Warehouse } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -36,6 +38,8 @@ export interface ProductExchangeSaleItem {
     unit?: string | null
     /** Quantity still eligible for return/exchange. */
     returnableQuantity: number
+    storageId?: string | null
+    unitFactor?: number
     /** The original unit price in the sale's settlement currency. */
     unitPrice: number
     /** Price Book that priced this sale item, when POS had one selected. */
@@ -189,7 +193,11 @@ export function ProductExchangeModal({
     const isReplacementQuantityValid = !!selectedReplacementProduct
         && isPositiveQuantity(replacementQuantityValue)
         && replacementQuantityValue <= selectedReplacementProduct.availableQuantity
-    const canSubmit = isReturnQuantityValid && isReplacementQuantityValid && !!storageId
+    const returnedStockCredit = isReturnQuantityValid && selectedSaleItem?.productId === replacementProductId && selectedSaleItem.storageId === storageId
+        ? returnedQuantityValue * (selectedSaleItem.unitFactor ?? 1) : 0
+    const replacementStockDemand = Math.max(0, replacementQuantityValue - returnedStockCredit)
+    const reservationGuard = useStockDemandGuard(workspaceId, isOpen && replacementProductId && storageId ? [{ productId: replacementProductId, storageId, quantity: replacementStockDemand }] : [])
+    const canSubmit = isReturnQuantityValid && isReplacementQuantityValid && !!storageId && !reservationGuard.blocked
     const hasReturnQuantityError = !!selectedSaleItem && !isReturnQuantityValid
     const hasReplacementQuantityError = !!selectedReplacementProduct && !isReplacementQuantityValid
     const returnQuantityError = !selectedSaleItem
@@ -287,6 +295,7 @@ export function ProductExchangeModal({
 
         setSubmitError('')
         try {
+            await reservationGuard.assert()
             await onSubmit({
                 originalSaleItemId: selectedSaleItem.id,
                 returnedProductId: selectedSaleItem.productId,
@@ -425,6 +434,7 @@ export function ProductExchangeModal({
                                                 showLinkedIndicator={!!selectedReplacementProduct}
                                             />
                                         </div>
+                                        {replacementProductId && <StockReservationInfo workspaceId={workspaceId} productId={replacementProductId} storageId={storageId} required={replacementStockDemand} />}
                                         {storageId && storageProducts.length === 0 && (
                                             <p className="text-xs text-amber-700 dark:text-amber-300">
                                                 {t('sales.exchange.noProductsInStorage', { defaultValue: 'This storage has no products available for exchange.' })}
@@ -540,6 +550,7 @@ export function ProductExchangeModal({
                 </DialogBody>
 
                 <DialogFooter layout="structured">
+                    <StockDemandNotice workspaceId={workspaceId} guard={reservationGuard} />
                     <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
                         {t('common.cancel', { defaultValue: 'Cancel' })}
                     </Button>

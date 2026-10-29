@@ -11315,5 +11315,29 @@
     "driver": "Driver",
     "linked": "Linked",
     "unlink": "Unlink"
+  },
+  "stockReservations": {
+    "stockShortageMessage": "Only {{available}} units are available. You requested {{required}}.",
+    "availableForOrderQuantity": "{{quantity}} available for fulfillment",
+    "ownReservationQuantity": "{{quantity}} reserved for this order",
+    "detailsTitle": "View reservations",
+    "visibilityHelp": "Only orders you are allowed to view are listed. All reservations still count toward availability. Quantities use the base inventory unit.",
+    "loadFailed": "Could not check stock availability. Refresh and try again.",
+    "reservedQuantity": "{{quantity}} reserved",
+    "availableQuantity": "{{quantity}} available to sell",
+    "onHandQuantity": "{{quantity}} on hand",
+    "shortQuantity": "Short by {{quantity}}",
+    "checking": "Checking stock availability…",
+    "noVisibleOrders": "No reservations are visible with your current access.",
+    "conflictTitle": "Some items exceed available stock",
+    "resolveHelp": "Reduce the quantity, choose another storage, or review the existing reservations before proceeding.",
+    "product": "Product",
+    "required": "Requested",
+    "onHand": "On hand",
+    "reserved": "Reserved",
+    "available": "Available to sell",
+    "reviewItems": "Review items",
+    "retry": "Refresh availability",
+    "conflictMessage": "Only {{available}} units are available to sell. You requested {{required}}. Other units are reserved for sales orders."
   }
 }

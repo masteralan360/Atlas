@@ -918,6 +918,7 @@ async function createLocalTransferBatch(input: CreateInventoryTransferBatchInput
       db.inventory_transactions,
       db.inventory_transfer_batches,
       db.inventory_transfer_sequences,
+      db.sales_orders,
       db.inventory_transfer_transactions,
       db.stock_batches,
       db.products,
