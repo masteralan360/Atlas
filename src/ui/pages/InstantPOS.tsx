@@ -1,4 +1,4 @@
-import { useStockDemandGuard } from '@/local-db/stockReservations'
+import { useStockAvailability, useStockDemandGuard } from '@/local-db/stockReservations'
 import { StockReservationInfo, StockDemandNotice, SellableStockQuantity } from '@/ui/components/inventory/StockReservationInfo'
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -425,6 +425,7 @@ interface MobileTicketPanelProps {
     activePendingTimeLeftMs: number | null
     isCheckoutLoading: boolean
     reservationBlocked: boolean
+    reservationRequiredByPosition: ReadonlyMap<string, number>
     workspaceId?: string
     reservationNotice: React.ReactNode
     canPreprintReceipt: boolean
@@ -455,7 +456,7 @@ interface MobileTicketPanelProps {
 
 function MobileTicketPanel({
     activeTicket, activeTicketTotals, minimumPriceViolations, settlementCurrency, features, t,
-    statusLabels, statusAction, activePendingTimeLeftMs, isCheckoutLoading, reservationBlocked, workspaceId, reservationNotice,
+    statusLabels, statusAction, activePendingTimeLeftMs, isCheckoutLoading, reservationBlocked, reservationRequiredByPosition, workspaceId, reservationNotice,
     canPreprintReceipt, isPreprinting, isLoadingPreprintTemplate,
     canCookOrderTicket, isPrintingCookOrderTicket,
     getStorageLabel, checkoutTicket, handlePreprintReceipt, handleCookOrderTicket, setTicketStatus, extendPendingExpiry, clearActiveTicket,
@@ -751,7 +752,7 @@ function MobileTicketPanel({
                                                     </div>
                                                     <div>
                                                         <div className="text-sm font-semibold text-foreground">{item.name}</div>
-                                                        <StockReservationInfo workspaceId={workspaceId} productId={item.productId} storageId={item.storageId} required={soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item))} />
+                                                        <StockReservationInfo workspaceId={workspaceId} productId={item.productId} storageId={item.storageId} required={reservationRequiredByPosition.get(`${item.productId}:${item.storageId}`)} sellingUnit={{ unitCode: item.sellingUnitCode, baseUnitCode: item.baseUnitCode, factor: getTicketItemFactor(item) }} />
                                                         {item.note && (
                                                             <div className="text-[10px] italic text-primary/80 font-medium">
                                                                 --{stylizeText(item.note)}
@@ -1346,6 +1347,8 @@ export function InstantPOS() {
     const unitPickerProduct = unitPickerProductId
         ? selectableProducts.find((product) => product.id === unitPickerProductId)
         : undefined
+    const unitPickerStock = useStockAvailability(user?.workspaceId, unitPickerProduct?.storageId
+        ? [{ productId: unitPickerProduct.id, storageId: unitPickerProduct.storageId }] : [])
     const unitPickerOptions = unitPickerProduct && !isService(unitPickerProduct)
         ? getActiveProductUoms(unitPickerProduct, productUoms, uomDescriptors)
         : []
@@ -2900,7 +2903,7 @@ export function InstantPOS() {
                                                                 ? 'bg-amber-400 text-amber-950'
                                                                 : 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 backdrop-blur-md'
                                                     )}>
-                                                        <SellableStockQuantity workspaceId={user?.workspaceId} productId={product.id} storageId={product.storageId} inCart={inTicketQuantity} unitFactor={defaultUom?.coefficient ?? 1} />
+                                                        <SellableStockQuantity workspaceId={user?.workspaceId} productId={product.id} storageId={product.storageId} inCart={inTicketQuantity} unitFactor={defaultUom?.coefficient ?? 1} unitCode={defaultUom?.unitCode ?? product.unit} isDynamic={defaultUom?.isDynamic ?? false} />
                                                     </div>
                                                 )}
                                                 {activeDiscount && (
@@ -2913,7 +2916,7 @@ export function InstantPOS() {
                                                 <div className="truncate text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/60">
                                                     {product.sku || (service ? t('services.title', { defaultValue: 'Services' }) : '---')}
                                                 </div>
-                                                {!service && <StockReservationInfo workspaceId={user?.workspaceId} productId={product.id} storageId={product.storageId} interactive={false} />}
+                                                {!service && <StockReservationInfo workspaceId={user?.workspaceId} productId={product.id} storageId={product.storageId} interactive={false} sellingUnit={defaultUom ? { unitCode: defaultUom.unitCode, baseUnitCode: product.unit, factor: defaultUom.coefficient, isDynamic: defaultUom.isDynamic } : undefined} />}
                                                 <h3 className="line-clamp-2 text-sm font-bold leading-snug text-foreground transition-colors group-hover:text-primary">
                                                     {product.name}
                                                 </h3>
@@ -2957,6 +2960,7 @@ export function InstantPOS() {
                             activePendingTimeLeftMs={activePendingTimeLeftMs}
                             isCheckoutLoading={isCheckoutLoading}
                             reservationBlocked={reservationGuard.blocked}
+                            reservationRequiredByPosition={reservationGuard.requiredByPosition}
                             workspaceId={user?.workspaceId}
                             reservationNotice={<StockDemandNotice workspaceId={user?.workspaceId} guard={reservationGuard} />}
                             canPreprintReceipt={canPreprintReceipt}
@@ -3095,7 +3099,7 @@ export function InstantPOS() {
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="min-w-0 flex-1">
                                                         <div className="truncate text-sm font-medium text-foreground">{item.name} {item.sellingUnitCode ? <span className="text-xs text-muted-foreground">· {item.sellingUnitCode}</span> : null}</div>
-                                                        {!isService(resolveTicketProduct(item)) && <StockReservationInfo workspaceId={user?.workspaceId} productId={item.productId} storageId={item.storageId || resolveTicketProduct(item)?.storageId} required={reservationGuard.requiredByPosition.get(`${item.productId}:${item.storageId || resolveTicketProduct(item)?.storageId}`)} />}
+                                                        {!isService(resolveTicketProduct(item)) && <StockReservationInfo workspaceId={user?.workspaceId} productId={item.productId} storageId={item.storageId || resolveTicketProduct(item)?.storageId} required={reservationGuard.requiredByPosition.get(`${item.productId}:${item.storageId || resolveTicketProduct(item)?.storageId}`)} sellingUnit={{ unitCode: item.sellingUnitCode, baseUnitCode: item.baseUnitCode, factor: getTicketItemFactor(item) }} />}
                                                         {item.note && (
                                                             <div className="text-[10px] italic text-primary/80 font-medium">
                                                                 --{stylizeText(item.note)}
@@ -3282,8 +3286,10 @@ export function InstantPOS() {
                     <AppDialogBody>
                         <div className="space-y-2">
                             <p className="text-sm text-muted-foreground">{unitPickerProduct?.name}</p>
+                            <StockReservationInfo workspaceId={user?.workspaceId} productId={unitPickerProduct?.id} storageId={unitPickerProduct?.storageId} />
                             {unitPickerOptions.map((uom) => {
-                                const remaining = Math.max(0, (unitPickerProduct?.quantity ?? 0) - unitPickerUsedBaseQuantity)
+                                const stock = unitPickerStock.data?.find(row => row.productId === unitPickerProduct?.id && row.storageId === unitPickerProduct?.storageId)
+                                const remaining = stock && !unitPickerStock.error ? Math.max(0, stock.available - unitPickerUsedBaseQuantity) : 0
                                 const canAdd = remaining + 1e-8 >= uom.coefficient
                                 const discount = activeDiscountMap.get(unitPickerProduct?.id ?? '')
                                 const price = getDiscountedUomPrice(uom.sellingPrice, discount)

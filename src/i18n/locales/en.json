@@ -11317,7 +11317,8 @@
     "unlink": "Unlink"
   },
   "stockReservations": {
-    "stockShortageMessage": "Only {{available}} units are available. You requested {{required}}.",
+    "baseUnits": "base inventory units",
+    "stockShortageMessage": "Only {{available}} base inventory units are available. You requested {{required}} base inventory units.",
     "availableForOrderQuantity": "{{quantity}} available for fulfillment",
     "ownReservationQuantity": "{{quantity}} reserved for this order",
     "detailsTitle": "View reservations",
@@ -11338,6 +11339,6 @@
     "available": "Available to sell",
     "reviewItems": "Review items",
     "retry": "Refresh availability",
-    "conflictMessage": "Only {{available}} units are available to sell. You requested {{required}}. Other units are reserved for sales orders."
+    "conflictMessage": "Only {{available}} base inventory units are available to sell. You requested {{required}} base inventory units. Other units are reserved for sales orders."
   }
 }

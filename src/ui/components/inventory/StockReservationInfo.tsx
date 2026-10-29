@@ -15,17 +15,33 @@ import { SmallDialog, SmallDialogBody, SmallDialogContent, SmallDialogHeader, Sm
 import { AppPagination } from '@/ui/components/AppPagination'
 import { reportStockReservationConflict } from '@/lib/stockReservationConflict'
 import { getPathWithLang } from '@/lib/i18nRouting'
+import { formatStockReservationQuantity, getSellableStockQuantity, type StockReservationSellingUnit } from '@/lib/stockReservationPresentation'
 
-export function SellableStockQuantity({ workspaceId, productId, storageId, inCart = 0, unitFactor = 1 }: {
-  workspaceId?: string; productId: string; storageId?: string | null; inCart?: number; unitFactor?: number
+function useReservationQuantityFormatter(workspaceId?: string, productId?: string, sellingUnit?: StockReservationSellingUnit) {
+  const { t, i18n } = useTranslation()
+  const unit = useLiveQuery(async () => {
+    const product = productId ? await db.products.get(productId) : undefined
+    return product?.workspaceId === workspaceId ? product?.unit : undefined
+  }, [workspaceId, productId])
+  const unitLabel = (code?: string | null) => code ? t(`products.units.${code}`, { defaultValue: code }) : t('stockReservations.baseUnits')
+  const baseLabel = unitLabel(sellingUnit?.baseUnitCode || unit)
+  const number = new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 })
+  return (value: number) => formatStockReservationQuantity(value, baseLabel,
+    sellingUnit?.unitCode ? { label: unitLabel(sellingUnit.unitCode), factor: sellingUnit.factor ?? 1, isDynamic: sellingUnit.isDynamic } : undefined,
+    quantity => number.format(quantity), t('common.and'))
+}
+
+export function SellableStockQuantity({ workspaceId, productId, storageId, inCart = 0, unitFactor = 1, unitCode, isDynamic = true }: {
+  workspaceId?: string; productId: string; storageId?: string | null; inCart?: number; unitFactor?: number; unitCode?: string; isDynamic?: boolean
 }) {
   const { t, i18n } = useTranslation()
   const result = useStockAvailability(workspaceId, storageId ? [{ productId, storageId }] : [])
   const stock = result.data?.find(row => row.productId === productId && row.storageId === storageId)
   if (!stock || result.error) return <span aria-label={t(result.error ? 'stockReservations.loadFailed' : 'stockReservations.checking')}>…</span>
-  const value = Math.max(0, stock.available - inCart) / Math.max(unitFactor, 0.000001)
+  const value = getSellableStockQuantity(stock.available, inCart, unitFactor, isDynamic)
   const quantity = new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }).format(value)
-  return <span aria-label={t('stockReservations.availableQuantity', { quantity })}>{quantity}</span>
+  const label = unitCode ? `${quantity} ${t(`products.units.${unitCode}`, { defaultValue: unitCode })}` : quantity
+  return <span aria-label={t('stockReservations.availableQuantity', { quantity: label })}>{label}</span>
 }
 
 export function StockDemandNotice({ workspaceId, guard }: { workspaceId?: string; guard: ReturnType<typeof useStockDemandGuard> }) {
@@ -42,10 +58,11 @@ export function StockDemandNotice({ workspaceId, guard }: { workspaceId?: string
   </div>
 }
 
-export function StockReservationDetails({ workspaceId, position, open, onOpenChange }: {
-  workspaceId: string; position: StockPosition; open: boolean; onOpenChange: (open: boolean) => void
+export function StockReservationDetails({ workspaceId, position, open, onOpenChange, sellingUnit }: {
+  workspaceId: string; position: StockPosition; open: boolean; onOpenChange: (open: boolean) => void; sellingUnit?: StockReservationSellingUnit
 }) {
   const { t, i18n } = useTranslation()
+  const format = useReservationQuantityFormatter(workspaceId, position.productId, sellingUnit)
   const { currentPage, setCurrentPage, pageSize } = usePaginationState({ initialPageSize: 20, resetOn: [workspaceId, position.productId, position.storageId, open] })
   const result = useVisibleStockReservations(workspaceId, position, currentPage, open)
   const bounds = usePaginationBounds({ currentPage, setCurrentPage, pageSize, totalCount: result.data?.total, isLoading: result.isLoading, error: result.error })
@@ -63,7 +80,7 @@ export function StockReservationDetails({ workspaceId, position, open, onOpenCha
             <a href={`#${getPathWithLang(`/orders/${encodeURIComponent(row.id)}`, i18n.language)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 font-medium text-primary underline">
               <bdi>{row.order_number}</bdi><ExternalLink className="h-4 w-4" />
             </a>
-            <span>{t('stockReservations.reservedQuantity', { quantity: new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }).format(row.quantity) })}</span>
+            <span><bdi>{t('stockReservations.reservedQuantity', { quantity: format(row.quantity) })}</bdi></span>
           </div>) : <p>{t('stockReservations.noVisibleOrders')}</p>}
       </SmallDialogBody>
     </SmallDialogContent>
@@ -71,21 +88,21 @@ export function StockReservationDetails({ workspaceId, position, open, onOpenCha
 }
 
 /** Small, reusable selling-stock readout. No nested interactive controls on catalog cards. */
-export function StockReservationInfo({ workspaceId, productId, storageId, required, excludeOrderId, interactive = true }: {
-  workspaceId?: string; productId?: string; storageId?: string | null; required?: number; excludeOrderId?: string; interactive?: boolean
+export function StockReservationInfo({ workspaceId, productId, storageId, required, excludeOrderId, interactive = true, hideWhenUnreserved = false, sellingUnit }: {
+  workspaceId?: string; productId?: string; storageId?: string | null; required?: number; excludeOrderId?: string; interactive?: boolean; hideWhenUnreserved?: boolean; sellingUnit?: StockReservationSellingUnit
 }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const unit = useLiveQuery(async () => productId ? (await db.products.get(productId))?.unit : undefined, [productId])
+  const format = useReservationQuantityFormatter(workspaceId, productId, sellingUnit)
   const position = { productId: productId || '', storageId: storageId || '' }
   const result = useStockAvailability(workspaceId, workspaceId && productId && storageId ? [position] : [], excludeOrderId)
   if (!workspaceId || !productId || !storageId) return null
-  if (result.isLoading) return <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" role="status"><Loader2 className="h-3 w-3 animate-spin" />{t('stockReservations.checking')}</span>
+  if (result.isLoading) return hideWhenUnreserved ? null : <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" role="status"><Loader2 className="h-3 w-3 animate-spin" />{t('stockReservations.checking')}</span>
   if (result.error) return <span className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300"><RefreshCw className="h-3 w-3" />{t('stockReservations.loadFailed')}</span>
   const stock = result.data?.find(row => row.productId === productId && row.storageId === storageId)
   if (!stock) return null
-  const format = (value: number) => `${new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }).format(value)}${unit ? ` ${t(`products.units.${unit}`, unit)}` : ''}`
   const shortage = required !== undefined && required > stock.available + 0.0000005
+  if (hideWhenUnreserved && stock.reserved <= 0 && !shortage) return null
   return <>
     <span className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${shortage ? 'text-destructive' : 'text-muted-foreground'}`} data-testid="stock-reservation-info">
       {shortage ? <AlertTriangle className="h-3.5 w-3.5" /> : <PackageCheck className="h-3.5 w-3.5" />}
@@ -97,14 +114,14 @@ export function StockReservationInfo({ workspaceId, productId, storageId, requir
       </button> : <span className="rounded border border-amber-500/40 px-1.5 py-0.5 text-amber-800 dark:text-amber-200">{t('stockReservations.reservedQuantity', { quantity: format(stock.reserved) })}</span>)}
       {shortage && <span role="status">{t('stockReservations.shortQuantity', { quantity: format(Math.max(0, (required ?? 0) - stock.available)) })}</span>}
     </span>
-    {interactive && open && <StockReservationDetails workspaceId={workspaceId} position={position} open={open} onOpenChange={setOpen} />}
+    {interactive && open && <StockReservationDetails workspaceId={workspaceId} position={position} open={open} onOpenChange={setOpen} sellingUnit={sellingUnit} />}
   </>
 }
 
 /** Central error presentation also covers backend conflicts discovered after the cart was checked. */
 export function GlobalStockReservationConflict() {
   const user = useOptionalAuth()?.user
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const [conflict, setConflict] = useState<StockReservationConflict | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
   useEffect(() => {
@@ -128,7 +145,7 @@ export function GlobalStockReservationConflict() {
     product: (await db.products.get(conflict.productId))?.name,
     storage: (await db.storages.get(conflict.storageId))?.name,
   } : undefined, [conflict?.productId, conflict?.storageId])
-  const format = (value: number) => new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }).format(value)
+  const format = useReservationQuantityFormatter(conflict?.workspaceId, conflict?.productId)
   return <>
     <AppDialog open={!!conflict} onOpenChange={open => { if (!open) { setConflict(null); setDetailsOpen(false) } }}>
       <AppDialogContent className="max-w-lg">
@@ -138,7 +155,7 @@ export function GlobalStockReservationConflict() {
           {conflict && <div className="space-y-4">
             <p className="font-medium"><bdi>{labels?.product || conflict.productName || t('stockReservations.product')}</bdi>{labels?.storage && <> · <bdi>{labels.storage}</bdi></>}</p>
             <dl className="grid grid-cols-2 gap-3 rounded-lg border p-4">
-              {(['required', 'onHand', 'reserved', 'available'] as const).map(key => <div key={key}><dt className="text-sm text-muted-foreground">{t(`stockReservations.${key}`)}</dt><dd className="text-lg font-semibold">{format(conflict[key])}</dd></div>)}
+              {(['required', 'onHand', 'reserved', 'available'] as const).map(key => <div key={key} className="min-w-0"><dt className="text-sm text-muted-foreground">{t(`stockReservations.${key}`)}</dt><dd className="break-words text-lg font-semibold"><bdi>{format(conflict[key])}</bdi></dd></div>)}
             </dl>
             <p className="text-sm font-medium text-destructive">{t('stockReservations.shortQuantity', { quantity: format(Math.max(0, conflict.required - conflict.available)) })}</p>
           </div>}

@@ -5,6 +5,7 @@ import { AlertTriangle, ArrowDownToLine, ArrowRightLeft, ArrowUpFromLine, Circle
 import { useTranslation } from 'react-i18next'
 import { formatCurrency, cn } from '@/lib/utils'
 import { isPositiveQuantity, roundQuantity } from '@/lib/quantity'
+import { getOrderLineUnitFactor } from '@/lib/orderLineItems'
 import type { PaymentAccount, Product, Storage } from '@/local-db'
 import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
@@ -151,7 +152,8 @@ export function ProductExchangeModal({
     isSubmitting = false,
     onSubmit,
 }: ProductExchangeModalProps) {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
+    const formatUnitQuantity = (quantity: number, unit?: string | null) => `${new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }).format(quantity)}${unit ? ` ${t(`products.units.${unit}`, { defaultValue: unit })}` : ''}`
     const [saleItemId, setSaleItemId] = useState('')
     const [returnQuantity, setReturnQuantity] = useState('')
     const [storageId, setStorageId] = useState('')
@@ -194,7 +196,7 @@ export function ProductExchangeModal({
         && isPositiveQuantity(replacementQuantityValue)
         && replacementQuantityValue <= selectedReplacementProduct.availableQuantity
     const returnedStockCredit = isReturnQuantityValid && selectedSaleItem?.productId === replacementProductId && selectedSaleItem.storageId === storageId
-        ? returnedQuantityValue * (selectedSaleItem.unitFactor ?? 1) : 0
+        ? returnedQuantityValue * getOrderLineUnitFactor(selectedSaleItem) : 0
     const replacementStockDemand = Math.max(0, replacementQuantityValue - returnedStockCredit)
     const reservationGuard = useStockDemandGuard(workspaceId, isOpen && replacementProductId && storageId ? [{ productId: replacementProductId, storageId, quantity: replacementStockDemand }] : [])
     const canSubmit = isReturnQuantityValid && isReplacementQuantityValid && !!storageId && !reservationGuard.blocked
@@ -206,7 +208,7 @@ export function ProductExchangeModal({
             ? t('sales.exchange.returnQuantityRequired', { defaultValue: 'Enter a return quantity greater than zero.' })
             : t('sales.exchange.returnQuantityExceedsAvailable', {
                 defaultValue: 'Return quantity cannot exceed {{quantity}}.',
-                quantity: selectedSaleItem.returnableQuantity,
+                quantity: formatUnitQuantity(selectedSaleItem.returnableQuantity, selectedSaleItem.unit),
             })
     const replacementQuantityError = !selectedReplacementProduct
         ? ''
@@ -214,7 +216,7 @@ export function ProductExchangeModal({
             ? t('sales.exchange.replacementQuantityRequired', { defaultValue: 'Enter a replacement quantity greater than zero.' })
             : t('sales.exchange.replacementQuantityExceedsAvailable', {
                 defaultValue: 'Replacement quantity cannot exceed the available stock of {{quantity}}.',
-                quantity: selectedReplacementProduct.availableQuantity,
+                quantity: formatUnitQuantity(selectedReplacementProduct.availableQuantity, selectedReplacementProduct.unit),
             })
 
     const reset = () => {
@@ -374,13 +376,13 @@ export function ProductExchangeModal({
                                             <p className="text-xs text-muted-foreground">
                                                 {t('sales.exchange.availableToExchange', {
                                                     defaultValue: 'Available to exchange: {{quantity}}',
-                                                    quantity: selectedSaleItem.returnableQuantity,
+                                                    quantity: formatUnitQuantity(selectedSaleItem.returnableQuantity, selectedSaleItem.unit),
                                                 })}
                                             </p>
                                         )}
                                     </div>
                                     <QuantityField
-                                        label={t('sales.exchange.returnQuantity', { defaultValue: 'Return quantity' })}
+                                        label={`${t('sales.exchange.returnQuantity', { defaultValue: 'Return quantity' })}${selectedSaleItem?.unit ? ` (${t(`products.units.${selectedSaleItem.unit}`, { defaultValue: selectedSaleItem.unit })})` : ''}`}
                                         value={returnQuantity}
                                         onChange={setReturnQuantity}
                                         max={selectedSaleItem?.returnableQuantity}
@@ -444,7 +446,7 @@ export function ProductExchangeModal({
                                 </div>
                                 <div className="grid gap-4 sm:grid-cols-[10rem_minmax(0,1fr)]">
                                     <QuantityField
-                                        label={t('sales.exchange.replacementQuantity', { defaultValue: 'Replacement quantity' })}
+                                        label={`${t('sales.exchange.replacementQuantity', { defaultValue: 'Replacement quantity' })}${selectedReplacementProduct?.unit ? ` (${t(`products.units.${selectedReplacementProduct.unit}`, { defaultValue: selectedReplacementProduct.unit })})` : ''}`}
                                         value={replacementQuantity}
                                         onChange={setReplacementQuantity}
                                         max={selectedReplacementProduct?.availableQuantity}
@@ -459,7 +461,7 @@ export function ProductExchangeModal({
                                                 <p>
                                                     {t('sales.exchange.availableStock', {
                                                         defaultValue: 'Available stock: {{quantity}}',
-                                                        quantity: selectedReplacementProduct.availableQuantity,
+                                                        quantity: reservationGuard.data?.[0] ? formatUnitQuantity(reservationGuard.data[0].available, selectedReplacementProduct.unit) : t('stockReservations.checking'),
                                                     })}
                                                 </p>
                                                 <p>

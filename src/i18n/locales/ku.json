@@ -11084,7 +11084,8 @@
     "orderTotalWithDeliveryFeeAfterDiscount": "کۆی گشتی داواکاری دوای داشکاندن و کرێی گەیاندن"
   },
   "stockReservations": {
-    "stockShortageMessage": "تەنها {{available}} یەکە بەردەستە. تۆ {{required}} یەکەت داوا کردووە.",
+    "baseUnits": "یەکەی بنەڕەتی کۆگا",
+    "stockShortageMessage": "تەنها {{available}} یەکەی بنەڕەتی کۆگا بەردەستە. تۆ {{required}} یەکەی بنەڕەتی کۆگات داوا کردووە.",
     "availableForOrderQuantity": "{{quantity}} بەردەست بۆ جێبەجێکردنی داواکاری",
     "ownReservationQuantity": "{{quantity}} بۆ ئەم داواکارییە تەرخانکراوە",
     "detailsTitle": "بینینی حیجزەکان",
@@ -11105,6 +11106,6 @@
     "available": "بەردەست بۆ فرۆشتن",
     "reviewItems": "پشکنینی کاڵاکان",
     "retry": "نوێکردنەوەی بڕی بەردەست",
-    "conflictMessage": "تەنها {{available}} یەکە بۆ فرۆشتن بەردەستە. تۆ {{required}} یەکەت داوا کردووە. یەکەکانی تر بۆ داواکارییەکانی فرۆشتن تەرخانکراون."
+    "conflictMessage": "تەنها {{available}} یەکەی بنەڕەتی کۆگا بۆ فرۆشتن بەردەستە. تۆ {{required}} یەکەی بنەڕەتی کۆگات داوا کردووە. یەکەکانی تر بۆ داواکارییەکانی فرۆشتن تەرخانکراون."
   }
 }

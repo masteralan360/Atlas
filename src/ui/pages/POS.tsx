@@ -1,4 +1,4 @@
-import { useStockDemandGuard } from '@/local-db/stockReservations'
+import { useStockAvailability, useStockDemandGuard } from '@/local-db/stockReservations'
 import { StockReservationInfo, StockDemandNotice, SellableStockQuantity } from '@/ui/components/inventory/StockReservationInfo'
 import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense, type MouseEvent as ReactMouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -650,6 +650,8 @@ export function POS() {
     const isActivitiesCart = cart.some((item) => item.storageId === ACTIVITIES_STORAGE_ID)
     const isActivitiesCheckout = cart.length > 0 ? isActivitiesCart : isActivitiesStorage
     const [unitSelectionProduct, setUnitSelectionProduct] = useState<PosCatalogProduct | null>(null)
+    const unitSelectionStock = useStockAvailability(user?.workspaceId, unitSelectionProduct?.storageId
+        ? [{ productId: unitSelectionProduct.id, storageId: unitSelectionProduct.storageId }] : [])
     const [unitSelectionStockSource, setUnitSelectionStockSource] = useState<PosStockSourceSelection | null>(null)
     const [stockSourceSelectionProduct, setStockSourceSelectionProduct] = useState<PosCatalogProduct | null>(null)
     const pendingCameraScannerAdd = useRef<{ productId: string; resolve: (succeeded: boolean) => void } | null>(null)
@@ -4484,7 +4486,7 @@ export function POS() {
                                                 )}
                                             </div>
 
-                                            {!isInfiniteActivity && !isServiceProduct && <StockReservationInfo workspaceId={user?.workspaceId} productId={product.id} storageId={product.storageId} interactive={false} />}
+                                            {!isInfiniteActivity && !isServiceProduct && <StockReservationInfo workspaceId={user?.workspaceId} productId={product.id} storageId={product.storageId} interactive={false} hideWhenUnreserved />}
                                             {/* Product Info */}
                                             <div className="flex-1 space-y-2 flex flex-col">
                                                 <div className="flex items-center justify-between text-[10px] font-mono font-bold text-muted-foreground uppercase tracking-widest opacity-60 gap-2">
@@ -4655,7 +4657,7 @@ export function POS() {
                                                     <div className="min-w-[8rem] flex-1">
                                                         <div className="min-w-0">
                                                             <div className="font-medium truncate"><bdi>{formatPosServiceName(item.name, item.is_service ? item.service_name_suffix : undefined)}</bdi></div>
-                                                            {!item.is_service && <StockReservationInfo workspaceId={user?.workspaceId} productId={item.product_id} storageId={item.storageId} required={reservationGuard.requiredByPosition.get(`${item.product_id}:${item.storageId}`)} />}
+                                                            {!item.is_service && <StockReservationInfo workspaceId={user?.workspaceId} productId={item.product_id} storageId={item.storageId} required={reservationGuard.requiredByPosition.get(`${item.product_id}:${item.storageId}`)} sellingUnit={{ unitCode: item.selling_unit_name_snapshot || item.unit, baseUnitCode: item.base_unit_code, factor: item.unit_factor, isDynamic: unitRegistry.isDynamicUnit(item.unit) }} hideWhenUnreserved />}
                                                             {showCartStorageLabels && (
                                                                 <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
                                                                     <Warehouse className="h-3 w-3 shrink-0" />
@@ -5444,13 +5446,20 @@ export function POS() {
                                 if (!unitSelectionProduct) return null
                                 const options = getProductUomOptions(unitSelectionProduct)
                                 const sourceAvailability = getStockSourceAvailability(unitSelectionProduct)
-                                const remainingInventoryQuantity = unitSelectionStockSource?.type === 'batch'
+                                const sourceRemainingQuantity = unitSelectionStockSource?.type === 'batch'
                                     ? sourceAvailability.batches.find((batch) => batch.id === unitSelectionStockSource.batch.id)?.availableQuantity ?? 0
                                     : unitSelectionStockSource?.type === 'regular'
                                         ? sourceAvailability.regularQuantity
                                         : sourceAvailability.inventoryQuantity
+                                const stock = unitSelectionStock.data?.find(row => row.productId === unitSelectionProduct.id && row.storageId === unitSelectionProduct.storageId)
+                                const inCart = cart.filter(item => item.product_id === unitSelectionProduct.id && item.storageId === unitSelectionProduct.storageId)
+                                    .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
+                                const remainingInventoryQuantity = stock && !unitSelectionStock.error
+                                    ? Math.min(sourceRemainingQuantity, Math.max(0, stock.available - inCart)) : 0
                                 return (
-                                    <div className="grid gap-3 sm:grid-cols-2">
+                                    <div className="space-y-3">
+                                      <StockReservationInfo workspaceId={user?.workspaceId} productId={unitSelectionProduct.id} storageId={unitSelectionProduct.storageId} />
+                                      <div className="grid gap-3 sm:grid-cols-2">
                                         {options.map((uom) => {
                                             const selection = buildPosUnitSelection(unitSelectionProduct, uom, unitSelectionStockSource)
                                             const canSell = remainingInventoryQuantity + 0.000001 >= uom.coefficient
@@ -5470,6 +5479,7 @@ export function POS() {
                                                 </button>
                                             )
                                         })}
+                                      </div>
                                     </div>
                                 )
                             })()}
@@ -6815,7 +6825,7 @@ function MobileGrid({ workspaceId, t, search, setSearch, setIsSkuModalOpen, setI
                                 if (canHoldForFreeOnlyOrder) event.preventDefault()
                             }}
                         >
-                            {!isInfiniteActivity && !isServiceProduct && <StockReservationInfo workspaceId={workspaceId} productId={product.id} storageId={product.storageId} interactive={false} />}
+                            {!isInfiniteActivity && !isServiceProduct && <StockReservationInfo workspaceId={workspaceId} productId={product.id} storageId={product.storageId} interactive={false} hideWhenUnreserved />}
                             <div className="aspect-square bg-muted/30 rounded-[1.5rem] overflow-hidden relative">
                                 <ProductImage
                                     url={product.imageUrl}
@@ -7188,7 +7198,7 @@ function MobileCart({
                                             <div className="flex items-center justify-between gap-2">
                                                 <div className="min-w-0 flex-1">
                                                     <h3 className="font-bold text-sm truncate"><bdi>{formatPosServiceName(item.name, item.is_service ? item.service_name_suffix : undefined)}</bdi></h3>
-                                                    {!item.is_service && <StockReservationInfo workspaceId={workspaceId} productId={item.product_id} storageId={item.storageId} required={reservationGuard.requiredByPosition.get(`${item.product_id}:${item.storageId}`)} />}
+                                                    {!item.is_service && <StockReservationInfo workspaceId={workspaceId} productId={item.product_id} storageId={item.storageId} required={reservationGuard.requiredByPosition.get(`${item.product_id}:${item.storageId}`)} sellingUnit={{ unitCode: item.selling_unit_name_snapshot || item.unit, baseUnitCode: item.base_unit_code, factor: item.unit_factor, isDynamic: unitRegistry.isDynamicUnit(item.unit) }} hideWhenUnreserved />}
                                                     {showCartStorageLabels && (
                                                         <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
                                                             <Warehouse className="h-3 w-3 shrink-0" />

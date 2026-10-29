@@ -11022,7 +11022,8 @@
     "unlink": "إلغاء الربط"
   },
   "stockReservations": {
-    "stockShortageMessage": "المتاح {{available}} وحدة فقط. طلبت {{required}}.",
+    "baseUnits": "وحدات المخزون الأساسية",
+    "stockShortageMessage": "المتاح {{available}} فقط من وحدات المخزون الأساسية. طلبت {{required}} من وحدات المخزون الأساسية.",
     "availableForOrderQuantity": "{{quantity}} متاح لتنفيذ الطلب",
     "ownReservationQuantity": "{{quantity}} محجوز لهذا الطلب",
     "detailsTitle": "عرض الحجوزات",
@@ -11043,6 +11044,6 @@
     "available": "المتاح للبيع",
     "reviewItems": "مراجعة الأصناف",
     "retry": "تحديث الكمية المتاحة",
-    "conflictMessage": "المتاح للبيع {{available}} وحدة فقط. طلبت {{required}}. الوحدات الأخرى محجوزة لطلبات البيع."
+    "conflictMessage": "المتاح للبيع {{available}} فقط من وحدات المخزون الأساسية. طلبت {{required}} من وحدات المخزون الأساسية. الوحدات الأخرى محجوزة لطلبات البيع."
   }
 }

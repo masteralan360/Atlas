@@ -246,7 +246,7 @@ export function QuickOrderModal({
     progressStage,
     onSubmit
 }: QuickOrderModalProps) {
-    const { t } = useTranslation()
+    const { t, i18n } = useTranslation()
     const { user } = useAuth()
     const showSalesAccountSelection = isSalesAccountSelectionVisible({
         agentSalesAccountsEnabled,
@@ -1019,6 +1019,9 @@ export function QuickOrderModal({
                     <div className="max-h-32 space-y-2 overflow-y-auto pe-1">
                         {cart.map((item) => {
                             const freeBonusQuantity = getOrderLineFreeBonusQuantity(item)
+                            const unit = item.selling_unit_name_snapshot || item.selling_unit_code || item.unit || ''
+                            const unitLabel = unit ? t(`products.units.${unit}`, { defaultValue: unit }) : ''
+                            const number = new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 })
                             return (
                                 <div key={`${item.product_id}:${item.storageId || ''}:${item.selling_unit_ref || ''}`} className="flex justify-between gap-3 text-sm">
                                     <span className="flex min-w-0 flex-col">
@@ -1030,8 +1033,8 @@ export function QuickOrderModal({
                                             </span>
                                         )}
                                     </span>
-                                    <span className="shrink-0 text-muted-foreground">
-                                        × {item.quantity}{freeBonusQuantity > 0 ? ` · ${t('orders.form.freeBonus')}: ${freeBonusQuantity}` : ''}
+                                    <span className="max-w-[60%] shrink-0 break-words text-end text-muted-foreground">
+                                        × {number.format(item.quantity)} {unitLabel}{freeBonusQuantity > 0 ? ` · ${t('orders.form.freeBonus')}: ${number.format(freeBonusQuantity)} ${unitLabel}` : ''}
                                     </span>
                                 </div>
                             )
@@ -1042,10 +1045,10 @@ export function QuickOrderModal({
                 {submitError ? (
                     <p role="alert" className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{submitError}</p>
                 ) : null}
+                <StockDemandNotice workspaceId={workspaceId} guard={reservationGuard} />
             </AppDialogBody>
 
-            <AppDialogFooter className="border-t bg-muted/10 px-6 py-4 sm:justify-between">
-                <StockDemandNotice workspaceId={workspaceId} guard={reservationGuard} />
+            <AppDialogFooter className="border-t bg-muted/10 px-6 py-4 sm:justify-end">
                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
                     {t('common.cancel')}
                 </Button>

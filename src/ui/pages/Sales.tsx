@@ -453,7 +453,7 @@ export function Sales() {
                 productId: item.product_id,
                 name: item.product?.name || item.product_name || t('common.unknownProduct', { defaultValue: 'Unknown product' }),
                 sku: item.product?.sku || item.product_sku || null,
-                unit: item.selling_unit_code || item.product?.unit || null,
+                unit: item.selling_unit_name_snapshot || item.selling_unit_code || item.product?.unit || null,
                 returnableQuantity,
                 storageId: item.storage_id ?? null,
                 unitFactor: Number(item.unit_factor ?? 1),

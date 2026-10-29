@@ -2148,7 +2148,7 @@ export function SalesOrderFormPage({
                                                     </div>
                                                     {product && !isService(product) && (
                                                         <div className="min-w-0">
-                                                            <StockReservationInfo workspaceId={workspaceId} productId={item.productId} storageId={item.storageId || sourceStorageId} />
+                                                            <StockReservationInfo workspaceId={workspaceId} productId={item.productId} storageId={item.storageId || sourceStorageId} sellingUnit={selectedUnitOption ? { ...selectedUnitOption, unitCode: item.unitRef.startsWith('custom:') ? item.unitNameSnapshot || selectedUnitOption.unitCode : selectedUnitOption.unitCode, baseUnitCode: item.baseUnitRef.startsWith('custom:') ? item.baseUnitNameSnapshot || selectedUnitOption.baseUnitCode : selectedUnitOption.baseUnitCode } : undefined} hideWhenUnreserved />
                                                         </div>
                                                     )}
                                                     {item.productId && item.storageId && !isService(product) ? (
