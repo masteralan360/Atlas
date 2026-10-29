@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
 import { useLocation } from "wouter";
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness';
 import {
@@ -7,8 +8,10 @@ import {
   ArrowUp,
   Boxes,
   History,
+  Loader2,
   Pencil,
   Plus,
+  Search,
   Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -18,18 +21,22 @@ import { useWorkspace } from "@/workspace/WorkspaceContext";
 import {
   createStockBatch,
   deleteStockBatch,
-  filterStockAdjustments,
   updateStockBatch,
   useInventory,
-  useInventoryTransactions,
+  useInventoryTransactionPagesChanged,
+  useInventoryTransactionsPage,
   useProducts,
-  useStockAdjustments,
-  useStockBatches,
+  useStockAdjustmentPage,
+  useStockAdjustmentPagesChanged,
+  useStockBatchGroupPage,
+  useStockBatchPagesChanged,
   useStorages,
   type CurrencyCode,
   type InventoryTransaction,
+  type StockAdjustment,
   type StockAdjustmentReason,
   type StockAdjustmentType,
+  type StockBatchGroup,
   type StockBatch,
 } from "@/local-db";
 import {
@@ -45,6 +52,7 @@ import {
 } from "@/lib/utils";
 import { isPositiveQuantity } from "@/lib/quantity";
 import { isService } from "@/lib/catalogItem";
+import { usePaginationBounds, usePaginationPageMap } from "@/hooks/usePaginationState";
 import { Button } from "@/ui/components/button";
 import { DeleteConfirmationModal } from "@/ui/components/DeleteConfirmationModal";
 import { StockAdjustmentDialog } from "@/ui/components/StockAdjustmentDialog";
@@ -55,6 +63,7 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
+  AppPagination,
   CurrencySelector,
   DateTimePicker,
   Dialog,
@@ -123,6 +132,14 @@ const emptyBatchForm: BatchFormState = {
   manufacturingDate: "",
   notes: "",
 };
+
+const STOCK_ADJUSTMENT_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+
+function getStockAdjustmentPageSize() {
+  if (typeof localStorage === "undefined") return 20;
+  const stored = Number(localStorage.getItem("stock_adjustments_page_size"));
+  return STOCK_ADJUSTMENT_PAGE_SIZE_OPTIONS.includes(stored) ? stored : 20;
+}
 
 function groupKey(productId: string, storageId: string) {
   return `${productId}::${storageId}`;
@@ -201,9 +218,6 @@ export function StockAdjustments() {
   );
   const storages = useStorages(workspaceId);
   const inventory = useInventory(workspaceId);
-  const adjustments = useStockAdjustments(workspaceId);
-  const batches = useStockBatches(workspaceId);
-  const transactions = useInventoryTransactions(workspaceId);
 
   const reasonOptions = useMemo(() => getAdjustmentReasonOptions(t), [t]);
 
@@ -220,18 +234,59 @@ export function StockAdjustments() {
   >("all");
   const [startDate, setStartDate] = useState<Date | undefined>();
   const [endDate, setEndDate] = useState<Date | undefined>();
+  const [batchSearchInput, setBatchSearchInput] = useState("");
+  const [batchSearch, setBatchSearch] = useState("");
 
   const [adjustmentDialogOpen, setAdjustmentDialogOpen] = useState(false);
 
   const [batchDialogOpen, setBatchDialogOpen] = useState(false);
   const [batchProductsViewOpen, setBatchProductsViewOpen] = useState(false);
-  const [batchSearch, setBatchSearch] = useState("");
+  const [batchProductSearch, setBatchProductSearch] = useState("");
   const [batchForm, setBatchForm] = useState<BatchFormState>(emptyBatchForm);
   const [isSavingBatch, setIsSavingBatch] = useState(false);
   const [batchToDelete, setBatchToDelete] = useState<StockBatch | null>(null);
   const [isDeletingBatch, setIsDeletingBatch] = useState(false);
   const batchUserPickedStorageRef = useRef(false);
   const batchAutoStorageIdRef = useRef<string | null>(null);
+  const persistPageSize = useCallback((pageSize: number) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("stock_adjustments_page_size", String(pageSize));
+    }
+  }, []);
+
+  const startAt = useMemo(() => {
+    if (!startDate) return undefined;
+    const value = new Date(startDate);
+    value.setHours(0, 0, 0, 0);
+    return value.toISOString();
+  }, [startDate]);
+  const endBefore = useMemo(() => {
+    if (!endDate) return undefined;
+    const value = new Date(endDate);
+    value.setHours(0, 0, 0, 0);
+    value.setDate(value.getDate() + 1);
+    return value.toISOString();
+  }, [endDate]);
+  const pagination = usePaginationPageMap({
+    initialPages: { adjustments: 1, batches: 1 },
+    initialPageSize: getStockAdjustmentPageSize(),
+    resetOn: [
+      workspaceId,
+      productFilter,
+      storageFilter,
+      typeFilter,
+      reasonFilter,
+      startAt,
+      endBefore,
+      batchSearch,
+    ],
+    onPageSizeChange: persistPageSize,
+  });
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setBatchSearch(batchSearchInput.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [batchSearchInput]);
 
   useEffect(() => {
     if (location === "/stock-adjustments/batches" && !canManageStockBatches) {
@@ -261,6 +316,166 @@ export function StockAdjustments() {
       ),
     [inventory],
   );
+  const searchTerm = batchSearch.toLocaleLowerCase();
+  const searchProductIds = useMemo(
+    () => searchTerm ? products
+      .filter((product) => `${product.name} ${product.sku ?? ""}`.toLocaleLowerCase().includes(searchTerm))
+      .map((product) => product.id)
+      .sort() : [],
+    [products, searchTerm],
+  );
+  const searchStorageIds = useMemo(
+    () => searchTerm ? storages
+      .filter((storage) => storage.name.toLocaleLowerCase().includes(searchTerm))
+      .map((storage) => storage.id)
+      .sort() : [],
+    [searchTerm, storages],
+  );
+
+  useStockAdjustmentPagesChanged(workspaceId);
+  useStockBatchPagesChanged(workspaceId);
+  useInventoryTransactionPagesChanged(workspaceId);
+
+  const adjustmentPageQuery = useStockAdjustmentPage({
+    workspaceId,
+    page: pagination.pages.adjustments,
+    pageSize: pagination.pageSize,
+    startAt,
+    endBefore,
+    productId: productFilter === "all" ? null : productFilter,
+    storageId: storageFilter === "all" ? null : storageFilter,
+    adjustmentType: typeFilter === "all" ? null : typeFilter,
+    reason: reasonFilter === "all" ? null : reasonFilter,
+  }, activeTab === "adjustments");
+  const adjustmentPagination = usePaginationBounds({
+    currentPage: pagination.pages.adjustments,
+    setCurrentPage: (page) => pagination.setPage("adjustments", page),
+    totalCount: adjustmentPageQuery.data?.totalCount ?? 0,
+    pageCount: adjustmentPageQuery.data?.pageCount,
+    pageSize: pagination.pageSize,
+    isLoading: adjustmentPageQuery.isPending || adjustmentPageQuery.isFetching,
+    error: adjustmentPageQuery.error,
+  });
+  const batchGroupPageQuery = useStockBatchGroupPage({
+    workspaceId,
+    page: pagination.pages.batches,
+    pageSize: pagination.pageSize,
+    search: batchSearch,
+    searchProductIds,
+    searchStorageIds,
+  }, activeTab === "batches" && canManageStockBatches);
+  const batchPagination = usePaginationBounds({
+    currentPage: pagination.pages.batches,
+    setCurrentPage: (page) => pagination.setPage("batches", page),
+    totalCount: batchGroupPageQuery.data?.totalCount ?? 0,
+    pageCount: batchGroupPageQuery.data?.pageCount,
+    pageSize: pagination.pageSize,
+    isLoading: batchGroupPageQuery.isPending || batchGroupPageQuery.isFetching,
+    error: batchGroupPageQuery.error,
+  });
+  const adjustmentRows = adjustmentPageQuery.data?.rows ?? [];
+  const batchGroups = batchGroupPageQuery.data?.rows ?? [];
+
+  const recentAdjustmentTransactionsQuery = useInventoryTransactionsPage({
+    workspaceId,
+    page: 1,
+    pageSize: 12,
+    filters: {
+      productId: null,
+      direction: "all",
+      source: "stock-adjustment",
+      storageId: null,
+      snapshot: "all",
+    },
+  }, activeTab === "adjustments");
+  const recentTransferTransactionsQuery = useInventoryTransactionsPage({
+    workspaceId,
+    page: 1,
+    pageSize: 12,
+    filters: {
+      productId: null,
+      direction: "all",
+      source: "transfer",
+      storageId: null,
+      snapshot: "all",
+    },
+  }, activeTab === "adjustments");
+  const recentInitialTransactionsQuery = useInventoryTransactionsPage({
+    workspaceId,
+    page: 1,
+    pageSize: 12,
+    filters: {
+      productId: null,
+      direction: "all",
+      source: "initial-stock",
+      storageId: null,
+      snapshot: "all",
+    },
+  }, activeTab === "adjustments");
+  const recentTransactionsLoading = activeTab === "adjustments" && [
+    recentAdjustmentTransactionsQuery,
+    recentTransferTransactionsQuery,
+    recentInitialTransactionsQuery,
+  ].some((query) => query.isPending || query.isFetching);
+  const recentTransactions = useMemo(() => [
+    ...(recentAdjustmentTransactionsQuery.data?.rows ?? []),
+    ...(recentTransferTransactionsQuery.data?.rows ?? []),
+    ...(recentInitialTransactionsQuery.data?.rows ?? []),
+  ].sort((left, right) =>
+    right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
+  ).slice(0, 12), [
+    recentAdjustmentTransactionsQuery.data?.rows,
+    recentInitialTransactionsQuery.data?.rows,
+    recentTransferTransactionsQuery.data?.rows,
+  ]);
+
+  const adjustmentTableColumns = useMemo<ColumnDef<StockAdjustment>[]>(() => [
+    { id: "createdAt", accessorFn: (row) => row.createdAt },
+    { id: "id", accessorFn: (row) => row.id },
+    { id: "productId", accessorFn: (row) => row.productId },
+    { id: "storageId", accessorFn: (row) => row.storageId },
+    { id: "adjustmentType", accessorFn: (row) => row.adjustmentType },
+    { id: "reason", accessorFn: (row) => row.reason },
+  ], []);
+  const adjustmentTable = useReactTable({
+    data: adjustmentRows,
+    columns: adjustmentTableColumns,
+    getRowId: (row) => row.id,
+    getCoreRowModel: getCoreRowModel(),
+    manualPagination: true,
+    manualSorting: true,
+    manualFiltering: true,
+    rowCount: adjustmentPageQuery.data?.totalCount ?? 0,
+    state: {
+      pagination: { pageIndex: adjustmentPagination.currentPage - 1, pageSize: pagination.pageSize },
+      sorting: [{ id: "createdAt", desc: true }, { id: "id", desc: true }],
+      columnFilters: [
+        { id: "productId", value: productFilter },
+        { id: "storageId", value: storageFilter },
+        { id: "adjustmentType", value: typeFilter },
+        { id: "reason", value: reasonFilter },
+      ],
+    },
+  });
+  const batchGroupTableColumns = useMemo<ColumnDef<StockBatchGroup>[]>(() => [
+    { id: "productId", accessorFn: (group) => group.productId },
+    { id: "storageId", accessorFn: (group) => group.storageId },
+  ], []);
+  const batchGroupTable = useReactTable({
+    data: batchGroups,
+    columns: batchGroupTableColumns,
+    getRowId: (group) => groupKey(group.productId, group.storageId),
+    getCoreRowModel: getCoreRowModel(),
+    manualPagination: true,
+    manualSorting: true,
+    manualFiltering: true,
+    rowCount: batchGroupPageQuery.data?.totalCount ?? 0,
+    state: {
+      pagination: { pageIndex: batchPagination.currentPage - 1, pageSize: pagination.pageSize },
+      sorting: [{ id: "productId", desc: false }, { id: "storageId", desc: false }],
+      columnFilters: [{ id: "search", value: batchSearch }],
+    },
+  });
 
   const batchStorageOptions = useMemo(() => {
     if (!batchForm.productId) return storages;
@@ -320,78 +535,6 @@ export function StockAdjustments() {
       selectedBatchProduct.costPrice !== batchCostPriceValue ||
       selectedBatchProduct.currency !== batchForm.currency);
 
-  const filteredAdjustments = useMemo(
-    () =>
-      filterStockAdjustments(adjustments, {
-        productId: productFilter === "all" ? null : productFilter,
-        storageId: storageFilter === "all" ? null : storageFilter,
-        adjustmentType: typeFilter === "all" ? null : typeFilter,
-        reason: reasonFilter === "all" ? null : reasonFilter,
-        startDate,
-        endDate,
-      }),
-    [
-      adjustments,
-      endDate,
-      productFilter,
-      reasonFilter,
-      startDate,
-      storageFilter,
-      typeFilter,
-    ],
-  );
-
-  const batchGroups = useMemo(() => {
-    const grouped = new Map<
-      string,
-      {
-        productId: string;
-        storageId: string;
-        rows: StockBatch[];
-        batchQuantity: number;
-      }
-    >();
-    for (const batch of batches) {
-      const key = groupKey(batch.productId, batch.storageId);
-      const group = grouped.get(key);
-      if (group) {
-        group.rows.push(batch);
-        group.batchQuantity += batch.quantity;
-      } else {
-        grouped.set(key, {
-          productId: batch.productId,
-          storageId: batch.storageId,
-          rows: [batch],
-          batchQuantity: batch.quantity,
-        });
-      }
-    }
-
-    return Array.from(grouped.values()).sort((left, right) => {
-      const leftName = productsById.get(left.productId)?.name || "";
-      const rightName = productsById.get(right.productId)?.name || "";
-      return (
-        leftName.localeCompare(rightName) ||
-        left.storageId.localeCompare(right.storageId)
-      );
-    });
-  }, [batches, productsById]);
-
-  const recentTransactions = useMemo(
-    () =>
-      transactions
-        .filter((transaction) =>
-          [
-            "stock_adjustment",
-            "transfer_in",
-            "transfer_out",
-            "initial_stock",
-          ].includes(transaction.transactionType),
-        )
-        .slice(0, 12),
-    [transactions],
-  );
-
   const canSaveBatch =
     !!batchForm.productId &&
     !!batchForm.storageId &&
@@ -407,7 +550,7 @@ export function StockAdjustments() {
 
   const resetBatchForm = () => {
     setBatchForm(emptyBatchForm);
-    setBatchSearch("");
+    setBatchProductSearch("");
     setBatchProductsViewOpen(false);
     setIsSavingBatch(false);
   };
@@ -423,7 +566,7 @@ export function StockAdjustments() {
       costPrice: String(product.costPrice ?? 0),
       currency: product.currency ?? "usd",
     }));
-    setBatchSearch(product.name);
+    setBatchProductSearch(product.name);
   };
 
   const handleSaveBatch = async () => {
@@ -508,7 +651,10 @@ export function StockAdjustments() {
           <p className="max-w-3xl text-muted-foreground">
             {canManageStockBatches
               ? t("stockAdjustments.pageSubtitle", "Record manual stock changes, manage product batches, and review the unified inventory log.")
-              : t("stockAdjustments.pageSubtitleSimple", "Record manual stock changes and review the unified inventory log.")} <ModulePageFreshness className="ms-2" />
+            : t("stockAdjustments.pageSubtitleSimple", "Record manual stock changes and review the unified inventory log.")} <ModulePageFreshness
+              className="ms-2"
+              tableNames={[activeTab === "batches" ? "stock_batches" : "inventory_transactions"]}
+            />
           </p>
         </div>
         {canEdit && (
@@ -670,14 +816,33 @@ export function StockAdjustments() {
               <CardDescription>
                 {t("stockAdjustments.history.description", "Each entry shows the before and after quantity snapshot for the selected storage.")}
               </CardDescription>
+              <AppPagination
+                currentPage={adjustmentPagination.currentPage}
+                totalCount={adjustmentPageQuery.data?.totalCount ?? 0}
+                pageCount={adjustmentPagination.pageCount}
+                pageSize={pagination.pageSize}
+                onPageChange={(page) => pagination.setPage("adjustments", page)}
+                onPageSizeChange={pagination.setPageSize}
+                pageSizeOptions={STOCK_ADJUSTMENT_PAGE_SIZE_OPTIONS}
+                className="justify-end"
+              />
             </CardHeader>
             <CardContent className="space-y-3">
-              {filteredAdjustments.length === 0 ? (
+              {adjustmentPageQuery.isPending || adjustmentPageQuery.isFetching ? (
+                <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t("common.loading", "Loading...")}
+                </div>
+              ) : adjustmentPageQuery.error ? (
+                <div className="rounded-2xl border border-dashed px-4 py-10 text-center text-sm text-destructive">
+                  {t("stockAdjustments.history.loadError", "Could not load stock adjustments. Check your connection and try again.")}
+                </div>
+              ) : adjustmentRows.length === 0 ? (
                 <div className="rounded-2xl border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
                   {t("stockAdjustments.history.empty", "No adjustments match the current filters.")}
                 </div>
               ) : (
-                filteredAdjustments.map((adjustment) => {
+                adjustmentTable.getRowModel().rows.map(({ original: adjustment }) => {
                   const isIncrease = adjustment.adjustmentType === "increase";
                   return (
                     <div
@@ -748,7 +913,18 @@ export function StockAdjustments() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {recentTransactions.length === 0 ? (
+              {recentTransactionsLoading ? (
+                <div className="flex min-h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t("common.loading", "Loading...")}
+                </div>
+              ) : recentAdjustmentTransactionsQuery.error
+                || recentTransferTransactionsQuery.error
+                || recentInitialTransactionsQuery.error ? (
+                <div className="rounded-2xl border border-dashed px-4 py-10 text-center text-sm text-destructive">
+                  {t("stockAdjustments.recentTransactions.loadError", "Could not load recent inventory transactions.")}
+                </div>
+              ) : recentTransactions.length === 0 ? (
                 <div className="rounded-2xl border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
                   {t("stockAdjustments.recentTransactions.empty", "No inventory transactions are available yet.")}
                 </div>
@@ -803,24 +979,59 @@ export function StockAdjustments() {
         {canManageStockBatches && (
         <TabsContent value="batches" className="space-y-6">
           <Card className="border-border/60 shadow-sm">
-            <CardHeader>
-              <CardTitle>{t("stockAdjustments.batches.title", "Batch tracking")}</CardTitle>
-              <CardDescription>
-                {t("stockAdjustments.batches.description", "Grouped by product and storage with a coverage check against current inventory.")}
-              </CardDescription>
+            <CardHeader className="gap-4">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-2">
+                  <CardTitle>{t("stockAdjustments.batches.title", "Batch tracking")}</CardTitle>
+                  <CardDescription>
+                    {t("stockAdjustments.batches.description", "Grouped by product and storage with a coverage check against current inventory.")}
+                  </CardDescription>
+                </div>
+                <div className="relative w-full lg:max-w-sm">
+                  <Search className="absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={batchSearchInput}
+                    onChange={(event) => setBatchSearchInput(event.target.value)}
+                    placeholder={t("stockAdjustments.batches.searchPlaceholder", "Search product, storage, batch number, or notes")}
+                    aria-label={t("stockAdjustments.batches.search", "Search stock batches")}
+                    className="ps-9"
+                  />
+                </div>
+              </div>
+              <AppPagination
+                currentPage={batchPagination.currentPage}
+                totalCount={batchGroupPageQuery.data?.totalCount ?? 0}
+                pageCount={batchPagination.pageCount}
+                pageSize={pagination.pageSize}
+                onPageChange={(page) => pagination.setPage("batches", page)}
+                onPageSizeChange={pagination.setPageSize}
+                pageSizeOptions={STOCK_ADJUSTMENT_PAGE_SIZE_OPTIONS}
+                className="justify-end"
+              />
             </CardHeader>
             <CardContent className="space-y-4">
-              {batchGroups.length === 0 ? (
+              {batchGroupPageQuery.isPending || batchGroupPageQuery.isFetching ? (
+                <div className="flex min-h-40 items-center justify-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {t("common.loading", "Loading...")}
+                </div>
+              ) : batchGroupPageQuery.error ? (
+                <div className="rounded-2xl border border-dashed px-4 py-10 text-center text-sm text-destructive">
+                  {t("stockAdjustments.batches.loadError", "Could not load stock batches. Check your connection and try again.")}
+                </div>
+              ) : batchGroups.length === 0 ? (
                 <div className="rounded-2xl border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
-                  {t("stockAdjustments.batches.empty", "No stock batches have been created yet.")}
+                  {batchSearch
+                    ? t("stockAdjustments.batches.emptySearch", "No stock batches match your search.")
+                    : t("stockAdjustments.batches.empty", "No stock batches have been created yet.")}
                 </div>
               ) : (
-                batchGroups.map((group) => {
+                batchGroupTable.getRowModel().rows.map(({ original: group }) => {
                   const inventoryQuantity =
                     inventoryByKey.get(
                       groupKey(group.productId, group.storageId),
                     ) || 0;
-                  const mismatch = inventoryQuantity !== group.batchQuantity;
+                  const mismatch = !batchSearch && inventoryQuantity !== group.batchQuantity;
                   return (
                     <div
                       key={groupKey(group.productId, group.storageId)}
@@ -952,7 +1163,7 @@ export function StockAdjustments() {
                                           batch.manufacturingDate || "",
                                         notes: batch.notes || "",
                                       });
-                                      setBatchSearch(productDefaults?.name ?? "");
+                                      setBatchProductSearch(productDefaults?.name ?? "");
                                       setBatchDialogOpen(true);
                                     }}
                                   >
@@ -1027,9 +1238,9 @@ export function StockAdjustments() {
                     <ProductAutocompleteInput
                       className="min-w-0 flex-1"
                       inputClassName={canOpenBatchProductsView ? "rounded-s-none" : undefined}
-                      value={batchSearch}
+                      value={batchProductSearch}
                       onChange={(value) => {
-                        setBatchSearch(value);
+                        setBatchProductSearch(value);
                         setBatchForm((current) => ({ ...current, productId: "" }));
                       }}
                       onSelectProduct={(product) => selectBatchProduct(product.id)}

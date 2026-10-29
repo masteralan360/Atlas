@@ -397,7 +397,10 @@ export function Products() {
     const canCloneProducts = user?.role === 'admin'
     const isBranchWorkspace = Boolean(branchInfo?.isBranch)
 
-    const [search, setSearch] = useState('')
+    const [search, setSearch] = useState(() => {
+        const hashQuery = window.location.hash.split('?')[1] ?? ''
+        return new URLSearchParams(hashQuery).get('productEditReturnSearch') ?? ''
+    })
     const deferredSearch = useDeferredValue(search)
     const [isCameraSearchScannerOpen, setIsCameraSearchScannerOpen] = useState(false)
     const [selectedScannerCameraId, setSelectedScannerCameraId] = useState(() => localStorage.getItem('scanner_camera_id') || '')
@@ -407,6 +410,17 @@ export function Products() {
     const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
     const [draftFilters, setDraftFilters] = useState<ProductFilterState>(filters)
     const [collapsedPrimaryProductIds, setCollapsedPrimaryProductIds] = useState<Set<string>>(() => new Set())
+
+    useEffect(() => {
+        const hash = window.location.hash
+        const queryIndex = hash.indexOf('?')
+        if (queryIndex < 0 || !new URLSearchParams(hash.slice(queryIndex + 1)).has('productEditReturnSearch')) return
+        window.history.replaceState(
+            window.history.state,
+            '',
+            `${window.location.pathname}${window.location.search}${hash.slice(0, queryIndex)}`
+        )
+    }, [])
     const pagination = usePaginationState({
         resetOn: [search, catalogType, filters],
         initialPageSize: Number(localStorage.getItem('products_page_size')) || 20,
@@ -1660,7 +1674,15 @@ export function Products() {
         })
 
     const openProductForm = (product?: Product) => {
-        navigate(product ? (isService(product) ? `/services/${product.id}` : `/products/${product.id}`) : '/products/new')
+        const route = product
+            ? (isService(product) ? `/services/${product.id}` : `/products/${product.id}`)
+            : '/products/new'
+        if (product && !isService(product) && search !== '') {
+            const returnSearch = new URLSearchParams({ productEditReturnSearch: search }).toString()
+            navigate(`${route}?${returnSearch}`)
+            return
+        }
+        navigate(route)
     }
 
     const handleCloneProduct = (product: Product) => {

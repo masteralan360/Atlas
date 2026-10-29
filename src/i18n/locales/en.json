@@ -8056,6 +8056,7 @@
       "title": "Adjustment history",
       "description": "Each entry shows the before and after quantity snapshot for the selected storage.",
       "empty": "No adjustments match the current filters.",
+      "loadError": "Could not load stock adjustments. Check your connection and try again.",
       "noNotes": "No notes provided.",
       "qty": "Qty {{value}}",
       "previousToNew": "{{previous}} → {{new}}"
@@ -8064,12 +8065,17 @@
       "title": "Recent inventory transactions",
       "description": "Unified audit trail for initial stock, adjustments, and transfers.",
       "empty": "No inventory transactions are available yet.",
+      "loadError": "Could not load recent inventory transactions.",
       "delta": "Delta {{sign}}{{value}}"
     },
     "batches": {
       "title": "Batch tracking",
       "description": "Grouped by product and storage with a coverage check against current inventory.",
       "empty": "No stock batches have been created yet.",
+      "emptySearch": "No stock batches match your search.",
+      "loadError": "Could not load stock batches. Check your connection and try again.",
+      "search": "Search stock batches",
+      "searchPlaceholder": "Search product, storage, batch number, or notes",
       "coverageMismatch": "Coverage mismatch",
       "inventory": "Inventory {{value}}",
       "batchCount": "Batches {{value}}",

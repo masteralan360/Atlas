@@ -1,10 +1,12 @@
+import Dexie from 'dexie'
 import { useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
-import { isOnline } from '@/lib/network'
+import { getActiveBusinessUserId, getActiveBusinessUserRole, isOnline } from '@/lib/network'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
-import { runSupabaseAction } from '@/lib/supabaseRequest'
+import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import {
     QUANTITY_EPSILON,
     isNonNegativeQuantity,
@@ -14,8 +16,14 @@ import {
 } from '@/lib/quantity'
 import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { queryKeys } from '@/query/queryKeys'
+import { recordWorkspaceDataFetch } from '@/workspace/workspaceDataFreshness'
 
-import { db } from './database'
+import {
+    db,
+    STOCK_BATCHES_CHANGED_EVENT,
+    withoutStockBatchChangeEvents,
+} from './database'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import { getInventoryQuantityForProductStorage, useInventoryProducts, type InventoryProduct } from './inventory'
 import { addToOfflineMutations } from './offlineMutations'
@@ -1584,6 +1592,315 @@ export function useStockBatches(workspaceId: string | undefined, options: UseSto
     }, [enabled, online, storageId, syncRemote, workspaceId])
 
     return batches ?? []
+}
+
+export interface StockBatchGroup {
+    productId: string
+    storageId: string
+    rows: StockBatch[]
+    batchQuantity: number
+}
+
+export interface StockBatchGroupPageQuery {
+    workspaceId?: string
+    page: number
+    pageSize: number
+    search: string
+    /** Product names and SKUs matching the search, used by Local mode's Dexie query. */
+    searchProductIds: string[]
+    /** Storage names matching the search, used by Local mode's Dexie query. */
+    searchStorageIds: string[]
+}
+
+export interface StockBatchGroupPage {
+    rows: StockBatchGroup[]
+    totalCount: number
+    pageCount: number
+}
+
+const EMPTY_STOCK_BATCH_GROUP_PAGE: StockBatchGroupPage = {
+    rows: [],
+    totalCount: 0,
+    pageCount: 1,
+}
+
+function stockBatchSearchMatches(batch: StockBatch, search: string) {
+    if (!search) return true
+    const normalized = search.trim().toLocaleLowerCase()
+    return batch.batchNumber.toLocaleLowerCase().includes(normalized)
+        || (batch.notes || '').toLocaleLowerCase().includes(normalized)
+}
+
+async function fetchLocalStockBatchGroupPage(
+    query: StockBatchGroupPageQuery,
+    access: ReturnType<typeof useStorageAccess>,
+): Promise<StockBatchGroupPage> {
+    if (!query.workspaceId || access.isReady === false) return EMPTY_STOCK_BATCH_GROUP_PAGE
+
+    const search = query.search.trim()
+    const matchingProductIds = new Set(query.searchProductIds)
+    const matchingStorageIds = new Set(query.searchStorageIds)
+    const offset = (Math.max(1, query.page) - 1) * Math.max(1, query.pageSize)
+    const limit = Math.max(1, query.pageSize)
+    const selectedGroups: Array<{ productId: string; storageId: string; includeWholeGroup: boolean }> = []
+    let totalCount = 0
+    let activeGroupKey = ''
+    let activeProductId = ''
+    let activeStorageId = ''
+    let activeGroupMatches = false
+    let activeProductMatches = false
+
+    const collectActiveGroup = () => {
+        if (!activeGroupKey || !activeGroupMatches) return
+        if (totalCount >= offset && selectedGroups.length < limit) {
+            selectedGroups.push({
+                productId: activeProductId,
+                storageId: activeStorageId,
+                includeWholeGroup: !search || activeProductMatches || matchingStorageIds.has(activeStorageId),
+            })
+        }
+        totalCount += 1
+    }
+
+    await db.stock_batches
+        .where('[workspaceId+productId+storageId]')
+        .between(
+            [query.workspaceId, Dexie.minKey, Dexie.minKey],
+            [query.workspaceId, Dexie.maxKey, Dexie.maxKey],
+        )
+        .each((batch) => {
+            if (batch.isDeleted || !canAccessStorage(batch.storageId, access)) return
+            const groupKey = `${batch.productId}:${batch.storageId}`
+            if (groupKey !== activeGroupKey) {
+                collectActiveGroup()
+                activeGroupKey = groupKey
+                activeProductId = batch.productId
+                activeStorageId = batch.storageId
+                activeProductMatches = !search || matchingProductIds.has(batch.productId)
+                    || matchingStorageIds.has(batch.storageId)
+                activeGroupMatches = activeProductMatches || stockBatchSearchMatches(batch, search)
+            } else if (!activeGroupMatches && stockBatchSearchMatches(batch, search)) {
+                activeGroupMatches = true
+            }
+        })
+    collectActiveGroup()
+
+    const pageCount = Math.max(1, Math.ceil(totalCount / limit))
+    if (selectedGroups.length === 0) {
+        recordWorkspaceDataFetch(query.workspaceId, 'local', undefined, TABLE_NAME)
+        return { ...EMPTY_STOCK_BATCH_GROUP_PAGE, totalCount, pageCount }
+    }
+
+    const keys = selectedGroups.map((group) => [query.workspaceId!, group.productId, group.storageId])
+    const pageBatches = await db.stock_batches
+        .where('[workspaceId+productId+storageId]')
+        .anyOf(keys)
+        .filter((batch) => !batch.isDeleted && canAccessStorage(batch.storageId, access))
+        .toArray()
+    const selectedGroupByKey = new Map(selectedGroups.map((group) => [
+        `${group.productId}:${group.storageId}`,
+        group,
+    ] as const))
+    const groupedRows = new Map<string, StockBatch[]>()
+
+    for (const batch of pageBatches) {
+        const key = `${batch.productId}:${batch.storageId}`
+        const selectedGroup = selectedGroupByKey.get(key)
+        if (!selectedGroup || (!selectedGroup.includeWholeGroup && !stockBatchSearchMatches(batch, search))) continue
+        const rows = groupedRows.get(key) ?? []
+        rows.push(batch)
+        groupedRows.set(key, rows)
+    }
+
+    const rows = selectedGroups.flatMap((group) => {
+        const groupRows = (groupedRows.get(`${group.productId}:${group.storageId}`) ?? [])
+            .sort((left, right) => left.batchNumber.localeCompare(right.batchNumber) || left.id.localeCompare(right.id))
+        if (groupRows.length === 0) return []
+        return [{
+            productId: group.productId,
+            storageId: group.storageId,
+            rows: groupRows,
+            batchQuantity: groupRows.reduce((total, batch) => total + batch.quantity, 0),
+        }]
+    })
+
+    recordWorkspaceDataFetch(query.workspaceId, 'local', undefined, TABLE_NAME)
+    return { rows, totalCount, pageCount }
+}
+
+function normalizeStockBatchPageRow(value: unknown, workspaceId: string): StockBatch | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const row = toCamelCase(value as Record<string, unknown>) as Record<string, unknown>
+    const quantity = Number(row.quantity)
+    const price = Number(row.price)
+    const costPrice = Number(row.costPrice)
+    const createdAt = typeof row.createdAt === 'string' ? row.createdAt : ''
+    const updatedAt = typeof row.updatedAt === 'string' ? row.updatedAt : ''
+    if (
+        typeof row.id !== 'string'
+        || row.workspaceId !== workspaceId
+        || typeof row.productId !== 'string'
+        || typeof row.storageId !== 'string'
+        || typeof row.batchNumber !== 'string'
+        || !Number.isFinite(quantity) || quantity <= 0
+        || !Number.isFinite(price) || price < 0
+        || !Number.isFinite(costPrice) || costPrice < 0
+        || !createdAt || Number.isNaN(Date.parse(createdAt))
+        || !updatedAt || Number.isNaN(Date.parse(updatedAt))
+        || row.isDeleted === true
+    ) return null
+
+    return {
+        ...row,
+        id: row.id,
+        workspaceId,
+        productId: row.productId,
+        storageId: row.storageId,
+        batchNumber: row.batchNumber,
+        quantity,
+        price,
+        costPrice,
+        currency: normalizeCurrencyCode(row.currency),
+        createdAt,
+        updatedAt,
+        isDeleted: false,
+        syncStatus: 'synced',
+        lastSyncedAt: new Date().toISOString(),
+    } as StockBatch
+}
+
+async function cacheRemoteStockBatches(rows: readonly StockBatch[]) {
+    if (rows.length === 0) return
+    const fetchedAt = new Date().toISOString()
+    await withoutStockBatchChangeEvents(() => db.transaction('rw', db.stock_batches, async () => {
+        const existingRows = await db.stock_batches.bulkGet(rows.map((batch) => batch.id))
+        const cacheRows = rows.flatMap((batch, index) => {
+            const existing = existingRows[index]
+            if (existing?.syncStatus === 'pending' || existing?.syncStatus === 'conflict') return []
+            const existingUpdatedAt = Date.parse(existing?.updatedAt || '')
+            const remoteUpdatedAt = Date.parse(batch.updatedAt || '')
+            if (existing && Number.isFinite(existingUpdatedAt) && Number.isFinite(remoteUpdatedAt)
+                && remoteUpdatedAt <= existingUpdatedAt) return []
+            return [{ ...batch, syncStatus: 'synced' as const, lastSyncedAt: fetchedAt }]
+        })
+        if (cacheRows.length > 0) await db.stock_batches.bulkPut(cacheRows)
+    }))
+}
+
+async function fetchRemoteStockBatchGroupPage(
+    query: StockBatchGroupPageQuery,
+    access: ReturnType<typeof useStorageAccess>,
+    signal?: AbortSignal,
+): Promise<StockBatchGroupPage> {
+    if (!query.workspaceId) return EMPTY_STOCK_BATCH_GROUP_PAGE
+    const response = await runSupabaseAction('stockBatches.listGroupPage', () => {
+        const request = getSupabaseClientForTable(TABLE_NAME).rpc('get_stock_batch_groups_page', {
+            p_workspace_id: query.workspaceId,
+            p_page: Math.max(1, Math.floor(query.page)),
+            p_page_size: Math.max(1, Math.floor(query.pageSize)),
+            p_search: query.search.trim() || null,
+            p_excluded_storage_ids: access.isAdmin ? [] : Array.from(access.excludedStorageIds),
+        })
+        return signal ? request.abortSignal(signal) : request
+    })
+    if (response.error) throw normalizeSupabaseActionError(response.error)
+    if (signal?.aborted) throw signal.reason ?? new Error('Stock batch request cancelled.')
+    if (!response.data || typeof response.data !== 'object' || Array.isArray(response.data)) {
+        throw new Error('Invalid stock batch page response.')
+    }
+
+    const payload = response.data as Record<string, unknown>
+    if (!Array.isArray(payload.rows)) throw new Error('Invalid stock batch groups.')
+    const totalCount = Number(payload.total_count)
+    if (!Number.isInteger(totalCount) || totalCount < 0) throw new Error('Invalid stock batch count.')
+    const rows = payload.rows.map((value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+        const group = value as Record<string, unknown>
+        if (typeof group.product_id !== 'string' || typeof group.storage_id !== 'string' || !Array.isArray(group.rows)) return null
+        const batches = group.rows.map((batch) => normalizeStockBatchPageRow(batch, query.workspaceId!))
+        if (batches.some((batch) => batch === null)) return null
+        const normalizedBatches = batches as StockBatch[]
+        return {
+            productId: group.product_id,
+            storageId: group.storage_id,
+            rows: normalizedBatches,
+            batchQuantity: Number(group.batch_quantity),
+        } satisfies StockBatchGroup
+    })
+    if (rows.some((group) => group === null || !Number.isFinite(group.batchQuantity))) {
+        throw new Error('Invalid stock batch group record.')
+    }
+    const page = {
+        rows: rows as StockBatchGroup[],
+        totalCount,
+        pageCount: Math.max(1, Math.ceil(totalCount / Math.max(1, query.pageSize))),
+    }
+    await cacheRemoteStockBatches(page.rows.flatMap((group) => group.rows))
+    recordWorkspaceDataFetch(query.workspaceId, 'supabase', undefined, TABLE_NAME)
+    return page
+}
+
+export function useStockBatchGroupPage(
+    query: StockBatchGroupPageQuery,
+    enabled = true,
+    onlineOverride?: boolean,
+) {
+    const access = useStorageAccess(query.workspaceId)
+    const online = onlineOverride ?? isOnline(query.workspaceId)
+    const sourceMode = query.workspaceId && online && !isLocalWorkspaceMode(query.workspaceId)
+        ? 'remote'
+        : 'local'
+    const viewer = {
+        userId: getActiveBusinessUserId(),
+        role: getActiveBusinessUserRole(),
+        storageScope: access.signature,
+    }
+    const remoteQuery = useQuery({
+        queryKey: queryKeys.stockBatches.groupPage(query, sourceMode, viewer),
+        queryFn: ({ signal }) => fetchRemoteStockBatchGroupPage(query, access, signal),
+        enabled: enabled && sourceMode === 'remote' && Boolean(query.workspaceId) && access.isReady !== false,
+        placeholderData: undefined,
+    })
+    const localPage = useLiveQuery(
+        () => enabled && sourceMode === 'local'
+            ? fetchLocalStockBatchGroupPage(query, access)
+            : Promise.resolve(undefined),
+        [
+            access.signature,
+            enabled,
+            query.page,
+            query.pageSize,
+            query.search,
+            query.searchProductIds.join('|'),
+            query.searchStorageIds.join('|'),
+            query.workspaceId,
+            sourceMode,
+        ],
+    )
+
+    return {
+        data: sourceMode === 'remote' ? remoteQuery.data : localPage,
+        error: sourceMode === 'remote' ? remoteQuery.error : null,
+        isPending: sourceMode === 'remote'
+            ? remoteQuery.isPending
+            : enabled && sourceMode === 'local' && localPage === undefined,
+        isFetching: sourceMode === 'remote' ? remoteQuery.isFetching : false,
+        sourceMode,
+    }
+}
+
+export function useStockBatchPagesChanged(workspaceId?: string) {
+    const queryClient = useQueryClient()
+    useEffect(() => {
+        if (!workspaceId || typeof window === 'undefined') return
+        const handleChanged = (event: Event) => {
+            const changedWorkspaceIds = (event as CustomEvent<{ workspaceIds?: string[] }>).detail?.workspaceIds
+            if (!changedWorkspaceIds?.includes(workspaceId)) return
+            void queryClient.invalidateQueries({ queryKey: queryKeys.stockBatches.all(workspaceId) })
+        }
+        window.addEventListener(STOCK_BATCHES_CHANGED_EVENT, handleChanged)
+        return () => window.removeEventListener(STOCK_BATCHES_CHANGED_EVENT, handleChanged)
+    }, [queryClient, workspaceId])
 }
 
 export function useBatchAwareInventoryProducts(workspaceId: string | undefined, options: UseStockBatchesOptions = {}) {

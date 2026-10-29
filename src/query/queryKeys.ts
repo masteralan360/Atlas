@@ -1,5 +1,7 @@
 import type { OrdersListPageQuery } from '@/local-db/ordersList'
 import type { MarketplaceOrderPageQuery, MarketplaceOrderSummaryQuery } from '@/local-db/marketplaceOrders'
+import type { StockAdjustmentPageQuery } from '@/local-db/stockAdjustments'
+import type { StockBatchGroupPageQuery } from '@/local-db/stockBatches'
 
 export const queryKeys = {
   postal: {
@@ -82,6 +84,51 @@ export const queryKeys = {
       query.viewer.userId ?? null,
       query.viewer.role ?? null,
       query.viewer.storageScope,
+    ] as const,
+  },
+  stockAdjustments: {
+    all: (workspaceId: string | undefined) =>
+      ['atlas', 'workspace', workspaceId ?? 'unscoped', 'stock-adjustments'] as const,
+    page: (
+      query: StockAdjustmentPageQuery,
+      sourceMode: 'remote' | 'local',
+      viewer: { userId?: string | null; role?: string | null; storageScope: string },
+    ) => [
+      ...queryKeys.stockAdjustments.all(query.workspaceId),
+      'page',
+      query.page,
+      query.pageSize,
+      query.startAt ?? null,
+      query.endBefore ?? null,
+      query.productId ?? null,
+      query.storageId ?? null,
+      query.adjustmentType ?? null,
+      query.reason ?? null,
+      sourceMode,
+      viewer.userId ?? null,
+      viewer.role ?? null,
+      viewer.storageScope,
+    ] as const,
+  },
+  stockBatches: {
+    all: (workspaceId: string | undefined) =>
+      ['atlas', 'workspace', workspaceId ?? 'unscoped', 'stock-batches'] as const,
+    groupPage: (
+      query: StockBatchGroupPageQuery,
+      sourceMode: 'remote' | 'local',
+      viewer: { userId?: string | null; role?: string | null; storageScope: string },
+    ) => [
+      ...queryKeys.stockBatches.all(query.workspaceId),
+      'group-page',
+      query.page,
+      query.pageSize,
+      query.search.trim(),
+      query.searchProductIds,
+      query.searchStorageIds,
+      sourceMode,
+      viewer.userId ?? null,
+      viewer.role ?? null,
+      viewer.storageScope,
     ] as const,
   },
   orders: {

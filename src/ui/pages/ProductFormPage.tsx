@@ -377,6 +377,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const { permissionKeys } = useWorkspacePermissions()
     const hideCosts = useHideCosts()
     const [, navigate] = useLocation()
+    const locationSearch = window.location.hash.split('?')[1] ?? ''
     const { toast } = useToast()
     const { rows: categories, isReady: areCategoriesReady } = useCategoriesState(user?.workspaceId)
     const { rows: storages, isReady: areStoragesReady } = useStoragesState(user?.workspaceId)
@@ -432,6 +433,10 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const canManageMinimumSellingPrice = shouldShowMinimumSellingPriceField(user?.role)
     const isClone = mode === 'clone'
     const isEditing = mode === 'edit'
+    const returnSearch = new URLSearchParams(locationSearch).get('productEditReturnSearch')
+    const productsReturnPath = mode === 'edit' && returnSearch !== null && returnSearch !== ''
+        ? `/products?${new URLSearchParams({ productEditReturnSearch: returnSearch }).toString()}`
+        : '/products'
     const isReadOnly = isEditing && !canEdit
     const highlightMissingCosts = isEditing && !isReadOnly && !hideCosts
     const catalogProducts = useProducts(workspaceId, { syncBarcodeCache: false })
@@ -870,12 +875,12 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
 
     const goToProducts = () => {
         if (isReadOnly) {
-            navigate('/products')
+            navigate(productsReturnPath)
             return
         }
 
-        if (!requestNavigation('/products')) {
-            navigate('/products')
+        if (!requestNavigation(productsReturnPath)) {
+            navigate(productsReturnPath)
         }
     }
 
@@ -1652,7 +1657,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             initialFormSnapshotRef.current = JSON.stringify(formData)
 
             if (navigateAfterSave) {
-                navigate('/products')
+                navigate(productsReturnPath)
             }
 
             return true
@@ -1849,7 +1854,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     if (mode !== 'create' && !product) {
         return (
             <div className="mx-auto max-w-5xl space-y-6">
-                <Button variant="ghost" className="w-fit gap-2 px-0" allowViewer={true} onClick={() => navigate('/products')}>
+                <Button variant="ghost" className="w-fit gap-2 px-0" allowViewer={true} onClick={() => navigate(productsReturnPath)}>
                     <ArrowLeft className="h-4 w-4" />
                     {t('products.backToList') || 'Back to Products'}
                 </Button>

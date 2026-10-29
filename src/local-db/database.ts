@@ -176,10 +176,14 @@ interface LocalModeSqliteTransactionContext {
 
 const localModeSqliteTransactions = new WeakMap<object, LocalModeSqliteTransactionContext>()
 export const INVENTORY_TRANSACTIONS_CHANGED_EVENT = 'atlas:inventory-transactions-changed'
+export const STOCK_BATCHES_CHANGED_EVENT = 'atlas:stock-batches-changed'
 
 let inventoryTransactionChangeSuppressionDepth = 0
+let stockBatchChangeSuppressionDepth = 0
 const pendingInventoryTransactionWorkspaceIds = new Set<string>()
 let inventoryTransactionChangeTimer: ReturnType<typeof setTimeout> | undefined
+const pendingStockBatchWorkspaceIds = new Set<string>()
+let stockBatchChangeTimer: ReturnType<typeof setTimeout> | undefined
 
 function queueInventoryTransactionsChanged(workspaceId?: string | null) {
   if (
@@ -204,6 +208,29 @@ function queueInventoryTransactionsChanged(workspaceId?: string | null) {
   }, 0)
 }
 
+function queueStockBatchesChanged(workspaceId?: string | null) {
+  if (
+    stockBatchChangeSuppressionDepth > 0 ||
+    !workspaceId ||
+    typeof window === 'undefined'
+  ) {
+    return
+  }
+
+  pendingStockBatchWorkspaceIds.add(workspaceId)
+  if (stockBatchChangeTimer) return
+  stockBatchChangeTimer = setTimeout(() => {
+    stockBatchChangeTimer = undefined
+    const workspaceIds = Array.from(pendingStockBatchWorkspaceIds)
+    pendingStockBatchWorkspaceIds.clear()
+    if (workspaceIds.length > 0) {
+      window.dispatchEvent(new CustomEvent(STOCK_BATCHES_CHANGED_EVENT, {
+        detail: { workspaceIds }
+      }))
+    }
+  }, 0)
+}
+
 export async function withoutInventoryTransactionChangeEvents<T>(task: () => Promise<T>) {
   inventoryTransactionChangeSuppressionDepth += 1
   try {
@@ -212,6 +239,18 @@ export async function withoutInventoryTransactionChangeEvents<T>(task: () => Pro
     inventoryTransactionChangeSuppressionDepth = Math.max(
       0,
       inventoryTransactionChangeSuppressionDepth - 1
+    )
+  }
+}
+
+export async function withoutStockBatchChangeEvents<T>(task: () => Promise<T>) {
+  stockBatchChangeSuppressionDepth += 1
+  try {
+    return await task()
+  } finally {
+    stockBatchChangeSuppressionDepth = Math.max(
+      0,
+      stockBatchChangeSuppressionDepth - 1
     )
   }
 }
@@ -3896,6 +3935,13 @@ export class AtlasDatabase extends Dexie {
 
     this.version(162).stores({ postal_cache: 'id, workspaceId, viewerId, table, fetchedAt' })
 
+    this.version(163).stores({
+      inventory_transactions:
+        'id, workspaceId, productId, storageId, transactionType, adjustmentReason, referenceId, transferBatchId, createdAt, isDeleted, syncStatus, [workspaceId+productId], [workspaceId+createdAt], [workspaceId+transactionType], [workspaceId+adjustmentReason], [workspaceId+transferBatchId], [workspaceId+createdAt+id], [workspaceId+productId+createdAt+id], [workspaceId+storageId+createdAt+id], [workspaceId+transactionType+createdAt+id]',
+      stock_batches:
+        'id, workspaceId, productId, storageId, batchNumber, expiryDate, sourcePurchaseOrderId, sourcePurchaseOrderItemId, updatedAt, isDeleted, [workspaceId+productId], [productId+storageId], [workspaceId+storageId], [workspaceId+storageId+productId], [workspaceId+productId+storageId], [workspaceId+updatedAt], [sourcePurchaseOrderId+sourcePurchaseOrderItemId]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
@@ -4269,6 +4315,9 @@ export class AtlasDatabase extends Dexie {
           if (tableName === 'inventory_transactions' || tableName === 'products') {
             queueInventoryTransactionsChanged((obj as { workspaceId?: string }).workspaceId)
           }
+          if (tableName === 'stock_batches') {
+            queueStockBatchesChanged((obj as { workspaceId?: string }).workspaceId)
+          }
         }
       })
 
@@ -4284,6 +4333,9 @@ export class AtlasDatabase extends Dexie {
           queueLocalModeSqliteUpsert(database, tableName, updatedObj as Record<string, unknown>)
           if (tableName === 'inventory_transactions' || tableName === 'products') {
             queueInventoryTransactionsChanged((updatedObj as { workspaceId?: string }).workspaceId)
+          }
+          if (tableName === 'stock_batches') {
+            queueStockBatchesChanged((updatedObj as { workspaceId?: string }).workspaceId)
           }
         }
 
@@ -4306,6 +4358,9 @@ export class AtlasDatabase extends Dexie {
           queueLocalModeSqliteDelete(database, tableName, obj as Record<string, unknown>)
           if (tableName === 'inventory_transactions' || tableName === 'products') {
             queueInventoryTransactionsChanged((obj as { workspaceId?: string }).workspaceId)
+          }
+          if (tableName === 'stock_batches') {
+            queueStockBatchesChanged((obj as { workspaceId?: string }).workspaceId)
           }
         }
       })
