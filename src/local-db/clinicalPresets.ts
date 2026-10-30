@@ -5,7 +5,7 @@ import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { generateId, toSnakeCase } from '@/lib/utils'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { isOnline } from '@/lib/network'
-import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { isDemoWorkspaceMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { runSupabaseAction } from '@/lib/supabaseRequest'
 import { fetchTableFromSupabase } from './hooks'
 import { addToOfflineMutations } from './offlineMutations'
@@ -16,8 +16,70 @@ import {
   getClinicalRegistryPresetId,
   normalizeClinicalRegistryType,
 } from './clinicalRegistryPreset'
+import { BEAUTY3_PROCEDURE_PRESET_CATEGORY } from './beauty3Procedures'
 
 const PRESETS_TABLE = 'clinical_presets'
+const BEAUTY3_APPOINTMENTS_TABLE = 'beauty3_appointments'
+const BEAUTY3_PROCEDURE_IN_USE_MARKER = 'beauty3_procedure_in_use'
+
+export class Beauty3ProcedureInUseError extends Error {
+  constructor() {
+    super('The procedure is assigned to active appointments')
+    this.name = 'Beauty3ProcedureInUseError'
+  }
+}
+
+export class Beauty3ProcedureUsageCheckError extends Error {
+  constructor() {
+    super('The procedure usage could not be checked')
+    this.name = 'Beauty3ProcedureUsageCheckError'
+  }
+}
+
+function isBeauty3ProcedureInUseRemoteError(error: unknown) {
+  return Boolean(
+    error
+    && typeof error === 'object'
+    && typeof (error as { message?: unknown }).message === 'string'
+    && (error as { message: string }).message.includes(BEAUTY3_PROCEDURE_IN_USE_MARKER),
+  )
+}
+
+async function ensureBeauty3ProcedureUnused(preset: ClinicalPreset, workspaceId: string) {
+  let localAppointments: number
+  try {
+    const matchingAppointments = db.beauty3_appointments
+      .where('[workspaceId+procedureType]')
+      .equals([workspaceId, preset.name])
+    localAppointments = await matchingAppointments
+      .filter((appointment) => !appointment.isDeleted && (
+        !shouldUseCloudBusinessData(workspaceId) || appointment.syncStatus !== 'synced'
+      ))
+      .count()
+  } catch {
+    throw new Beauty3ProcedureUsageCheckError()
+  }
+
+  if (localAppointments > 0) throw new Beauty3ProcedureInUseError()
+  if (!shouldUseCloudBusinessData(workspaceId)) return
+  if (!isOnline()) throw new Beauty3ProcedureUsageCheckError()
+
+  try {
+    const { count, error } = await runSupabaseAction('beauty3Appointments.checkProcedureUsage', () => (
+      (getSupabaseClientForTable(BEAUTY3_APPOINTMENTS_TABLE) as any)
+        .from(BEAUTY3_APPOINTMENTS_TABLE)
+        .select('id', { count: 'exact', head: true })
+        .eq('workspace_id', workspaceId)
+        .eq('procedure_type', preset.name)
+        .eq('is_deleted', false)
+    ))
+    if (error) throw error
+    if (Number(count ?? 0) > 0) throw new Beauty3ProcedureInUseError()
+  } catch (error) {
+    if (error instanceof Beauty3ProcedureInUseError) throw error
+    throw new Beauty3ProcedureUsageCheckError()
+  }
+}
 
 type ClinicalPresetsSyncEntity = Record<string, unknown> & {
   id: string
@@ -31,7 +93,9 @@ const tableByName = {
 } as const
 
 function shouldUseCloudBusinessData(workspaceId?: string | null) {
-  return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
+  return !!workspaceId
+    && !isLocalWorkspaceMode(workspaceId)
+    && !isDemoWorkspaceMode(workspaceId)
 }
 
 function getSyncMetadata(workspaceId: string, timestamp: string) {
@@ -64,6 +128,7 @@ function sanitizeForSupabase<T extends Record<string, unknown>>(obj: T): Record<
 }
 
 async function queueClinicalPresetsUpsert(entity: ClinicalPresetsSyncEntity, workspaceId: string) {
+  const dexieTable = tableByName[PRESETS_TABLE]
   if (shouldUseCloudBusinessData(workspaceId) && isOnline()) {
     const supabaseClient = getSupabaseClientForTable(PRESETS_TABLE)
     const { error } = await runSupabaseAction(`clinical.upsert.${PRESETS_TABLE}`, () =>
@@ -75,6 +140,14 @@ async function queueClinicalPresetsUpsert(entity: ClinicalPresetsSyncEntity, wor
     )
     if (error) {
       await addToOfflineMutations(PRESETS_TABLE, entity.id, 'update', entity as any, workspaceId)
+    } else {
+      const current = await dexieTable.get(entity.id)
+      if (current?.version === entity.version && current.updatedAt === entity.updatedAt) {
+        await dexieTable.update(entity.id, {
+          syncStatus: 'synced',
+          lastSyncedAt: new Date().toISOString(),
+        } as any)
+      }
     }
   } else if (shouldUseCloudBusinessData(workspaceId)) {
     await addToOfflineMutations(PRESETS_TABLE, entity.id, 'update', entity as any, workspaceId)
@@ -84,10 +157,41 @@ async function queueClinicalPresetsUpsert(entity: ClinicalPresetsSyncEntity, wor
 async function softDeleteClinicalPresetEntity(id: string, workspaceId: string) {
   const timestamp = new Date().toISOString()
   const dexieTable = tableByName[PRESETS_TABLE]
+  const existing = await dexieTable.get(id)
+  if (!existing || existing.workspaceId !== workspaceId || existing.isDeleted) return
+
+  if (existing.category === BEAUTY3_PROCEDURE_PRESET_CATEGORY) {
+    await ensureBeauty3ProcedureUnused(existing as ClinicalPreset, workspaceId)
+
+    if (shouldUseCloudBusinessData(workspaceId)) {
+      const supabaseClient = getSupabaseClientForTable(PRESETS_TABLE)
+      const { error } = await runSupabaseAction(`clinical.softDelete.${PRESETS_TABLE}`, () =>
+        supabaseClient
+          .from(PRESETS_TABLE)
+          .update({ is_deleted: true, updated_at: timestamp })
+          .eq('id', id)
+      )
+      if (error) {
+        if (isBeauty3ProcedureInUseRemoteError(error)) {
+          throw new Beauty3ProcedureInUseError()
+        }
+        throw new Beauty3ProcedureUsageCheckError()
+      }
+    }
+
+    await dexieTable.update(id, {
+      isDeleted: true,
+      updatedAt: timestamp,
+      ...getSyncMetadata(workspaceId, timestamp),
+    } as any)
+    return
+  }
+
+  const syncMeta = getSyncMetadata(workspaceId, timestamp)
   await dexieTable.update(id, {
     isDeleted: true,
     updatedAt: timestamp,
-    syncStatus: 'pending',
+    ...syncMeta,
   })
 
   if (shouldUseCloudBusinessData(workspaceId) && isOnline()) {
@@ -100,6 +204,14 @@ async function softDeleteClinicalPresetEntity(id: string, workspaceId: string) {
     )
     if (error) {
       await addToOfflineMutations(PRESETS_TABLE, id, 'delete', { id, workspaceId } as any, workspaceId)
+    } else {
+      const current = await dexieTable.get(id)
+      if (current?.updatedAt === timestamp) {
+        await dexieTable.update(id, {
+          syncStatus: 'synced',
+          lastSyncedAt: new Date().toISOString(),
+        } as any)
+      }
     }
   } else if (shouldUseCloudBusinessData(workspaceId)) {
     await addToOfflineMutations(PRESETS_TABLE, id, 'delete', { id, workspaceId } as any, workspaceId)
@@ -126,7 +238,12 @@ export function markClinicalPresetsSynced(ids: string[], timestamp: string) {
 function useGenericClinicalPresetsTableFetch(workspaceId: string | undefined) {
   const isOnlineVal = useNetworkStatus()
   useEffect(() => {
-    if (!workspaceId || !isOnlineVal || isLocalWorkspaceMode(workspaceId)) return
+    if (
+      !workspaceId
+      || !isOnlineVal
+      || isLocalWorkspaceMode(workspaceId)
+      || isDemoWorkspaceMode(workspaceId)
+    ) return
     const dexieTable = tableByName[PRESETS_TABLE]
     fetchTableFromSupabase(PRESETS_TABLE, dexieTable as any, workspaceId)
   }, [workspaceId, isOnlineVal])
@@ -138,7 +255,11 @@ export function useClinicalPresets(workspaceId: string | undefined) {
     if (!workspaceId) return []
     return db.clinical_presets
       .where('workspaceId').equals(workspaceId)
-      .filter((p) => !p.isDeleted && p.category !== CLINICAL_REGISTRY_PRESET_CATEGORY)
+      .filter((p) => (
+        !p.isDeleted
+        && p.category !== CLINICAL_REGISTRY_PRESET_CATEGORY
+        && p.category !== 'beauty3_procedure'
+      ))
       .sortBy('sortOrder')
   }, [workspaceId])
 }

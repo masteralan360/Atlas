@@ -1,5 +1,6 @@
 import { createAdminClient } from '../_shared/supabase.ts'
 import { computeDiscountPrice, type ResolvedWorkspaceDiscountRow } from '../_shared/discounts.ts'
+import { getJumlaKhaleejStorefrontDiscount } from '../_shared/jumlaKhaleejStorefrontDiscounts.ts'
 import { errorResponse, jsonResponse } from '../_shared/http.ts'
 import {
     listMarketplaceAssetUrls,
@@ -219,7 +220,7 @@ Deno.serve(async (req) => {
                 .filter((category): category is { id: string; name: string } => Boolean(category.name)),
             products: visibleProducts.productRows.map((product, index) => {
                 const resolvedPrice = resolveModePrice(product, mode, visibleProducts.priceBookItemsByProductId)
-                const discount = discountByProductId.get(product.id)
+                const discount = getJumlaKhaleejStorefrontDiscount(product, discountByProductId)
                 return {
                     id: product.id,
                     parent_product_id: product.parent_product_id,

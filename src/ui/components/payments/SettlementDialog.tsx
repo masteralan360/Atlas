@@ -1,6 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { X } from 'lucide-react'
+import { Loader2, X } from 'lucide-react'
 
 import { type BusinessPartner, type PaymentObligation, type WorkspacePaymentMethod, useBusinessPartners } from '@/local-db'
 import { formatCurrency, formatDate, formatLocalDateTimeValue, formatNumericInput, generateId, parseFormattedNumber, parseLocalDateTimeValue, sanitizeNumericInput } from '@/lib/utils'
@@ -231,7 +231,7 @@ export function SettlementDialog({
 
                                 {showsAmountInput ? (
                                     <div className="grid gap-2">
-                                        <Label>{t('payments.table.amount', { defaultValue: 'Amount' })}</Label>
+                                        <Label>{t('payments.table.amount', { defaultValue: 'Amount' })} *</Label>
                                         <Input
                                             type="text"
                                             inputMode="decimal"
@@ -298,7 +298,7 @@ export function SettlementDialog({
                                 ) : null}
 
                                 <div className="grid gap-2">
-                                    <Label>{t('settlementModal.paymentMethod', { defaultValue: 'Payment Method' })}</Label>
+                                    <Label>{t('settlementModal.paymentMethod', { defaultValue: 'Payment Method' })} *</Label>
                                     <PaymentMethodSelector
                                         value={paymentMethod}
                                         onValueChange={(value) => setPaymentMethod(value as WorkspacePaymentMethod)}
@@ -310,6 +310,7 @@ export function SettlementDialog({
                                         methods={includeLoanAdjustment
                                             ? [...STANDARD_PAYMENT_METHODS, LOAN_ADJUSTMENT_PAYMENT_METHOD]
                                             : STANDARD_PAYMENT_METHODS}
+                                        disabled={isSubmitting}
                                     />
                                 </div>
 
@@ -324,12 +325,13 @@ export function SettlementDialog({
                                 />
 
                                 <div className="grid gap-2">
-                                    <Label>{t('settlementModal.paidAt', { defaultValue: 'Paid At' })}</Label>
+                                    <Label>{t('settlementModal.paidAt', { defaultValue: 'Paid At' })} *</Label>
                                     <DateTimePicker
                                         id="settlement-paid-at"
                                         date={selectedPaidAt}
                                         setDate={(value) => setPaidAt(value ? formatLocalDateTimeValue(value) : '')}
                                         placeholder={t('settlementModal.pickPaymentTime', { defaultValue: 'Pick payment time' })}
+                                        disabled={isSubmitting}
                                     />
                                 </div>
 
@@ -340,6 +342,7 @@ export function SettlementDialog({
                                         value={note} 
                                         onChange={(event) => setNote(event.target.value)} 
                                         placeholder={t('settlementModal.optionalNote', { defaultValue: 'Optional note' })} 
+                                        disabled={isSubmitting}
                                     />
                                 </div>
                             </div>
@@ -355,7 +358,7 @@ export function SettlementDialog({
                             className="w-full sm:w-auto"
                             disabled={!canSubmit || isSubmitting}
                         >
-                            {actionLabel}
+                            {isSubmitting ? <><Loader2 className="me-2 h-4 w-4 animate-spin" />{t('common.loading')}</> : actionLabel}
                         </Button>
                     </DialogFooter>
                 </form>

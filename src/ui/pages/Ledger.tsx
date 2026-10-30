@@ -214,6 +214,7 @@ type LedgerEntryType =
     | 'activity_transaction'
     | 'activity_refund'
     | 'clinical_appointment_payment'
+    | 'beauty3_appointment_profit'
     | 'direct_inflow'
     | 'direct_outflow'
     | 'payment_account_opening_balance'
@@ -450,6 +451,8 @@ function ledgerTypeLabel(type: LedgerEntryType, t: any) {
             return t('ledger.type.clinicalAppointmentPayment', {
                 defaultValue: 'Appointment Payment',
             })
+        case 'beauty3_appointment_profit':
+            return t('beauty3Appointments.profitPayment')
         case 'direct_inflow':
             return t('ledger.type.directInflow', { defaultValue: 'Direct Inflow' })
         case 'direct_outflow':
@@ -1018,6 +1021,8 @@ function buildTransactionReference(transaction: PaymentTransaction) {
             return buildReferenceId('ACT', transaction.sourceRecordId)
         case 'clinical_appointment':
             return buildReferenceId('APT', transaction.sourceRecordId)
+        case 'beauty3_appointment_profit':
+            return buildReferenceId('B3', transaction.sourceRecordId)
         case 'delivery_courier_remittance':
             return buildReferenceId('CR', transaction.sourceRecordId)
         case 'delivery_courier_fee_payout':
@@ -1213,6 +1218,14 @@ function buildLedgerRelationDescriptor(
                 relationRole: 'settlement',
                 relationTitle: 'Appointment payment',
                 relationDescription: `Original source: Appointment ${reference}.`,
+            }
+
+        case 'beauty3_appointment_profit':
+            return {
+                relationKey: `beauty3-appointment:${transaction.sourceRecordId}`,
+                relationRole: 'settlement',
+                relationTitle: t('beauty3Appointments.profitPayment'),
+                relationDescription: t('beauty3Appointments.ledgerSource', { reference }),
             }
 
         case 'rental_payment':
@@ -1714,6 +1727,25 @@ function buildPaymentLedgerEntry(transaction: PaymentTransaction, context: Ledge
                 transactionId: transaction.id,
                 date: transaction.paidAt,
                 type: 'clinical_appointment_payment',
+                direction: 'incoming',
+                amount: transaction.amount,
+                currency: transaction.currency,
+                sourceModule: 'clinical_appointments',
+                referenceId: buildTransactionReference(transaction),
+                partner: transaction.counterpartyName || null,
+                businessPartnerId: context.businessPartnerByName.get(transaction.counterpartyName?.trim().toLowerCase() ?? '') ?? null,
+                paymentMethod: transaction.paymentMethod || 'unknown',
+                notes: transaction.note?.trim() || null,
+                description: buildTransactionDescription(transaction, t),
+                routePath: getPaymentTransactionRoutePath(transaction),
+                ...relation,
+            }
+        case 'beauty3_appointment_profit':
+            return {
+                id: `payment:${transaction.id}`,
+                transactionId: transaction.id,
+                date: transaction.paidAt,
+                type: 'beauty3_appointment_profit',
                 direction: 'incoming',
                 amount: transaction.amount,
                 currency: transaction.currency,

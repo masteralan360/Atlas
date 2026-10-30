@@ -67,6 +67,7 @@ const SINGLE_ROW_RECOVERY_TYPES = new Set<OfflineMutation['entityType']>([
     'exchange_pair_prices',
     'exchange_fee_rules',
     'clinical_presets',
+    'beauty3_appointments',
     'manual_entry_templates',
     'restaurant_table_settings',
 ])

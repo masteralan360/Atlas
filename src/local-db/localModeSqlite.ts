@@ -183,6 +183,7 @@ export const LOCAL_MODE_SQLITE_TABLES = [
   "offline_mutations",
   "manual_entry_templates",
   "manual_entries",
+  "beauty3_appointments",
   "clinical_appointments",
   "clinical_patients",
   "clinical_attachments",

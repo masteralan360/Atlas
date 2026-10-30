@@ -245,6 +245,7 @@ function movementTypeLabel(transaction: Pick<PaymentTransaction, 'sourceType' | 
     case 'activity_transaction': return t('ledger.type.activityTransaction', { defaultValue: 'Activity Transaction' })
     case 'activity_refund': return t('ledger.type.activityRefund', { defaultValue: 'Activity Refund' })
     case 'clinical_appointment': return t('ledger.type.clinicalAppointmentPayment', { defaultValue: 'Appointment Payment' })
+    case 'beauty3_appointment_profit': return t('beauty3Appointments.profitPayment')
     case 'sales_order': return t('ledger.type.salesOrderPayment', { defaultValue: 'Sales Order Payment' })
     case 'purchase_order': return t('ledger.type.purchaseOrderPayment', { defaultValue: 'Purchase Order Payment' })
     case 'order_return': return t('paymentAccounts.transactionTypes.orderReturn', { defaultValue: 'Order Return' })

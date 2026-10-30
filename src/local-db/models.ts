@@ -1698,10 +1698,29 @@ export type ClinicalAppointmentType = 'consultation' | 'follow_up' | 'emergency'
 
 export type ClinicalPatientType = 'new' | 'existing'
 
-export type ClinicalPresetCategory = 'reason_for_visit' | 'appointment_type' | 'registry_type'
+export type ClinicalPresetCategory = 'reason_for_visit' | 'appointment_type' | 'registry_type' | 'beauty3_procedure'
 
-export type ClinicalRegistryType = 'medical' | 'beauty' | 'beauty2'
-export type UserSelectableClinicalRegistryType = Exclude<ClinicalRegistryType, 'beauty2'>
+export type ClinicalRegistryType = 'medical' | 'beauty' | 'beauty2' | 'beauty3'
+export type UserSelectableClinicalRegistryType = ClinicalRegistryType
+
+export type Beauty3MaritalStatus = 'single' | 'married'
+export type Beauty3ProcedurePlace = 'sulaymaniyah' | 'erbil'
+
+export interface Beauty3Appointment extends BaseEntity {
+  name: string
+  age: number
+  maritalStatus: Beauty3MaritalStatus
+  address: string
+  phoneNumber: string
+  procedureType: string | null
+  procedureTypeOther: string | null
+  procedurePlace: Beauty3ProcedurePlace
+  procedureDate: string
+  appointmentTotal: number
+  totalProfit: number
+  currency: CurrencyCode
+  createdBy?: string | null
+}
 
 export interface ClinicalPreset extends BaseEntity {
   category: ClinicalPresetCategory
@@ -2345,6 +2364,7 @@ export type PaymentTransactionSourceType =
   | 'activity_transaction'
   | 'activity_refund'
   | 'clinical_appointment'
+  | 'beauty3_appointment_profit'
   | 'sales_order'
   | 'purchase_order'
   | 'order_return'
@@ -2811,6 +2831,7 @@ export interface SyncQueueItem {
     | 'clinical_patients'
     | 'clinical_attachments'
     | 'clinical_presets'
+    | 'beauty3_appointments'
   entityId: string
   operation: 'create' | 'update' | 'delete'
   data: Record<string, unknown>
@@ -3054,6 +3075,7 @@ export interface OfflineMutation {
     | 'clinical_patients'
     | 'clinical_attachments'
     | 'clinical_presets'
+    | 'beauty3_appointments'
     | 'manual_entry_templates'
     | 'manual_entries'
     | 'restaurant_table_settings'

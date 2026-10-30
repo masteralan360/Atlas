@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { CaptionLabel as DefaultCaptionLabel, DayPicker, type CaptionLabelProps } from "react-day-picker";
+import { DayPicker, MonthCaption as DefaultMonthCaption, type MonthCaptionProps } from "react-day-picker";
 import { useTranslation } from "react-i18next";
 
 import { cn, convertArabicIndicToLatin } from "@/lib/utils";
@@ -45,19 +45,41 @@ function getDaysInMonth(year: number, month: number) {
   return [4, 6, 9, 11].includes(month) ? 30 : 31
 }
 
-function DateFieldCaptionLabel(props: CaptionLabelProps) {
+function getDateInDisplayedMonth(date: Date, displayedMonth: Date) {
+  const year = displayedMonth.getFullYear()
+  const month = displayedMonth.getMonth()
+  const day = Math.min(date.getDate(), getDaysInMonth(year, month + 1))
+  const nextDate = new Date(date)
+  nextDate.setFullYear(year, month, day)
+  return nextDate
+}
+
+function DateFieldMonthCaption(props: MonthCaptionProps) {
   const dateField = React.useContext(DateFieldContext)
   if (!dateField) {
-    return <DefaultCaptionLabel {...props} />
+    return <DefaultMonthCaption {...props} />
   }
 
-  return <DateFieldInput {...props} dateField={dateField} />
+  const { calendarMonth, displayIndex, ...captionProps } = props
+  const displayedDate = getDateInDisplayedMonth(dateField.date, calendarMonth.date)
+
+  return (
+    <div {...captionProps} data-month-index={displayIndex}>
+      <DateFieldInput
+        dateField={{ ...dateField, date: displayedDate }}
+        className="text-sm font-medium"
+      />
+    </div>
+  )
 }
 
 function DateFieldInput({
   dateField,
-  ...captionProps
-}: CaptionLabelProps & { dateField: NonNullable<CalendarProps["dateField"]> }) {
+  className,
+}: {
+  dateField: NonNullable<CalendarProps["dateField"]>
+  className?: string
+}) {
   const { t } = useTranslation()
   const [values, setValues] = React.useState(() => getDateFieldValues(dateField.date))
   const [activePart, setActivePart] = React.useState<DateFieldPart | null>(null)
@@ -168,12 +190,10 @@ function DateFieldInput({
 
   return (
     <span
-      {...captionProps}
       ref={rootRef}
       dir="ltr"
-      className={cn(captionProps.className, "inline-flex items-center justify-center gap-0.5 tabular-nums")}
+      className={cn(className, "inline-flex items-center justify-center gap-0.5 tabular-nums")}
       onBlur={(event) => {
-        captionProps.onBlur?.(event)
         if (!(event.relatedTarget instanceof Node) || !rootRef.current?.contains(event.relatedTarget)) {
           setActivePart(null)
         }
@@ -292,7 +312,7 @@ function Calendar({
             }
             return <ChevronRight className="h-4 w-4" />;
           },
-          ...(dateField ? { CaptionLabel: DateFieldCaptionLabel } : {}),
+          ...(dateField ? { MonthCaption: DateFieldMonthCaption } : {}),
         }}
         {...props}
         formatters={{

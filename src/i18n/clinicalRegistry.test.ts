@@ -28,7 +28,7 @@ describe('clinical registry preference', () => {
         expect(canManageClinicalRegistryType('admin', false)).toBe(false)
         expect(canManageClinicalRegistryType('staff', true)).toBe(false)
         expect(canManageClinicalRegistryType('viewer', true)).toBe(false)
-        expect(canManageClinicalRegistryType('admin', true, 'beauty2')).toBe(false)
+        expect(canManageClinicalRegistryType('admin', true, 'beauty2')).toBe(true)
     })
 
     it('treats both beauty registry modes as Beauty Center behavior', () => {

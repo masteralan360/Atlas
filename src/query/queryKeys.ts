@@ -2,8 +2,36 @@ import type { OrdersListPageQuery } from '@/local-db/ordersList'
 import type { MarketplaceOrderPageQuery, MarketplaceOrderSummaryQuery } from '@/local-db/marketplaceOrders'
 import type { StockAdjustmentPageQuery } from '@/local-db/stockAdjustments'
 import type { StockBatchGroupPageQuery } from '@/local-db/stockBatches'
+import type { Beauty3AppointmentPageQuery } from '@/local-db/beauty3Appointments'
 
 export const queryKeys = {
+  beauty3Appointments: {
+    all: (workspaceId?: string) => ['atlas', 'workspace', workspaceId ?? 'unscoped', 'beauty3-appointments'] as const,
+    page: (query: Beauty3AppointmentPageQuery, viewer?: { userId?: string | null }) => [
+      ...queryKeys.beauty3Appointments.all(query.workspaceId),
+      'page',
+      query.page,
+      query.pageSize,
+      query.search.trim(),
+      query.dateFrom ?? null,
+      query.dateTo ?? null,
+      query.sourceMode,
+      query.sort,
+      viewer?.userId ?? null,
+    ] as const,
+    profitPayments: (
+      workspaceId: string,
+      appointmentIds: readonly string[],
+      sourceMode: 'local' | 'remote',
+      viewer?: { userId?: string | null },
+    ) => [
+      ...queryKeys.beauty3Appointments.all(workspaceId),
+      'profit-payments',
+      [...appointmentIds].sort(),
+      sourceMode,
+      viewer?.userId ?? null,
+    ] as const,
+  },
   stockReservations: {
     all: (workspaceId?: string) => ['atlas', 'workspace', workspaceId ?? 'unscoped', 'stock-reservations'] as const,
     availability: (workspaceId: string | undefined, positions: readonly { productId: string; storageId: string }[], excludeOrderId?: string, userId?: string, role?: string) =>

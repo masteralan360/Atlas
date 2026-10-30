@@ -370,6 +370,10 @@ function getTransactionRoutePath(transaction: Pick<PaymentTransaction, 'sourceMo
         return '/sales'
     }
 
+    if (transaction.sourceType === 'beauty3_appointment_profit') {
+        return '/clinical-appointments'
+    }
+
     if (transaction.sourceModule === 'clinical_appointments') {
         return `/clinical-appointments/${transaction.sourceRecordId}/edit`
   }
@@ -1799,6 +1803,7 @@ export function isReversiblePaymentSourceType(sourceType: PaymentTransactionSour
     sourceType === 'installment_sale_installment' ||
     sourceType === 'real_estate_commission' ||
     sourceType === 'clinical_appointment' ||
+    sourceType === 'beauty3_appointment_profit' ||
     sourceType === 'travel_booking_payment' ||
     sourceType === 'sales_order' ||
     sourceType === 'purchase_order' ||
@@ -4021,6 +4026,30 @@ export async function reversePaymentTransaction(
       const { updateClinicalAppointment } = await awaitStockDependency(import('./clinicalAppointments'))
       await updateClinicalAppointment(transaction.sourceRecordId, {}, workspaceId)
       return reversal
+    }
+
+    case 'beauty3_appointment_profit': {
+      return appendPaymentTransaction(workspaceId, {
+        sourceModule: transaction.sourceModule,
+        sourceType: transaction.sourceType,
+        sourceRecordId: transaction.sourceRecordId,
+        sourceSubrecordId: transaction.sourceSubrecordId ?? null,
+        direction: 'incoming',
+        amount: -reversalAmount,
+        currency: transaction.currency,
+        paymentMethod: reversalPaymentMethod,
+        paidAt: input.paidAt ? new Date(input.paidAt).toISOString() : new Date().toISOString(),
+        counterpartyName: transaction.counterpartyName || null,
+        referenceLabel: transaction.referenceLabel || null,
+        note,
+        createdBy: input.createdBy || null,
+        ...reversalAccount,
+        reversalOfTransactionId: transaction.id,
+        metadata: {
+          ...(transaction.metadata && typeof transaction.metadata === 'object' ? transaction.metadata : {}),
+          reversal: true,
+        },
+      })
     }
 
     case 'travel_booking_payment': {

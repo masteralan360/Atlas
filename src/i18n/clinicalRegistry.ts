@@ -5,15 +5,14 @@ export type { ClinicalRegistryType }
 export function supportsClinicalPatientsAndServicePresets(
     registryType: ClinicalRegistryType,
 ): boolean {
-    return registryType !== 'beauty2'
+    return registryType !== 'beauty2' && registryType !== 'beauty3'
 }
 
 export function canManageClinicalRegistryType(
     role: UserRole | undefined,
     hasClinicalAppointmentsFeature: boolean,
-    registryType: ClinicalRegistryType = 'medical',
+    _registryType: ClinicalRegistryType = 'medical',
 ): boolean {
     return role === 'admin'
         && hasClinicalAppointmentsFeature
-        && registryType !== 'beauty2'
 }

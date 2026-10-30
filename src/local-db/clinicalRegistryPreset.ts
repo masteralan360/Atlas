@@ -11,10 +11,10 @@ export function getClinicalRegistryPresetId(workspaceId: string): string {
 }
 
 export function normalizeClinicalRegistryType(value: string | null | undefined): ClinicalRegistryType {
-  if (value === 'beauty' || value === 'beauty2') return value
+  if (value === 'beauty' || value === 'beauty2' || value === 'beauty3') return value
   return DEFAULT_CLINICAL_REGISTRY_TYPE
 }
 
 export function isBeautyClinicalRegistryType(value: ClinicalRegistryType): boolean {
-  return value === 'beauty' || value === 'beauty2'
+  return value === 'beauty' || value === 'beauty2' || value === 'beauty3'
 }

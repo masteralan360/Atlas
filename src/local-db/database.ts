@@ -131,6 +131,7 @@ import type {
   ExchangeSafe,
   ExchangeSafeBalance,
   ExchangeSafeMovement,
+  Beauty3Appointment,
   ClinicalAppointment,
   ClinicalPatient,
   ClinicalAttachment,
@@ -622,6 +623,7 @@ export class AtlasDatabase extends Dexie {
   fx_safes!: EntityTable<ExchangeSafe, 'id'>
   fx_safe_balances!: EntityTable<ExchangeSafeBalance, 'id'>
   fx_safe_movements!: EntityTable<ExchangeSafeMovement, 'id'>
+  beauty3_appointments!: EntityTable<Beauty3Appointment, 'id'>
   clinical_appointments!: EntityTable<ClinicalAppointment, 'id'>
   clinical_patients!: EntityTable<ClinicalPatient, 'id'>
   clinical_attachments!: EntityTable<ClinicalAttachment, 'id'>
@@ -3949,6 +3951,16 @@ export class AtlasDatabase extends Dexie {
       app_settings: 'key,workspaceId',
     })
 
+    this.version(165).stores({
+      beauty3_appointments:
+        'id, workspaceId, name, age, maritalStatus, procedurePlace, procedureDate, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+procedureDate]'
+    })
+
+    this.version(166).stores({
+      beauty3_appointments:
+        'id, workspaceId, name, age, maritalStatus, procedurePlace, procedureDate, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+procedureDate], [workspaceId+procedureType]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
@@ -4281,6 +4293,7 @@ export class AtlasDatabase extends Dexie {
       'fx_safe_balances',
       'fx_safe_movements',
       'clinical_appointments',
+      'beauty3_appointments',
       'clinical_patients',
       'clinical_attachments',
       'clinical_presets',
@@ -4476,6 +4489,7 @@ export async function clearDatabase(): Promise<void> {
       db.fx_safe_balances,
       db.fx_safe_movements,
       db.clinical_appointments,
+      db.beauty3_appointments,
       db.clinical_patients,
       db.clinical_attachments,
       db.clinical_presets,
@@ -4546,6 +4560,7 @@ export async function clearDatabase(): Promise<void> {
       await db.fx_safe_balances.clear()
       await db.fx_safe_movements.clear()
       await db.clinical_appointments.clear()
+      await db.beauty3_appointments.clear()
       await db.clinical_patients.clear()
       await db.clinical_attachments.clear()
       await db.clinical_presets.clear()

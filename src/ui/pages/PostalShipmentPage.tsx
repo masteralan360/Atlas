@@ -268,6 +268,19 @@ export default function PostalShipmentPage({
                   'codAmount',
                   `${shipment.cod_amount.toLocaleString(i18n.language)} ${t('postal.iqd')}`,
                 ],
+                ...(shipment.delivery_fee !== null &&
+                shipment.delivery_fee !== undefined
+                  ? [
+                      [
+                        'deliveryFee',
+                        `${shipment.delivery_fee.toLocaleString(i18n.language)} ${t('postal.iqd')}`,
+                      ],
+                      [
+                        'totalAtDelivery',
+                        `${(shipment.cod_amount + shipment.delivery_fee).toLocaleString(i18n.language)} ${t('postal.iqd')}`,
+                      ],
+                    ]
+                  : []),
                 ['pieces', shipment.pieces?.toLocaleString(i18n.language)],
                 [
                   'fragility',

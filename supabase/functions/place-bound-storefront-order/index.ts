@@ -1,5 +1,6 @@
 import { createAdminClient } from '../_shared/supabase.ts'
 import { computeDiscountPrice, type ResolvedWorkspaceDiscountRow } from '../_shared/discounts.ts'
+import { getJumlaKhaleejStorefrontDiscount } from '../_shared/jumlaKhaleejStorefrontDiscounts.ts'
 import { errorResponse, jsonResponse, readJson } from '../_shared/http.ts'
 import {
     getLocalizedMarketplaceOrderMessage,
@@ -280,7 +281,7 @@ Deno.serve(async (req) => {
             }
 
             const resolvedPrice = resolveModePrice(product, mode, visibleProducts.priceBookItemsByProductId)
-            const discount = discountByProductId.get(product.id)
+            const discount = getJumlaKhaleejStorefrontDiscount(product, discountByProductId)
             const unitPrice = discount
                 ? computeDiscountPrice(resolvedPrice.price, discount.discount_type, discount.discount_value)
                 : resolvedPrice.price

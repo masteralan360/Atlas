@@ -1,5 +1,6 @@
 import { createAdminClient } from '../_shared/supabase.ts'
 import { computeDiscountPrice, type ResolvedWorkspaceDiscountRow } from '../_shared/discounts.ts'
+import { getJumlaKhaleejStorefrontDiscount } from '../_shared/jumlaKhaleejStorefrontDiscounts.ts'
 import { errorResponse, readJson } from '../_shared/http.ts'
 import {
     evaluateStorefrontPromoCode,
@@ -122,7 +123,7 @@ Deno.serve(async (req) => {
             const price = resolveModePrice(product, mode, visibleProducts.priceBookItemsByProductId)
             const currency = (price.currency ?? context.workspace.default_currency ?? 'iqd').toLowerCase()
             currencies.add(currency)
-            const activeDiscount = discountByProductId.get(productId)
+            const activeDiscount = getJumlaKhaleejStorefrontDiscount(product, discountByProductId)
             const unitPrice = activeDiscount
                 ? computeDiscountPrice(price.price, activeDiscount.discount_type, activeDiscount.discount_value)
                 : price.price

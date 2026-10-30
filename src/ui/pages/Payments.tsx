@@ -127,6 +127,8 @@ function sourceTypeLabel(
             return t('payments.sourceType.activityRefund', { defaultValue: 'Activity Refund' })
         case 'clinical_appointment':
             return t('payments.sourceType.clinicalAppointment', { defaultValue: 'Appointment Service' })
+        case 'beauty3_appointment_profit':
+            return t('beauty3Appointments.profitPayment')
         case 'sales_order':
             return t('payments.sourceType.salesOrder', { defaultValue: 'Sales Order' })
         case 'purchase_order':

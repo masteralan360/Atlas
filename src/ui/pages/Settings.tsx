@@ -46,7 +46,7 @@ import { Link } from 'wouter'
 import { AdditionalStorefrontsManager } from '@/ui/components/marketplace/AdditionalStorefrontsManager'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { Coins } from 'lucide-react'
-import type { IQDDisplayPreference, CurrencyCode } from '@/local-db/models'
+import type { IQDDisplayPreference, CurrencyCode, UserSelectableClinicalRegistryType } from '@/local-db/models'
 import { Settings as SettingsIcon, Database, Cloud, Trash2, RefreshCw, User, Copy, Check, CreditCard, Globe, Download, Upload, AlertCircle, Printer, Contact, Fingerprint, Store, ExternalLink, Usb, Bluetooth, CalendarClock, Menu, Table2, Crown, Loader2, PanelLeftOpen, PanelRightOpen, PanelLeftClose, CircleOff } from 'lucide-react'
 import { formatDate, formatDateTime, formatTime, cn, generateId, getHourDisplayPreference, setHourDisplayPreference, type HourDisplayPreference } from '@/lib/utils'
 import { useTheme } from '@/ui/components/theme-provider'
@@ -472,14 +472,14 @@ export function Settings() {
         }
     }
 
-    const handleClinicalRegistryTypeChange = async (useBeautyCenterTerms: boolean) => {
-        if (!user?.workspaceId || isClinicalRegistrySaving || clinicalRegistryType === 'beauty2') return
+    const handleClinicalRegistryTypeChange = async (registryType: UserSelectableClinicalRegistryType) => {
+        if (!user?.workspaceId || isClinicalRegistrySaving) return
 
         setIsClinicalRegistrySaving(true)
         try {
             await setClinicalRegistryType(
                 user.workspaceId,
-                useBeautyCenterTerms ? 'beauty' : 'medical',
+                registryType,
                 user.id,
             )
             toast({
@@ -3138,7 +3138,7 @@ export function Settings() {
                                 </CardTitle>
                                 <CardDescription>
                                     {t('settings.clinicalRegistry.description', {
-                                        defaultValue: 'Choose whether this appointment registry uses medical patient clinic or Beauty Center terminology.',
+                                        defaultValue: 'Choose the appointment registry mode. Beauty Center 3 is blank in V1.',
                                     })}
                                 </CardDescription>
                             </CardHeader>
@@ -3148,7 +3148,11 @@ export function Settings() {
                                         <Label htmlFor="clinical-registry-type">
                                             {clinicalRegistryType === 'beauty'
                                                 ? t('settings.clinicalRegistry.beauty', { defaultValue: 'Beauty Center' })
-                                                : t('settings.clinicalRegistry.medical', { defaultValue: 'Medical Patient Clinic' })}
+                                                : clinicalRegistryType === 'beauty2'
+                                                    ? t('settings.clinicalRegistry.beauty2', { defaultValue: 'Beauty Center 2' })
+                                                : clinicalRegistryType === 'beauty3'
+                                                    ? t('settings.clinicalRegistry.beauty3', { defaultValue: 'Beauty Center 3 (Blank)' })
+                                                    : t('settings.clinicalRegistry.medical', { defaultValue: 'Medical Patient Clinic' })}
                                         </Label>
                                         <p className="text-xs text-muted-foreground">
                                             {t('settings.clinicalRegistry.workspaceWide', {
@@ -3156,23 +3160,33 @@ export function Settings() {
                                             })}
                                         </p>
                                     </div>
-                                    <div className="flex shrink-0 items-center gap-3">
-                                        <span className="hidden text-xs font-medium text-muted-foreground sm:inline">
-                                            {t('settings.clinicalRegistry.medical', { defaultValue: 'Medical Patient Clinic' })}
-                                        </span>
-                                        <Switch
-                                            id="clinical-registry-type"
-                                            checked={clinicalRegistryType === 'beauty'}
-                                            onCheckedChange={handleClinicalRegistryTypeChange}
-                                            disabled={isClinicalRegistrySaving}
-                                            aria-label={t('settings.clinicalRegistry.toggleLabel', {
-                                                defaultValue: 'Use Beauty Center terminology',
-                                            })}
-                                        />
-                                        <span className="hidden text-xs font-medium text-muted-foreground sm:inline">
-                                            {t('settings.clinicalRegistry.beauty', { defaultValue: 'Beauty Center' })}
-                                        </span>
-                                    </div>
+                                    <Select
+                                        value={clinicalRegistryType}
+                                        onValueChange={(value) => {
+                                            if (value === 'medical' || value === 'beauty' || value === 'beauty2' || value === 'beauty3') {
+                                                void handleClinicalRegistryTypeChange(value)
+                                            }
+                                        }}
+                                        disabled={isClinicalRegistrySaving}
+                                    >
+                                        <SelectTrigger id="clinical-registry-type" className="w-[240px]">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="medical">
+                                                {t('settings.clinicalRegistry.medical', { defaultValue: 'Medical Patient Clinic' })}
+                                            </SelectItem>
+                                            <SelectItem value="beauty">
+                                                {t('settings.clinicalRegistry.beauty', { defaultValue: 'Beauty Center' })}
+                                            </SelectItem>
+                                            <SelectItem value="beauty2">
+                                                {t('settings.clinicalRegistry.beauty2', { defaultValue: 'Beauty Center 2' })}
+                                            </SelectItem>
+                                            <SelectItem value="beauty3">
+                                                {t('settings.clinicalRegistry.beauty3', { defaultValue: 'Beauty Center 3 (Blank)' })}
+                                            </SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
                             </CardContent>
                         </Card>

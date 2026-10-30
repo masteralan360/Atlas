@@ -175,6 +175,7 @@ export function getLedgerCashMovementFromPayment(
         case 'real_estate_commission':
             return createMovement('real_estate_commission', 'incoming')
         case 'clinical_appointment':
+        case 'beauty3_appointment_profit':
             return createMovement('clinical_appointment_payment', 'incoming')
         case 'loan_installment':
         case 'loan_payment':

@@ -66,6 +66,7 @@ import { isDemoWorkspaceMode, isLocalWorkspaceMode } from '@/workspace/workspace
 import { isImageUploadCandidate } from '@/lib/imageCompression'
 import { mediaUploadService } from '@/services/mediaUploadService'
 import { getMediaUploadErrorCode } from '@/services/mediaUploadService'
+import { Beauty3Appointments } from '@/ui/pages/Beauty3Appointments'
 
 const CLINIC_ATTACHMENTS_PREFIX = 'clinic-attachments'
 
@@ -265,15 +266,20 @@ function NextVisitDateFilter({
 
 export function ClinicalAppointments() {
   const { user } = useAuth()
+  const workspaceId = user?.workspaceId ?? ''
+  const registryType = useClinicalRegistryType(workspaceId || undefined)
+
+  if (!workspaceId) return null
+  if (registryType === 'beauty3') return <Beauty3Appointments />
+
+  return <ClinicalAppointmentsContent workspaceId={workspaceId} isBeauty2={registryType === 'beauty2'} />
+}
+
+function ClinicalAppointmentsContent({ workspaceId, isBeauty2 }: { workspaceId: string; isBeauty2: boolean }) {
   const [, navigate] = useLocation()
   const [createMatch] = useRoute('/clinical-appointments/new')
   const [editMatch, editParams] = useRoute('/clinical-appointments/:id/edit')
-  const workspaceId = user?.workspaceId ?? ''
   const editAppointment = useClinicalAppointment(editMatch ? editParams?.id : undefined)
-  const registryType = useClinicalRegistryType(workspaceId || undefined)
-  const isBeauty2 = registryType === 'beauty2'
-
-  if (!workspaceId) return null
 
   if (createMatch) {
     const AppointmentForm = isBeauty2 ? Beauty2AppointmentForm : CreateAppointmentForm
