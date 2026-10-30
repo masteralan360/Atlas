@@ -3764,6 +3764,7 @@ export function POS() {
                 atomicLoanPayload, account: paymentAccount
             }))
             const result = await commitPosCheckout(checkoutInput)
+            if (result.pendingSync) toast({ title: t('inventory.offline.saved') })
             posCheckoutAttempt.current.clear()
             if (result.loanId && validLoanRegistrationData
                 && !validLoanRegistrationData.linkedPartyType && validLoanRegistrationData.borrowerName.trim()) {
@@ -3777,7 +3778,7 @@ export function POS() {
             const saleData = mapSaleToUniversal({
                 ...checkoutInput.payload, sequenceId: result.sequenceId, created_at: checkoutInput.timestamp,
                 cashier_id: user.id, cashier_name: user.name
-            } as any)
+            } as any, { pendingSync: result.pendingSync })
             setCart([])
             setDiscountValue('')
             setPaymentAccount(null)

@@ -1,3 +1,5 @@
+import { awaitStockDependency } from './offlineStockContext'
+import { currentStockOperation, usesLocalStockExecution } from './offlineStockContext'
 import { useEffect, useMemo } from 'react'
 import Dexie from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -43,7 +45,6 @@ export {
   type PaymentReversalAmountPolicy,
   type PaymentTransactionReversalState,
 } from '@/lib/paymentReversals'
-import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import {
   createPartnerSettlementOperation,
   finishPartnerSettlementOperation,
@@ -291,10 +292,11 @@ type PaymentSourceKeyInput = {
 }
 
 function shouldUseCloudBusinessData(workspaceId?: string | null) {
-    return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
+    return !!workspaceId && !usesLocalStockExecution(workspaceId)
 }
 
 function getSyncMetadata(workspaceId: string, timestamp: string) {
+    if (currentStockOperation(workspaceId)) return { syncStatus: 'pending' as const, lastSyncedAt: null }
     if (!shouldUseCloudBusinessData(workspaceId)) {
         return {
             syncStatus: 'synced' as const,
@@ -800,7 +802,7 @@ async function ensureExpenseItemsThroughCurrentMonth(workspaceId: string) {
     return
   }
 
-  const { ensureExpenseItemsForMonth } = await import('./hooks')
+  const { ensureExpenseItemsForMonth } = await awaitStockDependency(import('./hooks'))
   let monthCursor: MonthKey = earliestMonth
 
   while (isMonthKeyOnOrBefore(monthCursor, currentMonth)) {
@@ -1938,7 +1940,7 @@ export async function appendPaymentTransaction(
   if (!shouldUseCloudBusinessData(workspaceId)) {
     await assertPaymentAccountTransactionCanBeAppliedLocally(transaction)
     if (transaction.sourceType === 'direct_transaction') {
-      const { persistLocalDirectTransactionWithVoucher } = await import('./localModeSqlite')
+      const { persistLocalDirectTransactionWithVoucher } = await awaitStockDependency(import('./localModeSqlite'))
       const sqliteNumber = await persistLocalDirectTransactionWithVoucher(db, transaction)
       if (sqliteNumber === null) {
         // Preserve the existing Dexie path where no Local SQLite runtime exists.
@@ -2396,7 +2398,7 @@ async function replaceBeauty2AppointmentPayment(
     })
   }
 
-  const { updateClinicalAppointment } = await import('./clinicalAppointments')
+  const { updateClinicalAppointment } = await awaitStockDependency(import('./clinicalAppointments'))
   await updateClinicalAppointment(appointment.id, {}, workspaceId)
   return replacement
 }
@@ -2782,7 +2784,7 @@ async function recordDirectTransactionInternal(workspaceId: string, input: Recor
   })
 
   if (businessPartnerId && partnerAccountEffect !== 'none') {
-    const { recalculateBusinessPartnerSummary } = await import('./businessPartners')
+    const { recalculateBusinessPartnerSummary } = await awaitStockDependency(import('./businessPartners'))
     await recalculateBusinessPartnerSummary(workspaceId, businessPartnerId).catch(error => {
       console.warn('[DirectTransactions] Saved payment; partner summary will refresh:', error)
     })
@@ -3253,7 +3255,7 @@ export async function settlePartnerBalance(
       switch (obligation.sourceType) {
         case 'loan_installment':
         case 'simple_loan': {
-          const { recordLoanPayment } = await import('./hooks')
+          const { recordLoanPayment } = await awaitStockDependency(import('./hooks'))
           const result = await recordLoanPayment(workspaceId, {
             loanId: obligation.sourceRecordId,
             installmentId:
@@ -3272,7 +3274,7 @@ export async function settlePartnerBalance(
         }
 
         case 'installment_sale_installment': {
-          const { recordInstallmentSaleCustomerPayment } = await import('./installmentSales')
+          const { recordInstallmentSaleCustomerPayment } = await awaitStockDependency(import('./installmentSales'))
           const result = await recordInstallmentSaleCustomerPayment(workspaceId, {
             installmentSaleId: obligation.sourceRecordId,
             installmentId: obligation.sourceSubrecordId || null,
@@ -3296,7 +3298,7 @@ export async function settlePartnerBalance(
 
         case 'sales_order':
         case 'purchase_order': {
-          const { recordOrderPayment } = await import('./orders')
+          const { recordOrderPayment } = await awaitStockDependency(import('./orders'))
           const result = await recordOrderPayment(workspaceId, {
             orderType: obligation.sourceType === 'sales_order' ? 'sales' : 'purchase',
             orderId: obligation.sourceRecordId,
@@ -3314,7 +3316,7 @@ export async function settlePartnerBalance(
         }
 
         case 'real_estate_commission': {
-          const { recordRealEstateCommissionPayment } = await import('./realEstate')
+          const { recordRealEstateCommissionPayment } = await awaitStockDependency(import('./realEstate'))
           const result = await recordRealEstateCommissionPayment(workspaceId, {
             transactionId: obligation.sourceRecordId,
             amount: applied,
@@ -3338,7 +3340,7 @@ export async function settlePartnerBalance(
             throw new Error('Sales agent commission settlement metadata is incomplete')
           }
 
-          const { recordAgentCommissionPayout } = await import('./agentCommissions')
+          const { recordAgentCommissionPayout } = await awaitStockDependency(import('./agentCommissions'))
           const result = await recordAgentCommissionPayout(workspaceId, {
             agentId,
             assignmentId,
@@ -3366,7 +3368,7 @@ export async function settlePartnerBalance(
             throw new Error('Sales agent commission settlement metadata is incomplete')
           }
 
-          const { recordAgentCommissionRecovery } = await import('./agentCommissions')
+          const { recordAgentCommissionRecovery } = await awaitStockDependency(import('./agentCommissions'))
           const result = await recordAgentCommissionRecovery(workspaceId, {
             agentId,
             assignmentId,
@@ -3430,7 +3432,7 @@ export async function settlePartnerBalance(
   const totalSettled = Array.from(appliedByCurrency.values()).reduce((sum, group) => sum + group.total, 0)
 
   try {
-    const { recalculateBusinessPartnerSummary } = await import('./businessPartners')
+    const { recalculateBusinessPartnerSummary } = await awaitStockDependency(import('./businessPartners'))
     await recalculateBusinessPartnerSummary(workspaceId, partner.id)
   } catch (error) {
     console.error('[Payments] Failed to refresh partner summary after settlement:', error)
@@ -3497,7 +3499,7 @@ export async function recordObligationSettlement(
       if (settlementAmount - obligation.amount > PAYMENT_AMOUNT_EPSILON) {
         throw new Error('Settlement amount cannot exceed the loan balance')
       }
-      const { recordLoanPayment } = await import('./hooks')
+      const { recordLoanPayment } = await awaitStockDependency(import('./hooks'))
       await recordLoanPayment(workspaceId, {
         loanId: obligation.sourceRecordId,
         installmentId:
@@ -3518,7 +3520,7 @@ export async function recordObligationSettlement(
       if (settlementAmount > obligation.amount) {
         throw new Error('Settlement amount cannot exceed the customer balance')
       }
-      const { recordInstallmentSaleCustomerPayment } = await import('./installmentSales')
+      const { recordInstallmentSaleCustomerPayment } = await awaitStockDependency(import('./installmentSales'))
       await recordInstallmentSaleCustomerPayment(workspaceId, {
         installmentSaleId: obligation.sourceRecordId,
         installmentId: obligation.sourceSubrecordId || null,
@@ -3538,7 +3540,7 @@ export async function recordObligationSettlement(
       if (settlementAmount > obligation.amount) {
         throw new Error('Settlement amount cannot exceed the receivable balance')
       }
-      const { recordRealEstateCommissionPayment } = await import('./realEstate')
+      const { recordRealEstateCommissionPayment } = await awaitStockDependency(import('./realEstate'))
       await recordRealEstateCommissionPayment(workspaceId, {
         transactionId: obligation.sourceRecordId,
         amount: settlementAmount,
@@ -3565,7 +3567,7 @@ export async function recordObligationSettlement(
       if (!agentId || !assignmentId) {
         throw new Error('Sales agent commission settlement metadata is incomplete')
       }
-      const { recordAgentCommissionPayout, recordAgentCommissionRecovery } = await import('./agentCommissions')
+      const { recordAgentCommissionPayout, recordAgentCommissionRecovery } = await awaitStockDependency(import('./agentCommissions'))
       const commissionInput = {
         agentId,
         assignmentId,
@@ -3592,7 +3594,7 @@ export async function recordObligationSettlement(
       if (settlementAmount > obligation.amount) {
         throw new Error('Settlement amount cannot exceed the order balance')
       }
-      const { recordOrderPayment } = await import('./orders')
+      const { recordOrderPayment } = await awaitStockDependency(import('./orders'))
       await recordOrderPayment(workspaceId, {
         orderType: 'sales',
         orderId: obligation.sourceRecordId,
@@ -3648,7 +3650,7 @@ export async function recordObligationSettlement(
           serviceFee: currentSummary.serviceFee
         }
       })
-      const { updateClinicalAppointment } = await import('./clinicalAppointments')
+      const { updateClinicalAppointment } = await awaitStockDependency(import('./clinicalAppointments'))
       await updateClinicalAppointment(
         appointment.id,
         {
@@ -3667,7 +3669,7 @@ export async function recordObligationSettlement(
       if (settlementAmount > obligation.amount) {
         throw new Error('Settlement amount cannot exceed the order balance')
       }
-      const { recordOrderPayment } = await import('./orders')
+      const { recordOrderPayment } = await awaitStockDependency(import('./orders'))
       await recordOrderPayment(workspaceId, {
         orderType: 'purchase',
         orderId: obligation.sourceRecordId,
@@ -3692,7 +3694,7 @@ export async function recordObligationSettlement(
       }
 
       const series = item.seriesId ? await db.expense_series.get(item.seriesId) : undefined
-      const { updateExpenseItem } = await import('./hooks')
+      const { updateExpenseItem } = await awaitStockDependency(import('./hooks'))
       const locator: SourceLocator = {
         sourceType: 'expense_item',
         sourceRecordId: item.id,
@@ -3803,7 +3805,7 @@ export async function recordObligationSettlement(
 
       const paymentTransaction = await appendPaymentTransaction(workspaceId, paymentInput)
       try {
-        const { upsertPayrollStatus } = await import('./hooks')
+        const { upsertPayrollStatus } = await awaitStockDependency(import('./hooks'))
         await upsertPayrollStatus(workspaceId, employeeId, month, {
           id: sourceRecordId,
           status: 'paid',
@@ -3917,7 +3919,7 @@ export async function reversePaymentTransaction(
     case 'loan_installment': {
       const loan = await db.loans.get(transaction.sourceRecordId)
       if (!loan || loan.isDeleted) throw new Error('Loan not found')
-      const { reverseLoanPayment } = await import('./hooks')
+      const { reverseLoanPayment } = await awaitStockDependency(import('./hooks'))
       if (Math.abs(reversalAmount - reversalState.remainingAmount) > PAYMENT_AMOUNT_EPSILON) {
         throw new Error('Loan payments can only be reversed in full')
       }
@@ -3958,7 +3960,7 @@ export async function reversePaymentTransaction(
           reversal: true
         }
       })
-      const { rebuildOrderPaymentState } = await import('./orders')
+      const { rebuildOrderPaymentState } = await awaitStockDependency(import('./orders'))
       await rebuildOrderPaymentState('sales', transaction.sourceRecordId, {
         preserveRemoteItemSnapshots: reversal.syncStatus === 'synced'
       })
@@ -3987,7 +3989,7 @@ export async function reversePaymentTransaction(
           reversal: true
         }
       })
-      const { rebuildOrderPaymentState } = await import('./orders')
+      const { rebuildOrderPaymentState } = await awaitStockDependency(import('./orders'))
       await rebuildOrderPaymentState('purchase', transaction.sourceRecordId, {
         preserveRemoteItemSnapshots: reversal.syncStatus === 'synced'
       })
@@ -4016,13 +4018,13 @@ export async function reversePaymentTransaction(
           reversal: true
         }
       })
-      const { updateClinicalAppointment } = await import('./clinicalAppointments')
+      const { updateClinicalAppointment } = await awaitStockDependency(import('./clinicalAppointments'))
       await updateClinicalAppointment(transaction.sourceRecordId, {}, workspaceId)
       return reversal
     }
 
     case 'travel_booking_payment': {
-      const { reverseTravelBookingPayment } = await import('./travelTransportation')
+      const { reverseTravelBookingPayment } = await awaitStockDependency(import('./travelTransportation'))
       const { reversal } = await reverseTravelBookingPayment(workspaceId, transaction.id, {
         ...input,
         amount: reversalAmount,
@@ -4092,7 +4094,7 @@ export async function reversePaymentTransaction(
 
   try {
     if (transaction.sourceType === 'expense_item') {
-      const { updateExpenseItem } = await import('./hooks')
+      const { updateExpenseItem } = await awaitStockDependency(import('./hooks'))
       await updateExpenseItem(transaction.sourceRecordId, {
         status: 'pending',
         paidAt: null,
@@ -4102,7 +4104,7 @@ export async function reversePaymentTransaction(
     } else if (transaction.sourceType === 'payroll_status') {
       const employeeId = String(transaction.metadata?.employeeId || transaction.sourceSubrecordId || '')
       const month = String(transaction.metadata?.month || '')
-      const { upsertPayrollStatus } = await import('./hooks')
+      const { upsertPayrollStatus } = await awaitStockDependency(import('./hooks'))
       await upsertPayrollStatus(workspaceId, employeeId, month, {
         status: 'pending',
         paidAt: null,
@@ -4119,7 +4121,7 @@ export async function reversePaymentTransaction(
     transaction.sourceType === 'installment_sale_down_payment' ||
     transaction.sourceType === 'installment_sale_installment'
   ) {
-    const { rebuildInstallmentSalePaymentState } = await import('./installmentSales')
+    const { rebuildInstallmentSalePaymentState } = await awaitStockDependency(import('./installmentSales'))
     await rebuildInstallmentSalePaymentState(workspaceId, transaction.sourceRecordId)
   }
 
@@ -4130,7 +4132,7 @@ export async function reversePaymentTransaction(
     businessPartnerId &&
     isDirectTransactionPartnerAccountEffect(transaction.metadata?.partnerAccountEffect)
   ) {
-    const { recalculateBusinessPartnerSummary } = await import('./businessPartners')
+    const { recalculateBusinessPartnerSummary } = await awaitStockDependency(import('./businessPartners'))
     await recalculateBusinessPartnerSummary(workspaceId, businessPartnerId).catch(error => {
       console.warn('[DirectTransactions] Saved reversal; partner summary will refresh:', error)
     })

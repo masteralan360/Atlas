@@ -1,12 +1,14 @@
 import 'fake-indexeddb/auto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { supabase } from '@/auth/supabase'
 import { db } from '@/local-db/database'
-import { setActiveBusinessUser, setActiveBusinessWorkspace } from '@/lib/network'
+import { setActiveBusinessUser, setActiveBusinessWorkspace, setNetworkStatus } from '@/lib/network'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 import { installTestBrowser } from '../fixtures/browser'
 import { assertNoPosCommit, assertPosPayment } from '../assertions/pos'
 import { POS_BATCH, POS_CURRENCIES, POS_INVENTORY, POS_METHODS, POS_PRODUCT, POS_STORAGE, POS_USER, POS_WORKSPACE,
     posCheckoutInput, seededPosCases, seedPosStock } from '../fixtures/pos'
+import { cacheOfflineStockAvailability } from '@/local-db/offlineStockAvailability'
 import { createPosServiceNameMetadata } from '@/lib/posServiceName'
 
 vi.mock('@/auth/supabase', () => {
@@ -40,11 +42,34 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
     })
     afterEach(() => {
         vi.restoreAllMocks()
+        setNetworkStatus(true)
         clearWorkspaceModeSnapshot(POS_WORKSPACE)
         setActiveBusinessUser(null)
         setActiveBusinessWorkspace(null)
     })
     afterAll(async () => { await db.delete() })
+
+    it.each(['cloud', 'hybrid'] as const)('%s records offline checkout, stock, batches and payment as one durable operation', async dataMode => {
+        await seedPosStock('usd')
+        const input = posCheckoutInput({ currency: 'usd', method: 'cash', quantity: 2.25 })
+        input.account = await accounts.savePaymentAccount(POS_WORKSPACE, { name: 'Offline drawer', accountType: 'cash_drawer', openingBalances: [] })
+        writeWorkspaceModeSnapshot({ workspaceId: POS_WORKSPACE, dataMode })
+        setNetworkStatus(false)
+        await cacheOfflineStockAvailability(POS_WORKSPACE, [{ productId: POS_PRODUCT, storageId: POS_STORAGE, onHand: 20, reserved: 0, available: 20 }])
+        const result = await checkout.commitPosCheckout(input)
+        expect(result).toMatchObject({ pendingSync: true, sequenceId: undefined })
+        expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 17.75, syncStatus: 'pending' })
+        expect(await db.stock_batches.get(POS_BATCH)).toMatchObject({ quantity: 17.75, syncStatus: 'pending' })
+        expect(await db.payment_transactions.get(input.payload.id)).toMatchObject({ amount: 225, accountId: input.account.id, syncStatus: 'pending' })
+        const operations = await db.offline_mutations.toArray()
+        expect(operations).toHaveLength(1)
+        expect(operations[0]).toMatchObject({ entityType: 'stock_operations', payload: { kind: 'checkout', rpc: { name: 'complete_pos_checkout' } } })
+        await checkout.commitPosCheckout(input)
+        expect(await db.sales.count()).toBe(1)
+        expect(await db.payment_transactions.count()).toBe(1)
+        expect(await db.payment_account_movements.count()).toBe(1)
+        expect(await db.inventory.get(POS_INVENTORY)).toMatchObject({ quantity: 17.75 })
+    })
 
     for (const method of POS_METHODS) for (const currency of POS_CURRENCIES) for (const selectedAccount of [false, true]) {
         it(`${method} / ${currency} / ${selectedAccount ? 'selected account' : 'no account'} saves sale, stock, payment, account and ledger exactly once`, async () => {
@@ -312,4 +337,21 @@ describe('POS checkout scenarios (independent of Instant POS)', () => {
             expect(await db.offline_mutations.count()).toBe(0)
         })
     }
+    it('retains the original sale and line IDs if the connection fails during online submission', async () => {
+        await seedPosStock('usd')
+        writeWorkspaceModeSnapshot({workspaceId:POS_WORKSPACE,dataMode:'cloud'});setNetworkStatus(true)
+        await cacheOfflineStockAvailability(POS_WORKSPACE,[{productId:POS_PRODUCT,storageId:POS_STORAGE,onHand:20,reserved:0,available:20}])
+        const input=posCheckoutInput({quantity:1})
+        const request=vi.spyOn(supabase,'rpc').mockRejectedValue(new TypeError('Failed to fetch'))
+        try {
+            expect(await checkout.commitPosCheckout(input)).toMatchObject({pendingSync:true})
+            const queued=(await db.offline_mutations.toArray())[0]
+            expect(queued.entityId).toBe(input.payload.id)
+            const sent=request.mock.calls[0][1]?.payload as {items:{id:string}[]}
+            expect(sent.items[0].id).toBeTruthy()
+            expect((queued.payload.rpc as {args:{payload:{items:{id:string}[]}}}).args.payload.items[0].id).toBe(sent.items[0].id)
+            expect(await db.payment_transactions.count()).toBe(1)
+        } finally {request.mockRestore()}
+    })
+
 })

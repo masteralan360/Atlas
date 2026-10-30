@@ -3944,6 +3944,11 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, productId, storageId, batchNumber, expiryDate, sourcePurchaseOrderId, sourcePurchaseOrderItemId, updatedAt, isDeleted, [workspaceId+productId], [productId+storageId], [workspaceId+storageId], [workspaceId+storageId+productId], [workspaceId+productId+storageId], [workspaceId+updatedAt], [sourcePurchaseOrderId+sourcePurchaseOrderItemId]'
     })
 
+    this.version(164).stores({
+      inventory: 'id, workspaceId, productId, storageId, quantity, syncStatus, updatedAt, isDeleted, [workspaceId+storageId], [workspaceId+productId], [productId+storageId], [workspaceId+storageId+productId], [workspaceId+updatedAt], [workspaceId+id]',
+      app_settings: 'key,workspaceId',
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

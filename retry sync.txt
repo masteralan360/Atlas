@@ -8,11 +8,7 @@ Fix Purchase Order form page and fix purchase order error, order_payment_source_
 
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide 
 
-Allow inventory movement on offline mode
-
 Add by unit in adjustment
-
-Item line-based currency
 
 #
 Days of month for visits

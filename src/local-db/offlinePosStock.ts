@@ -1,5 +1,5 @@
+import { usesLocalStockExecution } from './offlineStockContext'
 import i18n from "@/i18n/config";
-import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
 import type { StockBatchAllocation } from "./models";
@@ -29,7 +29,7 @@ export async function applyOfflinePosStockEffects(input: {
   /** A larger sale transaction schedules reorder rules after it commits. */
   skipReorderCheck?: boolean;
 }) {
-  if (!isLocalWorkspaceMode(input.workspaceId)) {
+  if (!usesLocalStockExecution(input.workspaceId)) {
     throw new Error(i18n.t("inventory.errors.onlineRequired"));
   }
 

@@ -1,3 +1,5 @@
+import { needsOfflineStockOperation, runOfflineStockOperation } from './offlineStockOperations'
+import { currentStockOperation, usesLocalStockExecution } from './offlineStockContext'
 import Dexie from 'dexie'
 import { useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -15,7 +17,6 @@ import {
     roundQuantity
 } from '@/lib/quantity'
 import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
-import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { queryKeys } from '@/query/queryKeys'
 import { recordWorkspaceDataFetch } from '@/workspace/workspaceDataFreshness'
 
@@ -137,7 +138,7 @@ export type BatchAwareInventoryProduct = InventoryProduct & {
 const SUPPORTED_CURRENCIES = new Set<CurrencyCode>(['usd', 'eur', 'iqd', 'try'])
 
 function shouldUseCloudBusinessData(workspaceId?: string | null) {
-    return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
+    return !!workspaceId && !usesLocalStockExecution(workspaceId)
 }
 
 function getSyncMetadata(
@@ -145,6 +146,7 @@ function getSyncMetadata(
     timestamp: string,
     syncSource: 'local' | 'remote' = 'local'
 ) {
+    if (syncSource === 'local' && currentStockOperation(workspaceId)) return { syncStatus: 'pending' as const, lastSyncedAt: null }
     if (syncSource === 'remote' || !shouldUseCloudBusinessData(workspaceId)) {
         return {
             syncStatus: 'synced' as const,
@@ -1296,7 +1298,8 @@ export async function createStockBatch(
         syncSource?: 'local' | 'remote'
         skipRemoteSync?: boolean
     }
-) {
+): Promise<StockBatch> {
+    if ((!options?.syncSource || options.syncSource === 'local') && await needsOfflineStockOperation(workspaceId)) return runOfflineStockOperation(workspaceId, 'batch', () => createStockBatch(workspaceId, input, options))
     const timestamp = options?.timestamp || new Date().toISOString()
     const syncSource = options?.syncSource || 'local'
     const normalized = await normalizeBatchInput(input)
@@ -1323,7 +1326,9 @@ export async function createStockBatch(
     return batch
 }
 
-export async function updateStockBatch(id: string, data: Partial<StockBatchInput>) {
+export async function updateStockBatch(id: string, data: Partial<StockBatchInput>): Promise<StockBatch> {
+    const offlineBatch = await db.stock_batches.get(id)
+    if (offlineBatch && await needsOfflineStockOperation(offlineBatch.workspaceId)) return runOfflineStockOperation(offlineBatch.workspaceId, 'batch', () => updateStockBatch(id, data))
     const existing = await db.stock_batches.get(id)
     if (!existing || existing.isDeleted) {
         throw new Error('Batch not found')
@@ -1360,7 +1365,9 @@ export async function updateStockBatch(id: string, data: Partial<StockBatchInput
     return updated
 }
 
-export async function deleteStockBatch(id: string) {
+export async function deleteStockBatch(id: string): Promise<void> {
+    const offlineBatch = await db.stock_batches.get(id)
+    if (offlineBatch && await needsOfflineStockOperation(offlineBatch.workspaceId)) return runOfflineStockOperation(offlineBatch.workspaceId, 'batch', () => deleteStockBatch(id))
     const existing = await db.stock_batches.get(id)
     if (!existing || existing.isDeleted) {
         return
@@ -1470,7 +1477,8 @@ async function refreshStockBatchesFromSupabaseInternal(
         }
 
         if (localItems.length > 0) {
-            await db.stock_batches.bulkPut(localItems)
+            const pendingIds = new Set(localRows.filter(row => row.syncStatus === 'pending' || row.syncStatus === 'conflict').map(row => row.id))
+            await db.stock_batches.bulkPut(localItems.filter(row => !pendingIds.has(row.id)))
         }
     })
 
@@ -1847,7 +1855,7 @@ export function useStockBatchGroupPage(
 ) {
     const access = useStorageAccess(query.workspaceId)
     const online = onlineOverride ?? isOnline(query.workspaceId)
-    const sourceMode = query.workspaceId && online && !isLocalWorkspaceMode(query.workspaceId)
+    const sourceMode = query.workspaceId && online && !usesLocalStockExecution(query.workspaceId)
         ? 'remote'
         : 'local'
     const viewer = {

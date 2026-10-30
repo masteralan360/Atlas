@@ -1,4 +1,8 @@
 import { useMemo } from 'react'
+import { currentStockOperation } from './offlineStockContext'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import { isOnline } from '@/lib/network'
+import { cacheOfflineStockAvailability, readOfflineStockAvailability } from './offlineStockAvailability'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/auth/supabase'
@@ -23,6 +27,7 @@ export const stockPositionKey = (position: StockPosition) => `${position.product
 export async function fetchStockAvailability(workspaceId: string, positions: readonly StockPosition[], excludeOrderId?: string, signal?: AbortSignal): Promise<StockAvailability[]> {
   if (!positions.length) return []
   if (isLocalWorkspaceMode(workspaceId)) return readLocalStockAvailability(workspaceId, positions, excludeOrderId)
+  if (!isOnline(workspaceId) || currentStockOperation(workspaceId)) return readOfflineStockAvailability(workspaceId, positions, excludeOrderId)
   const rows: StockAvailability[] = []
   for (let offset = 0; offset < positions.length; offset += 200) {
     let request = supabase.rpc('get_stock_reservation_availability', {
@@ -40,7 +45,8 @@ export async function fetchStockAvailability(workspaceId: string, positions: rea
       rows.push(row as StockAvailability)
     }
   }
-  return rows
+  await cacheOfflineStockAvailability(workspaceId, rows, excludeOrderId)
+  return readOfflineStockAvailability(workspaceId, positions, excludeOrderId)
 }
 
 export async function assertStockDemands(workspaceId: string, demands: readonly StockDemand[], excludeOrderId?: string) {
@@ -109,6 +115,7 @@ export function useStockDemandGuard(workspaceId: string | undefined, demands: re
 }
 
 export function useStockAvailability(workspaceId: string | undefined, positions: readonly StockPosition[], excludeOrderId?: string) {
+  const online = useNetworkStatus()
   const user = useOptionalAuth()?.user
   const permissions = useOptionalWorkspacePermissions()
   const storageAccess = useStorageAccess(workspaceId)
@@ -116,8 +123,13 @@ export function useStockAvailability(workspaceId: string | undefined, positions:
   const signature = JSON.stringify([...new Map(positions.filter(p => p.productId && p.storageId).map(p => [stockPositionKey(p), { productId: p.productId, storageId: p.storageId }])).values()]
     .sort((a, b) => stockPositionKey(a).localeCompare(stockPositionKey(b))))
   const scopedPositions = useMemo(() => JSON.parse(signature) as StockPosition[], [signature])
-  const local = !!workspaceId && isLocalWorkspaceMode(workspaceId)
-  const localRows = useLiveQuery(() => local && workspaceId ? readLocalStockAvailability(workspaceId, scopedPositions, excludeOrderId) : [], [workspaceId, signature, excludeOrderId, local])
+  const local = !!workspaceId && (isLocalWorkspaceMode(workspaceId) || !online)
+  const localResult = useLiveQuery(async () => {
+    if (!local || !workspaceId) return { rows: [] as StockAvailability[], error: null }
+    try {
+      return { rows: await (isLocalWorkspaceMode(workspaceId) ? readLocalStockAvailability(workspaceId, scopedPositions, excludeOrderId) : readOfflineStockAvailability(workspaceId, scopedPositions, excludeOrderId)), error: null }
+    } catch (error) { return { rows: undefined, error: error instanceof Error ? error : new Error(i18n.t('inventory.offline.prepareRequired')) } }
+  }, [workspaceId, signature, excludeOrderId, local])
   const query = useQuery({
     queryKey: [...queryKeys.stockReservations.availability(workspaceId, scopedPositions, excludeOrderId, user?.id, user?.role), permissionScope],
     queryFn: ({ signal }) => fetchBatchedAvailability(workspaceId!, scopedPositions, excludeOrderId, signal),
@@ -125,7 +137,7 @@ export function useStockAvailability(workspaceId: string | undefined, positions:
     staleTime: 5000,
     refetchInterval: 15000,
   })
-  return { ...query, data: local ? localRows : query.data, isLoading: local ? localRows === undefined : query.isLoading }
+  return { ...query, data: local ? localResult?.rows : query.data, error: local ? localResult?.error ?? null : query.error, isLoading: local ? localResult === undefined : query.isLoading }
 }
 
 export interface VisibleStockReservation { id: string; order_number: string; created_at: string; quantity: number }

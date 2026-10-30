@@ -1,6 +1,8 @@
 import i18n from '@/i18n/config'
 import { formatCurrency } from '@/lib/utils'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { usesLocalStockExecution } from './offlineStockContext'
+import { getActiveBusinessUserRole, isOnline } from '@/lib/network'
 import { supabase } from '@/auth/supabase'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import type { CurrencyCode, UserRole } from './models'
@@ -71,9 +73,12 @@ export async function assertStaffMinimumSellingPrices(input: {
 }) {
     if (input.items.length === 0) return
 
-    if (isLocalWorkspaceMode(input.workspaceId)) {
-        if (input.actingUserRole !== 'staff') return
+    if (usesLocalStockExecution(input.workspaceId) || !isOnline(input.workspaceId)) {
+        if (getActiveBusinessUserRole(input.workspaceId) !== 'staff' && input.actingUserRole !== 'staff') return
         const products = await db.products.bulkGet(input.items.map((item) => item.productId))
+        if (!isLocalWorkspaceMode(input.workspaceId) && products.some(product => !product || product.isDeleted || product.workspaceId !== input.workspaceId)) {
+            throw new Error(i18n.t('inventory.offline.prepareRequired'))
+        }
         const violations = input.items.flatMap<MinimumSellingPriceViolation>((item, lineIndex) => {
             const product = products[lineIndex]
             const minimum = item.minimumSellingPrice ?? product?.minimumSellingPrice ?? null

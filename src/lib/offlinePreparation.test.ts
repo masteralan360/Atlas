@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
     dbOpen: vi.fn(),
+    inventoryPage: vi.fn(),
+    fetchStockAvailability: vi.fn(),
     appSettingsCount: vi.fn(),
     ensurePwaDatabase: vi.fn(),
     isOpfsSupported: vi.fn(),
@@ -19,9 +21,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/local-db/database', () => ({
     db: {
         open: mocks.dbOpen,
+        inventory: { where: () => ({ between: () => ({ filter: () => ({ limit: () => ({ toArray: mocks.inventoryPage }) }) }) }) },
         app_settings: { count: mocks.appSettingsCount }
     }
 }))
+
+vi.mock('@/local-db/stockReservations', () => ({ fetchStockAvailability: mocks.fetchStockAvailability }))
 
 vi.mock('@/local-db/pwaSqlite', () => ({
     ensurePwaDatabase: mocks.ensurePwaDatabase,
@@ -74,6 +79,8 @@ describe('offline preparation', () => {
     beforeEach(() => {
         vi.clearAllMocks()
         mocks.dbOpen.mockResolvedValue(undefined)
+        mocks.inventoryPage.mockReset().mockResolvedValue([])
+        mocks.fetchStockAvailability.mockResolvedValue([])
         mocks.appSettingsCount.mockResolvedValue(1)
         mocks.requestPersistentStorage.mockResolvedValue(true)
         mocks.getPersistentStorageStatus.mockResolvedValue(true)

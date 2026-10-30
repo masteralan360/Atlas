@@ -1696,7 +1696,9 @@ export function SalesOrderFormPage({
                 })
             } else {
                 toast({
-                    title: requiresApprovalRequest
+                    title: savedOrder.syncStatus === 'pending'
+                        ? t('inventory.offline.saved')
+                        : requiresApprovalRequest
                         ? t('orders.form.requestSent', { defaultValue: 'Request sent' })
                         : editingOrderId ? (t('common.save') || 'Saved') : (t('common.create') || 'Created')
                 })

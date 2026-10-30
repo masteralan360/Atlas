@@ -5,6 +5,7 @@ type A4Variant = 'standard' | 'refund'
 
 interface MapSaleToUniversalOptions {
     a4Variant?: A4Variant
+    pendingSync?: boolean
 }
 
 function hasAnyReturnActivity(sale: Sale): boolean {
@@ -70,7 +71,7 @@ export function mapSaleToUniversal(sale: Sale, options: MapSaleToUniversalOption
     const baseInvoice: UniversalInvoice = {
         id: sale.id,
         sequenceId: sale.sequenceId,
-        invoiceid: `#${sequenceId}`,
+        invoiceid: !sale.sequenceId && options.pendingSync ? `LOCAL-${sale.id}` : `#${sequenceId}`,
         created_at: sale.created_at,
         workspaceId: sale.workspace_id,
         cashier_name: sale.cashier_name,

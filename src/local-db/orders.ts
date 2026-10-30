@@ -1,3 +1,6 @@
+import { awaitStockDependency } from './offlineStockContext'
+import { currentStockOperation, usesLocalStockExecution } from './offlineStockContext'
+import { needsOfflineStockOperation, runOfflineStockOperation } from './offlineStockOperations'
 import { invalidatePartnerSummaries, stripPartnerSummaryFields } from './partnerSummaryState'
 import { useEffect, useRef } from 'react'
 import Dexie from 'dexie'
@@ -34,7 +37,7 @@ import { canBePurchased, isService } from '@/lib/catalogItem'
 import { getPartnerSyncWriteRpc, getSupabaseClientForTable, getSupabaseRemoteTableName } from '@/lib/supabaseSchema'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId, toCamelCase } from '@/lib/utils'
-import { getWorkspaceDataMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { getWorkspaceDataMode } from '@/workspace/workspaceMode'
 import { isCrudDebuggerEnabled, runCrudOperation, type CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import { readWorkspaceCache } from '@/workspace/workspaceCache'
 import { supabase } from '@/auth/supabase'
@@ -179,7 +182,7 @@ async function reconcileSalesOrderCommissionBestEffort(
 ) {
     if (!hasCachedSalesAgentCommissionFeature(workspaceId)) return
     try {
-        const { reconcileSalesOrderCommission } = await import('./agentCommissions')
+        const { reconcileSalesOrderCommission } = await awaitStockDependency(import('./agentCommissions'))
         await reconcileSalesOrderCommission(workspaceId, orderId, createdBy)
     } catch (error) {
         console.error('[Orders] Failed to reconcile optional sales-agent commission:', error)
@@ -193,7 +196,7 @@ async function reverseSalesOrderCommissionForReturnBestEffort(
 ) {
     if (!hasCachedSalesAgentCommissionFeature(workspaceId)) return
     try {
-        const { reverseCommissionForOrderReturn } = await import('./agentCommissions')
+        const { reverseCommissionForOrderReturn } = await awaitStockDependency(import('./agentCommissions'))
         await reverseCommissionForOrderReturn(workspaceId, orderReturnId, createdBy)
     } catch (error) {
         console.error('[Orders] Failed to reconcile optional returned-order commission:', error)
@@ -245,13 +248,17 @@ export type OrderFormSaveOptions = {
     trace?: CrudTraceHandle
 }
 
-function runSalesOrderCrud<T>(
+async function runSalesOrderCrud<T>(
     action: 'create' | 'read' | 'update' | 'delete',
     execute: (trace: CrudTraceHandle | undefined) => Promise<T>,
     workspaceId?: string,
     entityId?: string,
     parentTrace?: CrudTraceHandle
 ) {
+    const scope = workspaceId ?? (entityId ? (await db.sales_orders.get(entityId))?.workspaceId : undefined)
+    if (action !== 'read' && scope && await needsOfflineStockOperation(scope)) {
+        return runOfflineStockOperation(scope, 'sales_order', () => execute(parentTrace))
+    }
     if (parentTrace) return execute(parentTrace)
     if (!isCrudDebuggerEnabled()) return execute(undefined)
     return runCrudOperation({ action, entityKey: 'salesOrder', workspaceId, entityId }, execute)
@@ -322,12 +329,12 @@ type OrderWithApproval = Pick<
 >
 
 function shouldUseCloudBusinessData(workspaceId?: string | null) {
-    return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
+    return !!workspaceId && !usesLocalStockExecution(workspaceId)
 }
 
 async function assertNoPendingFinancedOrderCancellation(workspaceId: string, orderId: string) {
     if (!shouldUseCloudBusinessData(workspaceId)) return
-    const cancellation = await import('./orderCancellation')
+    const cancellation = await awaitStockDependency(import('./orderCancellation'))
     await cancellation.assertNoPendingFinancedOrderCancellation(workspaceId, orderId)
 }
 
@@ -340,6 +347,7 @@ async function runMutation<T>(label: string, promiseFactory: () => PromiseLike<T
 }
 
 function getSyncMetadata(workspaceId: string, timestamp: string) {
+    if (currentStockOperation(workspaceId)) return { syncStatus: 'pending' as const, lastSyncedAt: null }
     if (!shouldUseCloudBusinessData(workspaceId)) {
         return {
             syncStatus: 'synced' as const,
@@ -1268,7 +1276,7 @@ async function assertSalesOrderServiceAccess(order: SalesOrder, products?: Array
         .map((product) => product.id)))
     // Online Cloud/Hybrid writes are validated atomically by the database
     // trigger. Local and offline writes must validate against the local policy.
-    if (serviceIds.length > 0 && (isLocalWorkspaceMode(order.workspaceId) || !isOnline(order.workspaceId))) {
+    if (serviceIds.length > 0 && (usesLocalStockExecution(order.workspaceId) || !isOnline(order.workspaceId))) {
         const accessibleServiceIds = await fetchAccessibleServiceIds(order.workspaceId, true)
         if (accessibleServiceIds !== null && serviceIds.some((serviceId) => !accessibleServiceIds.has(serviceId))) {
             throw new Error(i18n.t('services.access.serviceUnavailable'))
@@ -1482,7 +1490,7 @@ async function deductInventoryForSalesOrder(
                 )
                 if (changedInventoryRow) {
                     changedInventoryRows.push(changedInventoryRow)
-                    if (isLocalWorkspaceMode(order.workspaceId)) {
+                    if (usesLocalStockExecution(order.workspaceId)) {
                         await createInventoryTransaction(order.workspaceId, {
                             productId: deduction.productId,
                             storageId: deduction.storageId,
@@ -1582,7 +1590,7 @@ async function deductInventoryForSalesOrder(
 
     await syncStockBatchesBestEffort(changedBatches, order.workspaceId)
 
-    const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
+    const { evaluateReorderTransferRulesForProduct } = await awaitStockDependency(import('./reorderTransferRules'))
     await Promise.all(Array.from(new Set(physicalItems.map(({ item }) => item.productId))).map((productId) =>
         evaluateReorderTransferRulesForProduct(order.workspaceId, productId)
     ))
@@ -1733,7 +1741,7 @@ async function appendInitialOrderPaymentTransaction(
         return
     }
 
-    const { appendPaymentTransaction } = await import('./payments')
+    const { appendPaymentTransaction } = await awaitStockDependency(import('./payments'))
     await appendPaymentTransaction(order.workspaceId, {
         id: options?.initialPaymentTransactionId ?? (options?.initialSalesOrder ? uuidv5(order.id, uuidv5.URL) : undefined),
         idempotent: Boolean(options?.initialPaymentTransactionId || options?.initialSalesOrder),
@@ -1826,7 +1834,7 @@ async function repairStaleFullOrderPaymentAttempts(
     const {
         assertPaymentAccountTransactionsCanBeAppliedLocally,
         mirrorPaymentAccountTransactionLocally,
-    } = await import('./paymentAccounts')
+    } = await awaitStockDependency(import('./paymentAccounts'))
     await assertPaymentAccountTransactionsCanBeAppliedLocally(repairedPayments)
     await db.payment_transactions.bulkPut(repairedPayments)
     for (const payment of repairedPayments) {
@@ -2400,7 +2408,7 @@ async function synchronizeSalesAccountCommissionBeneficiaryBestEffort(
 ) {
     if (!hasCachedSalesAgentCommissionFeature(workspaceId)) return
     try {
-        const { synchronizeSalesAccountAgentCommissionAssignment } = await import('./agentCommissions')
+        const { synchronizeSalesAccountAgentCommissionAssignment } = await awaitStockDependency(import('./agentCommissions'))
         await synchronizeSalesAccountAgentCommissionAssignment(workspaceId, orderId, createdBy)
     } catch (error) {
         console.error('[Orders] Failed to synchronize the sales-account commission beneficiary:', error)
@@ -3256,7 +3264,7 @@ export async function recordOrderPayment(
         }
     }
 
-    const { appendPaymentTransaction } = await import('./payments')
+    const { appendPaymentTransaction } = await awaitStockDependency(import('./payments'))
     const transaction = await appendPaymentTransaction(workspaceId, {
         id: input.idempotencyKey || generateId(),
         idempotent: true,
@@ -3292,7 +3300,7 @@ export async function recordOrderPayment(
         return { order: updatedOrder, transaction }
     } catch (error) {
         try {
-            const { reversePaymentTransaction } = await import('./payments')
+            const { reversePaymentTransaction } = await awaitStockDependency(import('./payments'))
             await reversePaymentTransaction(workspaceId, transaction.id, {
                 createdBy: input.createdBy || null,
                 note: 'Automatically reversed because the linked order could not be synced.'
@@ -3368,7 +3376,7 @@ export async function resolveSocialOrderAgentCreator(workspaceId: string, agentI
         throw new Error('social_order_agent_creator_invalid')
     }
 
-    if (isLocalWorkspaceMode(workspaceId)) {
+    if (usesLocalStockExecution(workspaceId)) {
         const [linkedUser, linkedProfile] = await Promise.all([
             db.users.get(linkedUserId),
             db.profiles.get(linkedUserId)
@@ -3788,7 +3796,7 @@ async function completePaidQuickSalesOrderAtomically(
             await recalculateBusinessPartnerSummary(order.workspaceId, completedOrder.businessPartnerId, { ensureSync: true })
         })(),
         (async () => {
-            const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
+            const { evaluateReorderTransferRulesForProduct } = await awaitStockDependency(import('./reorderTransferRules'))
             await Promise.all(Array.from(new Set(completedOrder.items.map((item) => item.productId))).map((productId) =>
                 evaluateReorderTransferRulesForProduct(order.workspaceId, productId)
             ))
@@ -4164,8 +4172,10 @@ async function activateOrderFinancing(
     }
     const initialPaymentIsRepayment = isSimpleOrderLoan(order)
         && !(await hasLegacyOrderLoanDownPayment(orderType, order))
-    const { createLoanFromOrder } = await import('./hooks')
+    const { createLoanFromOrder } = await awaitStockDependency(import('./hooks'))
     const result = await createLoanFromOrder(order.workspaceId, {
+        id: uuidv5(`offline-order-loan:${orderType}:${order.id}`, uuidv5.URL),
+        installmentIds: Array.from({ length: Math.max(1, order.installmentCount || 1) }, (_, index) => uuidv5(`${uuidv5(`offline-order-loan:${orderType}:${order.id}`, uuidv5.URL)}:${index + 1}`, uuidv5.URL)),
         orderId: order.id,
         orderType,
         loanCategory: order.paymentMethod === 'loan' ? 'simple' : 'standard',
@@ -4196,8 +4206,10 @@ async function activateOrderFinancing(
         : 0
     if (initialRepaymentAmount > ORDER_AMOUNT_EPSILON) {
         try {
-            const { recordLoanPayment } = await import('./hooks')
+            const { recordLoanPayment } = await awaitStockDependency(import('./hooks'))
             await recordLoanPayment(order.workspaceId, {
+                id: uuidv5(`offline-order-repayment:${orderType}:${order.id}`, uuidv5.URL),
+                paymentTransactionId: uuidv5(`offline-order-repayment-ledger:${orderType}:${order.id}`, uuidv5.URL),
                 loanId: result.loan.id,
                 amount: initialRepaymentAmount,
                 paymentMethod: 'cash',
@@ -4209,7 +4221,7 @@ async function activateOrderFinancing(
             })
         } catch (error) {
             try {
-                const { cancelOrderLinkedLoan } = await import('./hooks')
+                const { cancelOrderLinkedLoan } = await awaitStockDependency(import('./hooks'))
                 await cancelOrderLinkedLoan(result.loan.id)
             } catch (cleanupError) {
                 console.error('[Orders] Failed to roll back the order loan after its initial repayment failed:', cleanupError)
@@ -4247,7 +4259,7 @@ async function reverseOrderPaymentsForCancellation(orderType: OrderType, order: 
         .where('[workspaceId+sourceType+sourceRecordId]')
         .equals([order.workspaceId, sourceType, order.id])
         .toArray()
-    const { reversePaymentTransaction } = await import('./payments')
+    const { reversePaymentTransaction } = await awaitStockDependency(import('./payments'))
 
     for (const payment of getUnreversedPaymentTransactions(payments)) {
         await reversePaymentTransaction(order.workspaceId, payment.id, {
@@ -4274,7 +4286,7 @@ async function reverseLinkedLoanPaymentsForCancellation(order: SalesOrder | Purc
         payment.sourceRecordId === order.linkedLoanId
         && loanPaymentSourceTypes.has(payment.sourceType)
     )
-    const { reversePaymentTransaction } = await import('./payments')
+    const { reversePaymentTransaction } = await awaitStockDependency(import('./payments'))
 
     for (const payment of getUnreversedPaymentTransactions(payments)) {
         await reversePaymentTransaction(order.workspaceId, payment.id, {
@@ -4288,7 +4300,7 @@ async function cancelOrderFinancialRecords(orderType: OrderType, order: SalesOrd
 
     if (order.linkedLoanId) {
         await reverseLinkedLoanPaymentsForCancellation(order)
-        const { cancelOrderLinkedLoan } = await import('./hooks')
+        const { cancelOrderLinkedLoan } = await awaitStockDependency(import('./hooks'))
         await cancelOrderLinkedLoan(order.linkedLoanId)
     }
 }
@@ -4355,7 +4367,7 @@ async function updateSalesOrderStatusOnce(
     options?.trace?.setEntityId(existing.id)
     options?.trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
 
-    if (isLocalWorkspaceMode(existing.workspaceId) && !Dexie.currentTransaction) {
+    if (usesLocalStockExecution(existing.workspaceId) && !Dexie.currentTransaction) {
         return db.transaction('rw', db.tables, () => updateSalesOrderStatusOnce(id, status, options))
     }
 
@@ -4392,7 +4404,7 @@ async function updateSalesOrderStatusOnce(
 
     if (status === 'cancelled' && shouldUseCloudBusinessData(existing.workspaceId)
         && (isOrderFinancingMethod(existing.paymentMethod) || existing.linkedLoanId)) {
-        const { cancelFinancedOrder } = await import('./orderCancellation')
+        const { cancelFinancedOrder } = await awaitStockDependency(import('./orderCancellation'))
         const result = await measureSalesOrderStage(
             options?.trace,
             'crudDebugger.stages.salesOrderPayment',
@@ -5602,10 +5614,13 @@ const salesOrderReturnRequestsInFlight = new Map<string, { fingerprint: string; 
 
 export function returnSalesOrder(input: ReturnSalesOrderInput) {
     const execute = async () => {
-        const result = await runCrudOperation(
+        const offlineOrder = await db.sales_orders.get(input.orderId)
+        const runReturn = () => runCrudOperation(
             { action: 'create', entityKey: 'salesOrderReturn', entityId: input.idempotencyKey || undefined },
             (trace) => returnSalesOrderOnce(input, trace)
         )
+        const result = offlineOrder && await needsOfflineStockOperation(offlineOrder.workspaceId)
+            ? await runOfflineStockOperation(offlineOrder.workspaceId, 'return', runReturn) : await runReturn()
         invalidateOrdersList(result.order.workspaceId, 'sales')
         return result
     }
@@ -6176,7 +6191,8 @@ export async function createPurchaseOrder(
     data: CreateOrderInput<PurchaseOrder>,
     createdBy?: string | null,
     options?: OrderFormSaveOptions
-) {
+): Promise<PurchaseOrder> {
+    if (await needsOfflineStockOperation(workspaceId)) return runOfflineStockOperation(workspaceId, 'purchase_order', () => createPurchaseOrder(workspaceId, data, createdBy, options))
     reportOrderSaveProgress(options, 'preparing')
     const now = new Date().toISOString()
     const orderNumber = await getInitialOrderNumber('purchase_orders', workspaceId)
@@ -6293,7 +6309,9 @@ export async function createPurchaseOrder(
     return createdOrder
 }
 
-export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrder>, options?: OrderFormSaveOptions) {
+export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrder>, options?: OrderFormSaveOptions): Promise<PurchaseOrder> {
+    const offlineOrder = await db.purchase_orders.get(id)
+    if (offlineOrder && await needsOfflineStockOperation(offlineOrder.workspaceId)) return runOfflineStockOperation(offlineOrder.workspaceId, 'purchase_order', () => updatePurchaseOrder(id, data, options))
     reportOrderSaveProgress(options, 'preparing')
     const existing = await db.purchase_orders.get(id)
     if (!existing || existing.isDeleted) {
@@ -6388,7 +6406,9 @@ export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrde
     return updated
 }
 
-export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrderStatus) {
+export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrderStatus): Promise<PurchaseOrder> {
+    const offlineOrder = await db.purchase_orders.get(id)
+    if (offlineOrder && await needsOfflineStockOperation(offlineOrder.workspaceId)) return runOfflineStockOperation(offlineOrder.workspaceId, 'purchase_order', () => updatePurchaseOrderStatus(id, status))
     const existing = await db.purchase_orders.get(id)
     if (!existing || existing.isDeleted) {
         throw new Error('Purchase order not found')
@@ -6428,7 +6448,7 @@ export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrde
 
     if (status === 'cancelled' && shouldUseCloudBusinessData(existing.workspaceId)
         && (isOrderFinancingMethod(existing.paymentMethod) || existing.linkedLoanId)) {
-        const { cancelFinancedOrder } = await import('./orderCancellation')
+        const { cancelFinancedOrder } = await awaitStockDependency(import('./orderCancellation'))
         const result = await cancelFinancedOrder('purchase', existing)
         invalidateOrdersList(existing.workspaceId, 'purchase')
         return result.order as PurchaseOrder
@@ -6646,7 +6666,9 @@ export async function lockPurchaseOrder(id: string) {
     return updated
 }
 
-export async function deletePurchaseOrder(id: string) {
+export async function deletePurchaseOrder(id: string): Promise<void> {
+    const offlineOrder = await db.purchase_orders.get(id)
+    if (offlineOrder && await needsOfflineStockOperation(offlineOrder.workspaceId)) return runOfflineStockOperation(offlineOrder.workspaceId, 'purchase_order', () => deletePurchaseOrder(id))
     const existing = await db.purchase_orders.get(id)
     if (!existing || existing.isDeleted) {
         return

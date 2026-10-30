@@ -1,4 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import appI18n from '@/i18n/config'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from '@/local-db/database'
+import { discardOfflineStockCount, type OfflineStockOperation } from '@/local-db/offlineStockOperations'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
     AppDialog,
     AppDialogBody,
@@ -44,12 +48,14 @@ interface ManualSyncModalProps {
 }
 
 function getEntityLabel(entityType: OfflineMutation['entityType']) {
+    if (entityType === 'stock_operations') return appI18n.t('inventory.offline.label')
     return entityType
         .replace(/_/g, ' ')
         .replace(/\b\w/g, (letter: string) => letter.toUpperCase())
 }
 
 function getMutationSummary(payload: OfflineMutation['payload']) {
+    if (payload.version === 1 && Array.isArray(payload.effects)) return `LOCAL-${String(payload.id).slice(0, 8)}`
     const summaryFields = [
         'name',
         'title',
@@ -118,6 +124,7 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
     const pendingCount = pendingMutations.length
     const [isOnline, setIsOnline] = useState(() => connectionManager.getState().isOnline)
 
+    const stockRetryLock = useRef(false)
     const [isSyncing, setIsSyncing] = useState(false)
     const [status, setStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle')
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -125,6 +132,12 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
     const [isDiscarding, setIsDiscarding] = useState(false)
     const [selectedMutation, setSelectedMutation] = useState<OfflineMutation | null>(null)
 
+    const selectedStockOperation = selectedMutation?.entityType === 'stock_operations' ? selectedMutation.payload as unknown as OfflineStockOperation : null
+    const selectedStockProducts = useLiveQuery(async () => {
+        const ids = [...new Set(selectedStockOperation?.effects.filter(effect => effect.table === 'inventory').map(effect => String(effect.after?.productId)) ?? [])]
+        return db.products.bulkGet(ids)
+    }, [selectedMutation?.id])
+    const stockProductNames = new Map(selectedStockProducts?.filter(row => !!row).map(row => [row!.id, row!.name]))
     const selectedMutationCanRecover = useMemo(() => (
         !isLocalMode
         && isOnline
@@ -165,7 +178,7 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
         })
     }, [])
 
-    async function handleSync() {
+    async function handleSync(retryAll = true) {
         if (!user || !user.workspaceId) return
 
         setIsSyncing(true)
@@ -176,14 +189,16 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
             // This is deliberate user intent. Automatic sync never retries a
             // deterministic server rejection because it would repeatedly fail
             // until the underlying schema, permission, or validation issue is fixed.
-            await retrySyncIntegrityMutations(user.workspaceId)
+            if (retryAll) await retrySyncIntegrityMutations(user.workspaceId)
             const result = await runManagedFullSync(
                 user.id,
                 user.workspaceId,
                 localStorage.getItem(LAST_SYNC_KEY)
             )
 
-            if (result.success) {
+            const remainingStock = result.success ? await db.offline_mutations.where('workspaceId').equals(user.workspaceId)
+                .filter(row => row.entityType === 'stock_operations' && row.status !== 'synced' && row.status !== 'discarded').count() : 0
+            if (result.success && remainingStock === 0) {
                 localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString())
                 setStatus('success')
                 toast({
@@ -199,7 +214,7 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                 }, 1500)
             } else {
                 setStatus('error')
-                setErrorMessage(result.errors.join(', '))
+                setErrorMessage(result.errors.join(', ') || t(pendingMutations.some(row => row.entityType === 'stock_operations' && row.payload.actorId !== user.id) ? 'inventory.offline.identityRequired' : 'inventory.offline.retryPending'))
                 toast({
                     title: t('sync.toastSyncFailed'),
                     description: t('sync.toastSyncFailedDesc'),
@@ -224,6 +239,19 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
     }
 
     async function handleDiscard() {
+        if (mutationToDiscard?.entityType === 'stock_operations') {
+            if (isDiscarding) return
+            setIsDiscarding(true)
+            try {
+                await discardOfflineStockCount(mutationToDiscard.id)
+                setMutationToDiscard(null)
+                setSelectedMutation(null)
+                toast({ title: t('inventory.offline.discarded') })
+            } catch (error) {
+                toast({ title: t('common.error'), description: error instanceof Error ? error.message : t('inventory.offline.rejected'), variant: 'destructive' })
+            } finally { setIsDiscarding(false) }
+            return
+        }
         if (!user || !mutationToDiscard || isDiscarding) return
 
         setIsDiscarding(true)
@@ -303,9 +331,9 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                                 >
                                     {pendingMutations.map((mutation) => {
                                         const summary = getMutationSummary(mutation.payload)
-                                        const hasSyncIntegrityIssue = isSyncIntegrityError(mutation.error)
+                                        const hasSyncIntegrityIssue = isSyncIntegrityError(mutation.error) || (mutation.entityType === 'stock_operations' && mutation.status === 'failed')
                                         const statusLabel = hasSyncIntegrityIssue
-                                            ? t('sync.needsAttention', { defaultValue: 'Needs attention' })
+                                            ? mutation.entityType === 'stock_operations' ? t('inventory.offline.needsAttention') : t('sync.needsAttention', { defaultValue: 'Needs attention' })
                                             : mutation.status === 'failed'
                                                 ? t('sync.retrying')
                                             : mutation.status === 'syncing'
@@ -391,7 +419,7 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                             </Button>
                         ) : (
                             <Button
-                                onClick={handleSync}
+                                onClick={() => void handleSync()}
                                 disabled={isSyncing || isDiscarding || !isOnline}
                             >
                                 {isSyncing ? t('sync.syncingBtn') : t('sync.syncNow')}
@@ -408,13 +436,13 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                 }}
                 onConfirm={() => void handleDiscard()}
                 isLoading={isDiscarding}
-                confirmLabel={isBusinessPartnerAccessChangedError(mutationToDiscard?.error)
+                confirmLabel={mutationToDiscard?.entityType === 'stock_operations' ? t('inventory.offline.discardCount') : isBusinessPartnerAccessChangedError(mutationToDiscard?.error)
                     ? t('sync.recovery.accessRevokedAction')
                     : t('sync.recovery.action')}
-                title={isBusinessPartnerAccessChangedError(mutationToDiscard?.error)
+                title={mutationToDiscard?.entityType === 'stock_operations' ? t('inventory.offline.discardCount') : isBusinessPartnerAccessChangedError(mutationToDiscard?.error)
                     ? t('sync.recovery.accessRevokedConfirmTitle')
                     : t('sync.recovery.confirmTitle')}
-                description={isBusinessPartnerAccessChangedError(mutationToDiscard?.error)
+                description={mutationToDiscard?.entityType === 'stock_operations' ? t('inventory.offline.discardDescription') : isBusinessPartnerAccessChangedError(mutationToDiscard?.error)
                     ? t('sync.recovery.accessRevokedConfirmDescription')
                     : t('sync.recovery.confirmDescription', {
                         entity: mutationToDiscard ? getEntityLabel(mutationToDiscard.entityType) : ''
@@ -427,27 +455,29 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
             <AppDialog
                 open={selectedMutation !== null}
                 onOpenChange={(nextOpen) => {
-                    if (!nextOpen && !isDiscarding) setSelectedMutation(null)
+                    if (!nextOpen && !isDiscarding && !isSyncing) setSelectedMutation(null)
                 }}
             >
                 <AppDialogContent
-                    className={cn('max-w-4xl', contentClassName)}
-                    showCloseButton={!isDiscarding}
+                    className={cn('max-w-4xl', contentClassName, 'z-[10020]')}
+                    overlayClassName="z-[10015]"
+                    showCloseButton={!isDiscarding && !isSyncing}
                     onEscapeKeyDown={(event) => {
-                        if (isDiscarding) event.preventDefault()
+                        if (isDiscarding || isSyncing) event.preventDefault()
                     }}
                     onPointerDownOutside={(event) => {
-                        if (isDiscarding) event.preventDefault()
+                        if (isDiscarding || isSyncing) event.preventDefault()
                     }}
                 >
                     <AppDialogHeader>
-                        <AppDialogTitle>{t('sync.payloadTitle', { entity: getEntityLabel(selectedMutation?.entityType ?? 'products') })}</AppDialogTitle>
+                        <AppDialogTitle>{selectedStockOperation ? t('inventory.offline.review') : t('sync.payloadTitle', { entity: getEntityLabel(selectedMutation?.entityType ?? 'products') })}</AppDialogTitle>
                         <DialogDescription>
-                            {t('sync.payloadDescription')}
+                            {selectedStockOperation ? t('inventory.offline.reviewHelp') : t('sync.payloadDescription')}
                         </DialogDescription>
                     </AppDialogHeader>
 
                     <AppDialogBody>
+                        {selectedStockOperation && selectedStockOperation.actorId !== user?.id && <p className="mb-3 text-sm text-muted-foreground">{t('inventory.offline.identityRequired')}</p>}
                         {selectedMutation?.error && (
                             <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
                                 {selectedMutationError}
@@ -460,6 +490,20 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                             </p>
                         )}
 
+                        {selectedStockOperation ? (
+                            <div className="space-y-4 py-3">
+                                <p className="break-all text-sm text-muted-foreground">{t('inventory.offline.pendingReference')}: LOCAL-{selectedStockOperation.id}</p>
+                                <p className="font-medium">{t(`inventory.offline.kinds.${selectedStockOperation.kind}`)}</p>
+                                {selectedStockOperation.effects.filter(effect => effect.table === 'inventory').map(effect => (
+                                    <div key={effect.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
+                                        <span>{stockProductNames.get(String(effect.after?.productId)) ?? t('inventory.offline.label')}</span>
+                                        <span className="tabular-nums">{t('inventory.offline.quantityChange', { quantity: new Intl.NumberFormat(i18n.language, { signDisplay: 'always', maximumFractionDigits: 6 }).format(Number(effect.after?.quantity ?? 0)-Number(effect.before?.quantity ?? 0)) })}</span>
+                                    </div>
+                                ))}
+                                {selectedStockOperation.count && <p className="text-sm text-muted-foreground">{t('inventory.offline.countHelp')}</p>}
+                                {selectedStockOperation.effects.some(effect => effect.table === 'payment_transactions') && <p className="text-sm text-muted-foreground">{t('inventory.offline.paymentPreserved')}</p>}
+                            </div>
+                        ) : (
                             <Table>
                                 <TableHeader>
                                     <TableRow>
@@ -489,13 +533,37 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                                 })}
                             </TableBody>
                             </Table>
+                        )}
                     </AppDialogBody>
 
                     <AppDialogFooter>
-                        <Button variant="ghost" onClick={() => setSelectedMutation(null)} disabled={isDiscarding}>
+                        <Button variant="ghost" onClick={() => setSelectedMutation(null)} disabled={isDiscarding || isSyncing}>
                             {t('common.close', 'Close')}
                         </Button>
-                        {selectedMutationCanRecover ? (
+                        {selectedStockOperation?.count && selectedMutation?.status === 'failed' && (
+                            <Button variant="destructive" disabled={isSyncing || isDiscarding || !isOnline || selectedStockOperation.actorId !== user?.id}
+                                onClick={() => setMutationToDiscard(selectedMutation)}>
+                                <RotateCcw className="h-4 w-4" />{t('inventory.offline.discardCount')}
+                            </Button>
+                        )}
+                        {selectedStockOperation ? (
+                            <Button disabled={isSyncing || isDiscarding || !isOnline || selectedStockOperation.actorId !== user?.id || selectedMutation?.status === 'syncing'} onClick={async () => {
+                                if (!selectedMutation || stockRetryLock.current || isDiscarding) return
+                                stockRetryLock.current = true
+                                setIsSyncing(true)
+                                try {
+                                    const current = await db.offline_mutations.get(selectedMutation.id)
+                                    if (current?.stockCancelRequested) { await discardOfflineStockCount(current.id); setSelectedMutation(null); return }
+                                    await db.offline_mutations.update(selectedMutation.id, { status: 'pending', error: undefined, nextAttemptAt: undefined })
+                                    await handleSync(false)
+                                } catch {
+                                    toast({ title: t('common.error'), description: t('inventory.offline.retryPending'), variant: 'destructive' })
+                                } finally { stockRetryLock.current = false; setIsSyncing(false) }
+                            }}>
+                                {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                                {t('inventory.offline.retry')}
+                            </Button>
+                        ) : selectedMutationCanRecover ? (
                             <Button
                                 variant="destructive"
                                 onClick={() => {

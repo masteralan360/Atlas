@@ -1,4 +1,6 @@
 import { db } from './database'
+import { currentStockOperation } from './offlineStockContext'
+import { readOfflineStockAvailability } from './offlineStockAvailability'
 import { isService } from '@/lib/catalogItem'
 import { getOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import { QUANTITY_EPSILON, roundQuantity } from '@/lib/quantity'
@@ -45,10 +47,12 @@ export async function assertLocalStockDemands(workspaceId: string, demands: read
     const previous = grouped.get(key)
     grouped.set(key, { ...demand, quantity: roundQuantity((previous?.quantity ?? 0) + demand.quantity) })
   }
-  const availability = await readLocalStockAvailability(workspaceId, [...grouped.values()], excludeOrderId)
+  const availability = await (currentStockOperation(workspaceId)
+    ? readOfflineStockAvailability(workspaceId, [...grouped.values()], excludeOrderId)
+    : readLocalStockAvailability(workspaceId, [...grouped.values()], excludeOrderId))
   for (const position of availability) {
     const required = grouped.get(stockPositionKey(position))!.quantity
-    if (position.reserved > 0 && required > position.onHand - position.reserved + QUANTITY_EPSILON) {
+    if ((position.reserved > 0 || currentStockOperation(workspaceId)) && required > position.onHand - position.reserved + QUANTITY_EPSILON) {
       const product = await db.products.get(position.productId)
       throw reportStockReservationConflict({ ...position, workspaceId, required, productName: product?.name })
     }

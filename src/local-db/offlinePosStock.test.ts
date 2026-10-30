@@ -2,7 +2,7 @@ import { installTestBrowser } from '@/dev/testing/fixtures/browser';
 import "fake-indexeddb/auto";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { setNetworkStatus } from "@/lib/network";
+import { setActiveBusinessUser, setNetworkStatus } from "@/lib/network";
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from "@/workspace/workspaceMode";
 
 import { db } from "./database";
@@ -254,7 +254,7 @@ describe("offline POS stock effects", () => {
     ]));
   });
 
-  it("blocks Cloud and Hybrid workspaces from applying offline stock effects", async () => {
+  it("blocks raw Cloud and Hybrid stock writes outside a durable operation", async () => {
     writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: "hybrid" });
 
     await expect(applyOfflinePosStockEffects({
@@ -268,4 +268,19 @@ describe("offline POS stock effects", () => {
     expect(await db.inventory.get(INVENTORY_ID)).toMatchObject({ quantity: 20 });
     expect(await db.stock_batches.get(BATCH_ID)).toMatchObject({ quantity: 20 });
   });
+  it.each(['cloud','hybrid'] as const)('commits a %s offline transfer as one stock operation', async dataMode => {
+    writeWorkspaceModeSnapshot({workspaceId:WORKSPACE_ID,dataMode}); setActiveBusinessUser(SALE_ID,'admin',WORKSPACE_ID);
+    const {cacheOfflineStockAvailability}=await import('./offlineStockAvailability');
+    await cacheOfflineStockAvailability(WORKSPACE_ID,[{productId:PRODUCT_ID,storageId:STORAGE_ID,onHand:20,reserved:0,available:20}]);
+    await transferInventoryQuantityWithBatches({workspaceId:WORKSPACE_ID,productId:PRODUCT_ID,sourceStorageId:STORAGE_ID,targetStorageId:TARGET_STORAGE_ID,quantity:2.25,timestamp:TIMESTAMP,skipReorderCheck:true});
+    expect(await db.inventory.get(INVENTORY_ID)).toMatchObject({quantity:17.75,syncStatus:'pending'});
+    expect(await db.inventory.where('[productId+storageId]').equals([PRODUCT_ID,TARGET_STORAGE_ID]).first()).toMatchObject({quantity:2.25,syncStatus:'pending'});
+    expect(await db.inventory_transactions.count()).toBe(2);
+    expect(await db.stock_batches.get(BATCH_ID)).toMatchObject({quantity:17.75});
+    const queued=await db.offline_mutations.toArray();expect(queued).toHaveLength(1);
+    expect(queued[0].payload).toMatchObject({kind:'transfer',rpc:{name:'apply_inventory_transfer_batch'}});
+    expect((await db.inventory_transfer_batches.toArray())[0].transferNumber).toMatch(/^LOCAL-/);
+    setActiveBusinessUser(null);
+  });
+
 });

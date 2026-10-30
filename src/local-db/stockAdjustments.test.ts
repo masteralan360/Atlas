@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { setNetworkStatus } from '@/lib/network'
+import { setActiveBusinessUser, setNetworkStatus } from '@/lib/network'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 
 import { db } from './database'
@@ -27,7 +27,7 @@ function installBrowserGlobals() {
     Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: storage })
     Object.defineProperty(globalThis, 'window', {
         configurable: true,
-        value: { localStorage: storage, sessionStorage: storage, location: { hash: '', origin: 'http://localhost', pathname: '/' }, addEventListener: () => undefined },
+        value: { localStorage: storage, sessionStorage: storage, location: { hash: '', origin: 'http://localhost', pathname: '/' }, addEventListener: () => undefined, dispatchEvent: () => true },
     })
     Object.defineProperty(globalThis, 'document', {
         configurable: true,
@@ -92,6 +92,7 @@ describe('stock adjustments', () => {
         await db.delete()
         await db.open()
         setNetworkStatus(false)
+        setActiveBusinessUser('00000000-0000-4000-8000-000000000519', 'admin', WORKSPACE_ID)
         writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
         await seedInventory(4)
     })
@@ -99,6 +100,7 @@ describe('stock adjustments', () => {
     afterEach(() => {
         clearWorkspaceModeSnapshot(WORKSPACE_ID)
         setNetworkStatus(true)
+        setActiveBusinessUser(null)
     })
     afterAll(async () => { await db.delete() })
 
@@ -127,22 +129,19 @@ describe('stock adjustments', () => {
         expect(await db.inventory_transactions.where('referenceId').equals(adjustment.id).count()).toBe(1)
     })
 
-    it('rejects an offline stock adjustment in cloud mode without changing stock', async () => {
-        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'cloud' })
-
-        await expect(createStockAdjustment(WORKSPACE_ID, {
-            productId: PRODUCT_ID,
-            storageId: STORAGE_ID,
-            adjustmentType: 'increase',
-            quantity: 1,
-            targetQuantity: 11,
-            reason: 'correction',
-        })).rejects.toThrow('Connect to the internet')
-
+    it.each(['cloud', 'hybrid'] as const)('saves an offline %s adjustment and its replay operation together', async dataMode => {
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode })
+        await createStockAdjustment(WORKSPACE_ID, {
+            productId: PRODUCT_ID, storageId: STORAGE_ID, adjustmentType: 'increase',
+            quantity: 1, targetQuantity: 11, reason: 'correction',
+        })
         expect(await db.inventory.where('[productId+storageId]').equals([PRODUCT_ID, STORAGE_ID]).first())
-            .toMatchObject({ quantity: 4 })
-        expect(await db.inventory_transactions.count()).toBe(0)
-        expect(await db.offline_mutations.count()).toBe(0)
+            .toMatchObject({ quantity: 11, syncStatus: 'pending' })
+        expect(await db.inventory_transactions.count()).toBe(1)
+        const operations = await db.offline_mutations.toArray()
+        expect(operations).toHaveLength(1)
+        expect(operations[0]).toMatchObject({ entityType: 'stock_operations', status: 'pending',
+            payload: { kind: 'adjustment', count: { quantity: 11 } } })
     })
 
     it('rounds fractional target quantities to the inventory precision', async () => {

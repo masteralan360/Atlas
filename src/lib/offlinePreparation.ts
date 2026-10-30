@@ -17,6 +17,7 @@ import {
 import { areApplicationUpdatesDisabled } from '@/lib/updatePreference'
 import { LAST_SYNC_KEY } from '@/sync/constants'
 import { runManagedFullSync } from '@/sync/syncCoordinator'
+import { fetchStockAvailability } from '@/local-db/stockReservations'
 
 const READINESS_RECORD_VERSION = 1
 
@@ -178,6 +179,17 @@ export async function prepareForOfflineUse(options: {
             if (!syncResult.success) {
                 console.warn('[OfflinePreparation] Full workspace sync failed:', syncResult.errors)
                 throw new OfflinePreparationError('data-sync-failed')
+            }
+            // Persist aggregate reservation totals, including commitments for
+            // orders that this user cannot read individually. Cursor batches
+            // keep preparation bounded even for large workspace inventories.
+            let lastId = ''
+            while (true) {
+                const inventory = await db.inventory.where('[workspaceId+id]').between([user.workspaceId, lastId], [user.workspaceId, '\uffff'], false, true)
+                    .filter(row => !row.isDeleted).limit(200).toArray()
+                if (!inventory.length) break
+                await fetchStockAvailability(user.workspaceId, inventory.map(row => ({ productId: row.productId, storageId: row.storageId })))
+                lastId = inventory[inventory.length - 1].id
             }
             dataSyncedAt = new Date().toISOString()
             if (typeof localStorage !== 'undefined') {

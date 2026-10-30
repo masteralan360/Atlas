@@ -1,13 +1,15 @@
+import { awaitStockDependency } from './offlineStockContext'
+import { currentStockOperation, usesLocalStockExecution } from './offlineStockContext'
+import { needsOfflineStockOperation, runOfflineStockOperation } from './offlineStockOperations'
 import i18n from '@/i18n/config'
 import { assertLocalStockDemands } from './stockReservationData'
 import { supabase } from '@/auth/supabase'
 import { generateId } from '@/lib/utils'
-import { isOnline } from '@/lib/network'
+import { getActiveBusinessUserId, isOnline } from '@/lib/network'
 import { normalizeSupabaseActionError, isRetriableWebRequestError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { createVerificationSale, verifySale } from '@/lib/saleVerification'
 import { isService } from '@/lib/catalogItem'
 import type { SalesExchangePayload } from '@/lib/salesExchange'
-import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { db } from './database'
 import type { CurrencyCode, ExchangeRateSnapshot, StockBatchAllocation, UserRole } from './models'
 import { assertStaffMinimumSellingPrices } from './minimumSellingPrice'
@@ -27,6 +29,7 @@ import { persistLoanAggregateRpcResult } from './loanTransactions'
 import { getLocalAccessibleServiceIdsInCurrentTransaction } from './serviceAccess'
 
 export interface PosCheckoutItem {
+    id?: string
     product_id: string
     storage_id: string | null
     product_name: string
@@ -242,7 +245,7 @@ async function saveLocal(input: PosCheckoutInput, loanDependencies?: LoanBusines
             totalAmount: p.total_amount, originalTotalAmount: p.total_amount, returnedAmount: 0,
             returnStatus: 'none', settlementCurrency: p.settlement_currency,
             currencyConversionApplied: p.currency_conversion_applied, origin: 'pos', payment_method: p.payment_method,
-            sequenceId, createdAt: input.timestamp, updatedAt: input.timestamp,
+            sequenceId: currentStockOperation(p.workspace_id) ? undefined : sequenceId, createdAt: input.timestamp, updatedAt: input.timestamp,
             syncStatus: 'synced', lastSyncedAt: input.timestamp, version: 1, isDeleted: false,
             systemVerified: verification.verified, systemReviewStatus: verification.status, systemReviewReason: verification.reason
         })
@@ -253,7 +256,7 @@ async function saveLocal(input: PosCheckoutInput, loanDependencies?: LoanBusines
                 expiryDate: a.expiry_date, manufacturingDate: a.manufacturing_date
             })) ?? null
             return {
-                id: generateId(), workspaceId: p.workspace_id, saleId: p.id,
+                id: item.id ?? generateId(), workspaceId: p.workspace_id, saleId: p.id,
                 createdAt: input.timestamp, updatedAt: input.timestamp,
                 productId: item.product_id, storageId: item.storage_id, quantity: item.quantity,
                 sellingUnitRef: item.selling_unit_ref as never, sellingUnitCode: item.selling_unit_code,
@@ -291,23 +294,53 @@ async function saveLocal(input: PosCheckoutInput, loanDependencies?: LoanBusines
             skipReorderCheck: true,
             storageAccessPrevalidated: true
         })
-        await postPayment(input, `#${String(sequenceId).padStart(5, '0')}`)
+        await postPayment(input, currentStockOperation(p.workspace_id) ? `LOCAL-${p.id}` : `#${String(sequenceId).padStart(5, '0')}`)
         const r = input.loanRegistration
         const loan = p.payment_method === 'loan' && r ? await createLoanFromPosSale(p.workspace_id, {
+            id: typeof input.atomicLoanPayload?.id === 'string' ? input.atomicLoanPayload.id : undefined,
+            installmentIds: Array.isArray(input.atomicLoanPayload?.installments)
+                ? (input.atomicLoanPayload.installments as { id: string }[]).map(row => row.id) : undefined,
             saleId: p.id, ...r, principalAmount: p.total_amount, settlementCurrency: p.settlement_currency,
             exchangeRateSnapshot: input.exchangeRates, createdBy: input.user.id, createdAt: input.timestamp
         }, loanDependencies) : null
-        return { sequenceId, loanId: loan?.loan.id ?? null }
+        return { sequenceId: currentStockOperation(p.workspace_id) ? undefined : sequenceId, loanId: loan?.loan.id ?? null }
     })
 }
 
 /** Production checkout persistence, shared by /pos and isolated developer tests. */
-export async function commitPosCheckout(input: PosCheckoutInput) {
+async function queuePosCheckout(input: PosCheckoutInput): Promise<{ sequenceId: number | undefined; loanId: string | null; pendingSync?: boolean }> {
+    const p = input.payload
+    const result = await runOfflineStockOperation(p.workspace_id, 'checkout', () => commitPosCheckout(input), {
+        id: p.id,
+        rpc: input.atomicLoanPayload
+            ? { name: 'complete_sale_with_loan', args: { payload: p, p_loan: input.atomicLoanPayload } }
+            : { name: 'complete_pos_checkout', args: { payload: p, p_account_id: input.account?.id ?? null, p_account_name_snapshot: input.account?.name ?? null } },
+    })
+    return { ...result, pendingSync: true }
+}
+
+export async function commitPosCheckout(input: PosCheckoutInput): Promise<{ sequenceId: number | undefined; loanId: string | null; pendingSync?: boolean }> {
+    input = { ...input, payload: { ...input.payload, items: input.payload.items.map(item => ({ ...item, id: item.id ?? generateId() })) } }
+    if (!currentStockOperation(input.payload.workspace_id)) {
+        const recorded = await db.offline_mutations.get(input.payload.id)
+        if (recorded?.entityType === 'stock_operations') {
+            const previous = (recorded.payload.rpc as { args?: { payload?: PosCheckoutPayload } } | undefined)?.args?.payload
+            const terms = (p: PosCheckoutPayload) => JSON.stringify({ ...p, items: p.items.map(({ id: _id, ...item }) => item) })
+            const args = (recorded.payload.rpc as { args?: Record<string, unknown> } | undefined)?.args
+            if (recorded.payload.actorId !== getActiveBusinessUserId() || recorded.workspaceId !== input.payload.workspace_id
+                || args?.p_account_id !== (input.account?.id ?? null) && !input.atomicLoanPayload
+                || JSON.stringify(args?.p_loan ?? null) !== JSON.stringify(input.atomicLoanPayload ?? null)
+                || !previous || terms(previous) !== terms(input.payload)) throw new Error(i18n.t('messages.checkoutFailed'))
+            const saved = await db.sales.get(input.payload.id)
+            if (saved) return { sequenceId: saved.sequenceId, loanId: (await db.loans.where('saleId').equals(saved.id).first())?.id ?? null, pendingSync: recorded.status !== 'synced' }
+        }
+    }
+    if (await needsOfflineStockOperation(input.payload.workspace_id)) return queuePosCheckout(input)
     let committed = false
     try {
         validate(input)
         const { payload: p } = input
-        if (isLocalWorkspaceMode(p.workspace_id)) {
+        if (usesLocalStockExecution(p.workspace_id)) {
             const minimumPriceValidationItems = input.minimumPriceValidationItems ?? p.items.map((item) => ({
                 productId: item.product_id,
                 effectiveSellingPrice: item.unit_price,
@@ -329,15 +362,16 @@ export async function commitPosCheckout(input: PosCheckoutInput) {
             let loanDependencies: LoanBusinessPartnerDependencies | undefined
             if (input.loanRegistration?.linkedPartyType === 'business_partner'
                 && input.loanRegistration.linkedPartyId) {
-                const businessPartners = await import('./businessPartners')
+                const businessPartners = await awaitStockDependency(import('./businessPartners'))
                 loanDependencies = {
                     getBusinessPartnerByAnyId: businessPartners.getBusinessPartnerByAnyId,
                     recalculateBusinessPartnerSummary: businessPartners.recalculateBusinessPartnerSummary
                 }
             }
             const result = await saveLocal(input, loanDependencies)
+            if (currentStockOperation(p.workspace_id)) return result
             // Automatic reorder transfers are follow-up work, outside the sale.
-            const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
+            const { evaluateReorderTransferRulesForProduct } = await awaitStockDependency(import('./reorderTransferRules'))
             await Promise.allSettled([...new Set(p.items.filter(item => item.storage_id).map(item => item.product_id))]
                 .map(id => evaluateReorderTransferRulesForProduct(p.workspace_id, id)))
             return result
@@ -422,6 +456,7 @@ export async function commitPosCheckout(input: PosCheckoutInput) {
         scheduleReconciliation()
         return { sequenceId: result.sequence_id, loanId: aggregate?.loan.id ?? null }
     } catch (cause) {
+        if (!committed && !usesLocalStockExecution(input.payload.workspace_id) && isRetriableWebRequestError(cause)) return queuePosCheckout(input)
         throw new PosCheckoutError(committed, input.payload.id, cause)
     }
 }

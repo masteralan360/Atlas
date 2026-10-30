@@ -1,6 +1,9 @@
 import Dexie from "dexie";
 import { useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode';
+import { currentStockOperation, usesLocalStockExecution } from './offlineStockContext';
+import { needsOfflineStockOperation, runOfflineStockOperation } from './offlineStockOperations';
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import i18n from "@/i18n/config";
@@ -9,7 +12,6 @@ import { getActiveBusinessUserId, getActiveBusinessUserRole, isOnline } from "@/
 import { getSupabaseClientForTable } from "@/lib/supabaseSchema";
 import { normalizeSupabaseActionError, runSupabaseAction } from "@/lib/supabaseRequest";
 import { generateId, toCamelCase } from "@/lib/utils";
-import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 import { queryKeys } from "@/query/queryKeys";
 import { recordWorkspaceDataFetch } from "@/workspace/workspaceDataFreshness";
 
@@ -178,18 +180,27 @@ export async function createStockAdjustment(
     timestamp?: string;
     id?: string;
   },
-) {
+): Promise<StockAdjustment> {
   const timestamp = options?.timestamp || new Date().toISOString();
+  if (await needsOfflineStockOperation(workspaceId)) {
+    const id = options?.id || generateId();
+    return runOfflineStockOperation(workspaceId, 'adjustment', () => createStockAdjustment(workspaceId, input, { ...options, id, timestamp }), { id });
+  }
   const normalized = normalizeAdjustmentInput(input);
+  const operation = currentStockOperation(workspaceId);
+  if (operation && normalized.targetQuantity !== null) {
+    const position = await db.inventory.where('[productId+storageId]').equals([normalized.productId, normalized.storageId]).first();
+    operation.count = { productId: normalized.productId, storageId: normalized.storageId, quantity: normalized.targetQuantity, version: position?.version ?? 0 };
+  }
   const transactionId = options?.id || generateId();
-  if (isLocalWorkspaceMode(workspaceId)) {
+  if (usesLocalStockExecution(workspaceId)) {
     const existingTransaction = await db.inventory_transactions.get(transactionId);
     if (existingTransaction) {
       return mapTransactionToStockAdjustment(existingTransaction) as StockAdjustment;
     }
   }
   const useAuthoritativeTarget =
-    !isLocalWorkspaceMode(workspaceId) && normalized.targetQuantity !== null;
+    !usesLocalStockExecution(workspaceId) && normalized.targetQuantity !== null;
 
   // Relative adjustments still need the latest quantity to build their
   // transaction. Absolute cloud adjustments pass the target to the database,
@@ -223,7 +234,7 @@ export async function createStockAdjustment(
     throw new Error("Insufficient inventory");
   }
 
-  if (!isLocalWorkspaceMode(workspaceId)) {
+  if (!usesLocalStockExecution(workspaceId)) {
     // The target RPC replaces these client-side quantities with the exact
     // authoritative values. If the local snapshot already equals the target,
     // provide a harmless non-zero placeholder for the shared transaction

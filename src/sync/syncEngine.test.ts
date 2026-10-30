@@ -1,3 +1,4 @@
+vi.mock('@/local-db/offlineStockFollowups', () => ({ runOfflineStockFollowups: vi.fn(async () => undefined) }))
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const dbMock = vi.hoisted(() => {

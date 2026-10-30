@@ -1,10 +1,12 @@
+import { awaitStockDependency } from './offlineStockContext'
+import { needsOfflineStockOperation, runOfflineStockOperation } from './offlineStockOperations'
+import { usesLocalStockExecution } from './offlineStockContext'
 import i18n from '@/i18n/config'
 import type { Sale } from '@/types'
 import type { CurrencyCode, PaymentAccount, SaleReturn as LocalSaleReturn, SaleReturnItem as LocalSaleReturnItem, StockBatchAllocation, WorkspacePaymentMethod } from './models'
 import { db } from './database'
 import { appendPaymentTransaction } from './payments'
 import { getPaymentTransactionReversalState } from '@/lib/paymentReversals'
-import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { isService } from '@/lib/catalogItem'
 import { assertLocalServiceAccessInCurrentTransaction } from './serviceAccess'
 
@@ -19,12 +21,13 @@ export async function commitLocalSaleReturn<T>(
     operation: () => Promise<T>,
     options: { reorderProductIds?: string[] } = {}
 ) {
-    if (!isLocalWorkspaceMode(workspaceId)) throw new Error(i18n.t('inventory.errors.onlineRequired'))
+    if (await needsOfflineStockOperation(workspaceId)) return runOfflineStockOperation(workspaceId, 'return', operation)
+    if (!usesLocalStockExecution(workspaceId)) throw new Error(i18n.t('inventory.errors.onlineRequired'))
     const result = await db.transaction('rw', db.tables, operation)
     const productIds = Array.from(new Set(options.reorderProductIds?.filter(Boolean) ?? []))
     if (productIds.length > 0) {
         try {
-            const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
+            const { evaluateReorderTransferRulesForProduct } = await awaitStockDependency(import('./reorderTransferRules'))
             for (const productId of productIds) {
                 try {
                     await evaluateReorderTransferRulesForProduct(workspaceId, productId)
@@ -58,7 +61,7 @@ export async function persistSaleReturnLedger(input: {
 }) {
     if (!Number.isFinite(input.refundAmount) || input.refundAmount < 0 || !input.linePayloads.length) throw new Error(i18n.t('sales.return.failed'))
     const persist = async () => {
-        if (isLocalWorkspaceMode(input.sale.workspace_id)) {
+        if (usesLocalStockExecution(input.sale.workspace_id)) {
             const saleProductIds = input.sale.items?.length
                 ? input.sale.items.map((item) => item.product_id).filter(Boolean)
                 : (await db.sale_items.where('saleId').equals(input.sale.id).toArray()).map((item) => item.productId)
@@ -168,6 +171,6 @@ export async function persistSaleReturnLedger(input: {
             metadata: { saleReturnId: input.returnId, returnReason: input.reason || 'Return' }
         })
     }
-    if (isLocalWorkspaceMode(input.sale.workspace_id)) return db.transaction('rw', db.tables, persist)
+    if (usesLocalStockExecution(input.sale.workspace_id)) return db.transaction('rw', db.tables, persist)
     return persist().catch(cause => { throw Object.assign(new Error(i18n.t('sales.return.failed')), { cause }) })
 }

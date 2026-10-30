@@ -511,6 +511,40 @@ describe('atomic POS Quick Order completion', () => {
         await db.delete()
     })
 
+    it.each(['cloud', 'hybrid'] as const)('%s keeps a completed offline Quick Order and its payment in one operation', async dataMode => {
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode })
+        setNetworkStatus(false)
+        await db.storages.put({ ...baseEntity(STORAGE_ID), name: 'Main' } as never)
+        const { cacheOfflineStockAvailability } = await import('./offlineStockAvailability')
+        await cacheOfflineStockAvailability(WORKSPACE_ID, [{ productId: PRODUCT_ID, storageId: STORAGE_ID, onHand: 5, reserved: 0, available: 5 }])
+        const order = await createQuickSalesOrder(WORKSPACE_ID, { ...quickOrderInput(), status: 'completed' }, USER_ID)
+        expect(order).toMatchObject({ status: 'completed', syncStatus: 'pending' })
+        expect(await db.inventory.get(INVENTORY_ID)).toMatchObject({ quantity: 4, syncStatus: 'pending' })
+        expect(await db.payment_transactions.count()).toBe(1)
+        const operations = await db.offline_mutations.toArray()
+        expect(operations).toHaveLength(1)
+        expect(operations[0]).toMatchObject({ entityType: 'stock_operations', payload: { kind: 'sales_order' } })
+        expect(supabaseMock.rpc).not.toHaveBeenCalled()
+    })
+
+
+    it.each(['cloud', 'hybrid'] as const)('%s saves an offline financed Quick Order with stable loan identities', async dataMode => {
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode }); setNetworkStatus(false)
+        await db.storages.put({ ...baseEntity(STORAGE_ID), name: 'Main' } as never)
+        const { cacheOfflineStockAvailability } = await import('./offlineStockAvailability')
+        await cacheOfflineStockAvailability(WORKSPACE_ID, [{ productId: PRODUCT_ID, storageId: STORAGE_ID, onHand: 5, reserved: 0, available: 5 }])
+        const completed = await createQuickSalesOrder(WORKSPACE_ID, {
+            ...unpaidQuickOrderInput('completed'), paymentMethod: 'loan', paymentStatus: 'partial',
+            initialPaymentAmount: 25, paidAmount: 25, balanceAmount: 75, firstDueDate: null, nextDueDate: null,
+        }, USER_ID)
+        expect(completed).toMatchObject({ status: 'completed', linkedLoanId: expect.any(String) })
+        expect(await db.loans.get(completed.linkedLoanId!)).toMatchObject({ principalAmount: 100, balanceAmount: 75 })
+        expect(await db.inventory.get(INVENTORY_ID)).toMatchObject({ quantity: 4 })
+        expect(await db.payment_transactions.count()).toBe(1)
+        expect(await db.offline_mutations.filter(row => row.entityType === 'stock_operations').count()).toBe(1)
+        expect(supabaseMock.rpc).not.toHaveBeenCalled()
+    })
+
     describe('sales order form summary refresh', () => {
         for (const dataMode of ['cloud', 'hybrid'] as const) {
             for (const paymentMethod of ['cash', 'loan'] as const) {

@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import i18n from "@/i18n/config";
 import { isTauri } from "@/lib/platform";
-import { shouldMirrorToSqlite, isStrictLocalWorkspaceMode } from "@/workspace/workspaceMode";
+import { shouldMirrorToSqlite, isStrictLocalWorkspaceMode, isHybridWorkspaceMode } from "@/workspace/workspaceMode";
 import { recordWorkspaceDataFetch } from "@/workspace/workspaceDataFreshness";
 import { isAllowedInventoryQuantityTransition } from "./inventoryDeficit";
 import { prepareSqliteReservationValidation } from './stockReservationsSqlite';
@@ -60,6 +60,7 @@ function createTauriSqliteConnection(database: {
 }
 
 export const LOCAL_MODE_SQLITE_TABLES = [
+  "app_settings",
   'postal_cache',
   "products",
   "product_storage_assignments",
@@ -923,6 +924,7 @@ function getEntityId(
   tableName: LocalModeSqliteTableName,
   row: Record<string, unknown>,
 ) {
+  if (tableName === "app_settings") return typeof row.key === "string" ? row.key : null;
   if (tableName === "workspaces") {
     return typeof row.id === "string"
       ? row.id
@@ -949,6 +951,10 @@ async function resolveWorkspaceId(
 
   if (typeof row.workspaceId === "string") {
     return row.workspaceId;
+  }
+
+  if (tableName === "app_settings" && typeof row.key === "string") {
+    return /^(?:stock-alias:v2|stock-availability:v1|stock-followup:v1):([^:]+):/.exec(row.key)?.[1] ?? null;
   }
 
   if (tableName === "sale_items" && typeof row.saleId === "string") {
@@ -1463,8 +1469,14 @@ export async function commitLocalModeSqliteMutations(
   }
 
   const authoritativeMutations: LocalModeSqliteMutation[] = [];
+  // A Hybrid offline operation journals its outbox and complete projection in
+  // one SQLite transaction before Dexie reports success. Supabase authority is
+  // unchanged; startup hydration can recover a crash between the two stores.
+  const durableHybridScopes = new Set(mutations.filter(mutation => mutation.tableName === 'offline_mutations'
+    && mutation.row.entityType === 'stock_operations' && mutation.workspaceId && isHybridWorkspaceMode(mutation.workspaceId))
+    .map(mutation => mutation.workspaceId));
   for (const mutation of mutations) {
-    if (isAuthoritativeLocalMutation(mutation)) {
+    if (isAuthoritativeLocalMutation(mutation) || durableHybridScopes.has(mutation.workspaceId)) {
       authoritativeMutations.push(mutation);
     }
   }

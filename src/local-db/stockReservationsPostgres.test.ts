@@ -43,13 +43,26 @@ describe('authoritative PostgreSQL reservation protection', () => {
       ALTER TABLE crm.sales_orders ENABLE ROW LEVEL SECURITY;
       CREATE POLICY own_orders ON crm.sales_orders FOR SELECT TO authenticated USING (created_by=auth.uid());`)
     await pg.exec(migration)
+    await pg.exec(`CREATE SCHEMA extensions;
+      CREATE FUNCTION public.current_user_role() RETURNS text LANGUAGE sql AS $$SELECT 'admin'::text$$;
+      CREATE TABLE public.workspaces(id uuid PRIMARY KEY); INSERT INTO public.workspaces VALUES('${workspace}');
+      ALTER TABLE public.inventory ADD COLUMN version integer DEFAULT 1;
+      CREATE TABLE public.stock_batches(id uuid PRIMARY KEY,workspace_id uuid,product_id uuid,storage_id uuid,quantity numeric,is_deleted boolean DEFAULT false);
+      CREATE FUNCTION public.apply_inventory_snapshot_changes(p_operation_id uuid,p_workspace_id uuid,p_operation_kind text,p_changes jsonb)
+      RETURNS jsonb LANGUAGE plpgsql AS $$DECLARE change jsonb; BEGIN
+        FOR change IN SELECT value FROM jsonb_array_elements(p_changes) LOOP PERFORM private.apply_inventory_snapshot_changes(change); END LOOP;
+        RETURN '{}'; END$$;
+      GRANT USAGE ON SCHEMA public,crm,auth,extensions,private TO authenticated;
+      GRANT SELECT,INSERT,UPDATE,DELETE ON public.inventory,public.products,public.stock_batches,public.workspaces TO authenticated;`)
+    await pg.exec(readFileSync(new URL('../../supabase/migrations/20261029221116_offline_stock_operations.sql', import.meta.url), 'utf8'))
+
   }, 60_000)
   afterAll(async () => { await pg?.close() })
   beforeEach(async () => {
-    await pg.exec(`RESET ROLE; TRUNCATE crm.sales_orders CASCADE; TRUNCATE public.inventory,public.products,public.test_payments;
+    await pg.exec(`RESET ROLE; TRUNCATE crm.sales_orders CASCADE; TRUNCATE public.offline_stock_operation_receipts; TRUNCATE public.inventory,public.products,public.test_payments;
       SELECT set_config('atlas.inventory_transaction_type','',false),set_config('atlas.inventory_reference_type','',false),set_config('atlas.inventory_reference_id','',false);`)
     await pg.query('INSERT INTO public.products(id,workspace_id,storage_id) VALUES($1,$2,$3)',[product,workspace,storage])
-    await pg.query('INSERT INTO public.inventory VALUES($1,$2,$3,$4,100,false)',[inventory,workspace,product,storage])
+    await pg.query('INSERT INTO public.inventory VALUES($1,$2,$3,$4,100,false,1)',[inventory,workspace,product,storage])
   })
   it('allows free stock, blocks consuming committed stock, and rolls back payments', async () => {
     await reserve()
@@ -101,7 +114,7 @@ describe('authoritative PostgreSQL reservation protection', () => {
   it('protects transfers/deletion and keeps storage/workspace scopes separate', async () => {
     await reserve()
     await expect(pg.query('DELETE FROM public.inventory WHERE id=$1',[inventory])).rejects.toThrow('stock_reserved')
-    await pg.query('INSERT INTO public.inventory VALUES($1,$2,$3,$4,100,false)', ['00000000-0000-4000-8000-000000000008',workspace,product,'00000000-0000-4000-8000-000000000009'])
+    await pg.query('INSERT INTO public.inventory VALUES($1,$2,$3,$4,100,false,1)', ['00000000-0000-4000-8000-000000000008',workspace,product,'00000000-0000-4000-8000-000000000009'])
     await pg.exec("SELECT set_config('atlas.inventory_transaction_type','inventory_transfer',false)")
     await pg.query('UPDATE public.inventory SET quantity=0 WHERE storage_id<>$1',[storage])
     await expect(pg.query('UPDATE public.inventory SET quantity=69 WHERE id=$1',[inventory])).rejects.toThrow('stock_reserved')
@@ -130,4 +143,21 @@ describe('authoritative PostgreSQL reservation protection', () => {
     expect(details.rows[0].result).toEqual({total:0,rows:[]})
     await expect(pg.query('SELECT * FROM private.sales_order_stock_reservations')).rejects.toThrow()
   })
+  it('revalidates competing offline operations against hidden reservations at replay', async () => {
+    await reserve(order,70,{})
+    await pg.query('UPDATE crm.sales_orders SET created_by=$1 WHERE id=$2',[product,order])
+    const makeOperation = (id: string) => ({ version:1,id,workspaceId:workspace,actorId:actor,kind:'product',effects:[{
+      table:'inventory',id:inventory,
+      before:{id:inventory,workspace_id:workspace,product_id:product,storage_id:storage,quantity:100,version:1},
+      after:{id:inventory,workspace_id:workspace,product_id:product,storage_id:storage,quantity:80,version:2},
+    }] })
+    const first = makeOperation('00000000-0000-4000-8000-000000000091')
+    const second = makeOperation('00000000-0000-4000-8000-000000000092')
+    await pg.query('SELECT public.apply_offline_stock_operation($1::jsonb)',[JSON.stringify(first)])
+    await expect(pg.query('SELECT public.apply_offline_stock_operation($1::jsonb)',[JSON.stringify(second)])).rejects.toThrow('stock_reserved')
+    await pg.query('SELECT public.apply_offline_stock_operation($1::jsonb)',[JSON.stringify(first)])
+    expect((await pg.query('SELECT quantity::float8 quantity FROM public.inventory')).rows).toEqual([{quantity:80}])
+    expect((await pg.query('SELECT count(*)::int count FROM public.offline_stock_operation_receipts')).rows).toEqual([{count:1}])
+  })
+
 })

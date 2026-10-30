@@ -1,3 +1,5 @@
+import { awaitStockDependency } from './offlineStockContext'
+import { currentStockOperation, usesLocalStockExecution } from './offlineStockContext'
 import { useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
@@ -165,7 +167,7 @@ function shouldUseCloudBusinessData(workspaceId?: string | null) {
 }
 
 export function assertInventoryMutationConnectivity(workspaceId: string) {
-    if (shouldUseCloudBusinessData(workspaceId) && !isOnline(workspaceId)) {
+    if (shouldUseCloudBusinessData(workspaceId) && !isOnline(workspaceId) && !currentStockOperation(workspaceId)) {
         throw new Error(i18n.t('inventory.errors.onlineRequired'))
     }
 }
@@ -242,7 +244,7 @@ export async function hydrateInventoryProductStoragesFromSupabase(
     storageIds: string[],
     options: InventoryPositionHydrationOptions = {}
 ) {
-    if (!shouldUseCloudBusinessData(workspaceId)) {
+    if (!shouldUseCloudBusinessData(workspaceId) || currentStockOperation(workspaceId)) {
         return [] as Inventory[]
     }
 
@@ -309,6 +311,8 @@ export async function hydrateInventoryProductStoragesFromSupabase(
         }
 
         for (const remoteRow of normalizedRemoteRows) {
+            if (localRows.some(row => row.productId === remoteRow.productId && row.storageId === remoteRow.storageId && (row.syncStatus === 'pending' || row.syncStatus === 'conflict'))) continue
+
             for (const localRow of localRows) {
                 const localKey = buildInventoryPositionKey(localRow.workspaceId, localRow.productId, localRow.storageId)
                 const remoteKey = buildInventoryPositionKey(remoteRow.workspaceId, remoteRow.productId, remoteRow.storageId)
@@ -336,7 +340,7 @@ export async function syncInventoryRowsBestEffort(
         ])).values()
     )
 
-    if (!shouldUseCloudBusinessData(workspaceId)) {
+    if (!shouldUseCloudBusinessData(workspaceId) || currentStockOperation(workspaceId)) {
         await Promise.all(dedupedRows.map((row) => ensureProductStorageAssignment(
             workspaceId,
             row.productId,
@@ -548,11 +552,11 @@ async function evaluateReorderRulesIfNeeded(input: {
     syncSource: InventorySyncSource
     skipReorderCheck?: boolean
 }) {
-    if (input.syncSource !== 'local' || input.skipReorderCheck) {
+    if (input.syncSource !== 'local' || input.skipReorderCheck || currentStockOperation(input.workspaceId)) {
         return
     }
 
-    const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
+    const { evaluateReorderTransferRulesForProduct } = await awaitStockDependency(import('./reorderTransferRules'))
     await evaluateReorderTransferRulesForProduct(input.workspaceId, input.productId)
 }
 
@@ -874,7 +878,7 @@ async function fetchInventoryWorkspaceFromSupabaseInternal(
     }
 
     if (affectedIds.length > 0) {
-        const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
+        const { evaluateReorderTransferRulesForProduct } = await awaitStockDependency(import('./reorderTransferRules'))
         for (let index = 0; index < affectedIds.length; index += 100) {
             const chunk = affectedIds.slice(index, index + 100)
             await Promise.all(chunk.map((productId) =>
@@ -1265,7 +1269,7 @@ export async function setProductInventoryFromLegacyInput(input: {
         ? await input.trace.measure('crudDebugger.stages.productInventory', 'persistence', persistInventory, localPersistenceDetails)
         : await persistInventory()
 
-    if (input.storageId && !isLocalWorkspaceMode(input.workspaceId)) {
+    if (input.storageId && !usesLocalStockExecution(input.workspaceId)) {
         await ensureProductStorageAssignment(input.workspaceId, input.productId, input.storageId)
     } else if (input.storageId) {
         await ensureProductStorageAssignment(input.workspaceId, input.productId, input.storageId, { remoteHydration: true })
@@ -1330,14 +1334,14 @@ export async function adjustInventoryQuantity(input: {
         nextQuantity,
     } = await db.transaction('rw', [
         db.inventory, db.products, db.storages, db.inventory_transactions, db.sales_orders, db.product_storage_assignments,
-        ...(isLocalWorkspaceMode(input.workspaceId)
+        ...(usesLocalStockExecution(input.workspaceId)
             ? [db.users, db.profiles, db.storage_member_exclusions]
             : [])
     ], async () => {
         const currentQuantity = await getInventoryQuantityForProductStorage(input.productId, input.storageId)
         const computedNextQuantity = roundQuantity(currentQuantity + input.quantityDelta)
 
-        if (syncSource === 'local' && isLocalWorkspaceMode(input.workspaceId) && input.quantityDelta < 0
+        if (syncSource === 'local' && usesLocalStockExecution(input.workspaceId) && input.quantityDelta < 0
             && !['stock_adjustment', 'inventory_change', 'initial_stock'].includes(input.movement?.transactionType || '')) {
             await assertLocalStockDemands(input.workspaceId, [{ productId: input.productId, storageId: input.storageId, quantity: -input.quantityDelta }],
                 input.movement?.referenceType === 'sales_order' ? input.movement.referenceId ?? undefined : undefined)
@@ -1362,7 +1366,7 @@ export async function adjustInventoryQuantity(input: {
             input.movement
             && changedRow
             && syncSource !== 'remote'
-            && isLocalWorkspaceMode(input.workspaceId)
+            && usesLocalStockExecution(input.workspaceId)
         ) {
             localMovement = await persistLocalInventoryMovement({
                 workspaceId: input.workspaceId,
@@ -1465,9 +1469,10 @@ export interface TransferInventoryQuantityInput {
 export async function transferInventoryQuantityWithBatches(
     input: TransferInventoryQuantityInput
 ) {
-    const { createInventoryTransferBatch } = await import('./inventoryTransferBatches')
+    const { createInventoryTransferBatch } = await awaitStockDependency(import('./inventoryTransferBatches'))
     const result = await createInventoryTransferBatch({
         workspaceId: input.workspaceId,
+        batchId: input.operationId ?? undefined,
         sourceStorageId: input.sourceStorageId,
         destinationStorageId: input.targetStorageId,
         items: [{
@@ -1544,7 +1549,7 @@ export async function deleteInventoryForProduct(
     const persistInventory = () => db.transaction('rw', [db.inventory, db.inventory_transactions], async () => {
         for (const row of deletedRows) {
             await db.inventory.put(row)
-            if (syncSource !== 'remote' && isLocalWorkspaceMode(product.workspaceId)) {
+            if (syncSource !== 'remote' && usesLocalStockExecution(product.workspaceId)) {
                 const movement = await persistLocalInventoryMovement({
                     workspaceId: product.workspaceId,
                     productId: row.productId,

@@ -1,3 +1,5 @@
+import { needsOfflineStockOperation, runOfflineStockOperation } from '@/local-db/offlineStockOperations'
+import { isOnline } from '@/lib/network'
 import { useStockAvailability, useStockDemandGuard } from '@/local-db/stockReservations'
 import { StockReservationInfo, StockDemandNotice, SellableStockQuantity } from '@/ui/components/inventory/StockReservationInfo'
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
@@ -2082,6 +2084,7 @@ export function InstantPOS() {
                 ? convertBatchCost(item.uomCostPrice, originalCurrency, targetCurrency)
                 : convertedBatchUnitCost * factor
             return {
+                id: generateId(),
                 product_id: item.productId,
                 storage_id: resolvedStorageId,
                 product_name: item.name,
@@ -2151,13 +2154,14 @@ export function InstantPOS() {
             notes: ticketNote
         }
 
+        const queueStockCheckout = !isLocalMode && await needsOfflineStockOperation(user.workspaceId)
         let remoteSaleCommitted = false
         let confirmedSequenceId: number | null = null
         let confirmedSaleData: ReturnType<typeof mapSaleToUniversal> | null = null
 
         try {
-            if (isLocalMode) {
-                throw new Error('local_workspace_sale')
+            if (isLocalMode || queueStockCheckout) {
+                throw new Error('local_stock_execution')
             }
 
             let completeSaleResponse = await runSupabaseAction('instantPos.completeSale', () =>
@@ -2305,13 +2309,14 @@ export function InstantPOS() {
 
             console.error('[Instant POS] Checkout failed:', normalized)
 
-            if (isLocalMode) {
+            if (isLocalMode || queueStockCheckout || !isOnline(user.workspaceId) || isRetriableWebRequestError(normalized)) {
                 try {
-                    const saleDataOffline = await db.transaction('rw', db.tables, async () => {
+                    const saleDataOffline = await runOfflineStockOperation(user.workspaceId, 'checkout', () => db.transaction('rw', db.tables, async () => {
                     await reservationGuard.assert()
-                    const localSequenceId = await generateLocalSaleSequenceId(user.workspaceId)
+                    const localSequenceId = isLocalMode ? await generateLocalSaleSequenceId(user.workspaceId) : undefined
+                    const localReference = localSequenceId ? `#${String(localSequenceId).padStart(5, '0')}` : `LOCAL-${saleId}`
                     const localSaleItems = itemsWithMetadata.map((item) => ({
-                        id: generateId(),
+                        id: item.id,
                         workspaceId: user.workspaceId,
                         saleId,
                         createdAt: item.created_at,
@@ -2436,7 +2441,7 @@ export function InstantPOS() {
                             paymentMethod: 'cash',
                             paidAt: snapshotTimestamp,
                             counterpartyName: null,
-                            referenceLabel: `#${String(localSequenceId).padStart(5, '0')}`,
+                            referenceLabel: localReference,
                             note: null,
                             createdBy: user.id,
                             accountId: checkoutPaymentAccount?.id ?? null,
@@ -2448,7 +2453,7 @@ export function InstantPOS() {
                     if (!isLocalMode) {
                         await db.invoices.add({
                             id: saleId,
-                            invoiceid: `#${String(localSequenceId).padStart(5, '0')}`,
+                            invoiceid: localReference,
                             sequenceId: localSequenceId,
                             workspaceId: user.workspaceId,
                             customerId: '',
@@ -2474,12 +2479,12 @@ export function InstantPOS() {
                         workspace_id: user.workspaceId,
                         cashier_id: user.id,
                         cashier_name: user.name || 'System'
-                    } as any)
+                    } as any, { pendingSync: !isLocalMode })
 
                     await addToOfflineMutations('sales', saleId, 'create', checkoutPayload, user.workspaceId)
 
                     return saleDataOffline
-                    })
+                    }), { id: saleId, rpc: { name: 'complete_pos_checkout', args: { payload: checkoutPayload, p_account_id: checkoutPaymentAccount?.id ?? null, p_account_name_snapshot: checkoutPaymentAccount?.name ?? null } } })
 
                     await finalizeTicket(activeTicket.id)
                     setIsCheckoutPaymentAccountSelectorOpen(false)

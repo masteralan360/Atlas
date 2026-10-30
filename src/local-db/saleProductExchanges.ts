@@ -1,8 +1,9 @@
+import { setStockOperationRpc, usesLocalStockExecution } from './offlineStockContext'
+import { needsOfflineStockOperation, runOfflineStockOperation } from './offlineStockOperations'
 import { supabase } from '@/auth/supabase'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { QUANTITY_EPSILON, roundQuantity } from '@/lib/quantity'
 import { generateId } from '@/lib/utils'
-import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { isService } from '@/lib/catalogItem'
 
 import { db } from './database'
@@ -66,7 +67,7 @@ export interface ProcessSaleProductExchangeResult {
 type ExchangeIds = { exchangeId: string, returnId: string }
 
 function getSyncMetadata(workspaceId: string, timestamp: string) {
-    return isLocalWorkspaceMode(workspaceId)
+    return usesLocalStockExecution(workspaceId)
         ? { syncStatus: 'synced' as const, lastSyncedAt: timestamp }
         : { syncStatus: 'pending' as const, lastSyncedAt: null }
 }
@@ -592,12 +593,11 @@ async function refreshAfterCloudExchange(workspaceId: string, exchangeId: string
 }
 
 export async function processSaleProductExchange(input: ProcessSaleProductExchangeInput): Promise<ProcessSaleProductExchangeResult> {
+    if (await needsOfflineStockOperation(input.workspaceId)) return runOfflineStockOperation(input.workspaceId, 'exchange', () => processSaleProductExchange(input))
     const ids: ExchangeIds = { exchangeId: generateId(), returnId: generateId() }
-    const localMode = isLocalWorkspaceMode(input.workspaceId)
+    const localMode = usesLocalStockExecution(input.workspaceId)
 
-    if (!localMode) {
-        assertInventoryMutationConnectivity(input.workspaceId)
-        const { data, error } = await supabase.rpc('process_sale_product_exchange_with_account', {
+    const replayArgs = {
             p_exchange_id: ids.exchangeId,
             p_return_id: ids.returnId,
             p_sale_id: input.saleId,
@@ -612,7 +612,11 @@ export async function processSaleProductExchange(input: ProcessSaleProductExchan
             p_account_name_snapshot: input.accountNameSnapshot || null,
             p_note: input.note?.trim() || null,
             p_return_reason: input.returnReason?.trim() || 'Product exchange',
-        })
+        }
+    setStockOperationRpc(input.workspaceId, { name: 'process_sale_product_exchange_with_account', args: replayArgs })
+    if (!localMode) {
+        assertInventoryMutationConnectivity(input.workspaceId)
+        const { data, error } = await supabase.rpc('process_sale_product_exchange_with_account', replayArgs)
         if (!error && data) {
             await refreshAfterCloudExchange(input.workspaceId, ids.exchangeId, ids.returnId)
             return {

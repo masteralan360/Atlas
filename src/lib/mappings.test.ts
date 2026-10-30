@@ -19,4 +19,10 @@ describe('mapSaleToUniversal', () => {
         expect(invoice.origin).toBe('instant_pos')
         expect(invoice.notes).toBe('No onions, please.')
     })
+    it('keeps a pending local reference distinct from a confirmed sequence number', () => {
+        const sale = { id: 'offline-sale', workspace_id: 'workspace', total_amount: 20, settlement_currency: 'usd', items: [] } as unknown as Parameters<typeof mapSaleToUniversal>[0]
+        expect(mapSaleToUniversal(sale, { pendingSync: true }).invoiceid).toBe('LOCAL-offline-sale')
+        expect(mapSaleToUniversal({ ...sale, sequenceId: 17 }, { pendingSync: true }).invoiceid).toBe('#00017')
+    })
+
 })

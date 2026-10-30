@@ -464,4 +464,38 @@ describe("local-mode SQLite authority", () => {
       setLocalModeSqliteConnectionForTests(sqlite);
     }
   });
+  it("journals a Hybrid stock projection and its outbox before acknowledging", async () => {
+    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: "hybrid" });
+    const gate = deferred(); sqlite.commitGate = gate.promise;
+    let settled = false;
+    const write = testDb.transaction('rw', testDb.products, testDb.offline_mutations, testDb.app_settings, async () => {
+      await testDb.products.put(entity('products', 'hybrid-stock-product') as never);
+      await testDb.app_settings.put({key:`stock-alias:v2:${WORKSPACE_ID}:actor:old`,workspaceId:WORKSPACE_ID,value:'[]'});
+      await testDb.offline_mutations.put({ id: 'hybrid-stock-command', workspaceId: WORKSPACE_ID,
+        entityType: 'stock_operations', entityId: 'hybrid-stock-command', operation: 'create',
+        payload: { version: 1, effects: [] }, createdAt: '2026-10-30T00:00:00Z', status: 'pending' });
+    }).then(() => { settled = true; });
+    await waitFor(() => sqlite.events.length > 0);
+    expect(settled).toBe(false); expect(sqlite.events).toEqual(['begin']);
+    gate.resolve(); await write;
+    expect(sqlite.events).toEqual(['begin', 'commit']);
+    expect(sqlite.rows.has('products:hybrid-stock-product')).toBe(true);
+    expect(sqlite.rows.has('offline_mutations:hybrid-stock-command')).toBe(true);
+    expect(sqlite.rows.has(`app_settings:stock-alias:v2:${WORKSPACE_ID}:actor:old`)).toBe(true);
+    testDb.close(); await testDb.open();
+    expect(await testDb.offline_mutations.get('hybrid-stock-command')).toMatchObject({ status: 'pending' });
+  });
+  it("rolls back a Hybrid projection if its durable outbox cannot be written", async () => {
+    writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: "hybrid" });
+    sqlite.failEntityType = 'offline_mutations';
+    await expect(testDb.transaction('rw', testDb.products, testDb.offline_mutations, async () => {
+      await testDb.products.put(entity('products', 'hybrid-rollback') as never);
+      await testDb.offline_mutations.put({ id: 'hybrid-rejected', workspaceId: WORKSPACE_ID,
+        entityType: 'stock_operations', entityId: 'hybrid-rejected', operation: 'create',
+        payload: { version: 1, effects: [] }, createdAt: '2026-10-30T00:00:00Z', status: 'pending' });
+    })).rejects.toThrow('SQLite rejected offline_mutations');
+    expect(await testDb.products.get('hybrid-rollback')).toBeUndefined();
+    expect(await testDb.offline_mutations.get('hybrid-rejected')).toBeUndefined();
+  });
+
 });

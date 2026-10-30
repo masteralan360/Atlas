@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
+import { setActiveBusinessUser, setNetworkStatus } from '@/lib/network'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 
 import { db } from './database'
@@ -112,7 +113,7 @@ describe('sale product exchanges', () => {
         await seedCashSale()
     })
 
-    afterEach(() => clearWorkspaceModeSnapshot(WORKSPACE_ID))
+    afterEach(() => { clearWorkspaceModeSnapshot(WORKSPACE_ID); setActiveBusinessUser(null); setNetworkStatus(true) })
     afterAll(async () => { await db.delete() })
 
     it('posts the return, replacement stock, and only the net cash settlement together', async () => {
@@ -226,4 +227,16 @@ describe('sale product exchanges', () => {
         expect(await db.inventory.where('[productId+storageId]').equals([REPLACEMENT_PRODUCT_ID, STORAGE_ID]).first())
             .toMatchObject({ quantity: 3 })
     })
+    it.each(['cloud','hybrid'] as const)('%s saves the complete offline exchange with its net payment', async dataMode => {
+        writeWorkspaceModeSnapshot({workspaceId:WORKSPACE_ID,dataMode});setActiveBusinessUser(SALE_ID,'admin',WORKSPACE_ID);setNetworkStatus(false)
+        const {cacheOfflineStockAvailability}=await import('./offlineStockAvailability')
+        await cacheOfflineStockAvailability(WORKSPACE_ID,[{productId:RETURNED_PRODUCT_ID,storageId:STORAGE_ID,onHand:0,reserved:0,available:0},{productId:REPLACEMENT_PRODUCT_ID,storageId:STORAGE_ID,onHand:3,reserved:0,available:3}])
+        const result=await processSaleProductExchange({workspaceId:WORKSPACE_ID,saleId:SALE_ID,returnSaleItemId:SALE_ITEM_ID,returnQuantity:1,replacementProductId:REPLACEMENT_PRODUCT_ID,replacementStorageId:STORAGE_ID,replacementQuantity:1,replacementUnitAmount:15,settlementMethod:'cash',createdBy:SALE_ID})
+        expect(result.differenceAmount).toBe(5)
+        expect(await db.inventory.where('[productId+storageId]').equals([REPLACEMENT_PRODUCT_ID,STORAGE_ID]).first()).toMatchObject({quantity:2,syncStatus:'pending'})
+        expect(await db.payment_transactions.where('sourceRecordId').equals(result.exchangeId).first()).toMatchObject({amount:5})
+        const queue=await db.offline_mutations.toArray();expect(queue).toHaveLength(1)
+        expect(queue[0].payload).toMatchObject({kind:'exchange',rpc:{name:'process_sale_product_exchange_with_account'}})
+    })
+
 })

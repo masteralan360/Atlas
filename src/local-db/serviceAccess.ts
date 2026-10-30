@@ -1,3 +1,4 @@
+import { usesLocalStockExecution } from './offlineStockContext'
 import { useEffect, useState } from 'react'
 
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
@@ -186,7 +187,7 @@ export function fetchAccessibleServiceIds(workspaceId: string, forceRefresh = fa
   const inFlight = accessIdRequests.get(key)
   if (inFlight) return inFlight
 
-  if (isLocalWorkspaceMode(workspaceId)) {
+  if (usesLocalStockExecution(workspaceId)) {
     const promise = getLocalAccessibleServiceIds(workspaceId).finally(() => {
       if (accessIdRequests.get(key) === promise) accessIdRequests.delete(key)
     })
@@ -308,7 +309,7 @@ export function useServiceAccessIds(workspaceId?: string, enabled = true) {
 }
 
 export async function listServiceAccessCategories(workspaceId: string): Promise<ServiceAccessCategorySummary[]> {
-  if (isLocalWorkspaceMode(workspaceId)) {
+  if (usesLocalStockExecution(workspaceId)) {
     const rows = await db.service_access_categories.where('workspaceId').equals(workspaceId).sortBy('nameKey')
     return rows.map(normalizeLocalCategory)
   }
@@ -331,7 +332,7 @@ export async function listServiceAccessCategories(workspaceId: string): Promise<
 }
 
 export async function listServiceAccessCategoryMembers(workspaceId: string): Promise<ServiceAccessCategoryMemberAssignment[]> {
-  if (isLocalWorkspaceMode(workspaceId)) {
+  if (usesLocalStockExecution(workspaceId)) {
     const rows = await db.service_access_category_members.where('workspaceId').equals(workspaceId).toArray()
     return rows.map(({ categoryId, userId }) => ({ categoryId, userId }))
   }
@@ -347,7 +348,7 @@ export async function listServiceAccessCategoryMembers(workspaceId: string): Pro
 }
 
 export async function listServiceAccessWorkspaceMembers(workspaceId: string): Promise<ServiceAccessWorkspaceMember[]> {
-  if (isLocalWorkspaceMode(workspaceId)) {
+  if (usesLocalStockExecution(workspaceId)) {
     const [users, profiles] = await Promise.all([
       db.users.where('workspaceId').equals(workspaceId).toArray(),
       db.profiles.where('workspaceId').equals(workspaceId).toArray(),
@@ -376,7 +377,7 @@ export async function listServiceAccessWorkspaceMembers(workspaceId: string): Pr
 }
 
 export async function createServiceAccessCategory(workspaceId: string, name: string) {
-  if (isLocalWorkspaceMode(workspaceId)) {
+  if (usesLocalStockExecution(workspaceId)) {
     await assertLocalWorkspaceAdmin(workspaceId)
     const trimmedName = name.trim()
     const nameKey = normalizeCategoryName(trimmedName)
@@ -400,7 +401,7 @@ export async function createServiceAccessCategory(workspaceId: string, name: str
 }
 
 export async function renameServiceAccessCategory(workspaceId: string, categoryId: string, name: string) {
-  if (isLocalWorkspaceMode(workspaceId)) {
+  if (usesLocalStockExecution(workspaceId)) {
     await assertLocalWorkspaceAdmin(workspaceId)
     const trimmedName = name.trim()
     const nameKey = normalizeCategoryName(trimmedName)
@@ -427,7 +428,7 @@ export async function renameServiceAccessCategory(workspaceId: string, categoryI
 }
 
 export async function deleteServiceAccessCategory(workspaceId: string, categoryId: string) {
-  if (isLocalWorkspaceMode(workspaceId)) {
+  if (usesLocalStockExecution(workspaceId)) {
     await assertLocalWorkspaceAdmin(workspaceId)
     await db.transaction('rw', db.service_access_categories, db.service_access_category_members, db.service_access_category_services, async () => {
       const category = await db.service_access_categories.get(categoryId)
@@ -455,7 +456,7 @@ export async function deleteServiceAccessCategory(workspaceId: string, categoryI
 
 export async function setServiceAccessCategoryMembers(categoryId: string, userIds: string[], requestedWorkspaceId?: string) {
   const workspaceId = requestedWorkspaceId ?? getActiveBusinessWorkspaceId()
-  if (isLocalWorkspaceMode(workspaceId)) {
+  if (usesLocalStockExecution(workspaceId)) {
     if (!workspaceId) throw new Error('The active workspace is unavailable.')
     await assertLocalWorkspaceAdmin(workspaceId)
     const uniqueUserIds = [...new Set(userIds)]

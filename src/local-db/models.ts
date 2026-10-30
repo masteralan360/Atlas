@@ -2700,6 +2700,7 @@ export interface PaymentObligation {
 export interface SyncQueueItem {
   id: string
   entityType:
+    | 'stock_operations'
     | 'products'
     | 'product_storage_assignments'
     | 'product_uoms'
@@ -2938,6 +2939,7 @@ export interface OfflineMutation {
   id: string
   workspaceId: string
   entityType:
+    | 'stock_operations'
     | 'products'
     | 'product_storage_assignments'
     | 'product_uoms'
@@ -3062,11 +3064,18 @@ export interface OfflineMutation {
   createdAt: string
   status: MutationStatus
   error?: string
+  stockCancelRequested?: boolean
+  stockRevisions?: Record<string, { localVersion: number; serverVersion: number; serverId: string }>
+  syncLeaseId?: string
+  syncLeaseUntil?: string
+  nextAttemptAt?: string
+  attempts?: number
   discardedAt?: string
   discardedBy?: string
 }
 
 export interface AppSetting {
+  workspaceId?: string
   key: string
   value: string
 }

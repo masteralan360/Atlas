@@ -1,7 +1,12 @@
+import { getActiveBusinessWorkspaceId } from '@/lib/network';
+import { generateId } from '@/lib/utils';
+import { runOfflineStockFollowups } from '@/local-db/offlineStockFollowups';
 import { isRetiredEntityType } from '@/local-db/retiredEntities';
 import { supabase, isSupabaseConfigured } from "@/auth/supabase";
 import i18n from "@/i18n/config";
 import { db } from "@/local-db";
+import { replayOfflineStockOperation, type OfflineStockOperation } from '@/local-db/offlineStockOperations';
+import { isRetriableWebRequestError } from '@/lib/supabaseRequest';
 import { syncProductStockSnapshot } from "@/local-db/inventory";
 import { syncProductBarcodeCachesForWorkspace } from "@/local-db/productBarcodes";
 import { rekeyPriceBookItemReferences } from "@/local-db/priceBookReferences";
@@ -310,6 +315,15 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
   };
 
   switch (entityType) {
+    case "stock_operations":
+      for (const id of Array.isArray(payload.dependencies) ? payload.dependencies : []) {
+        if (typeof id === 'string') parentKeys.push(mutationEntityKey(workspaceId, 'stock_operations', id));
+      }
+      for (const effect of (Array.isArray(payload.effects) ? payload.effects : []) as { table: string; id: string; after?: Record<string, unknown> }[]) {
+        if (effect.table === 'stock_operations' || !effect.after) continue;
+        parentKeys.push(...getMutationParentKeys({ ...mutation, entityType: effect.table, entityId: effect.id, payload: effect.after }));
+      }
+      break;
     case "product_storage_assignments":
       addParent("products", "productId", "product_id");
       addParent("storages", "storageId", "storage_id");
@@ -1035,6 +1049,53 @@ export async function processMutationQueue(
   }>();
 
   for (const mutation of orderedMutations) {
+    if (mutation.entityType === 'stock_operations') {
+      const operation = mutation.payload as unknown as OfflineStockOperation;
+      if (operation.actorId !== _userId || (getActiveBusinessWorkspaceId() && operation.workspaceId !== getActiveBusinessWorkspaceId())
+        || (mutation.nextAttemptAt && Date.parse(mutation.nextAttemptAt)>Date.now())) { reportCompleted(); continue; }
+
+      const dependencies = await db.offline_mutations.bulkGet(operation.dependencies);
+      if (dependencies.some(row => !row || row.status !== 'synced')) {
+        reportCompleted();
+        continue;
+      }
+      const leaseId = generateId();
+      const claimed = await db.transaction('rw', db.offline_mutations, async () => {
+        const current = await db.offline_mutations.get(mutation.id);
+        if (!current || current.stockCancelRequested || current.status === 'synced' || current.status === 'discarded'
+          || (current.status === 'syncing' && Date.parse(current.syncLeaseUntil ?? '')>Date.now())) return false;
+        await db.offline_mutations.update(mutation.id, { status: 'syncing', error: undefined, syncLeaseId: leaseId,
+          syncLeaseUntil: new Date(Date.now()+60_000).toISOString() });
+        return true;
+      });
+      if (!claimed) { reportCompleted(); continue; }
+      try {
+        await replayOfflineStockOperation(operation);
+        successCount++;
+      } catch (error) {
+        const code = String((error as { code?: string }).code ?? '');
+        const transient = isRetriableWebRequestError(error) || ['40P01','55P03','57014'].includes(code);
+        const message = transient ? i18n.t('inventory.offline.retryPending')
+          : i18n.t(code === '40001' ? 'inventory.offline.conflict' : 'inventory.offline.rejected');
+        const current = await db.offline_mutations.get(mutation.id);
+        if (!current || current.status === 'synced' || current.syncLeaseId !== leaseId) { reportCompleted(); continue; }
+        const attempts = (current.attempts ?? 0)+1;
+        await db.offline_mutations.update(mutation.id, { status: transient ? 'pending' : 'failed', error: message,
+          attempts, syncLeaseId: undefined, syncLeaseUntil: undefined,
+          nextAttemptAt: transient ? new Date(Date.now()+Math.min(300_000,1000*2**Math.min(9,attempts))).toISOString() : undefined });
+        if (!transient) {
+          await db.transaction('rw', db.tables, async () => {
+            for (const effect of operation.effects) {
+              if (effect.after) await db.table(effect.table).update(effect.id, { syncStatus: 'conflict' });
+            }
+          });
+        }
+        failedCount++;
+        errors.push(message);
+      }
+      reportCompleted();
+      continue;
+    }
     if (mutation.entityType === "inventory" || mutation.entityType === "stock_batches") {
       const quarantineMessage = i18n.t("inventory.errors.legacyMutationQuarantined");
       await db.offline_mutations.update(mutation.id, {
@@ -1793,6 +1854,7 @@ export async function processMutationQueue(
     }
   }
 
+  await runOfflineStockFollowups(_userId);
   const explicitlyReconciledOrderKeys = new Set<string>();
   for (const mutation of deferredCommissionReconciliations) {
     await db.offline_mutations.update(mutation.id, {

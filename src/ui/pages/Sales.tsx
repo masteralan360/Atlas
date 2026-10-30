@@ -1,3 +1,5 @@
+import { needsOfflineStockOperation } from '@/local-db/offlineStockOperations'
+import { currentStockOperation } from '@/local-db/offlineStockContext'
 import { useState, useEffect, useMemo, useCallback, useDeferredValue, useRef } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { useTranslation } from 'react-i18next'
@@ -1638,7 +1640,7 @@ export function Sales() {
                         })
                     }
                 } catch (e) {
-                    if (isLocalMode) throw e
+                    if (isLocalMode || currentStockOperation(saleToReturn.workspace_id)) throw e
                     console.error('[Sales] Failed to apply loan return payment:', e)
                 }
             }
@@ -1656,25 +1658,10 @@ export function Sales() {
             const isPartialReturn = (saleToReturn as any)._isPartialReturn
             const isIndividualItemReturn = saleToReturn?.items?.length === 1 && !(saleToReturn as any)._isWholeSaleReturn && !isPartialReturn
             const isCurrentlyOnline = typeof navigator === 'undefined' ? true : navigator.onLine
-            if (!isLocalMode && !isCurrentlyOnline) {
-                throw new Error(t('inventory.errors.onlineRequired'))
-            }
-            const shouldQueueOfflineReturn = false
+            const offlineReturn = !isLocalMode && (!isCurrentlyOnline || await needsOfflineStockOperation(saleToReturn.workspace_id))
 
-            const queueOfflineReturnMutation = async (payload: Record<string, unknown>) => {
-                await db.offline_mutations.add({
-                    id: crypto.randomUUID(),
-                    workspaceId: activeWorkspace?.id || saleToReturn.workspace_id,
-                    entityType: 'sales',
-                    entityId: saleToReturn.id,
-                    operation: 'update',
-                    payload,
-                    status: 'pending',
-                    createdAt: new Date().toISOString()
-                })
-            }
 
-            if (isLocalMode || shouldQueueOfflineReturn) {
+            if (isLocalMode || offlineReturn) {
                 let nextSelectedSale: Sale | null = null
                 await commitLocalSaleReturn(saleToReturn.workspace_id, async () => {
                 if (isIndividualItemReturn || isPartialReturn) {
@@ -1697,7 +1684,7 @@ export function Sales() {
                         items: itemsToReturn,
                         quantities,
                         timestamp: returnTimestamp,
-                        syncSource: isLocalMode ? 'local' : 'remote'
+                        syncSource: isLocalMode || offlineReturn ? 'local' : 'remote'
                     })
                     const returnValue = calculateSaleReturnAmount(itemsToReturn, quantities)
                     await persistLocalReturnLedger({
@@ -1708,7 +1695,7 @@ export function Sales() {
                         refundAmount: returnValue,
                         linePayloads: returnLinePayloads,
                         restoredPlans,
-                        pendingSync: shouldQueueOfflineReturn,
+                        pendingSync: offlineReturn,
                         paymentAccount: returnPaymentAccount,
                         hasPaymentAccountSelection: returnPaymentAccount !== null
                     })
@@ -1755,7 +1742,7 @@ export function Sales() {
                             ; (existingLocal as any).returnedAt = returnTimestamp
                             ; (existingLocal as any).returnedBy = user?.id
                             ; (existingLocal as any).updatedAt = returnTimestamp
-                        if (shouldQueueOfflineReturn) {
+                        if (offlineReturn) {
                             ; (existingLocal as any).syncStatus = 'pending'
                                 ; (existingLocal as any).lastSyncedAt = null
                         }
@@ -1783,23 +1770,9 @@ export function Sales() {
                     if (selectedSale?.id === saleToReturn.id) {
                         nextSelectedSale = updateSale(selectedSale)
                     }
-                    if (shouldQueueOfflineReturn) {
-                        await queueOfflineReturnMutation({
-                            __rpc_action: 'process_sale_return',
-                            p_return_id: returnId,
-                            p_sale_id: saleToReturn.id,
-                            p_items: returnLinePayloads,
-                            p_return_reason: reason,
-                            p_refund_method: null
-                        })
-                        toast({
-                            title: t('sales.return.confirmTitle') || 'Return Sale',
-                            description: t('pos.offlineDesc') || 'Sale saved locally and will sync when online.',
-                        })
-                    }
                     await recordReturnLoanPayment(returnValue, {
                         isFullSaleReturn: isSaleFullyReturnedBy(itemsToReturn, quantities),
-                        pendingRemoteSync: shouldQueueOfflineReturn
+                        pendingRemoteSync: offlineReturn
                     })
                 } else {
                     const itemsToReturn = (saleToReturn.items || []).filter(
@@ -1819,7 +1792,7 @@ export function Sales() {
                         items: itemsToReturn,
                         quantities,
                         timestamp: returnTimestamp,
-                        syncSource: isLocalMode ? 'local' : 'remote'
+                        syncSource: isLocalMode || offlineReturn ? 'local' : 'remote'
                     })
                     const returnValue = calculateSaleReturnAmount(itemsToReturn, quantities)
                     await persistLocalReturnLedger({
@@ -1830,7 +1803,7 @@ export function Sales() {
                         refundAmount: returnValue,
                         linePayloads: returnLinePayloads,
                         restoredPlans,
-                        pendingSync: shouldQueueOfflineReturn,
+                        pendingSync: offlineReturn,
                         paymentAccount: returnPaymentAccount,
                         hasPaymentAccountSelection: returnPaymentAccount !== null
                     })
@@ -1886,7 +1859,7 @@ export function Sales() {
                             }
                         })
                             ; (existingLocal as any)._enrichedItems = updatedItems
-                        if (shouldQueueOfflineReturn) {
+                        if (offlineReturn) {
                             ; (existingLocal as any).syncStatus = 'pending'
                                 ; (existingLocal as any).lastSyncedAt = null
                         }
@@ -1913,27 +1886,14 @@ export function Sales() {
                             updatedAt: returnTimestamp,
                         } as any)
                     ))
-                    if (shouldQueueOfflineReturn) {
-                        await queueOfflineReturnMutation({
-                            __rpc_action: 'process_sale_return',
-                            p_return_id: returnId,
-                            p_sale_id: saleToReturn.id,
-                            p_items: returnLinePayloads,
-                            p_return_reason: reason,
-                            p_refund_method: null
-                        })
-                        toast({
-                            title: t('sales.return.confirmTitle') || 'Return Sale',
-                            description: t('pos.offlineDesc') || 'Sale saved locally and will sync when online.',
-                        })
-                    }
                     await recordReturnLoanPayment(returnValue, {
                         isFullSaleReturn: true,
-                        pendingRemoteSync: shouldQueueOfflineReturn
+                        pendingRemoteSync: offlineReturn
                     })
                 }
 
                 }, { reorderProductIds: (saleToReturn.items || []).map((item) => item.product_id) })
+                if (offlineReturn) toast({ title: t('sales.return.confirmTitle'), description: t('inventory.offline.saved') })
                 if (nextSelectedSale) setSelectedSale(nextSelectedSale)
                 setReturnModalOpen(false)
                 setSaleToReturn(null)

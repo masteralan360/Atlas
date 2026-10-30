@@ -1,10 +1,13 @@
+import { currentStockOperation, setStockOperationRpc, usesLocalStockExecution } from './offlineStockContext'
+import { assertLocalStockDemands } from './stockReservationData'
+import { needsOfflineStockOperation, runOfflineStockOperation } from './offlineStockOperations'
 import Dexie from 'dexie'
 import { getActiveBusinessUserId } from '@/lib/network'
 import { QUANTITY_EPSILON, isPositiveQuantity, roundQuantity } from '@/lib/quantity'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { isRetriableWebRequestError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
-import { isDemoWorkspaceMode, isHybridWorkspaceMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { isDemoWorkspaceMode, isHybridWorkspaceMode } from '@/workspace/workspaceMode'
 import { getLocalModeSqliteConnection } from './localModeSqlite'
 
 import { db } from './database'
@@ -257,7 +260,7 @@ export async function fetchInventoryTransferBatchHistory(query: InventoryTransfe
   if (!workspaceId) return { rows: [], totalCount: 0 }
   const normalizedQuery = { ...query, workspaceId, ...historyBounds(query) }
 
-  if (isLocalWorkspaceMode(workspaceId) && !isDemoWorkspaceMode(workspaceId)) {
+  if (usesLocalStockExecution(workspaceId) && !isDemoWorkspaceMode(workspaceId)) {
     return queryTransferBatchesFromSqlite(normalizedQuery)
   }
   if (isDemoWorkspaceMode(workspaceId)) {
@@ -418,7 +421,7 @@ async function enrichDexieTransferBatchRows(
 export async function fetchInventoryTransferBatchDetails(workspaceId: string, batchId: string): Promise<InventoryTransferBatchDetails | null> {
   const normalizedWorkspaceId = workspaceId.trim()
   if (!normalizedWorkspaceId || !batchId.trim()) return null
-  if (isLocalWorkspaceMode(normalizedWorkspaceId) && !isDemoWorkspaceMode(normalizedWorkspaceId)) {
+  if (usesLocalStockExecution(normalizedWorkspaceId) && !isDemoWorkspaceMode(normalizedWorkspaceId)) {
     return fetchTransferBatchDetailsFromSqlite(normalizedWorkspaceId, batchId)
   }
   if (isDemoWorkspaceMode(normalizedWorkspaceId)) {
@@ -933,6 +936,7 @@ async function createLocalTransferBatch(input: CreateInventoryTransferBatchInput
         items,
         timestamp,
       )
+      await assertLocalStockDemands(workspaceId, plannedItems.map(item => ({ productId: item.productId, storageId: sourceStorageId, quantity: item.quantity })))
       const { inventoryRows, transactions } = getTransferTransactionRows({
         batchId,
         workspaceId,
@@ -968,7 +972,7 @@ async function createLocalTransferBatch(input: CreateInventoryTransferBatchInput
       const batchRow: InventoryTransferBatch = {
         id: batchId,
         workspaceId,
-        transferNumber: `TRF-${String(nextSequence).padStart(5, '0')}`,
+        transferNumber: currentStockOperation(workspaceId) ? `LOCAL-${batchId}` : `TRF-${String(nextSequence).padStart(5, '0')}`,
         sourceWorkspaceId: input.sourceWorkspaceId || workspaceId,
         sourceWorkspaceName: input.sourceWorkspaceName ?? sourceWorkspace?.name ?? null,
         sourceStorageId,
@@ -990,6 +994,22 @@ async function createLocalTransferBatch(input: CreateInventoryTransferBatchInput
       }
 
       await db.inventory_transfer_batches.add(batchRow)
+      const movementByPosition = new Map(transactions.map(row => [`${row.productId}:${row.storageId}`, row]))
+      setStockOperationRpc(workspaceId, { name: 'apply_inventory_transfer_batch', args: {
+        p_operation_id: batchId,
+        p_payload: {
+          batch: { ...toSnakeCase({ ...batchRow }), created_by: createdBy },
+          inventory_changes: inventoryRows.map(row => {
+            const movement = movementByPosition.get(`${row.productId}:${row.storageId}`)
+            return { id: row.id, workspace_id: workspaceId, product_id: row.productId, storage_id: row.storageId,
+              quantity: row.quantity, expected_version: row.version - 1, transfer_item_id: row.productId,
+              transfer_side: row.storageId === sourceStorageId ? 'source' : 'destination', quantity_delta: movement?.quantityDelta,
+              audit_transaction_type: movement?.transactionType, audit_reference_id: batchId,
+              audit_reference_type: movement?.referenceType, audit_notes: movement?.notes, audit_created_by: createdBy }
+          }),
+          stock_batch_changes: stockBatchChanges.map(change => ({ expected_version: change.expectedVersion, row: toSnakeCase({ ...change.row }) })),
+        },
+      } })
       await db.inventory.bulkPut(inventoryRows)
       await db.inventory_transactions.bulkPut(transactions)
       await db.inventory_transfer_transactions.bulkPut(buildTransferActivityRows({
@@ -1264,6 +1284,10 @@ async function createRemoteTransferBatch(input: CreateInventoryTransferBatchInpu
  * changes as a single operation in the active workspace data store.
  */
 export async function createInventoryTransferBatch(input: CreateInventoryTransferBatchInput): Promise<InventoryTransferBatchResult> {
+  if (await needsOfflineStockOperation(input.workspaceId)) {
+    const batchId = input.batchId?.trim() || generateId()
+    return runOfflineStockOperation(input.workspaceId, 'transfer', () => createInventoryTransferBatch({ ...input, batchId }), { id: batchId })
+  }
   const workspaceId = input.workspaceId.trim()
   const sourceStorageId = input.sourceStorageId.trim()
   const destinationStorageId = input.destinationStorageId.trim()
@@ -1290,7 +1314,7 @@ export async function createInventoryTransferBatch(input: CreateInventoryTransfe
   const batchId = input.batchId?.trim() || generateId()
   const timestamp = input.transferredAt || new Date().toISOString()
 
-  if (isLocalWorkspaceMode(workspaceId)) {
+  if (usesLocalStockExecution(workspaceId)) {
     return createLocalTransferBatch(normalizedInput, batchId, timestamp)
   }
   assertInventoryMutationConnectivity(workspaceId)

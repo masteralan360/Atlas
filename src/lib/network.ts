@@ -1,6 +1,7 @@
 // Application connectivity status. The ConnectionManager updates this only after
 // a user confirms offline mode, or when the browser reports connectivity restored.
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { currentStockOperation } from '@/local-db/offlineStockContext'
 
 let isActuallyOnline = true;
 let activeBusinessWorkspaceId: string | null = null;
@@ -70,6 +71,7 @@ function getWorkspaceIdForBusinessData(workspaceId?: string | null) {
 
 export function isBusinessDataOnline(workspaceId?: string | null): boolean {
     const resolvedWorkspaceId = getWorkspaceIdForBusinessData(workspaceId);
+    if (currentStockOperation(resolvedWorkspaceId ?? undefined)) return false;
     if (resolvedWorkspaceId && isLocalWorkspaceMode(resolvedWorkspaceId)) {
         return false;
     }

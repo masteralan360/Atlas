@@ -1,3 +1,6 @@
+import { awaitStockDependency } from './offlineStockContext'
+import { usesLocalStockExecution } from './offlineStockContext'
+import { needsOfflineStockOperation, runOfflineStockOperation } from './offlineStockOperations'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Dexie from 'dexie'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -106,7 +109,7 @@ import { convertCurrencyAmountWithAvailableSnapshot, getEffectiveExchangeRatesSn
 import { salesExchangeRowsToSnapshots } from '@/lib/salesExchange'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import { getSupabaseClientForTable, getSupabaseRemoteTableName, getWorkspaceScopedPartnerReadRpc } from '@/lib/supabaseSchema'
-import { getWorkspaceDataMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { getWorkspaceDataMode } from '@/workspace/workspaceMode'
 import { isCrudDebuggerEnabled, runCrudOperation, type CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import { persistLoanAggregateRpcResult } from './loanTransactions'
 import {
@@ -174,7 +177,7 @@ function shouldUseOfflineMutationFallback(error: unknown): boolean {
 }
 
 function shouldUseCloudBusinessData(workspaceId?: string | null): boolean {
-    return !!workspaceId && !isLocalWorkspaceMode(workspaceId)
+    return !!workspaceId && !usesLocalStockExecution(workspaceId)
 }
 
 function toSupabaseProductPayload(product: Partial<Product>) {
@@ -1078,7 +1081,8 @@ export async function unlinkProductVariant(variantProductId: string) {
     await updateProduct(variant.id, { parentProductId: null })
 }
 
-export function createProduct(workspaceId: string, data: Omit<Product, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>): Promise<Product> {
+export async function createProduct(workspaceId: string, data: Omit<Product, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted'>): Promise<Product> {
+    if (await needsOfflineStockOperation(workspaceId)) return runOfflineStockOperation(workspaceId, 'product', () => createProduct(workspaceId, data))
     if (!isCrudDebuggerEnabled()) return createProductInternal(workspaceId, data)
     const id = generateId()
     return runCrudOperation({ action: 'create', entityKey: 'product', entityId: id, workspaceId }, (trace) => (
@@ -1190,7 +1194,7 @@ async function createProductInternal(
         const queueMutation = () => addToOfflineMutations('products', id, 'create', product as unknown as Record<string, unknown>, workspaceId)
         if (trace) {
             await trace.measure('crudDebugger.stages.productOfflineQueue', 'data', queueMutation)
-            if (!isLocalWorkspaceMode(workspaceId)) {
+            if (!usesLocalStockExecution(workspaceId)) {
                 trace.addPendingStage('crudDebugger.stages.productSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
             }
         } else await queueMutation()
@@ -1354,7 +1358,7 @@ async function updateProductInternal(id: string, data: Partial<Product>, trace?:
         const queueMutation = () => addToOfflineMutations('products', id, 'update', updated as unknown as Record<string, unknown>, existing.workspaceId)
         if (trace) {
             await trace.measure('crudDebugger.stages.productOfflineQueue', 'data', queueMutation)
-            if (!isLocalWorkspaceMode(existing.workspaceId)) {
+            if (!usesLocalStockExecution(existing.workspaceId)) {
                 trace.addPendingStage('crudDebugger.stages.productSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
             }
         } else await queueMutation()
@@ -1489,6 +1493,8 @@ async function assertVariantsCanBecomeIndependentAfterParentDeletion(parentProdu
 }
 
 export function deleteProduct(id: string): Promise<void> {
+    if (!Dexie.currentTransaction) return db.products.get(id).then(async row => row && await needsOfflineStockOperation(row.workspaceId)
+        ? runOfflineStockOperation(row.workspaceId, 'product', () => deleteProductInternal(id)) : deleteProductInternal(id))
     if (!isCrudDebuggerEnabled()) return deleteProductInternal(id)
     return runCrudOperation({ action: 'delete', entityKey: 'product', entityId: id }, (trace) => (
         deleteProductInternal(id, trace)
@@ -1559,7 +1565,7 @@ async function deleteProductInternal(id: string, trace?: CrudTraceHandle): Promi
         const queueMutation = () => addToOfflineMutations('products', id, 'delete', { id }, existing.workspaceId)
         if (trace) {
             await trace.measure('crudDebugger.stages.productOfflineQueue', 'data', queueMutation)
-            if (!isLocalWorkspaceMode(existing.workspaceId)) {
+            if (!usesLocalStockExecution(existing.workspaceId)) {
                 trace.addPendingStage('crudDebugger.stages.productSyncQueued', 'network', 'crudDebugger.details.queuedForSync')
             }
         } else await queueMutation()
@@ -4077,7 +4083,7 @@ export async function transferInventoryBetweenStorages(
     onProgress?.({ stage: 'finalizing', completed: result.movedCount, total: result.movedCount })
 
     if (result.movedCount > 0) {
-        const { evaluateReorderTransferRulesForProduct } = await import('./reorderTransferRules')
+        const { evaluateReorderTransferRulesForProduct } = await awaitStockDependency(import('./reorderTransferRules'))
         const evaluations = await Promise.allSettled(result.items.map((item) =>
             evaluateReorderTransferRulesForProduct(workspaceId, item.productId)
         ))
@@ -4091,6 +4097,8 @@ export async function transferInventoryBetweenStorages(
     return { movedCount: result.movedCount }
 }
 export async function deleteStorage(id: string, moveProductsToStorageId: string): Promise<{ success: boolean, movedCount: number }> {
+    const offlineStorage = await db.storages.get(id)
+    if (offlineStorage && await needsOfflineStockOperation(offlineStorage.workspaceId)) return runOfflineStockOperation(offlineStorage.workspaceId, 'storage', () => deleteStorage(id, moveProductsToStorageId))
     const existing = await db.storages.get(id)
     if (!existing) return { success: false, movedCount: 0 }
 
@@ -5262,7 +5270,7 @@ async function resolveLinkedBusinessPartner(
     }
 
     const getBusinessPartnerByAnyId = dependencies?.getBusinessPartnerByAnyId
-        ?? (await import('./businessPartners')).getBusinessPartnerByAnyId
+        ?? (await awaitStockDependency(import('./businessPartners'))).getBusinessPartnerByAnyId
     const partner = await getBusinessPartnerByAnyId(linkedPartyId)
     if (!partner || partner.isDeleted || partner.mergedIntoBusinessPartnerId) {
         return undefined
@@ -5346,13 +5354,13 @@ async function recalculateLoanLinkedBusinessPartnerSummary(
     }
 
     const recalculateBusinessPartnerSummary = dependencies?.recalculateBusinessPartnerSummary
-        ?? (await import('./businessPartners')).recalculateBusinessPartnerSummary
+        ?? (await awaitStockDependency(import('./businessPartners'))).recalculateBusinessPartnerSummary
     await recalculateBusinessPartnerSummary(workspaceId, partner.id)
 }
 
 async function mirrorLoanToLinkedOrder(loan: Loan) {
     if (loan.source !== 'order' || !loan.orderId) return
-    const { mirrorLinkedOrderPaymentState } = await import('./orders')
+    const { mirrorLinkedOrderPaymentState } = await awaitStockDependency(import('./orders'))
     await mirrorLinkedOrderPaymentState(loan)
 }
 
@@ -5656,6 +5664,8 @@ async function enqueueLoanCommand(
 }
 
 interface LoanCreateInput {
+    id?: string
+    installmentIds?: string[]
     saleId?: string | null
     orderId?: string | null
     orderType?: 'sales' | 'purchase' | null
@@ -5730,7 +5740,7 @@ async function createLoanAggregate(
         throw new Error('Invalid creation time')
     }
     const createdAt = requestedCreatedAt?.toISOString() || now
-    const loanId = generateId()
+    const loanId = input.id ?? generateId()
     const originationTransactionId = input.source === 'manual' ? generateId() : null
     const firstDueDate = normalizeDueDate(input.firstDueDate)
     const principalAmount = roundLoanAmount(Math.max(0, Number(input.principalAmount || 0)), input.settlementCurrency)
@@ -5786,7 +5796,7 @@ async function createLoanAggregate(
     const installments: LoanInstallment[] = plan.map(entry => {
         const status = computeInstallmentStatus(entry.dueDate, entry.plannedAmount)
         return {
-            id: generateId(),
+            id: input.installmentIds?.[entry.installmentNo - 1] ?? generateId(),
             workspaceId,
             loanId,
             installmentNo: entry.installmentNo,
@@ -5879,7 +5889,7 @@ async function createLoanAggregate(
         }
     }
 
-    const localOnly = isLocalWorkspaceMode(workspaceId)
+    const localOnly = usesLocalStockExecution(workspaceId)
     const localNow = new Date().toISOString()
     const localLoan: Loan = {
         ...loan,
@@ -5896,7 +5906,7 @@ async function createLoanAggregate(
     // remain part of this transaction. Load the payment module first: awaiting
     // a native dynamic-import promise in the Dexie callback can auto-commit it.
     const appendLoanOriginationTransactionForLoan = localLoan.source === 'manual'
-        ? (await import('./payments')).appendLoanOriginationTransactionForLoan
+        ? (await awaitStockDependency(import('./payments'))).appendLoanOriginationTransactionForLoan
         : null
 
     await db.transaction(
@@ -6299,8 +6309,8 @@ export async function markPosLoanCancelledForFullSaleReturn(input: {
     // those audit rows themselves because they never call Supabase. Keep the
     // loan, payment subledger, cash ledger, and account projection in one local
     // commit so an account failure cannot leave a half-cancelled loan.
-    if (isLocalWorkspaceMode(input.workspaceId)) {
-        const { appendPaymentTransaction } = await import('./payments')
+    if (usesLocalStockExecution(input.workspaceId)) {
+        const { appendPaymentTransaction } = await awaitStockDependency(import('./payments'))
         const transactions = await db.payment_transactions.where('workspaceId').equals(input.workspaceId).toArray()
         const reversedPayments: LoanPayment[] = []
 
@@ -6674,7 +6684,7 @@ export async function deleteLoan(loanId: string): Promise<void> {
     }
 
     const hideLoanTransactions = async () => {
-        const { hideLoanTransactionsForDeletedLoan } = await import('./payments')
+        const { hideLoanTransactionsForDeletedLoan } = await awaitStockDependency(import('./payments'))
         await hideLoanTransactionsForDeletedLoan(loan.workspaceId, loanId)
     }
 
@@ -6783,7 +6793,7 @@ export async function reverseLoanPayment(
         throw new Error('Loan not found')
     }
     if (loan.source === 'order' && loan.orderId) {
-        const { assertNoPendingFinancedOrderCancellation } = await import('./orderCancellation')
+        const { assertNoPendingFinancedOrderCancellation } = await awaitStockDependency(import('./orderCancellation'))
         await assertNoPendingFinancedOrderCancellation(workspaceId, loan.orderId)
     }
 
@@ -6881,7 +6891,7 @@ export async function reverseLoanPayment(
         lastSyncedAt: null
     }
 
-    const localOnly = isLocalWorkspaceMode(workspaceId)
+    const localOnly = usesLocalStockExecution(workspaceId)
     const localSyncedAt = localOnly ? new Date().toISOString() : null
     const localLoan = { ...updatedLoan, syncStatus: localOnly ? 'synced' as const : 'pending' as const, lastSyncedAt: localSyncedAt }
     const localInstallments = updatedInstallments.map((installment) => ({
@@ -6897,7 +6907,7 @@ export async function reverseLoanPayment(
         lastSyncedAt: localSyncedAt
     }
 
-    const { appendPaymentTransaction } = await import('./payments')
+    const { appendPaymentTransaction } = await awaitStockDependency(import('./payments'))
     let reversal!: PaymentTransaction
     await db.transaction(
         'rw',
@@ -6958,6 +6968,8 @@ export async function reverseLoanPayment(
 }
 
 interface LoanPaymentInput {
+    id?: string
+    paymentTransactionId?: string
     loanId: string
     installmentId?: string
     amount: number
@@ -6981,7 +6993,7 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
         throw new Error('Loan not found')
     }
     if (loan.source === 'order' && loan.orderId) {
-        const { assertNoPendingFinancedOrderCancellation } = await import('./orderCancellation')
+        const { assertNoPendingFinancedOrderCancellation } = await awaitStockDependency(import('./orderCancellation'))
         await assertNoPendingFinancedOrderCancellation(workspaceId, loan.orderId)
     }
 
@@ -7078,7 +7090,7 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
         updatedLoan.status = updatedLoan.balanceAmount <= 0 ? 'completed' : 'overdue'
     }
     const payment: LoanPayment = {
-        id: generateId(),
+        id: input.id ?? generateId(),
         workspaceId,
         loanId: loan.id,
         amount: payableAmount,
@@ -7093,7 +7105,7 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
         version: 1,
         isDeleted: false,
         sequenceNo: paymentSequence,
-        paymentTransactionId: generateId(),
+        paymentTransactionId: input.paymentTransactionId ?? generateId(),
         reversedAmount: 0,
         reversalTransactionId: null,
         reversedAt: null,
@@ -7181,7 +7193,7 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
         }
     }
 
-    const localOnly = isLocalWorkspaceMode(workspaceId)
+    const localOnly = usesLocalStockExecution(workspaceId)
     const localSyncedAt = localOnly ? new Date().toISOString() : null
     const localLoan = {
         ...updatedLoan,
@@ -7201,7 +7213,7 @@ export async function recordLoanPayment(workspaceId: string, input: LoanPaymentI
 
     // Resolve the payment module before opening Dexie's transaction. Its
     // dynamic-import promise must not be awaited from the transaction callback.
-    const { appendPaymentTransaction } = await import('./payments')
+    const { appendPaymentTransaction } = await awaitStockDependency(import('./payments'))
 
     await db.transaction(
         'rw',

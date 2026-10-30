@@ -1,3 +1,6 @@
+import { v5 as uuidv5 } from 'uuid'
+import { fetchInventoryTransferBatchDetails } from './inventoryTransferBatches'
+import { currentStockOperation } from './offlineStockContext'
 import { useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
@@ -242,7 +245,7 @@ export async function cleanupExpiredReorderTransferRules(workspaceId: string) {
     return expiredRules.length
 }
 
-export async function evaluateReorderTransferRule(ruleId: string) {
+export async function evaluateReorderTransferRule(ruleId: string, triggerId?: string) {
     const rule = await db.reorder_transfer_rules.get(ruleId)
     if (!rule || rule.isDeleted) {
         return false
@@ -257,6 +260,8 @@ export async function evaluateReorderTransferRule(ruleId: string) {
         return false
     }
 
+    const operationId = triggerId ? uuidv5(`offline-reorder:${triggerId}:${ruleId}`, uuidv5.URL) : undefined
+    if (operationId && await fetchInventoryTransferBatchDetails(rule.workspaceId, operationId)) return true
     runningRuleIds.add(ruleId)
 
     try {
@@ -283,6 +288,7 @@ export async function evaluateReorderTransferRule(ruleId: string) {
         const now = new Date().toISOString()
         await transferInventoryQuantityWithBatches({
             workspaceId: rule.workspaceId,
+            operationId,
             productId: rule.productId,
             sourceStorageId: rule.sourceStorageId,
             targetStorageId: rule.destinationStorageId,
@@ -305,7 +311,9 @@ export async function evaluateReorderTransferRule(ruleId: string) {
     }
 }
 
-export async function evaluateReorderTransferRulesForProduct(workspaceId: string, productId: string) {
+export async function evaluateReorderTransferRulesForProduct(workspaceId: string, productId: string, triggerId?: string) {
+    if (currentStockOperation(workspaceId)) return
+
     await cleanupExpiredReorderTransferRules(workspaceId)
 
     const rules = await db.reorder_transfer_rules
@@ -316,7 +324,7 @@ export async function evaluateReorderTransferRulesForProduct(workspaceId: string
 
     let triggeredCount = 0
     for (const rule of rules.sort((left, right) => left.createdAt.localeCompare(right.createdAt))) {
-        if (await evaluateReorderTransferRule(rule.id)) {
+        if (await evaluateReorderTransferRule(rule.id, triggerId)) {
             triggeredCount += 1
         }
     }

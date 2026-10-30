@@ -1,3 +1,4 @@
+import { STOCK_EFFECT_TABLES, currentStockOperation } from './offlineStockContext'
 import { generateId } from '@/lib/utils'
 import { isSchemaMismatchError, isSyncIntegrityError } from '@/sync/syncErrors'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
@@ -228,6 +229,9 @@ export async function addToOfflineMutations(
     workspaceId: string,
     options: { omitFields?: readonly string[] } = {}
 ): Promise<void> {
+    // The enclosing operation owns every captured business effect.
+    if (currentStockOperation(workspaceId) && (STOCK_EFFECT_TABLES.has(entityType) || String(entityType) === 'stock_adjustments')) return
+
     if (
         isLocalWorkspaceMode(workspaceId)
         || LOCAL_ONLY_ENTITY_TYPES.has(entityType)
@@ -304,7 +308,10 @@ export async function retrySchemaMismatchMutations(workspaceId: string): Promise
         key: mutation.id,
         changes: {
             status: 'pending' as const,
-            error: undefined
+            error: undefined,
+            nextAttemptAt: undefined,
+            syncLeaseId: undefined,
+            syncLeaseUntil: undefined
         }
     })))
 
@@ -319,7 +326,7 @@ export async function retrySyncIntegrityMutations(workspaceId: string): Promise<
     const rows = await db.offline_mutations
         .where('status')
         .equals('failed')
-        .filter((mutation) => mutation.workspaceId === workspaceId && isSyncIntegrityError(mutation.error))
+        .filter((mutation) => mutation.workspaceId === workspaceId && (isSyncIntegrityError(mutation.error) || mutation.entityType === 'stock_operations'))
         .toArray()
 
     if (rows.length === 0) return 0
@@ -335,7 +342,10 @@ export async function retrySyncIntegrityMutations(workspaceId: string): Promise<
         key: mutation.id,
         changes: {
             status: 'pending' as const,
-            error: undefined
+            error: undefined,
+            nextAttemptAt: undefined,
+            syncLeaseId: undefined,
+            syncLeaseUntil: undefined
         }
     })))
 
