@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/auth/supabase'
 import { useOptionalAuth } from '@/auth'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
+import { isVirtualStorageId } from '@/lib/catalogItem'
 import { getOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import { QUANTITY_EPSILON, roundQuantity } from '@/lib/quantity'
 import { reportStockReservationConflict } from '@/lib/stockReservationConflict'
@@ -24,14 +25,45 @@ export interface StockAvailability extends StockPosition { onHand: number; reser
 export interface StockDemand extends StockPosition { quantity: number }
 export const stockPositionKey = (position: StockPosition) => `${position.productId}:${position.storageId}`
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+class InvalidStockPositionError extends Error {
+  constructor() {
+    super('Stock availability requires UUID product and storage IDs')
+    this.name = 'InvalidStockPositionError'
+  }
+}
+
+function isVirtualStockPosition(position: StockPosition): boolean {
+  return isVirtualStorageId(position.productId) || isVirtualStorageId(position.storageId)
+}
+
+function stockPositionsExcludingVirtual(positions: readonly StockPosition[]): StockPosition[] {
+  return positions.filter(position => position.productId && position.storageId && !isVirtualStockPosition(position))
+}
+
+function isValidStockPosition(position: StockPosition): boolean {
+  return !isVirtualStockPosition(position) && UUID_PATTERN.test(position.productId) && UUID_PATTERN.test(position.storageId)
+}
+
+function isNonRetryableStockAvailabilityError(error: unknown): boolean {
+  if (error instanceof InvalidStockPositionError) return true
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false
+  const code = error.code
+  return typeof code === 'string'
+    && (code.startsWith('22') || code.startsWith('23') || code.startsWith('42') || code === 'P0001' || code.startsWith('PGRST'))
+}
+
 export async function fetchStockAvailability(workspaceId: string, positions: readonly StockPosition[], excludeOrderId?: string, signal?: AbortSignal): Promise<StockAvailability[]> {
-  if (!positions.length) return []
-  if (isLocalWorkspaceMode(workspaceId)) return readLocalStockAvailability(workspaceId, positions, excludeOrderId)
-  if (!isOnline(workspaceId) || currentStockOperation(workspaceId)) return readOfflineStockAvailability(workspaceId, positions, excludeOrderId)
+  const stockPositions = stockPositionsExcludingVirtual(positions)
+  if (!stockPositions.length) return []
+  if (isLocalWorkspaceMode(workspaceId)) return readLocalStockAvailability(workspaceId, stockPositions, excludeOrderId)
+  if (!isOnline(workspaceId) || currentStockOperation(workspaceId)) return readOfflineStockAvailability(workspaceId, stockPositions, excludeOrderId)
+  if (stockPositions.some(position => !isValidStockPosition(position))) throw new InvalidStockPositionError()
   const rows: StockAvailability[] = []
-  for (let offset = 0; offset < positions.length; offset += 200) {
+  for (let offset = 0; offset < stockPositions.length; offset += 200) {
     let request = supabase.rpc('get_stock_reservation_availability', {
-      p_workspace_id: workspaceId, p_positions: positions.slice(offset, offset + 200), p_exclude_order_id: excludeOrderId || null,
+      p_workspace_id: workspaceId, p_positions: stockPositions.slice(offset, offset + 200), p_exclude_order_id: excludeOrderId || null,
     })
     if (signal) request = request.abortSignal(signal)
     const { data, error } = await request
@@ -46,12 +78,13 @@ export async function fetchStockAvailability(workspaceId: string, positions: rea
     }
   }
   await cacheOfflineStockAvailability(workspaceId, rows, excludeOrderId)
-  return readOfflineStockAvailability(workspaceId, positions, excludeOrderId)
+  return readOfflineStockAvailability(workspaceId, stockPositions, excludeOrderId)
 }
 
 export async function assertStockDemands(workspaceId: string, demands: readonly StockDemand[], excludeOrderId?: string) {
   const grouped = new Map<string, StockDemand>()
   for (const demand of demands) {
+    if (!demand.productId || !demand.storageId || isVirtualStockPosition(demand)) continue
     const key = stockPositionKey(demand)
     grouped.set(key, { ...demand, quantity: roundQuantity((grouped.get(key)?.quantity ?? 0) + demand.quantity) })
   }
@@ -104,6 +137,7 @@ export function useStockDemandGuard(workspaceId: string | undefined, demands: re
   const grouped = new Map<string, StockDemand>()
   for (const demand of demands) {
     if (!demand.productId || !demand.storageId) continue
+    if (isVirtualStockPosition(demand)) continue
     const key = stockPositionKey(demand)
     grouped.set(key, { ...demand, quantity: roundQuantity((grouped.get(key)?.quantity ?? 0) + demand.quantity) })
   }
@@ -120,7 +154,7 @@ export function useStockAvailability(workspaceId: string | undefined, positions:
   const permissions = useOptionalWorkspacePermissions()
   const storageAccess = useStorageAccess(workspaceId)
   const permissionScope = `${storageAccess.signature}:${permissions?.permissionKeys.join(',') ?? ''}`
-  const signature = JSON.stringify([...new Map(positions.filter(p => p.productId && p.storageId).map(p => [stockPositionKey(p), { productId: p.productId, storageId: p.storageId }])).values()]
+  const signature = JSON.stringify([...new Map(stockPositionsExcludingVirtual(positions).map(p => [stockPositionKey(p), { productId: p.productId, storageId: p.storageId }])).values()]
     .sort((a, b) => stockPositionKey(a).localeCompare(stockPositionKey(b))))
   const scopedPositions = useMemo(() => JSON.parse(signature) as StockPosition[], [signature])
   const local = !!workspaceId && (isLocalWorkspaceMode(workspaceId) || !online)
@@ -135,7 +169,8 @@ export function useStockAvailability(workspaceId: string | undefined, positions:
     queryFn: ({ signal }) => fetchBatchedAvailability(workspaceId!, scopedPositions, excludeOrderId, signal),
     enabled: !!workspaceId && !local && scopedPositions.length > 0,
     staleTime: 5000,
-    refetchInterval: 15000,
+    retry: (failureCount, error) => !isNonRetryableStockAvailabilityError(error) && failureCount < 1,
+    refetchInterval: query => isNonRetryableStockAvailabilityError(query.state.error) ? false : 15000,
   })
   return { ...query, data: local ? localResult?.rows : query.data, error: local ? localResult?.error ?? null : query.error, isLoading: local ? localResult === undefined : query.isLoading }
 }
@@ -152,6 +187,7 @@ export function useVisibleStockReservations(workspaceId: string, position: Stock
   const local = isLocalWorkspaceMode(workspaceId)
   const localPage = useLiveQuery(async (): Promise<VisibleStockReservationsPage | undefined> => {
     if (!enabled || !local) return undefined
+    if (isVirtualStockPosition(position)) return { total: 0, rows: [] }
     if (user?.role !== 'admin' && !permissions?.permissionKeys.includes('orders.saleOrdersAccess')) return { total: 0, rows: [] }
     const storageAccess = await getCurrentStorageAccess(workspaceId)
     let total = 0
@@ -180,7 +216,7 @@ export function useVisibleStockReservations(workspaceId: string, position: Stock
           && typeof row.order_number === 'string' && typeof row.created_at === 'string'
           && typeof row.quantity === 'number' && Number.isFinite(row.quantity) && row.quantity >= 0)) throw new Error('Invalid reservation page')
       return data as VisibleStockReservationsPage
-    }, enabled: enabled && !local,
+    }, enabled: enabled && !local && isValidStockPosition(position),
   })
   return { data: local ? localPage : remote.data, isLoading: local ? localPage === undefined : remote.isFetching, error: remote.error }
 }

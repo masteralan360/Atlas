@@ -28,6 +28,10 @@ export function canBePurchased(item: Pick<Product, 'isService'> | null | undefin
 export const SERVICES_VIRTUAL_STORAGE_ID = '__atlas_services__'
 export const ACTIVITIES_VIRTUAL_STORAGE_ID = '__atlas_activities__'
 
+export function isVirtualStorageId(storageId: string | null | undefined): boolean {
+    return storageId === SERVICES_VIRTUAL_STORAGE_ID || storageId === ACTIVITIES_VIRTUAL_STORAGE_ID
+}
+
 export function isServicesVirtualStorage(storageId: string | null | undefined): boolean {
     return storageId === SERVICES_VIRTUAL_STORAGE_ID
 }
