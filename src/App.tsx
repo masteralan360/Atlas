@@ -14,7 +14,7 @@ import { SubscriptionExpiryWarningModal } from "@/ui/components/SubscriptionExpi
 import { WorkspacePaymentController, WorkspacePaymentStatusDialog } from "@/ui/components/WorkspacePaymentDialog";
 import { WorkspaceExtraDaysDialog } from "@/ui/components/WorkspaceExtraDaysDialog";
 import { WorkspaceAdminMessageDialog } from "@/ui/components/WorkspaceAdminMessageDialog";
-import { lazy, Suspense, useEffect, useCallback, useState } from "react";
+import { lazy, Suspense, useEffect, useCallback, useState, type ReactNode } from "react";
 import { usePatchNotes } from "@/hooks/usePatchNotes";
 import { Clock3, Download, LoaderCircle, RotateCw, Upload } from "lucide-react";
 import type { Update } from "@tauri-apps/plugin-updater";
@@ -23,7 +23,7 @@ import { NavigationRailDisplayProvider } from "@/ui/navigation/NavigationRailDis
 import { ExchangeRateProvider } from "@/context/ExchangeRateContext";
 import { DateRangeProvider } from "@/context/DateRangeContext";
 import { UiAccessProvider } from "@/context/UiAccessContext";
-import { WorkspacePermissionsProvider } from "@/permissions";
+import { WorkspacePermissionsProvider, useWorkspacePermissions } from "@/permissions";
 import { FleetLocationSharingProvider } from "@/fleet/FleetLocationSharingContext";
 import { AutoSyncOverlay } from "@/ui/components/AutoSyncOverlay";
 import { OfflineEntryOverlay } from "@/ui/components/OfflineEntryOverlay";
@@ -1322,18 +1322,39 @@ function WhatsAppPlanGuard() {
 }
 
 function FirstTimeRedirect() {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
+  const { hasFeature, isLoading: isWorkspaceLoading } = useWorkspace();
+  const { hasPermission, isLoading: isPermissionsLoading } = useWorkspacePermissions();
 
   useEffect(() => {
-    if (isLoading || !isAuthenticated) return;
+    if (isLoading || !isAuthenticated || isWorkspaceLoading || isPermissionsLoading) return;
     if (localStorage.getItem('atlas_first_time_done')) return;
 
     localStorage.setItem('atlas_first_time_done', 'true');
     localStorage.setItem('modules_view_mode', 'grid');
-    window.location.hash = getPathWithLang('/modules', i18n.language);
-  }, [isAuthenticated, isLoading]);
+    const isMerchantStaff =
+      user?.role === 'staff' &&
+      hasFeature('postal_service') &&
+      hasPermission('postService.merchant');
+    window.location.hash = getPathWithLang(isMerchantStaff ? '/post-service' : '/modules', i18n.language);
+  }, [hasFeature, hasPermission, isAuthenticated, isLoading, isPermissionsLoading, isWorkspaceLoading, user?.role]);
 
   return null;
+}
+
+function MerchantStaffRedirect({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const { hasFeature } = useWorkspace();
+  const { hasPermission, isLoading } = useWorkspacePermissions();
+
+  if (isLoading) return <LoadingState />;
+
+  const isMerchantStaff =
+    user?.role === 'staff' &&
+    hasFeature('postal_service') &&
+    hasPermission('postService.merchant');
+
+  return isMerchantStaff ? <Redirect to="/post-service" /> : <>{children}</>;
 }
 
 function UsbBackupStartupValidator() {
@@ -1504,11 +1525,13 @@ function App() {
                       {/* Protected Routes */}
                       <Route path="/">
                         <ProtectedRoute>
-                          <Layout>
-                            <Suspense fallback={<DashboardSkeleton />}>
-                              <Dashboard />
-                            </Suspense>
-                          </Layout>
+                          <MerchantStaffRedirect>
+                            <Layout>
+                              <Suspense fallback={<DashboardSkeleton />}>
+                                <Dashboard />
+                              </Suspense>
+                            </Layout>
+                          </MerchantStaffRedirect>
                         </ProtectedRoute>
                       </Route>
                       <Route path="/help">
@@ -2215,9 +2238,11 @@ function App() {
                       </Route>
                       <Route path="/modules">
                         <ProtectedRoute>
-                          <Layout>
-                            <ModuleLauncher />
-                          </Layout>
+                          <MerchantStaffRedirect>
+                            <Layout>
+                              <ModuleLauncher />
+                            </Layout>
+                          </MerchantStaffRedirect>
                         </ProtectedRoute>
                       </Route>
                       <Route path="/revenue">

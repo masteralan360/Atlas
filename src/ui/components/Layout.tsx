@@ -1646,6 +1646,11 @@ export function Layout({ children }: LayoutProps) {
             <NavigationRail
               location={location}
               hasSettings={navigation.some((group) => group.items.some((item) => item.href === '/settings'))}
+              hideDashboard={
+                user?.role === 'staff' &&
+                hasFeature('postal_service') &&
+                hasPermission('postService.merchant')
+              }
               onNavigate={() => triggerHaptic('selection')}
             />
           )}

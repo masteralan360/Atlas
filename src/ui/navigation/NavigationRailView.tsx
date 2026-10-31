@@ -21,10 +21,11 @@ import {
 interface NavigationRailProps {
   location: string
   hasSettings: boolean
+  hideDashboard?: boolean
   onNavigate: () => void
 }
 
-export function NavigationRail({ location, hasSettings, onNavigate }: NavigationRailProps) {
+export function NavigationRail({ location, hasSettings, hideDashboard = false, onNavigate }: NavigationRailProps) {
   const { t } = useTranslation()
   const { mode, setMode } = useNavigationRailDisplay()
   const [isPointerInside, setIsPointerInside] = useState(false)
@@ -74,20 +75,22 @@ export function NavigationRail({ location, hasSettings, onNavigate }: Navigation
       <div className="flex h-full w-14 shrink-0 flex-col" aria-hidden={!isExpanded} style={contentStyle}>
         <div className="h-12 shrink-0" />
         <nav className="flex flex-1 flex-col items-center gap-2 px-2 py-3" aria-label={t('nav.navigationRail')}>
-          <Link
-            href="/"
-            onClick={onNavigate}
-            tabIndex={isExpanded ? 0 : -1}
-            className={cn(
-              'flex h-10 w-10 items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-              location === '/' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-primary/5 hover:text-primary'
-            )}
-            title={t('nav.dashboard')}
-            aria-label={t('nav.dashboard')}
-            aria-current={location === '/' ? 'page' : undefined}
-          >
-            <LayoutDashboard className="h-5 w-5" />
-          </Link>
+          {!hideDashboard && (
+            <Link
+              href="/"
+              onClick={onNavigate}
+              tabIndex={isExpanded ? 0 : -1}
+              className={cn(
+                'flex h-10 w-10 items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                location === '/' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-primary/5 hover:text-primary'
+              )}
+              title={t('nav.dashboard')}
+              aria-label={t('nav.dashboard')}
+              aria-current={location === '/' ? 'page' : undefined}
+            >
+              <LayoutDashboard className="h-5 w-5" />
+            </Link>
+          )}
           <Link
             href="/help"
             onClick={onNavigate}

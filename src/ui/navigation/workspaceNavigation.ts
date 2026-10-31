@@ -118,6 +118,10 @@ export function buildWorkspaceNavigation({
 }: BuildWorkspaceNavigationOptions): WorkspaceNavigationGroup[] {
   const isCoreRole = role === "admin" || role === "staff" || role === "viewer";
   const canAccessPermission = hasPermission ?? (() => true);
+  const isMerchantStaff =
+    role === "staff" &&
+    hasFeature("postal_service") &&
+    canAccessPermission("postService.merchant");
 
   const canUseEcommerce =
     features.data_mode !== "local" &&
@@ -806,7 +810,7 @@ export function buildWorkspaceNavigation({
     {
       title: "", // Standalone Dashboard has no group title
       icon: LayoutDashboard,
-      items: [dashboardItem, helpItem],
+      items: [...(isMerchantStaff ? [] : [dashboardItem]), helpItem],
     },
     ...launcherGroups,
   ];
