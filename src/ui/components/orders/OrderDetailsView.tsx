@@ -12,6 +12,7 @@ import { Link, useLocation } from 'wouter'
 import { useAuth } from '@/auth'
 import { useProfileData } from '@/hooks/useProfileData'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
+import { useCommerceOrderAttribution } from '@/local-db/commerceOperations'
 import { resolveOrderDetailsLookupStatus, type OrderDetailsRemoteLookupStatus } from '@/lib/orderDetailsLookup'
 import { runSalesOrderIntegrityAudit } from '@/lib/integrityAudit/salesOrderAudit'
 import { isPurchaseOrderIntegrityAuditEligible, runPurchaseOrderIntegrityAudit } from '@/lib/integrityAudit/purchaseOrderAudit'
@@ -292,6 +293,8 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
     const purchaseOrderLookup = usePurchaseOrderLookup(orderId, lookupRetryVersion)
     const salesOrder = salesOrderLookup.status === 'found' ? salesOrderLookup.order : undefined
     const purchaseOrder = purchaseOrderLookup.status === 'found' ? purchaseOrderLookup.order : undefined
+    const commerceOperationsEnabled = hasFeature('commerce_operations')
+    const commerceOrderAttribution = useCommerceOrderAttribution(workspaceId, salesOrder?.id, commerceOperationsEnabled)
     const salesOrderAgentAssignments = useSalesOrderAgentAssignments(workspaceId)
     const commissionAgentDirectory = useCommissionAgentDirectory(workspaceId)
     const salesOrderReturns = useSalesOrderReturns(orderId, workspaceId)
@@ -1699,6 +1702,37 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             )}
                         </CardContent>
                     </Card>
+
+                    {isSales && commerceOperationsEnabled && commerceOrderAttribution ? (
+                        <Card className="border-emerald-500/20 bg-emerald-500/[0.02]">
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                    <UsersRound className="h-4 w-4 text-emerald-600" />
+                                    {t('commerceOperations.order.attributionTitle')}
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-1">
+                                {commerceOrderAttribution.platform ? (
+                                    <div className="rounded-xl border bg-background/70 p-3">
+                                        <div className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                                            {t('commerceOperations.fields.platform')}
+                                        </div>
+                                        <div className="mt-1 font-medium">
+                                            {t(`commerceOperations.platforms.${commerceOrderAttribution.platform}`, { defaultValue: commerceOrderAttribution.platform })}
+                                        </div>
+                                    </div>
+                                ) : null}
+                                {commerceOrderAttribution.agentName ? (
+                                    <div className="rounded-xl border bg-background/70 p-3">
+                                        <div className="text-xs font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                                            {t('commerceOperations.fields.agent')}
+                                        </div>
+                                        <div className="mt-1 font-medium">{commerceOrderAttribution.agentName}</div>
+                                    </div>
+                                ) : null}
+                            </CardContent>
+                        </Card>
+                    ) : null}
 
                     {!order.isArchived && isSales && salesAgentCommissionsEnabled && productCommissionPreviewAgentIds.length > 0 ? (
                         <ProductCommissionPreview

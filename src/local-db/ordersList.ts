@@ -13,6 +13,7 @@ import { useViewOwnRecordScope } from '@/permissions/useViewOwnRecordScope'
 import { useOptionalWorkspacePermissions } from '@/permissions/workspacePermissionsState'
 
 import { db } from './database'
+import { fetchCommerceOrderAttributions, findCommerceOrderIdsMatchingSearch, type CommerceOrderAttribution } from './commerceOperations'
 import { getAccessibleBusinessPartnerFacetIdsInLocalCache, getAccessibleBusinessPartnerIdsInLocalCache } from './businessPartnerAccess'
 import { getOrderBalanceAmount, getOrderPaymentStatus } from './orderInstallments'
 import { getCurrentStorageAccess, redactPurchaseOrderForStorageAccess, redactSalesOrderForStorageAccess, useStorageAccess } from './storagePermissions'
@@ -49,6 +50,7 @@ export interface OrdersListPageQuery {
   commissionMode?: string
   search?: string
   includeArchived?: boolean
+  includeCommerceAttribution?: boolean
   page: number
   pageSize: number
   refreshToken?: number
@@ -65,6 +67,7 @@ export interface OrdersListPage {
   totalsByCurrency: Array<{ currency: string; total: number }>
   outstandingByCurrency: Array<{ currency: string; total: number; unpaidCount: number; partialCount: number }>
   productCommissionPreviewByCurrency: Array<{ currency: string; total: number; unavailableConversion: boolean }>
+  commerceAttributionByOrderId?: Record<string, CommerceOrderAttribution>
   productCommissionPreviewIsLoading?: boolean
   productCommissionPreviewError?: unknown | null
 }
@@ -88,7 +91,8 @@ const EMPTY_ORDERS_PAGE: OrdersListPage = {
   maxCreatedAt: null,
   totalsByCurrency: [],
   outstandingByCurrency: [],
-  productCommissionPreviewByCurrency: []
+  productCommissionPreviewByCurrency: [],
+  commerceAttributionByOrderId: {}
 }
 
 type OrderListAccess = ReturnType<typeof useStorageAccess>
@@ -119,7 +123,8 @@ function matchesOrderFilters(
   order: SalesOrder | PurchaseOrder,
   query: OrdersListPageQuery,
   searchAgentOrderIds: ReadonlySet<string>,
-  searchCreatorUserIds: ReadonlySet<string>
+  searchCreatorUserIds: ReadonlySet<string>,
+  searchCommerceOrderIds: ReadonlySet<string>
 ) {
   if (order.isDeleted) return false
   if (query.includeArchived ? !order.isArchived : order.isArchived) return false
@@ -157,6 +162,7 @@ function matchesOrderFilters(
     || order.items.some((item) => String(item.productName ?? '').toLocaleLowerCase().includes(search)
       || String(item.productSku ?? '').toLocaleLowerCase().includes(search))
     || searchAgentOrderIds.has(order.id)
+    || searchCommerceOrderIds.has(order.id)
 }
 
 async function getCreatorIdsMatchingSearch(workspaceId: string, search: string) {
@@ -184,7 +190,8 @@ async function readLocalOrdersListPage(
   viewOwn: { isRestricted: boolean; userId?: string },
   permissionKeys: readonly string[] = [],
   commissionPreview?: OrdersProductCommissionPreviewContext,
-  agentSalesAccountsFeatureEnabled?: boolean
+  agentSalesAccountsFeatureEnabled?: boolean,
+  includeCommerceAttribution = query.includeCommerceAttribution === true
 ): Promise<OrdersListPage> {
   const workspaceId = query.workspaceId
   if (!workspaceId || !access.isReady) return EMPTY_ORDERS_PAGE
@@ -213,6 +220,9 @@ async function readLocalOrdersListPage(
   const needsAgentSearch = isSales && Boolean(search) && (canSearchAllAgentNames || canSearchOwnAgentNames)
   let assignedOrderIds = new Set<string>()
   let searchAgentOrderIds = new Set<string>()
+  const searchCommerceOrderIds = isSales && includeCommerceAttribution && search
+    ? await findCommerceOrderIdsMatchingSearch(workspaceId, search)
+    : new Set<string>()
   const linkedSalesAccountAgentIds = isSales && viewOwn.isRestricted
     ? await getLinkedSalesAccountAgentIdsForOwnOrders(
       workspaceId,
@@ -270,7 +280,7 @@ async function readLocalOrdersListPage(
     const order = isSales
       ? redactSalesOrderForStorageAccess(rawOrder as SalesOrder, access)
       : redactPurchaseOrderForStorageAccess(rawOrder as PurchaseOrder, access)
-    return order && matchesOrderFilters(order, query, searchAgentOrderIds, searchCreatorUserIds) ? order : null
+    return order && matchesOrderFilters(order, query, searchAgentOrderIds, searchCreatorUserIds, searchCommerceOrderIds) ? order : null
   }
 
   // Resolve access only for partners referenced by matching orders. This keeps
@@ -342,6 +352,9 @@ async function readLocalOrdersListPage(
   const productCommissionPreviewByCurrency = isSales && commissionPreview
     ? await summarizeLocalProductCommissions(commissionOrderIds, workspaceId, access, commissionPreview)
     : []
+  const commerceAttributionByOrderId = isSales && includeCommerceAttribution
+    ? await fetchCommerceOrderAttributions(workspaceId, pageRows.map((order) => order.id), { online: false })
+    : {}
 
   const pageCount = Math.max(1, Math.ceil(totalCount / pageSize))
   return {
@@ -353,7 +366,8 @@ async function readLocalOrdersListPage(
     maxCreatedAt,
     totalsByCurrency: Array.from(totalsByCurrency, ([currency, total]) => ({ currency, total })),
     outstandingByCurrency: Array.from(outstandingByCurrency, ([currency, summary]) => ({ currency, ...summary })),
-    productCommissionPreviewByCurrency
+    productCommissionPreviewByCurrency,
+    commerceAttributionByOrderId
   }
 }
 
@@ -495,6 +509,9 @@ export async function fetchOrdersListPage(
       row.lastSyncedAt = fetchedAt
       return row
     })
+    const commerceAttributionByOrderId = query.orderType === 'sales' && query.includeCommerceAttribution
+      ? await fetchCommerceOrderAttributions(workspaceId, rows.map((row) => row.id), { signal })
+      : {}
     const table = (query.orderType === 'sales' ? db.sales_orders : db.purchase_orders) as unknown as Table<SalesOrder | PurchaseOrder, string>
     if (rows.length > 0) {
       const existingRows = await table.bulkGet(rows.map((row) => row.id))
@@ -533,7 +550,8 @@ export async function fetchOrdersListPage(
         currency: String(entry.currency || 'usd'),
         total: asNumber(entry.total),
         unavailableConversion: entry.unavailable_conversion === true
-      }))
+      })),
+      commerceAttributionByOrderId
     }
   }
 
@@ -616,6 +634,7 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
     request.commissionMode,
     request.search,
     request.includeArchived,
+    request.includeCommerceAttribution,
     request.refreshToken,
     request.enabled
   ])
@@ -639,7 +658,8 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
         viewOwn,
         permissions?.permissionKeys,
         undefined,
-        agentSalesAccountsFeatureEnabled
+        agentSalesAccountsFeatureEnabled,
+        request.includeCommerceAttribution === true
       ),
     [request, storageAccess.signature, viewOwn.isRestricted, viewOwn.userId, permissions?.permissionKeys, usesRemote, agentSalesAccountsFeatureEnabled],
     EMPTY_ORDERS_PAGE
@@ -653,7 +673,8 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
         viewOwn,
         permissions?.permissionKeys,
         commissionPreview,
-        agentSalesAccountsFeatureEnabled
+        agentSalesAccountsFeatureEnabled,
+        commissionSummaryRequest.includeCommerceAttribution === true
       ).then((page) => page.productCommissionPreviewByCurrency),
     [
       commissionSummaryQueryKey,

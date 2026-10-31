@@ -78,6 +78,7 @@ import { platformService } from '@/services/platformService'
 import { AgentCommissionPerformanceCard } from '@/ui/components/commissions/AgentCommissionPerformanceCard'
 import { useOptionalCommissionFeatureData } from '@/ui/components/commissions/useCommissionAgentDirectory'
 import { CreateManualLoanModal } from '@/ui/components/loans/CreateManualLoanModal'
+import { useCommerceAttributedSalesOrderIds } from '@/local-db/commerceOperations'
 
 type PartnerKind = 'customer' | 'supplier' | 'agent' | 'business_partner'
 type PartnerPrintTemplateKey = typeof PARTNER_DETAILS_TEMPLATE_KEY
@@ -555,6 +556,11 @@ export function PartnerDetailsView({
     const workspaceContacts = useWorkspaceContacts(workspaceId)
     const customerOrders = useCustomerSalesOrders(partnerId, workspaceId)
     const allSalesOrders = useSalesOrders(workspaceId)
+    const commerceAttributedSalesOrderIds = useCommerceAttributedSalesOrderIds(
+        workspaceId,
+        agent?.id,
+        kind === 'agent' && Boolean(features.commerce_operations)
+    )
     const commissionFeatureData = useOptionalCommissionFeatureData()
     const salesAgentCommissionsEnabled = Boolean(commissionFeatureData)
     const salesOrderAgentAssignments = useMemo(
@@ -808,19 +814,29 @@ export function PartnerDetailsView({
     const agentSalesOrders = useMemo(() => {
         if (!agent) return []
         if (isSalesAccountProfile) {
-            return allSalesOrders.filter((order) => !order.isDeleted && order.salesAccountAgentId === agent.id)
+            return allSalesOrders.filter((order) => (
+                !order.isDeleted
+                && (order.salesAccountAgentId === agent.id || commerceAttributedSalesOrderIds.has(order.id))
+            ))
         }
         if (salesAgentCommissionsEnabled) {
             return allSalesOrders.filter((order) => (
                 !order.isDeleted
-                && getActiveSalesOrderAgentAssignments(salesOrderAgentAssignments, order.id)
-                    .some((assignment) => assignment.agentId === agent.id)
+                && (
+                    commerceAttributedSalesOrderIds.has(order.id)
+                    || getActiveSalesOrderAgentAssignments(salesOrderAgentAssignments, order.id)
+                        .some((assignment) => assignment.agentId === agent.id)
+                )
             ))
         }
-        return agentLinkedUserId
-            ? allSalesOrders.filter((order) => !order.isDeleted && order.createdBy === agentLinkedUserId)
-            : []
-    }, [agent, agentLinkedUserId, allSalesOrders, isSalesAccountProfile, salesAgentCommissionsEnabled, salesOrderAgentAssignments])
+        return allSalesOrders.filter((order) => (
+            !order.isDeleted
+            && (
+                commerceAttributedSalesOrderIds.has(order.id)
+                || Boolean(agentLinkedUserId && order.createdBy === agentLinkedUserId)
+            )
+        ))
+    }, [agent, agentLinkedUserId, allSalesOrders, commerceAttributedSalesOrderIds, isSalesAccountProfile, salesAgentCommissionsEnabled, salesOrderAgentAssignments])
     const agentPosSales = useMemo(
         () => !isSalesAccountProfile && agentLinkedUserId
             ? sales.filter((sale) => isActiveSale(sale) && !sale.isDeleted && sale.cashierId === agentLinkedUserId)

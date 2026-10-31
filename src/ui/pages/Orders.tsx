@@ -460,12 +460,13 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         paymentStatus: paymentFilter,
         ecommerceFilter: activeTab === 'sales' ? ecommerceFilter : 'all',
         commissionMode: activeTab === 'sales' ? commissionModeFilter : 'all',
+        includeCommerceAttribution: activeTab === 'sales' && Boolean(features.commerce_operations),
         search: deferredSearch,
         page: pagination.currentPage,
         pageSize: pagination.pageSize,
         refreshToken: ordersRefreshToken,
         enabled: true
-    }), [activeTab, commissionModeFilter, deferredSearch, ecommerceFilter, fulfillmentBounds.endDate, fulfillmentBounds.startDate, orderDateBounds.endDate, orderDateBounds.startDate, ordersRefreshToken, pagination.currentPage, pagination.pageSize, paymentFilter, statusFilter, workspaceId])
+    }), [activeTab, commissionModeFilter, deferredSearch, ecommerceFilter, features.commerce_operations, fulfillmentBounds.endDate, fulfillmentBounds.startDate, orderDateBounds.endDate, orderDateBounds.startDate, ordersRefreshToken, pagination.currentPage, pagination.pageSize, paymentFilter, statusFilter, workspaceId])
     const commissionData = useOptionalCommissionFeatureData()
     const salesAgentCommissionsEnabled = Boolean(commissionData)
     const canAssignSalesAgentCommissions = hasEffectiveSalesAgentCommissionPermission(
@@ -524,6 +525,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         pageSize: archivePagination.pageSize,
         refreshToken: ordersRefreshToken,
         includeArchived: true,
+        includeCommerceAttribution: activeTab === 'sales' && Boolean(features.commerce_operations),
         enabled: archivesOpen
     })
     const archivedPagination = usePaginationBounds({
@@ -536,6 +538,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     })
 
     const salesOrders = activeTab === 'sales' ? ordersPage.rows as SalesOrder[] : []
+    const commerceAttributionByOrderId = ordersPage.commerceAttributionByOrderId ?? {}
     const visibleSalesOrderIds = useMemo(() => salesOrders.map((order) => order.id), [salesOrders])
     const pageCommissionAssignments = useSalesOrderAgentAssignmentsForOrders(
         salesAgentCommissionsEnabled && activeTab === 'sales' ? workspaceId : undefined,
@@ -1623,6 +1626,15 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             const canDelete = canDeleteOrders && isDraft
                             const returnStatus = activeTab === 'sales' ? (row as SalesOrder).returnStatus : 'none'
                             const isFullyReturnedSalesOrder = activeTab === 'sales' && returnStatus === 'full'
+                            const commerceAttribution = activeTab === 'sales' ? commerceAttributionByOrderId[row.id] : undefined
+                            const commerceAttributionLabel = commerceAttribution ? [
+                                commerceAttribution.platform
+                                    ? t(`commerceOperations.platforms.${commerceAttribution.platform}`, { defaultValue: commerceAttribution.platform })
+                                    : null,
+                                commerceAttribution.agentName
+                                    ? `${t('commerceOperations.fields.agent')}: ${commerceAttribution.agentName}`
+                                    : null
+                            ].filter(Boolean).join(' · ') : ''
 
                             return (
                                 <TableRow key={row.id} className={isApprovalRequested ? 'bg-violet-50/70 hover:bg-violet-50 dark:bg-violet-950/20 dark:hover:bg-violet-950/30' : undefined}>
@@ -1645,6 +1657,11 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                                         <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-sky-700 dark:text-sky-300">
                                                             <BadgeDollarSign className="h-3 w-3" />
                                                             {t('salesAgentCommissions.trackedCommission')} · {t('salesAgentCommissions.nonpayable')}
+                                                        </span>
+                                                    ) : null}
+                                                    {commerceAttributionLabel ? (
+                                                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                                                            <UsersRound className="h-3 w-3" />{commerceAttributionLabel}
                                                         </span>
                                                     ) : null}
                                                 </div>
@@ -1762,6 +1779,15 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     const canDelete = canDeleteOrders && isDraft
                     const returnStatus = activeTab === 'sales' ? (row as SalesOrder).returnStatus : 'none'
                     const isFullyReturnedSalesOrder = activeTab === 'sales' && returnStatus === 'full'
+                    const commerceAttribution = activeTab === 'sales' ? commerceAttributionByOrderId[row.id] : undefined
+                    const commerceAttributionLabel = commerceAttribution ? [
+                        commerceAttribution.platform
+                            ? t(`commerceOperations.platforms.${commerceAttribution.platform}`, { defaultValue: commerceAttribution.platform })
+                            : null,
+                        commerceAttribution.agentName
+                            ? `${t('commerceOperations.fields.agent')}: ${commerceAttribution.agentName}`
+                            : null
+                    ].filter(Boolean).join(' · ') : ''
 
                     return (
                         <div
@@ -1795,6 +1821,11 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                                 <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/20 bg-sky-500/10 px-2 py-0.5 text-[10px] font-bold uppercase text-sky-700 dark:text-sky-300">
                                                     <BadgeDollarSign className="h-3 w-3" />
                                                     {t('salesAgentCommissions.trackedCommission')} · {t('salesAgentCommissions.nonpayable')}
+                                                </span>
+                                            ) : null}
+                                            {commerceAttributionLabel ? (
+                                                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
+                                                    <UsersRound className="h-3 w-3" />{commerceAttributionLabel}
                                                 </span>
                                             ) : null}
                                         </div>

@@ -294,6 +294,7 @@
       "noAgentAttribution": "بدون إسناد إلى وكيل",
       "agentFallback": "وكيل",
       "agentUnavailable": "غير متاح",
+      "attributionTitle": "مصدر البيع والوكيل",
       "agentAttributionHint": "يُحفظ الوكيل المحدد كإسناد للطلب. إذا كان له مستخدم مرتبط فسيُستخدم حسابه كمنشئ الطلب؛ وإلا فسيُستخدم حسابك."
     },
     "data": {

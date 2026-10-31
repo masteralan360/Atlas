@@ -1,7 +1,3 @@
-Dialog screen
-
-Product Search P and C
-
 Sale Order Exchange
 
 Fix Purchase Order form page and fix purchase order error, order_payment_source_not_found

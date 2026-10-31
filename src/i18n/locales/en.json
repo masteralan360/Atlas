@@ -294,6 +294,7 @@
       "noAgentAttribution": "No agent attribution",
       "agentFallback": "Agent",
       "agentUnavailable": "unavailable",
+      "attributionTitle": "Sales source and agent",
       "agentAttributionHint": "The selected agent is saved as attribution. If they have a linked user, that account is used for Created By; otherwise your account is used."
     },
     "data": {
