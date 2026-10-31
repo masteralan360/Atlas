@@ -3372,7 +3372,13 @@ async function buildSalesOrderEntity(
 export async function resolveSocialOrderAgentCreator(workspaceId: string, agentId: string): Promise<string> {
     const agent = await db.agents.get(agentId)
     const linkedUserId = agent?.linkedUserId?.trim()
-    if (!agent || agent.workspaceId !== workspaceId || agent.isDeleted || !linkedUserId) {
+    if (
+        !agent
+        || agent.workspaceId !== workspaceId
+        || agent.isDeleted
+        || agent.agentType !== 'seller'
+        || !linkedUserId
+    ) {
         throw new Error('social_order_agent_creator_invalid')
     }
 
@@ -3705,6 +3711,7 @@ async function completePaidQuickSalesOrderAtomically(
     options?: {
         onProgress?: (stage: CompletedSalesOrderProgressStage) => void
         trace?: CrudTraceHandle
+        creatorAgentId?: string
     }
 ) {
     await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesOrderProductsAvailable(order))
@@ -3725,6 +3732,7 @@ async function completePaidQuickSalesOrderAtomically(
         })
         : null
     const payload = {
+        ...(options?.creatorAgentId ? { creator_agent_id: options.creatorAgentId } : {}),
         order: sanitizeSyncPayload(
             'sales_orders',
             {
@@ -3825,6 +3833,7 @@ type QuickSalesOrderOptions = {
     minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
     orderId?: string
     trace?: CrudTraceHandle
+    creatorAgentId?: string
 }
 
 async function createQuickSalesOrderInternal(

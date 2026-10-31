@@ -1428,11 +1428,7 @@ function MutationQueueRoute() {
 
   if (isLocalMode) return <Redirect to="/settings" />;
 
-  return (
-    <Layout>
-      <MutationQueue />
-    </Layout>
-  );
+  return <MutationQueue />;
 }
 
 function App() {
@@ -1528,13 +1524,13 @@ function App() {
                       {/* Protected Routes */}
                       <Route path="/">
                         <ProtectedRoute>
-                          <MerchantStaffRedirect>
-                            <Layout>
+                          <Layout>
+                            <MerchantStaffRedirect>
                               <Suspense fallback={<DashboardSkeleton />}>
                                 <Dashboard />
                               </Suspense>
-                            </Layout>
-                          </MerchantStaffRedirect>
+                            </MerchantStaffRedirect>
+                          </Layout>
                         </ProtectedRoute>
                       </Route>
                       <Route path="/help">
@@ -2610,7 +2606,9 @@ function App() {
                       </Route>
                       <Route path="/mutation-queue">
                         <ProtectedRoute allowedRoles={["admin"]}>
-                          <MutationQueueRoute />
+                          <Layout>
+                            <MutationQueueRoute />
+                          </Layout>
                         </ProtectedRoute>
                       </Route>
                       <Route path="/workspace-configuration">

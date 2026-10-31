@@ -816,15 +816,16 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
   const selectedCity = city === 'other'
     ? otherCity.trim()
     : selectedCityOption ? t(selectedCityOption.key) : ''
-  const coachAgents = useMemo(() => agents.flatMap((agent) => {
-    if (agent.workspaceId !== workspaceId || agent.isDeleted) return []
+  const eligibleOrderAgents = useMemo(() => agents.flatMap((agent) => {
     const linkedUserId = agent.linkedUserId?.trim() || null
+    if (agent.workspaceId !== workspaceId || agent.isDeleted || agent.agentType !== 'seller' || !linkedUserId) return []
     const partner = businessPartners.find((candidate) => candidate.id === agent.businessPartnerId && !candidate.isDeleted)
     const label = partner?.partnerName?.trim() || t('commerceOperations.order.agentFallback')
     return [{ id: agent.id, label, zone: agent.zone?.trim() || '', linkedUserId }]
   }), [agents, businessPartners, t, workspaceId])
-  const selectedAgent = coachAgents.find((agent) => agent.id === agentId)
+  const selectedAgent = eligibleOrderAgents.find((agent) => agent.id === agentId)
   const selectedAgentAvailable = !agentId || Boolean(selectedAgent)
+  const orderAgentEnabled = channel === 'social' && platform === 'coach'
   const discountInvalid = lineSubtotal > 0 && discountAmount / lineSubtotal * 100 > maxDiscountPercent
   const paymentRequired = total !== null && total > 0.000001
   const selectedPaymentAccount = paymentAccount
@@ -850,7 +851,7 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
     available && !saving && workspaceId && seller.trim() && buyerName.trim() && buyerPhone.trim()
     && storageId && lines.length && lines.every((line) => line.product && line.currency && Number(line.quantity.replace(/,/g, '')) > 0)
     && (city !== 'other' || otherCity.trim()) && !deliveryFeeInvalid && !discountInvalid && totalCurrency
-    && (!agentId || (platform === 'coach' && agentsLoaded && selectedAgentAvailable)),
+    && (!agentId || (orderAgentEnabled && agentsLoaded && selectedAgentAvailable)),
   )
   const isCreatingBuyer = isEnteringNewBuyer
   const partnerCreationLabels = getCommerceOperationsPartnerLabels(buyerName, t)
@@ -992,12 +993,12 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
     setSaving(true)
     try {
       let orderCreatorId = userId ?? null
-      if (channel === 'social' && platform === 'coach' && agentId) {
+      if (orderAgentEnabled && agentId) {
         if (!agentsLoaded || !selectedAgent) {
           toast({ title: t('commerceOperations.toast.orderFailed'), description: t('commerceOperations.validation.agentCreatorInvalid'), variant: 'destructive' })
           return
         }
-        if (selectedAgent.linkedUserId) {
+        if (channel === 'social' && platform === 'coach') {
           try {
             orderCreatorId = await resolveSocialOrderAgentCreator(workspaceId, agentId)
           } catch (error) {
@@ -1092,7 +1093,11 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
         notes: notes.trim() || undefined,
         sourceChannel: 'manual',
         createdAt: savedAt,
-      }, orderCreatorId, { actingUserRole: userRole, orderId })
+      }, orderCreatorId, {
+        actingUserRole: userRole,
+        orderId,
+        creatorAgentId: orderAgentEnabled && agentId ? agentId : undefined,
+      })
 
       let intakeRecordSaved = true
       try {
@@ -1101,8 +1106,8 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
           relatedOrderId: order.id, relatedPartnerId: partner.id, createdBy: userId ?? null,
           payload: {
             channel, platform: channel === 'social' ? platform : 'other',
-            agentId: channel === 'social' && platform === 'coach' ? agentId || null : null,
-            agentNameSnapshot: channel === 'social' && platform === 'coach' && agentId
+            agentId: orderAgentEnabled ? agentId || null : null,
+            agentNameSnapshot: orderAgentEnabled && agentId
               ? selectedAgent?.label || agentNameSnapshot || null
               : null,
             seller: seller.trim(), buyerName: buyerName.trim(), buyerPhone: buyerPhone.trim(),
@@ -1202,7 +1207,7 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
                     setAgentNameSnapshot('')
                     return
                   }
-                  const selected = coachAgents.find((agent) => agent.id === value)
+                  const selected = eligibleOrderAgents.find((agent) => agent.id === value)
                   if (!selected) return
                   setAgentId(selected.id)
                   setAgentNameSnapshot(selected.label)
@@ -1211,7 +1216,7 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
                   <SelectContent>
                     <SelectItem value="none">{t('commerceOperations.order.noAgentAttribution')}</SelectItem>
                     {agentId && !selectedAgent ? <SelectItem value={agentId} disabled>{agentNameSnapshot || t('commerceOperations.order.agentFallback')} · {t('commerceOperations.order.agentUnavailable')}</SelectItem> : null}
-                    {coachAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.zone ? `${agent.label} · ${agent.zone}` : agent.label}</SelectItem>)}
+                    {eligibleOrderAgents.map((agent) => <SelectItem key={agent.id} value={agent.id}>{agent.zone ? `${agent.label} · ${agent.zone}` : agent.label}</SelectItem>)}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">{t('commerceOperations.order.agentAttributionHint')}</p>

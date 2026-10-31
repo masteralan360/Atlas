@@ -141,13 +141,15 @@ import {
   AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter
 } from './dialog'
+import {
+  SmallDialog,
+  SmallDialogContent,
+  SmallDialogDescription,
+  SmallDialogFooter,
+  SmallDialogHeader,
+  SmallDialogTitle
+} from './small-dialog'
 import { PressAndHoldButton } from './PressAndHoldButton'
 import { Textarea } from './textarea'
 import { Input } from './input'
@@ -3780,21 +3782,21 @@ export function Layout({ children }: LayoutProps) {
 
           {/* Sign Out Confirmation Modal */}
           {isDemoWorkspace(user?.workspaceCode) ? (
-            <Dialog open={isSignOutModalOpen} onOpenChange={setIsSignOutModalOpen}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2">
+            <SmallDialog open={isSignOutModalOpen} onOpenChange={setIsSignOutModalOpen}>
+              <SmallDialogContent>
+                <SmallDialogHeader>
+                  <SmallDialogTitle className="flex items-center gap-2">
                     <AlertTriangle className="w-5 h-5 text-destructive" />
                     {t('demo.signOutTitle', 'Leaving Demo Workspace')}
-                  </DialogTitle>
-                  <DialogDescription>
+                  </SmallDialogTitle>
+                  <SmallDialogDescription>
                     {t(
                       'demo.signOutWarn',
                       'Signing out will permanently delete this demo workspace and all related demo data. Are you sure you want to continue?'
                     )}
-                  </DialogDescription>
-                </DialogHeader>
-                <DialogFooter>
+                  </SmallDialogDescription>
+                </SmallDialogHeader>
+                <SmallDialogFooter>
                   <Button variant="ghost" allowViewer={true} onClick={() => setIsSignOutModalOpen(false)}>
                     {t('common.cancel') || 'Cancel'}
                   </Button>
@@ -3808,19 +3810,19 @@ export function Layout({ children }: LayoutProps) {
                   >
                     {t('demo.deleteAndSignOut', 'Delete & Sign Out')}
                   </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+                </SmallDialogFooter>
+              </SmallDialogContent>
+            </SmallDialog>
           ) : (
-            <Dialog open={isSignOutModalOpen} onOpenChange={setIsSignOutModalOpen}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>{t('auth.signOutConfirmTitle') || 'Sign Out'}</DialogTitle>
-                  <DialogDescription>
+            <SmallDialog open={isSignOutModalOpen} onOpenChange={setIsSignOutModalOpen}>
+              <SmallDialogContent>
+                <SmallDialogHeader>
+                  <SmallDialogTitle>{t('auth.signOutConfirmTitle') || 'Sign Out'}</SmallDialogTitle>
+                  <SmallDialogDescription>
                     {t('auth.signOutConfirmDesc') || 'Are you sure you want to sign out?'}
-                  </DialogDescription>
-                </DialogHeader>
-                <DialogFooter>
+                  </SmallDialogDescription>
+                </SmallDialogHeader>
+                <SmallDialogFooter>
                   <Button variant="ghost" allowViewer={true} onClick={() => setIsSignOutModalOpen(false)}>
                     {t('common.cancel') || 'Cancel'}
                   </Button>
@@ -3834,9 +3836,9 @@ export function Layout({ children }: LayoutProps) {
                   >
                     {t('auth.signOut') || 'Sign Out'}
                   </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+                </SmallDialogFooter>
+              </SmallDialogContent>
+            </SmallDialog>
           )}
           <CurrencyConverterPopup open={currencyConverterOpen} onClose={() => setCurrencyConverterOpen(false)} />
           <WorkspaceUsageModal

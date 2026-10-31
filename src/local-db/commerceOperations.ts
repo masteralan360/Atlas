@@ -70,7 +70,7 @@ async function readCommerceOrderDetailsFromCache(workspaceId: string, orderIds: 
     .toArray()
 }
 
-/** Load Coach/platform attribution only for the sales orders on the current page. */
+/** Load order attribution only for the sales orders on the current page. */
 export async function fetchCommerceOrderAttributions(
   workspaceId: string,
   orderIds: readonly string[],

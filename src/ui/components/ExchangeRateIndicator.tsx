@@ -7,12 +7,12 @@ import { cn } from '@/lib/utils'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from './theme-provider'
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger
-} from './dialog'
+    SmallDialog,
+    SmallDialogContent,
+    SmallDialogHeader,
+    SmallDialogTitle,
+    SmallDialogTrigger
+} from './small-dialog'
 import { Button } from './button'
 
 // Component for showing offline/error state for a specific currency
@@ -245,7 +245,7 @@ export function ExchangeRateIndicator({ compact = false }: { compact?: boolean }
     const isNotebookPage = location === '/notebook'
 
     return (
-        <Dialog open={isOpen} onOpenChange={setIsOpen}>
+        <SmallDialog open={isOpen} onOpenChange={setIsOpen}>
             <div className="flex items-center gap-2">
                 {/* Desktop View */}
                 <div className={cn('items-center gap-2', compact ? 'hidden' : 'hidden md:flex')}>
@@ -277,11 +277,11 @@ export function ExchangeRateIndicator({ compact = false }: { compact?: boolean }
                         <Calculator className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
                     </button>
 
-                    <DialogTrigger asChild>
+                    <SmallDialogTrigger asChild>
                         <div className="cursor-pointer hover:opacity-80 transition-opacity">
                             <ExchangeRateList />
                         </div>
-                    </DialogTrigger>
+                    </SmallDialogTrigger>
 
                     <button
                         onClick={refresh}
@@ -303,7 +303,7 @@ export function ExchangeRateIndicator({ compact = false }: { compact?: boolean }
 
                 {/* Mobile View */}
                 <div className={cn('items-center gap-1.5', compact ? 'flex' : 'md:hidden flex')}>
-                    <DialogTrigger asChild>
+                    <SmallDialogTrigger asChild>
                         <Button
                             variant="outline"
                             size="sm"
@@ -320,7 +320,7 @@ export function ExchangeRateIndicator({ compact = false }: { compact?: boolean }
                             <Globe className={cn("w-4 h-4 shrink-0", status === 'loading' && "animate-spin")} />
                             {!compact && <span className="text-xs font-bold uppercase tracking-tight hidden min-[380px]:inline">Live Rate</span>}
                         </Button>
-                    </DialogTrigger>
+                    </SmallDialogTrigger>
 
                     {!compact && (
                         <Button
@@ -344,19 +344,19 @@ export function ExchangeRateIndicator({ compact = false }: { compact?: boolean }
                 </div>
             </div>
 
-            <DialogContent dir={direction} className={cn(
+            <SmallDialogContent dir={direction} className={cn(
                 "max-w-[calc(100vw-2rem)] sm:max-w-md p-0 overflow-hidden shadow-2xl animate-in zoom-in duration-300",
                 style === 'neo-orange' ? "rounded-[var(--radius)] border-2 border-black dark:border-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]" : "rounded-2xl border-emerald-500/20"
             )}>
-                <DialogHeader className="p-6 border-b bg-emerald-500/5 items-start rtl:items-start text-start rtl:text-start relative overflow-hidden">
+                <SmallDialogHeader className="p-6 border-b bg-emerald-500/5 items-start rtl:items-start text-start rtl:text-start relative overflow-hidden">
                     {/* Decorative background for modal header */}
                     <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full -mr-12 -mt-12 blur-2xl" />
 
-                    <DialogTitle className="flex items-center gap-2 text-emerald-600 font-black tracking-tight text-xl">
+                    <SmallDialogTitle className="flex items-center gap-2 text-emerald-600 font-black tracking-tight text-xl">
                         <Coins className="w-6 h-6" />
                         {t('common.exchangeRates')}
-                    </DialogTitle>
-                </DialogHeader>
+                    </SmallDialogTitle>
+                </SmallDialogHeader>
 
                 <div className="p-2">
                     <ExchangeRateList isMobile />
@@ -393,7 +393,7 @@ export function ExchangeRateIndicator({ compact = false }: { compact?: boolean }
                         {t('common.done')}
                     </Button>
                 </div>
-            </DialogContent>
-        </Dialog>
+            </SmallDialogContent>
+        </SmallDialog>
     )
 }
