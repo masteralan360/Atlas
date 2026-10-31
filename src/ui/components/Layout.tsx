@@ -293,6 +293,14 @@ function prefetchRoute(href: string) {
   }
 }
 
+function isSidebarRouteActive(location: string, href: string) {
+  const normalizedLocation = location.replace(/\/+$/, '') || '/'
+  const normalizedHref = href.replace(/\/+$/, '') || '/'
+
+  return normalizedLocation === normalizedHref
+    || (normalizedHref !== '/' && normalizedLocation.startsWith(`${normalizedHref}/`))
+}
+
 export function Layout({ children }: LayoutProps) {
   const [location, setLocation] = useLocation()
   const { isEnabled: isNavigationRailPreferenceEnabled } = useNavigationRailDisplay()
@@ -2138,12 +2146,11 @@ export function Layout({ children }: LayoutProps) {
                       const showEcommerceBadge = item.href === '/ecommerce' && pendingEcommerceCount > 0
                       const isChildActive = isExpandableGroup
                         ? item.children!.some(
-                            (child) =>
-                              location === child.href || (child.href !== '/' && location.startsWith(child.href))
+                            (child) => isSidebarRouteActive(location, child.href)
                           )
                         : false
                       const isActive =
-                        location === item.href || (item.href !== '/' && location.startsWith(item.href)) || isChildActive
+                        isSidebarRouteActive(location, item.href) || isChildActive
                       const isOpen = isExpandableGroup ? Boolean(expandedNavGroups[item.href]) || isChildActive : false
                       const showChildren = isExpandableGroup && isOpen && !(isSidebarMini && !mobileSidebarOpen)
                       const isModuleLockerTarget = Boolean(
@@ -2402,8 +2409,7 @@ export function Layout({ children }: LayoutProps) {
                               )}
                             >
                               {item.children!.map((child) => {
-                                const isChildSelected =
-                                  location === child.href || (child.href !== '/' && location.startsWith(child.href))
+                                const isChildSelected = isSidebarRouteActive(location, child.href)
                                 const childLink = (
                                   <Link
                                     key={child.href}

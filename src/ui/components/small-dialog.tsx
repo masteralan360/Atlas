@@ -18,8 +18,8 @@ import {
 /**
  * Dialog primitives for focused, compact interactions.
  *
- * This shares the accessible Radix integration used by `Dialog`, while its
- * content defaults to the narrower width used by small modals.
+ * This shares the accessible Radix integration used by `Dialog`, while keeping
+ * small modals centered and compact on mobile and desktop.
  */
 const SmallDialog = Dialog
 
@@ -37,8 +37,12 @@ const SmallDialogContent = React.forwardRef<
 >(({ className, ...props }, ref) => (
     <DialogContent
         ref={ref}
-        className={cn("sm:max-w-md", className)}
         {...props}
+        className={cn(
+            "sm:max-w-md max-sm:top-[calc(50%+var(--titlebar-height)/2+var(--safe-area-top)/2)] max-sm:w-[calc(100vw-2rem)] max-sm:max-h-[calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-2rem)] max-sm:overflow-y-auto max-sm:rounded-xl",
+            className
+        )}
+        mobileFullscreen={false}
     />
 ))
 SmallDialogContent.displayName = "SmallDialogContent"

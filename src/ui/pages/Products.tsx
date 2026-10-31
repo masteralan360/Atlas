@@ -1389,32 +1389,54 @@ export function Products() {
 
     const variantsByParentId = useMemo(() => {
         const map = new Map<string, Product[]>()
-        for (const product of [...products, ...catalogProducts]) {
+        const familyProducts = useRemoteCatalogPage
+            ? [...catalogSupportProducts, ...catalogProducts]
+            : products
+        for (const product of familyProducts) {
             if (!product.parentProductId) continue
             const variants = map.get(product.parentProductId) ?? []
             variants.push(product)
             map.set(product.parentProductId, variants)
         }
         return map
-    }, [catalogProducts, products])
+    }, [catalogProducts, catalogSupportProducts, products, useRemoteCatalogPage])
 
     const productListGroups = useMemo(() => {
         const groups = new Map<string, ProductListGroup>()
 
         for (const product of filteredProducts) {
-            const primary = product.parentProductId ? productById.get(product.parentProductId) : product
+            const familyId = product.parentProductId || product.id
+            const primary = product.parentProductId ? productById.get(familyId) : product
             const groupPrimary = primary ?? product
-            const group = groups.get(groupPrimary.id) ?? { primary: groupPrimary, variants: [] }
+            if (groups.has(familyId)) continue
 
-            if (product.parentProductId && primary) {
-                group.variants.push(product)
-            }
+            const variants = (variantsByParentId.get(familyId) ?? [])
+                .filter((variant) => variant.id !== groupPrimary.id
+                    && !variant.isDeleted
+                    && (hasFeature('services') || !isService(variant)))
+                .sort((left, right) => {
+                    let comparison = 0
+                    switch (filters.sort) {
+                        case 'name_asc': comparison = left.name.localeCompare(right.name); break
+                        case 'name_desc': comparison = right.name.localeCompare(left.name); break
+                        case 'sku_asc': comparison = left.sku.localeCompare(right.sku); break
+                        case 'sku_desc': comparison = right.sku.localeCompare(left.sku); break
+                        case 'price_asc': comparison = left.price - right.price; break
+                        case 'price_desc': comparison = right.price - left.price; break
+                        case 'stock_asc': comparison = left.quantity - right.quantity; break
+                        case 'stock_desc': comparison = right.quantity - left.quantity; break
+                        case 'date_asc': comparison = new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime(); break
+                        case 'date_desc': comparison = new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(); break
+                        default: comparison = 0
+                    }
+                    return comparison || left.id.localeCompare(right.id)
+                })
 
-            groups.set(groupPrimary.id, group)
+            groups.set(familyId, { primary: groupPrimary, variants })
         }
 
         return Array.from(groups.values())
-    }, [filteredProducts, productById])
+    }, [filteredProducts, filters.sort, hasFeature, productById, variantsByParentId])
 
     const totalCount = useRemoteCatalogPage ? productCatalogPage.totalCount : filteredProducts.length
     const productPages = useMemo(

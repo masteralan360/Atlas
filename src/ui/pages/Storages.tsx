@@ -852,7 +852,11 @@ const totalStorageValue = useMemo(() => {
                     setIsDialogOpen(open)
                 }}
             >
-                <AppDialogContent className="max-w-xl" showCloseButton={!savingStorage}>
+                <AppDialogContent
+                    className="max-w-xl max-sm:w-[calc(100vw-2rem)] max-sm:max-h-[calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-2rem)] max-sm:rounded-2xl"
+                    mobileFullscreen={false}
+                    showCloseButton={!savingStorage}
+                >
                     <AppDialogHeader>
                         <AppDialogTitle>
                             {editingStorage ? t('storages.editStorage', 'Edit Storage') : t('storages.addStorage', 'New Storage')}

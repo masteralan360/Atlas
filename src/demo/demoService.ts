@@ -1,9 +1,11 @@
 import { db } from '@/local-db/database'
 import type { DemoJob } from './demoConfig'
-import { buildDemoCode, parseDemoOptionalModuleCodes } from './demoConfig'
+import { buildDemoCode, hasDemoOptionalModuleCode, parseDemoOptionalModuleCodes } from './demoConfig'
 import type { CurrencyCode } from '@/local-db/models'
 import { clearLocalDemoWorkspaceData } from './demoCleanup'
 import { supabase, isSupabaseConfigured } from '@/auth/supabase'
+import { setClinicalRegistryType } from '@/local-db/clinicalPresets'
+import { writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 
 export interface CreateDemoResult {
   userId: string
@@ -77,6 +79,9 @@ export async function createDemoWorkspace(
     updatedAt: now,
   })
 
+  // Set the mode before creating workspace-scoped records so demo data stays local.
+  writeWorkspaceModeSnapshot({ workspaceId, dataMode: 'demo' })
+
   await db.profiles.put({
     id: userId,
     workspaceId,
@@ -86,6 +91,10 @@ export async function createDemoWorkspace(
     profile_url: null,
     created_at: now,
   })
+
+  if (hasDemoOptionalModuleCode(optionalModuleCodes, 'BC3')) {
+    await setClinicalRegistryType(workspaceId, 'beauty3', userId)
+  }
 
   // Best-effort: register the timer on the server so it can enforce expiry
   // independently of the client clock. Non-blocking — local timer still works.

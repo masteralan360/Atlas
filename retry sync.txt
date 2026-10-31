@@ -17,16 +17,12 @@ Weekly Maintenence
 Replace Maintenence Incase homeowner wasn't present
 #
 
-Business partner form save slow
-
 #
 
 Ai Assistance Payment maker with Transaction send to admin dashboard
 User Plan Control in Billing
 
 #
-
-Partner Account Statement Back
 
 Make Quick Orders Faster
 
@@ -44,8 +40,6 @@ Overdue Loans
 ##
 Easy Expire Product 
 
-Fix POS Quick Order Time
-
 Collectable Open Payments for Transportation and Travel
 
 New Update alert like in PWA
@@ -55,9 +49,6 @@ Force Update Action in admin dashboard
 remove R2 Print Blob, only keep Manual Entry 
 
 Fix the Error in Supabase Logs
-
-Shipped Point Makes Sale Order
-Allow Shipped to be cancelled
 
 Remake PrintPreviewEditorPage
 

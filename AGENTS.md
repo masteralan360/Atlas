@@ -126,7 +126,7 @@ When a workflow explicitly uses `MultipleModalLayout`, only its last active pane
 Before finishing a modal, compare it with `src/ui/components/crm/BusinessPartnerFormDialog.tsx` and verify it at a narrow mobile width as well as desktop.
 
 ## Small Dialogs
-Use the `src/ui/components/ui/small-dialog.tsx` component for dialogs that are normally used for showing information, such as the selected items details or list of items.
+Use the `src/ui/components/ui/small-dialog.tsx` component for dialogs that are normally used for showing information, such as the selected items details or list of items, Or dialogs that have one or two minimal UI Control Inputs.
 
 ## Localization (required)
 Use the `react-i18next` library for all text content that appears in the UI . Do not hardcode strings in components or application logic. The expected flow is:

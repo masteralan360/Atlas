@@ -33,6 +33,7 @@ export const DEMO_OPTIONAL_MODULE_GRANTS = {
   ME: { type: 'module', key: 'manual_entry' },
   CE: { type: 'module', key: 'currency_exchange' },
   CA: { type: 'module', key: 'clinical_appointments' },
+  BC3: { type: 'module', key: 'clinical_appointments' },
   OFB: { type: 'capability', key: 'orderFreeBonus' },
   PB: { type: 'capability', key: 'priceBooks' },
   QO: { type: 'capability', key: 'quickOrder' },
@@ -62,6 +63,17 @@ export function isDemoOptionalModuleCodePrefix(value: string): boolean {
   return DEMO_OPTIONAL_MODULE_CODES.some((code) => code.startsWith(value))
 }
 
+function normalizeDemoOptionalModuleCodes(value: string): string {
+  return value.trim().toUpperCase().replace(/\s+/g, '-')
+}
+
+export function hasDemoOptionalModuleCode(
+  value: string,
+  code: DemoOptionalModuleCode,
+): boolean {
+  return normalizeDemoOptionalModuleCodes(value).split('-').includes(code)
+}
+
 export interface DemoOptionalModuleCodeIssues {
   invalidCodes: string[]
   incompleteCode: string | null
@@ -70,7 +82,7 @@ export interface DemoOptionalModuleCodeIssues {
 }
 
 export function inspectDemoOptionalModuleCodes(value: string): DemoOptionalModuleCodeIssues {
-  const normalized = value.trim().toUpperCase().replace(/\s+/g, '-')
+  const normalized = normalizeDemoOptionalModuleCodes(value)
   if (!normalized) {
     return {
       invalidCodes: [],
@@ -101,14 +113,14 @@ export function inspectDemoOptionalModuleCodes(value: string): DemoOptionalModul
 
 /** Strictly resolves user-supplied codes; callers must not rely on UI validation. */
 export function parseDemoOptionalModuleCodes(value: string): DemoOptionalModuleGrant[] {
-  const normalized = value.trim().toUpperCase().replace(/\s+/g, '-')
+  const normalized = normalizeDemoOptionalModuleCodes(value)
   if (!normalized) return []
 
   const codes = normalized.split('-')
   const grants = new Map<string, DemoOptionalModuleGrant>()
 
   for (const code of codes) {
-    if (!/^[A-Z]+$/.test(code) || !isDemoOptionalModuleCode(code)) {
+    if (!/^[A-Z0-9]+$/.test(code) || !isDemoOptionalModuleCode(code)) {
       throw new Error(`Unsupported optional demo module code: ${code || '(empty)'}`)
     }
 

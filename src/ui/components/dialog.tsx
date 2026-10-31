@@ -11,6 +11,7 @@ type DialogContentProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.
     showCloseButton?: boolean
     layout?: DialogLayout
     overlayClassName?: string
+    mobileFullscreen?: boolean
 }
 
 type PendingChangesContextValue = {
@@ -68,7 +69,7 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 const DialogContent = React.forwardRef<
     React.ElementRef<typeof DialogPrimitive.Content>,
     DialogContentProps
->(({ className, children, showCloseButton = true, layout = "default", overlayClassName, ...props }, ref) => {
+>(({ className, children, showCloseButton = true, layout = "default", overlayClassName, mobileFullscreen = true, ...props }, ref) => {
     const dialogOpen = React.useContext(DialogOpenContext)
     const { t, i18n } = useTranslation()
     const [contentNode, setContentNode] = React.useState<HTMLDivElement | null>(null)
@@ -279,14 +280,16 @@ const DialogContent = React.forwardRef<
                     className={cn(
                         "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
                         layout === "structured" && "top-[calc(50%+var(--titlebar-height)/2+var(--safe-area-top)/2)] flex max-h-[calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-0.75rem)] w-[calc(100vw-0.75rem)] max-w-3xl flex-col overflow-hidden rounded-[1.25rem] border-border/60 p-0 sm:w-full sm:max-h-[min(calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-2rem),820px)] sm:rounded-[1.75rem]",
-                        className
+                        className,
+                        mobileFullscreen && "max-sm:!left-0 max-sm:!right-0 max-sm:!top-[var(--titlebar-height)] max-sm:!bottom-0 max-sm:!h-[calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height))] max-sm:!max-h-[calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height))] max-sm:!w-screen max-sm:!max-w-none max-sm:!translate-x-0 max-sm:!translate-y-0 max-sm:!rounded-none max-sm:!border-0",
+                        mobileFullscreen && (layout === "structured" ? "max-sm:!overflow-hidden" : "max-sm:!overflow-y-auto")
                     )}
                     {...props}
                 >
                     {children}
                     {layout === "default" && scroller && <ScrollIndicator containerRef={{ current: scroller }} />}
                     {showCloseButton ? (
-                        <DialogPrimitive.Close className="absolute right-4 top-4 rtl:right-auto rtl:left-4 rounded-lg bg-destructive/10 p-1.5 text-destructive opacity-80 ring-offset-background transition-all hover:bg-destructive hover:text-destructive-foreground hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground z-[70]">
+                        <DialogPrimitive.Close className="absolute right-4 top-[calc(1rem+var(--safe-area-top))] rtl:right-auto rtl:left-4 rounded-lg bg-destructive/10 p-1.5 text-destructive opacity-80 ring-offset-background transition-all hover:bg-destructive hover:text-destructive-foreground hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground z-[70]">
                             <X className="h-4 w-4" />
                             <span className="sr-only">Close</span>
                         </DialogPrimitive.Close>
@@ -306,7 +309,7 @@ const DialogHeader = ({
     <div
         className={cn(
             "flex flex-col space-y-1.5 text-center sm:text-start",
-            layout === "structured" && "border-b bg-muted/30 px-4 py-4 pr-14 text-start sm:px-6 sm:py-5",
+            layout === "structured" && "border-b bg-muted/30 px-4 py-4 pr-14 pt-[calc(1rem+var(--safe-area-top))] text-start sm:px-6 sm:py-5",
             className
         )}
         {...props}

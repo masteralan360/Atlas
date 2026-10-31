@@ -6,11 +6,11 @@ import { isPositiveQuantity, roundQuantity } from '@/lib/quantity'
 import type { PaymentAccount } from '@/local-db'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import {
-    Dialog,
-    DialogContent,
     DialogHeader,
     DialogTitle,
     DialogFooter,
+    SmallDialog,
+    SmallDialogContent,
     Button,
     Label,
     Textarea
@@ -101,9 +101,9 @@ export function ReturnConfirmationModal({
     }
 
     return (
-        <Dialog open={isOpen} onOpenChange={handleClose}>
-            <DialogContent className={cn(
-                "max-w-lg w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in duration-300",
+        <SmallDialog open={isOpen} onOpenChange={handleClose}>
+            <SmallDialogContent className={cn(
+                "max-w-xl w-[95vw] sm:w-full sm:max-w-xl max-h-[min(82vh,720px)] max-sm:max-h-[min(calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-3rem),82vh)] overflow-y-auto shadow-2xl animate-in fade-in zoom-in duration-300",
                 "rounded-[2rem] border-[3px] border-primary/50 bg-background/95 backdrop-blur-3xl"
             )}
             >
@@ -241,7 +241,7 @@ export function ReturnConfirmationModal({
                                         <label
                                             key={reason.value}
                                             className={cn(
-                                                "flex items-center gap-3 p-4 rounded-2xl border-2 cursor-pointer transition-all",
+                                                "flex items-center gap-3 p-3 rounded-2xl border-2 cursor-pointer transition-all",
                                                 selectedReason === reason.value
                                                     ? "bg-primary/5 border-primary shadow-sm"
                                                     : "bg-muted/30 border-transparent hover:bg-muted/50 hover:border-border/50"
@@ -307,7 +307,7 @@ export function ReturnConfirmationModal({
                         </div>
                     )}
                 </div>
-            </DialogContent>
-        </Dialog>
+            </SmallDialogContent>
+        </SmallDialog>
     )
 }

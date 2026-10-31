@@ -134,7 +134,7 @@ export function OptionalModuleCodesInput({
     }
 
     if (!nativeEvent.inputType.startsWith('insert') || nativeEvent.data === null) return
-    if (/^[a-z]+$/i.test(nativeEvent.data)) {
+    if (/^[a-z0-9]+$/i.test(nativeEvent.data)) {
       const affected = getTouchedValidTokenIndexes(value, start, end, 'insert', true)
       if (affected.length) {
         event.preventDefault()
@@ -187,7 +187,7 @@ export function OptionalModuleCodesInput({
           return
         }
 
-        if (/^[a-z]$/i.test(event.key) && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        if (/^[a-z0-9]$/i.test(event.key) && !event.altKey && !event.ctrlKey && !event.metaKey) {
           const affected = getTouchedValidTokenIndexes(value, start, end, 'insert', true)
           if (affected.length) {
             event.preventDefault()
@@ -202,7 +202,7 @@ export function OptionalModuleCodesInput({
       }}
       onChange={(event) => {
         const nextValue = event.currentTarget.value
-        if (!/^[a-z\s-]*$/i.test(nextValue)) {
+        if (!/^[a-z0-9\s-]*$/i.test(nextValue)) {
           event.currentTarget.value = value
           return
         }
@@ -218,7 +218,7 @@ export function OptionalModuleCodesInput({
         event.preventDefault()
         const pasted = event.clipboardData.getData('text')
         if (!pasted) return
-        if (!/^[a-z\s-]*$/i.test(pasted)) return
+        if (!/^[a-z0-9\s-]*$/i.test(pasted)) return
 
         const input = event.currentTarget
         const start = input.selectionStart ?? value.length
