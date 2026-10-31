@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   availableOperations,
   copyShipment,
+  findPostalTariff,
   internationalIraqiPhone,
   isIraqiPhone,
   locations,
   parseShipmentQr,
+  postalTariffOptions,
   shipmentQr,
   signedIqd,
   shipmentValidationErrors,
@@ -89,6 +91,37 @@ describe("Post Service domain", () => {
     expect(locations).toHaveLength(19);
     expect(new Set(locations.map((x) => x.id)).size).toBe(19);
     expect(locations.find((x) => x.id === "halabja")).toBeDefined();
+  });
+  it("offers tariffs only for a complete valid destination and preserves the existing location rules", () => {
+    expect(postalTariffOptions("", "")).toEqual([]);
+    expect(postalTariffOptions("erbil", "")).toEqual([]);
+    expect(postalTariffOptions("baghdad", "ankawa")).toEqual([]);
+    for (const governorate of locations) {
+      for (const [area] of governorate.areas) {
+        const options = postalTariffOptions(governorate.id, area);
+        if (["erbil", "sulaymaniyah", "duhok"].includes(governorate.id)) {
+          const center = /center|centre/i.test(area);
+          expect(options).toEqual([{
+            size: "small_package", fee: center ? 5000 : 6000,
+            zone: center ? "center" : "outside",
+          }]);
+        } else {
+          expect(options).toHaveLength(7);
+          expect(options.map((option) => option.size)).toEqual([
+            "carton", "carton", "carton", "ship", "ship", "ship", "ship",
+          ]);
+        }
+      }
+    }
+  });
+  it("matches the size and fee together when restoring or reevaluating a selection", () => {
+    expect(findPostalTariff("baghdad", "karrada", "carton", 8000)).toMatchObject({ size: "carton", fee: 8000 });
+    expect(findPostalTariff("erbil", "ankawa", "carton", 8000)).toBeNull();
+    expect(findPostalTariff("erbil", "ankawa", "small_package", 6000)).toMatchObject({ zone: "outside" });
+    expect(findPostalTariff("erbil", "erbil-centre", "small_package", 6000)).toBeNull();
+    expect(findPostalTariff("erbil", "erbil-centre", "small_package", 5000)).toMatchObject({ zone: "center" });
+    expect(findPostalTariff("baghdad", "karrada", "ship", 8000)).toBeNull();
+    expect(findPostalTariff("erbil", "ankawa", null, null)).toBeNull();
   });
   it("supports direct final-mile delivery or administrator-authorized transfers", () => {
     expect(availableOperations(shipment, undefined, "office")).toEqual([

@@ -12,6 +12,7 @@ type CreateWorkspaceAccountRequest = {
     name?: unknown
     password?: unknown
     merchant?: unknown
+    coach?: unknown
 }
 
 type WorkspaceProfile = {
@@ -124,6 +125,21 @@ Deno.serve(async (req) => {
             }
         }
 
+        if (request.coach) {
+            const { data: agentType, error: agentTypeError } = await admin
+                .schema('crm')
+                .from('agent_types')
+                .select('id, mode, is_deleted')
+                .eq('id', request.coach.agentTypeId)
+                .eq('workspace_id', workspaceId)
+                .maybeSingle()
+
+            if (agentTypeError) throw agentTypeError
+            if (agentType?.mode !== 'seller' || agentType.is_deleted) {
+                return response('invalid_coach_agent_type')
+            }
+        }
+
         const merchantUserId = request.merchant ? crypto.randomUUID() : undefined
         if (merchantUserId) {
             const { error: permitError } = await admin.rpc('postal_prepare_registration', {
@@ -132,12 +148,28 @@ Deno.serve(async (req) => {
             })
             if (permitError) throw permitError
         }
+        let staffRegistrationPasskey: string | undefined
+        if (!request.merchant) {
+            const { data: staffKey, error: staffKeyError } = await admin
+                .from('keys')
+                .select('key_value')
+                .eq('key_name', 'staff')
+                .maybeSingle()
+
+            if (staffKeyError) throw staffKeyError
+            if (!staffKey?.key_value) throw new Error('Staff registration key is unavailable')
+            staffRegistrationPasskey = staffKey.key_value
+        }
+
         const { data: createdUserData, error: createUserError } = await admin.auth.admin.createUser({
             ...(merchantUserId ? { id: merchantUserId } : {}),
             email: request.email,
             password: request.password,
             email_confirm: true,
-            user_metadata: buildWorkspaceAccountUserMetadata(request.name, workspaceId)
+            user_metadata: {
+                ...buildWorkspaceAccountUserMetadata(request.name, workspaceId),
+                ...(staffRegistrationPasskey ? { passkey: staffRegistrationPasskey } : {})
+            }
         })
 
         if (createUserError || !createdUserData.user) {
@@ -170,6 +202,76 @@ Deno.serve(async (req) => {
             const code = getCreationFailureCode(profileError)
             const status = code === 'member_limit_reached' ? 403 : 400
             return response(code, status)
+        }
+
+        if (request.coach) {
+            const partnerId = crypto.randomUUID()
+            const agentId = crypto.randomUUID()
+            let partnerCreated = false
+            let agentCreated = false
+
+            try {
+                const { error: partnerError } = await admin.schema('crm').from('business_partners').insert({
+                    id: partnerId,
+                    workspace_id: workspaceId,
+                    partner_name: request.name,
+                    name: request.name,
+                    contact_name: request.name,
+                    role: 'agent',
+                    default_currency: 'usd',
+                    agent_facet_id: null,
+                    sync_status: 'synced',
+                    version: 1,
+                    is_deleted: false
+                })
+                if (partnerError) throw partnerError
+                partnerCreated = true
+
+                const { error: agentError } = await admin.schema('crm').from('agents').insert({
+                    id: agentId,
+                    workspace_id: workspaceId,
+                    business_partner_id: partnerId,
+                    // The agent schema requires a zone, but Add Coach does not collect territory in V1.
+                    zone: '',
+                    agent_type: 'seller',
+                    custom_agent_type_id: request.coach.agentTypeId,
+                    linked_user_id: createdUser.id,
+                    status: 'active',
+                    sync_status: 'synced',
+                    version: 1,
+                    is_deleted: false
+                })
+                if (agentError) throw agentError
+                agentCreated = true
+
+                const { error: partnerLinkError } = await admin.schema('crm').from('business_partners')
+                    .update({ agent_facet_id: agentId, updated_at: new Date().toISOString(), version: 2 })
+                    .eq('id', partnerId)
+                    .eq('workspace_id', workspaceId)
+                if (partnerLinkError) throw partnerLinkError
+
+                const { error: permissionError } = await admin.from('workspace_permissions').insert({
+                    workspace_id: workspaceId,
+                    user_uuid: createdUser.id,
+                    key: 'coach',
+                    module: 'coach'
+                })
+                if (permissionError) throw permissionError
+            } catch (coachSetupError) {
+                console.error('[workspace-account-creation] Coach account setup failed:', coachSetupError)
+                if (agentCreated) {
+                    const { error } = await admin.schema('crm').from('agents').delete().eq('id', agentId)
+                    if (error) console.error('[workspace-account-creation] Failed to clean up the coach agent:', error)
+                }
+                if (partnerCreated) {
+                    const { error } = await admin.schema('crm').from('business_partners').delete().eq('id', partnerId)
+                    if (error) console.error('[workspace-account-creation] Failed to clean up the coach partner:', error)
+                }
+                await admin.auth.admin.deleteUser(createdUser.id).catch((cleanupError) => {
+                    console.error('[workspace-account-creation] Failed to clean up the incomplete coach account:', cleanupError)
+                })
+                return response('account_creation_failed', 503)
+            }
         }
 
         return jsonResponse({ id: createdUser.id, email: request.email })

@@ -135,6 +135,9 @@
   "commerceOperations": {
     "title": "Commerce Operations",
     "subtitle": "Manage social and wholesale order intake, manual market records, and coach performance.",
+    "coachData": {
+      "title": "Coach Data"
+    },
     "tabs": {
       "social": "Social orders",
       "wholesale": "Wholesale",
@@ -173,7 +176,7 @@
       "openOrder": "Open order",
       "addRecord": "Add record",
       "openStockAdjustments": "Open stock adjustments",
-      "addCoach": "Add coach",
+      "addCoach": "Add Coach",
       "openAgents": "Open agents",
       "openCommissionLedger": "Commission ledger",
       "browseProducts": "Browse products",
@@ -342,8 +345,13 @@
     "coaches": {
       "title": "Coach performance",
       "subtitle": "Connect coaches to Agents and review sales commission records.",
-      "addTitle": "Add coach profile",
+      "addTitle": "Add Coach",
+      "addAccountTitle": "Add Coach",
       "coach": "Coach",
+      "selectSellerAgentType": "Select a seller agent type",
+      "sellerAgentTypesLoading": "Loading seller agent types…",
+      "noSellerAgentTypes": "No seller agent types are available in this workspace.",
+      "clearAgentType": "Clear agent type",
       "chooseAgent": "Search existing agent",
       "agentsRequired": "The Agents module is required to link coach profiles.",
       "commissionSetupHint": "Set up agent commission rules in Agents before using commission reporting.",
@@ -1480,6 +1488,10 @@
       "clearDescription": "This removes every module from Favorites on this device. The modules return to their original sidebar sections."
     },
     "modules": {
+      "/commerce-operations/coach-data": {
+        "description": "Access Coach Data.",
+        "badge": "V1"
+      },
       "/business-partners/product-movements-statement": {
         "description": "Review and print a business partner's actual product movements, quantities and commissions.",
         "badge": "Statement"
@@ -5852,6 +5864,7 @@
       "memberLimit": "This workspace has reached its member limit.",
       "notAuthorized": "Only a workspace administrator can create accounts here.",
       "workspaceUnavailable": "Account creation is available for active Cloud and Hybrid workspaces.",
+      "invalidCoachAgentType": "Choose an available seller agent type.",
       "invalidRequest": "Check the account details and try again.",
       "createFailed": "The account could not be created. Check the details and try again."
     }
@@ -6031,6 +6044,8 @@
       "teamPerformanceAccessDescription": "Access team performance reporting.",
       "hrAccess": "HR",
       "hrAccessDescription": "Access HR records and workflows.",
+      "coach": "Coach",
+      "coachDescription": "Marks a staff account as a coach and grants access to the Coach Data module.",
       "globalPrint": "Print",
       "globalPrintDescription": "Allow printing across all modules by default.",
       "manualEntryAccess": "Manual Entry",
@@ -11291,7 +11306,8 @@
       "center": "Center",
       "outside": "Outside"
     },
-    "tariffAssignmentHint": "Inspect the parcel and confirm its tariff before receiving it.",
+    "tariffAssignmentHint": "Review the selected size and tariff. You can change them before receiving the parcel.",
+    "tariffCreationHint": "Select the shipment size and tariff for the chosen governorate and area.",
     "deliveryFeeTitle": "Delivery Fee",
     "deliveryFee": "Delivery Fee",
     "deliveryFeeCollected": "Delivery Fee Collected",

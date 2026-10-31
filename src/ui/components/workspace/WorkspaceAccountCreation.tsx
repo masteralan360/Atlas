@@ -5,6 +5,7 @@ import {
     type ChangeEvent,
     type FormEvent,
     type KeyboardEvent,
+    type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -43,8 +44,16 @@ import {
 } from '@/postal/domain'
 
 interface WorkspaceAccountCreationProps {
-    accountType?: 'staff' | 'postalMerchant'
+    accountType?: 'staff' | 'postalMerchant' | 'coach'
     onCreated?: () => void | Promise<void>
+    buttonLabel?: string
+    dialogTitle?: string
+    dialogDescription?: string
+    createButtonLabel?: string
+    additionalFields?: ReactNode | ((disabled: boolean) => ReactNode)
+    additionalFieldsValid?: boolean
+    coach?: { agentTypeId: string }
+    onReset?: () => void
 }
 
 type AccountCreationErrorResponse = {
@@ -78,6 +87,14 @@ async function readAccountCreationErrorCode(error: unknown, data: unknown) {
 export function WorkspaceAccountCreation({
     accountType = 'staff',
     onCreated,
+    buttonLabel,
+    dialogTitle,
+    dialogDescription,
+    createButtonLabel,
+    additionalFields,
+    additionalFieldsValid = true,
+    coach,
+    onReset,
 }: WorkspaceAccountCreationProps) {
     const { user } = useAuth()
     const { hasFeature } = useWorkspace()
@@ -92,6 +109,7 @@ export function WorkspaceAccountCreation({
     const creatingRef = useRef(false)
     const [submitAttempted, setSubmitAttempted] = useState(false)
     const merchantAccount = accountType === 'postalMerchant'
+    const coachAccount = accountType === 'coach'
     const [organizationMode, setOrganizationMode] = useState<
         'join' | 'create' | ''
     >('')
@@ -105,7 +123,8 @@ export function WorkspaceAccountCreation({
             workspaceId &&
             (user.workspaceMode === 'cloud' ||
                 user.workspaceMode === 'hybrid') &&
-            (!merchantAccount || hasFeature('postal_service')),
+            (!merchantAccount || hasFeature('postal_service')) &&
+            (!coachAccount || hasFeature('agents')),
     )
 
     const formValues = useMemo(
@@ -115,9 +134,11 @@ export function WorkspaceAccountCreation({
     const validationError = validateWorkspaceAccountCreationForm(formValues)
     const request = buildWorkspaceAccountCreationRequest(
         formValues,
-        merchantAccount
-            ? { type: 'postalMerchant', organizationMode, organizationValue }
-            : { type: 'staff' },
+        coachAccount
+            ? { type: 'coach', agentTypeId: coach?.agentTypeId ?? '' }
+            : merchantAccount
+                ? { type: 'postalMerchant', organizationMode, organizationValue }
+                : { type: 'staff' },
     )
     const hasInput = Boolean(name || email || password || confirmPassword)
 
@@ -131,6 +152,7 @@ export function WorkspaceAccountCreation({
         setSubmitAttempted(false)
         setOrganizationMode('')
         setOrganizationValue('')
+        onReset?.()
     }
 
     const handleOrganizationCodeChange = (
@@ -213,7 +235,7 @@ export function WorkspaceAccountCreation({
     const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault()
         setSubmitAttempted(true)
-        if (creatingRef.current || !request) return
+        if (creatingRef.current || !request || (coachAccount && !additionalFieldsValid)) return
 
         creatingRef.current = true
         setIsCreating(true)
@@ -278,7 +300,7 @@ export function WorkspaceAccountCreation({
                 disabled={isCreating}
             >
                 <UserPlus className="me-2 h-4 w-4" aria-hidden="true" />
-                {t('workspaceAccountCreation.create')}
+                {buttonLabel ?? t('workspaceAccountCreation.create')}
             </Button>
             <AppDialog open={dialogOpen} onOpenChange={handleOpenChange}>
                 <AppDialogContent
@@ -291,10 +313,10 @@ export function WorkspaceAccountCreation({
                                 className="h-5 w-5 text-primary"
                                 aria-hidden="true"
                             />
-                            {t('workspaceAccountCreation.title')}
+                            {dialogTitle ?? t('workspaceAccountCreation.title')}
                         </AppDialogTitle>
                         <p className="text-sm text-muted-foreground">
-                            {t('workspaceAccountCreation.description')}
+                            {dialogDescription ?? t('workspaceAccountCreation.description')}
                         </p>
                     </AppDialogHeader>
 
@@ -303,6 +325,9 @@ export function WorkspaceAccountCreation({
                         className="flex min-h-0 flex-1 flex-col"
                     >
                         <AppDialogBody className="space-y-4">
+                            {typeof additionalFields === 'function'
+                                ? additionalFields(isCreating)
+                                : additionalFields}
                             {merchantAccount && (
                                 <div className="space-y-3 rounded-xl border p-3">
                                     <Label id="postal-organization-path">
@@ -530,7 +555,7 @@ export function WorkspaceAccountCreation({
                             </Button>
                             <Button
                                 type="submit"
-                                disabled={!request || isCreating}
+                                disabled={!request || (coachAccount && !additionalFieldsValid) || isCreating}
                             >
                                 {isCreating ? (
                                     <Loader2
@@ -543,11 +568,9 @@ export function WorkspaceAccountCreation({
                                         aria-hidden="true"
                                     />
                                 )}
-                                {t(
-                                    isCreating
-                                        ? 'workspaceAccountCreation.creating'
-                                        : 'workspaceAccountCreation.create',
-                                )}
+                                {isCreating
+                                    ? t('workspaceAccountCreation.creating')
+                                    : createButtonLabel ?? t('workspaceAccountCreation.create')}
                             </Button>
                         </AppDialogFooter>
                     </form>

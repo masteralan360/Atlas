@@ -14,9 +14,9 @@ import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useWorkspacePermissions } from '@/permissions'
 import { db } from '@/local-db/database'
-import type { Agent, BusinessPartner, CommerceOperationRecord, CommerceOperationRecordType, CurrencyCode, ExchangeRateSnapshot, PaymentAccount, Product, SalesOrder, SalesOrderItem } from '@/local-db/models'
+import type { Agent, BusinessPartner, CommerceOperationRecord, CommerceOperationRecordType, CurrencyCode, CustomAgentType, ExchangeRateSnapshot, PaymentAccount, Product, SalesOrder, SalesOrderItem } from '@/local-db/models'
 import { createQuickSalesOrder, resolveSocialOrderAgentCreator } from '@/local-db/orders'
-import { createBusinessPartner } from '@/local-db/businessPartners'
+import { createBusinessPartner, useCustomAgentTypes } from '@/local-db/businessPartners'
 import { createCommerceOperationRecord, refreshCommerceOperationRecords, updateCommerceOperationRecord } from '@/local-db/commerceOperations'
 import { useProducts, useStorages, usePriceBooks, usePriceBookItems, useInventory, usePaymentAccountsState } from '@/local-db'
 import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
@@ -29,6 +29,7 @@ import { DateTimePicker } from '@/ui/components/ui/date-time-picker'
 import { PriceBookName } from '@/ui/components/PriceBookName'
 import { PaymentMethodSelector } from '@/ui/components/PaymentMethodSelector'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
+import { WorkspaceAccountCreation } from '@/ui/components/workspace/WorkspaceAccountCreation'
 import { Button } from '@/ui/components/button'
 import { Input } from '@/ui/components/input'
 import {
@@ -200,7 +201,6 @@ export function CommerceOperations() {
   const [orderSectionTabs, setOrderSectionTabs] = useState<Record<OrderChannel, OrderSectionTab>>({ social: 'newOrder', wholesale: 'newOrder' })
   const [dataDialogOpen, setDataDialogOpen] = useState(false)
   const [editingDataRecord, setEditingDataRecord] = useState<CommerceOperationRecord | null>(null)
-  const [coachDialogOpen, setCoachDialogOpen] = useState(false)
 
   const products = useProducts(workspaceId, { enabled: Boolean(workspaceId && hasFeature('products')) })
   const storages = useStorages(workspaceId && hasFeature('products') ? workspaceId : undefined)
@@ -277,6 +277,9 @@ export function CommerceOperations() {
   const canCreateOrders = hasFeature('orders') && hasFeature('products') && hasFeature('crm') && hasPermission('orders.saleOrdersAccess')
   const canManageRecords = user?.role === 'admin' || user?.role === 'staff'
   const canUseCoaches = hasFeature('agents')
+  const canCreateCoachAccount = canUseCoaches
+    && user?.role === 'admin'
+    && (user.workspaceMode === 'cloud' || user.workspaceMode === 'hybrid')
   const canViewCommissions = hasFeature('sales_agent_commissions')
 
   return (
@@ -386,8 +389,8 @@ export function CommerceOperations() {
           commissions={commissionEntries}
           canUseCoaches={canUseCoaches}
           canViewCommissions={canViewCommissions}
-          canManage={canManageRecords}
-          onAdd={() => setCoachDialogOpen(true)}
+          canCreateCoachAccount={canCreateCoachAccount}
+          workspaceId={workspaceId}
           onOpenAgents={() => navigate('/agents')}
           onOpenCommissions={() => navigate('/agents/commissions')}
           t={t}
@@ -402,16 +405,6 @@ export function CommerceOperations() {
         workspaceId={workspaceId}
         userId={user?.id}
         iqdPreference={features.iqd_display_preference}
-        canManage={canManageRecords}
-        onSaved={() => { if (workspaceId) void refreshCommerceOperationRecords(workspaceId) }}
-        t={t}
-      />
-      <CoachProfileDialog
-        open={coachDialogOpen}
-        onOpenChange={setCoachDialogOpen}
-        workspaceId={workspaceId}
-        userId={user?.id}
-        existing={coachRecords}
         canManage={canManageRecords}
         onSaved={() => { if (workspaceId) void refreshCommerceOperationRecords(workspaceId) }}
         t={t}
@@ -558,15 +551,114 @@ function DataCenterSection({ records, products, t, currencyPreference, canManage
   )
 }
 
-function CoachesSection({ records, agents, partners, commissions, canUseCoaches, canViewCommissions, canManage, onAdd, onOpenAgents, onOpenCommissions, t, currencyPreference }: {
+function CoachAccountCreation({ workspaceId, t }: {
+  workspaceId?: string
+  t: (key: string, options?: Record<string, unknown>) => string
+}) {
+  const agentTypes = useCustomAgentTypes(workspaceId)
+  const sellerAgentTypes = useMemo(
+    () => agentTypes.filter((agentType) => agentType.mode === 'seller').sort((left, right) => left.name.localeCompare(right.name)),
+    [agentTypes],
+  )
+  const [selectedAgentTypeId, setSelectedAgentTypeId] = useState('')
+  const [selectedAgentTypeSnapshot, setSelectedAgentTypeSnapshot] = useState<CustomAgentType | null>(null)
+  const selectedAgentType = sellerAgentTypes.find((agentType) => agentType.id === selectedAgentTypeId)
+  const selectedAgentTypeAvailable = Boolean(selectedAgentType)
+  const selectedAgentTypeLabel = selectedAgentType?.name || selectedAgentTypeSnapshot?.name
+  const isValid = selectedAgentTypeAvailable
+
+  async function refreshCoachAccounts() {
+    if (!workspaceId) return
+    try {
+      const { fetchTableFromSupabase } = await import('@/local-db/hooks')
+      await Promise.allSettled([
+        fetchTableFromSupabase('agents', db.agents, workspaceId),
+        fetchTableFromSupabase('business_partners', db.business_partners, workspaceId),
+      ])
+    } catch (error) {
+      console.error('[CommerceOperations] Failed to refresh coach account data:', error)
+    }
+  }
+
+  return (
+    <WorkspaceAccountCreation
+      accountType="coach"
+      buttonLabel={t('commerceOperations.actions.addCoach')}
+      dialogTitle={t('commerceOperations.coaches.addAccountTitle')}
+      coach={{ agentTypeId: selectedAgentTypeId }}
+      additionalFieldsValid={isValid}
+      additionalFields={(disabled) => (
+        <>
+          <div className="space-y-2">
+            <div className="flex items-end gap-2">
+              <div className="min-w-0 flex-1 space-y-2">
+                <RequiredLabel>{t('businessPartners.agent.type')}</RequiredLabel>
+                <Select
+                  value={selectedAgentTypeId || undefined}
+                  onValueChange={(value) => {
+                    const nextAgentType = sellerAgentTypes.find((agentType) => agentType.id === value)
+                    if (!nextAgentType) return
+                    setSelectedAgentTypeId(nextAgentType.id)
+                    setSelectedAgentTypeSnapshot(nextAgentType)
+                  }}
+                  disabled={disabled || (agentTypes.isLoading && sellerAgentTypes.length === 0)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={t('commerceOperations.coaches.selectSellerAgentType')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectedAgentTypeId && !selectedAgentTypeAvailable ? (
+                      <SelectItem value={selectedAgentTypeId} disabled>
+                        {selectedAgentTypeLabel || t('agents.agentTypes.unavailableSelected')}
+                      </SelectItem>
+                    ) : null}
+                    {sellerAgentTypes.length ? sellerAgentTypes.map((agentType) => (
+                      <SelectItem key={agentType.id} value={agentType.id}>{agentType.name}</SelectItem>
+                    )) : (
+                      <SelectItem value={agentTypes.isLoading ? '__loading__' : '__no_seller_types__'} disabled>
+                        {agentTypes.isLoading
+                          ? t('commerceOperations.coaches.sellerAgentTypesLoading')
+                          : t('commerceOperations.coaches.noSellerAgentTypes')}
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+              {selectedAgentTypeId ? (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="outline"
+                  aria-label={t('commerceOperations.coaches.clearAgentType')}
+                  title={t('commerceOperations.coaches.clearAgentType')}
+                  disabled={disabled}
+                  onClick={() => { setSelectedAgentTypeId(''); setSelectedAgentTypeSnapshot(null) }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </>
+      )}
+      onCreated={refreshCoachAccounts}
+      onReset={() => {
+        setSelectedAgentTypeId('')
+        setSelectedAgentTypeSnapshot(null)
+      }}
+    />
+  )
+}
+
+function CoachesSection({ records, agents, partners, commissions, canUseCoaches, canViewCommissions, canCreateCoachAccount, workspaceId, onOpenAgents, onOpenCommissions, t, currencyPreference }: {
   records: CommerceOperationRecord[]
   agents: Array<{ id: string; businessPartnerId: string; status: string }>
   partners: BusinessPartner[]
   commissions: Array<{ agentId: string; orderId?: string | null; kind: string; status: string; currency: CurrencyCode; amount: number; occurredAt: string }>
   canUseCoaches: boolean
   canViewCommissions: boolean
-  canManage: boolean
-  onAdd: () => void
+  canCreateCoachAccount: boolean
+  workspaceId?: string
   onOpenAgents: () => void
   onOpenCommissions: () => void
   t: (key: string, options?: Record<string, unknown>) => string
@@ -580,7 +672,7 @@ function CoachesSection({ records, agents, partners, commissions, canUseCoaches,
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="flex items-center gap-2 text-xl font-semibold"><UsersRound className="h-5 w-5 text-primary" />{t('commerceOperations.coaches.title')}</h2><p className="mt-1 text-sm text-muted-foreground">{t('commerceOperations.coaches.subtitle')}</p></div><div className="flex flex-wrap gap-2"><Button variant="outline" className="gap-2" onClick={onOpenAgents}><UserRound className="h-4 w-4" />{t('commerceOperations.actions.openAgents')}</Button>{canUseCoaches && canManage ? <Button className="gap-2" onClick={onAdd}><Plus className="h-4 w-4" />{t('commerceOperations.actions.addCoach')}</Button> : null}</div></div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="flex items-center gap-2 text-xl font-semibold"><UsersRound className="h-5 w-5 text-primary" />{t('commerceOperations.coaches.title')}</h2><p className="mt-1 text-sm text-muted-foreground">{t('commerceOperations.coaches.subtitle')}</p></div><div className="flex flex-wrap gap-2">{canCreateCoachAccount ? <CoachAccountCreation workspaceId={workspaceId} t={t} /> : null}<Button variant="outline" className="gap-2" onClick={onOpenAgents}><UserRound className="h-4 w-4" />{t('commerceOperations.actions.openAgents')}</Button></div></div>
       {!canUseCoaches ? <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-muted-foreground">{t('commerceOperations.coaches.agentsRequired')}</div> : null}
       <DateRangeFilters label={t('commerceOperations.filters.commissionDate')} />
       <div className="grid gap-3 sm:grid-cols-3"><MetricCard title={t('commerceOperations.coaches.coachCount')} value={records.length} icon={UsersRound} /><MetricCard title={t('commerceOperations.coaches.activeCoaches')} value={records.filter((record) => record.relatedPartnerId && agentByPartner.get(record.relatedPartnerId)?.status === 'active').length} icon={Check} /><MetricCard title={t('commerceOperations.coaches.commissionEntries')} value={filteredCommissions.length} icon={Wallet} /></div>
@@ -1492,64 +1584,5 @@ function DataRecordDialog({ open, onOpenChange, record, workspaceId, userId, iqd
 
 function PlatformSelect({ value, onChange, disabled, t }: { value: (typeof PLATFORM_OPTIONS)[number]; onChange: (value: (typeof PLATFORM_OPTIONS)[number]) => void; disabled: boolean; t: (key: string) => string }) {
   return <Select value={value} onValueChange={(next) => onChange(next as typeof value)} disabled={disabled}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{PLATFORM_OPTIONS.map((option) => <SelectItem key={option} value={option}>{t(`commerceOperations.platforms.${option}`)}</SelectItem>)}</SelectContent></Select>
-}
-
-function CoachProfileDialog({ open, onOpenChange, workspaceId, userId, existing, canManage, onSaved, t }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  workspaceId?: string
-  userId?: string
-  existing: CommerceOperationRecord[]
-  canManage: boolean
-  onSaved: () => void
-  t: (key: string, options?: Record<string, unknown>) => string
-}) {
-  const { toast } = useToast()
-  const [coach, setCoach] = useState<BusinessPartner | null>(null)
-  const [coachName, setCoachName] = useState('')
-  const [city, setCity] = useState('')
-  const [phone, setPhone] = useState('')
-  const [notes, setNotes] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [attempted, setAttempted] = useState(false)
-  const alreadyLinked = (partnerId?: string | null) => Boolean(partnerId && existing.some((record) => record.relatedPartnerId === partnerId))
-
-  useEffect(() => {
-    if (!open) return
-    setCoach(null); setCoachName(''); setCity(''); setPhone(''); setNotes(''); setSaving(false); setAttempted(false)
-  }, [open])
-  const close = (next: boolean) => { if (saving && !next) return; onOpenChange(next) }
-  const valid = Boolean(canManage && workspaceId && coach && !alreadyLinked(coach.id) && !saving)
-
-  async function save() {
-    setAttempted(true)
-    if (!valid || !workspaceId || !coach) return
-    setSaving(true)
-    try {
-      await createCommerceOperationRecord(workspaceId, {
-        recordType: 'coach_profile', recordDate: new Date().toISOString(), title: coach.partnerName,
-        relatedPartnerId: coach.id, createdBy: userId ?? null,
-        payload: { agentId: coach.agentFacetId || null, partnerId: coach.id, name: coach.partnerName, phone: phone.trim() || coach.phone || null, city: city.trim() || coach.city || null, notes: notes.trim() || null },
-      })
-      toast({ title: t('commerceOperations.toast.coachSaved') })
-      onSaved(); close(false)
-    } catch {
-      toast({ title: t('commerceOperations.toast.coachFailed'), description: t('commerceOperations.toast.tryAgain'), variant: 'destructive' })
-    } finally { setSaving(false) }
-  }
-
-  return (
-    <AppDialog open={open} onOpenChange={close}>
-      <AppDialogContent className="max-w-xl" onPointerDownOutside={(event) => saving && event.preventDefault()} onEscapeKeyDown={(event) => saving && event.preventDefault()}>
-        <AppDialogHeader><AppDialogTitle className="flex items-center gap-2"><UsersRound className="h-5 w-5 text-primary" />{t('commerceOperations.coaches.addTitle')}</AppDialogTitle></AppDialogHeader>
-        <AppDialogBody><div className="space-y-4">
-          <div className="space-y-2"><RequiredLabel>{t('commerceOperations.coaches.coach')}</RequiredLabel><div className="flex gap-2"><PartnerAutocompleteInput value={coachName} onChange={(value) => { setCoachName(value); setCoach(null) }} onSelectPartner={(partner) => { setCoach(partner); setCoachName(partner.partnerName); setPhone(partner.phone || ''); setCity(partner.city || '') }} workspaceId={workspaceId || ''} roles={['agent']} includeAgentRoles placeholder={t('commerceOperations.coaches.chooseAgent')} disabled={saving} className="min-w-0 flex-1" /><Button type="button" size="icon" variant="outline" aria-label={t('commerceOperations.actions.unlinkCoach')} disabled={!coach || saving} onClick={() => { setCoach(null); setCoachName(''); setPhone(''); setCity('') }}><X className="h-4 w-4" /></Button></div>{coach ? <Badge className="gap-1"><Check className="h-3 w-3" />{t('commerceOperations.labels.linked')}</Badge> : null}{attempted && !coach ? <p className="text-xs text-destructive">{t('commerceOperations.validation.coachRequired')}</p> : null}{coach && alreadyLinked(coach.id) ? <p className="text-xs text-destructive">{t('commerceOperations.validation.coachExists')}</p> : null}</div>
-          <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="commerce-coach-phone">{t('commerceOperations.fields.phone')}</Label><Input id="commerce-coach-phone" value={phone} onChange={(event) => setPhone(event.target.value)} disabled={saving} /></div><div className="space-y-2"><Label htmlFor="commerce-coach-city">{t('commerceOperations.fields.city')}</Label><Input id="commerce-coach-city" value={city} onChange={(event) => setCity(event.target.value)} disabled={saving} /></div><div className="space-y-2 sm:col-span-2"><Label htmlFor="commerce-coach-notes">{t('commerceOperations.fields.notes')}</Label><Textarea id="commerce-coach-notes" value={notes} onChange={(event) => setNotes(event.target.value)} disabled={saving} /></div></div>
-          <p className="text-xs text-muted-foreground">{t('commerceOperations.coaches.commissionSetupHint')}</p>
-        </div></AppDialogBody>
-        <AppDialogFooter><Button type="button" variant="outline" disabled={saving} onClick={() => close(false)}>{t('common.cancel')}</Button><Button type="button" disabled={!valid} onClick={() => void save()}>{saving ? t('commerceOperations.actions.saving') : t('commerceOperations.actions.saveCoach')}</Button></AppDialogFooter>
-      </AppDialogContent>
-    </AppDialog>
-  )
 }
 

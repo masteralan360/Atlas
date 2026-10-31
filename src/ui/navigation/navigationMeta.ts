@@ -231,6 +231,11 @@ export const moduleMetaByHref: Record<string, ModuleMeta> = {
     description: "Run the main checkout and in-store selling flow.",
     badge: "Checkout",
   },
+  "/commerce-operations/coach-data": {
+    section: "people-and-workspace",
+    description: "Open Coach Data.",
+    badge: "V1",
+  },
   "/instant-pos": {
     section: "sell-and-serve",
     description: "Handle rapid-service orders with the faster POS flow.",

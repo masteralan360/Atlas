@@ -190,6 +190,23 @@ function Fixture() {
         />
       </Providers>
     )
+  if (view === 'receive') {
+    const params = new URLSearchParams(location.search)
+    const receivingRole = params.get('role') === 'office' ? 'office' : 'admin'
+    return (
+      <Providers>
+        {open ? (
+          <OperationDialog
+            scope={{ ...scope, role: receivingRole,
+              userId: receivingRole === 'office' ? '00000000-0000-4000-8000-000000000012' : '00000000-0000-4000-8000-000000000010' }}
+            shipment={JSON.parse(params.get('shipment')!) as PostalShipment}
+            operation="receive"
+            onClose={() => setOpen(false)}
+          />
+        ) : <p data-testid="received">Received</p>}
+      </Providers>
+    )
+  }
   if (view === 'payment')
     return (
       <Providers>

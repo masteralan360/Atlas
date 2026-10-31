@@ -2,7 +2,6 @@ import { usePostalAction } from "./usePostalAccess";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  AlertCircle,
   PackagePlus,
   Loader2,
   ShieldCheck,
@@ -26,16 +25,20 @@ import {
 } from "@/ui/components";
 import {
   copyShipment,
+  findPostalTariff,
+  postalTariffOptions,
   signedIqd,
   shipmentValidationErrors,
   type ShipmentValidationError,
   type ShipmentInput,
   type PostalShipment,
   type PostalOrganization,
+  type PostalTariffOption,
 } from "./domain";
 import { postalCommand, type PostalScope } from "@/local-db/postal";
 import { LocationPicker } from "./shared";
 import { OrganizationAutoCompleteInput } from "./OrganizationAutoCompleteInput";
+import { ShipmentTariffSelector } from "./ShipmentTariffSelector";
 
 const validationFields = {
   recipient_name: ["shipment-recipient_name", "postal.recipient_name"],
@@ -48,6 +51,7 @@ const validationFields = {
   pieces: ["shipment-pieces", "postal.pieces"],
   delivery_notes: ["shipment-notes", "postal.deliveryNotes"],
   reason: ["shipment-reason", "postal.correctionReason"],
+  tariff_size: ["shipment-tariff", "postal.shipmentSize"],
 } as const;
 type ValidationField = keyof typeof validationFields;
 
@@ -93,6 +97,17 @@ export function ShipmentForm({
     source?.pieces ? String(source.pieces) : "",
   );
   const [reason, setReason] = useState("");
+  const needsTariff = !editing || source?.state === "draft";
+  const [selectedTariff, setSelectedTariff] = useState<PostalTariffOption | null>(
+    () => source
+      ? findPostalTariff(
+          source.governorate, source.area, source.shipment_size, source.delivery_fee,
+        )
+      : null,
+  );
+  const tariff = findPostalTariff(
+    form.governorate, form.area, selectedTariff?.size, selectedTariff?.fee,
+  );
   const [touched, setTouched] = useState<
     Partial<Record<ValidationField, boolean>>
   >({});
@@ -108,6 +123,7 @@ export function ShipmentForm({
     shipmentValidationErrors(payload);
   if (editing && scope.role === "admin" && !reason.trim())
     errors.reason = "required";
+  if (needsTariff && !tariff) errors.tariff_size = "required";
   const invalidFields = Object.keys(validationFields).filter(
     (field) => errors[field as ValidationField],
   ) as ValidationField[];
@@ -163,6 +179,9 @@ export function ShipmentForm({
             if (!valid) return;
             const commandPayload = {
               ...payload,
+              ...(needsTariff
+                ? { tariff_size: tariff?.size, delivery_fee: tariff?.fee }
+                : {}),
               ...(requiresOrganization
                 ? { organization_id: selectedOrganization?.id }
                 : {}),
@@ -246,12 +265,13 @@ export function ShipmentForm({
                   key={key}
                 >
                   <Label htmlFor={`shipment-${key}`}>
-                    {t(`postal.${key}`)} *
+                    {t(`postal.${key}`)}
+                    {key !== "backup_phone" && " *"}
                   </Label>
                   <Input
                     id={`shipment-${key}`}
                     {...fieldValidation(key)}
-                    required
+                    required={key !== "backup_phone"}
                     value={form[key]}
                     maxLength={key === "recipient_name" ? 160 : 15}
                     inputMode={key === "recipient_name" ? "text" : "tel"}
@@ -271,9 +291,12 @@ export function ShipmentForm({
               governorate={form.governorate}
               area={form.area}
               disabled={action.busy}
-              onChange={(governorate, area) =>
-                setForm((f) => ({ ...f, governorate, area }))
-              }
+              onChange={(governorate, area) => {
+                setForm((f) => ({ ...f, governorate, area }));
+                setSelectedTariff((current) =>
+                  findPostalTariff(governorate, area, current?.size, current?.fee),
+                );
+              }}
             />
             <div className="space-y-2">
               <Label htmlFor="shipment-address">{t("postal.address")}</Label>
@@ -408,48 +431,14 @@ export function ShipmentForm({
                 {fieldError("reason")}
               </div>
             )}
-            {!valid && (
-              <div
-                data-testid="shipment-validation"
-                className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm"
-                aria-labelledby="shipment-validation-title"
-                role="region"
-              >
-                <p
-                  id="shipment-validation-title"
-                  className="mb-2 flex items-center gap-2 font-medium"
-                >
-                  <AlertCircle className="h-4 w-4 shrink-0 text-destructive" />
-                  {t("postal.validation.checkFields")}
-                </p>
-                <ul className="space-y-2">
-                  {invalidFields.map((field) => (
-                    <li key={field}>
-                      <button
-                        type="button"
-                        className="text-start underline underline-offset-2 hover:text-primary focus-visible:outline focus-visible:outline-2"
-                        onClick={() => {
-                          setTouched((current) => ({
-                            ...current,
-                            [field]: true,
-                          }));
-                          let target = document.getElementById(
-                            validationFields[field][0],
-                          );
-                          if (target?.matches(":disabled"))
-                            target =
-                              document.getElementById("postal-governorate");
-                          target?.focus({ preventScroll: true });
-                          target?.scrollIntoView({ block: "center" });
-                        }}
-                      >
-                        {t(validationFields[field][1])}:{" "}
-                        {t(`postal.validation.${errors[field]}`)}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+            {needsTariff && (
+              <ShipmentTariffSelector
+                id="shipment-tariff"
+                options={postalTariffOptions(form.governorate, form.area)}
+                value={tariff}
+                disabled={action.busy}
+                onChange={setSelectedTariff}
+              />
             )}
           </AppDialogBody>
           <AppDialogFooter>

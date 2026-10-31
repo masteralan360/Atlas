@@ -3445,7 +3445,7 @@ export function Layout({ children }: LayoutProps) {
               // Mobile uses this shared container as its scroller, so the top bar
               // follows the content. Desktop retains its isolated page scroller.
               'h-full transition-[padding] duration-300 ease-in-out flex flex-col overflow-x-hidden overflow-y-auto overscroll-contain custom-scrollbar lg:overflow-hidden',
-              location === '/whatsapp' || isPosLikeRoute ? 'bg-background' : 'bg-muted/30',
+              'bg-background',
               isTauri && 'mt-[var(--titlebar-height)] h-[calc(100vh-var(--titlebar-height))]',
               // Desktop Sidebar Padding Logic
               desktopSidebarOpen

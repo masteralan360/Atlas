@@ -135,6 +135,9 @@
   "commerceOperations": {
     "title": "إدارة التجارة",
     "subtitle": "إدارة استقبال الطلبات الاجتماعية والجملة وسجلات السوق اليدوية وأداء المدربين.",
+    "coachData": {
+      "title": "بيانات المدربين"
+    },
     "tabs": {
       "social": "طلبات التواصل الاجتماعي",
       "wholesale": "الجملة",
@@ -342,8 +345,13 @@
     "coaches": {
       "title": "أداء المدربين",
       "subtitle": "اربط المدربين بالوكلاء وراجع سجلات عمولات المبيعات.",
-      "addTitle": "إضافة ملف مدرب",
+      "addTitle": "إضافة مدرب",
+      "addAccountTitle": "إضافة مدرب",
       "coach": "المدرب",
+      "selectSellerAgentType": "اختر نوع وكيل البائع",
+      "sellerAgentTypesLoading": "جارٍ تحميل أنواع وكلاء البائع…",
+      "noSellerAgentTypes": "لا توجد أنواع لوكلاء البائع في مساحة العمل هذه.",
+      "clearAgentType": "مسح نوع الوكيل",
       "chooseAgent": "ابحث عن وكيل موجود",
       "agentsRequired": "يتطلب ربط ملفات المدربين تفعيل وحدة الوكلاء.",
       "commissionSetupHint": "أعد قواعد عمولات الوكلاء في قسم الوكلاء قبل استخدام تقارير العمولات.",
@@ -1473,6 +1481,10 @@
       "clearDescription": "سيؤدي هذا إلى إزالة كل النقاط من المفضلة على هذا الجهاز. ستعود النقاط إلى أقسامها الأصلية في الشريط الجانبي."
     },
     "modules": {
+      "/commerce-operations/coach-data": {
+        "description": "الوصول إلى بيانات المدربين.",
+        "badge": "V1"
+      },
       "/business-partners/product-movements-statement": {
         "description": "مراجعة وطباعة حركات المنتجات الفعلية لشريك الأعمال والكميات والعمولات.",
         "badge": "كشف"
@@ -3965,6 +3977,7 @@
       "memberLimit": "وصلت مساحة العمل إلى الحد الأقصى للأعضاء.",
       "notAuthorized": "يمكن لمسؤول مساحة العمل فقط إنشاء الحسابات هنا.",
       "workspaceUnavailable": "إنشاء الحسابات متاح لمساحات العمل النشطة من نوع Cloud وHybrid.",
+      "invalidCoachAgentType": "اختر نوعاً متاحاً لوكيل البائع.",
       "invalidRequest": "تحقق من تفاصيل الحساب وحاول مرة أخرى.",
       "createFailed": "تعذّر إنشاء الحساب. تحقق من التفاصيل وحاول مرة أخرى."
     }
@@ -4144,6 +4157,8 @@
       "teamPerformanceAccessDescription": "الوصول إلى تقارير أداء الفريق.",
       "hrAccess": "الموارد البشرية",
       "hrAccessDescription": "الوصول إلى السجلات وسير العمل الخاصة بالموارد البشرية.",
+      "coach": "مدرب",
+      "coachDescription": "يحدد حساب الموظف كمدرب ويمنحه صلاحية الوصول إلى وحدة بيانات المدربين.",
       "globalPrint": "الطباعة",
       "globalPrintDescription": "السماح بالطباعة عبر جميع الوحدات افتراضيًا.",
       "manualEntryAccess": "الإدخال اليدوي",
@@ -11006,7 +11021,8 @@
       "center": "المركز",
       "outside": "خارج المركز"
     },
-    "tariffAssignmentHint": "افحص الطرد وحدد أجرته قبل استلامه.",
+    "tariffAssignmentHint": "راجع الحجم والأجرة المحددين. يمكنك تغييرهما قبل استلام الطرد.",
+    "tariffCreationHint": "اختر حجم الشحنة وأجرتها حسب المحافظة والمنطقة المحددتين.",
     "deliveryFeeTitle": "أجرة التوصيل",
     "deliveryFee": "أجرة التوصيل",
     "deliveryFeeCollected": "أجرة التوصيل المحصلة",

@@ -334,6 +334,9 @@ const Ecommerce = lazy(() =>
 const CommerceOperations = lazy(() =>
   import("@/ui/pages/CommerceOperations").then((m) => ({ default: m.CommerceOperations })),
 );
+const CoachData = lazy(() =>
+  import("@/ui/pages/CoachData").then((m) => ({ default: m.CoachData })),
+);
 const RealEstate = lazy(() =>
   import("@/ui/pages/RealEstate").then((m) => ({ default: m.RealEstate })),
 );
@@ -1956,6 +1959,13 @@ function App() {
                         >
                           <Layout>
                             <Ecommerce />
+                          </Layout>
+                        </ProtectedRoute>
+                      </Route>
+                      <Route path="/commerce-operations/coach-data">
+                        <ProtectedRoute allowedRoles={["admin", "staff"]}>
+                          <Layout>
+                            <CoachData />
                           </Layout>
                         </ProtectedRoute>
                       </Route>

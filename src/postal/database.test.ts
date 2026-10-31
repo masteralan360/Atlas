@@ -36,6 +36,8 @@ const form = {
   pieces: null,
   fragile: false,
   delivery_notes: '',
+  tariff_size: 'small_package',
+  delivery_fee: 6000,
 }
 async function actor(id: string, workspace = w) {
   await pg.exec('RESET ROLE')
@@ -141,12 +143,24 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
     await pg.exec(
       readFileSync(
         new URL(
+          '../../supabase/migrations/20261027223702_postal_shipment_tariffs_and_delivery_fees.sql',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    )
+    await pg.exec(
+      readFileSync(
+        new URL(
           '../../supabase/migrations/20261031173159_postal_create_shipments_for_admin_and_office.sql',
           import.meta.url,
         ),
         'utf8',
       ),
     )
+    await pg.exec(readFileSync(new URL(
+      '../../supabase/migrations/20261031203510_postal_assign_tariff_during_creation.sql', import.meta.url,
+    ), 'utf8'))
     const registrationSql = readFileSync(
       new URL(
         '../../supabase/migrations/20261002000858_scope_resilience_actor_permits.sql',
@@ -508,6 +522,7 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
     shipment = await command('create_shipment', form, request)
     expect(shipment.state).toBe('draft')
     expect(shipment.cod_amount).toBe(-25000)
+    expect(shipment).toMatchObject({ shipment_size: 'small_package', delivery_fee: 6000, tariff_zone: 'outside', tariff_assigned_by: merchant })
     expect(await command('create_shipment', form, request)).toEqual(shipment)
     await expect(
       command('create_shipment', { ...form, cod_amount: 1 }, request),
@@ -677,6 +692,86 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
     s = await command('deliver', { id: s.id, revision: s.revision })
     expect(s.state).toBe('delivered')
   })
+  it('requires valid creation tariffs and reevaluates them when a draft destination changes', async () => {
+    await actor(merchant)
+    const withoutTariff = { ...form, tariff_size: undefined, delivery_fee: undefined }
+    await expect(command('create_shipment', withoutTariff)).rejects.toThrow('postal_tariff_required')
+    for (const payload of [
+      { ...form, tariff_size: 'carton', delivery_fee: 8000 },
+      { ...form, delivery_fee: 5000 },
+      { ...form, delivery_fee: '6000.5' },
+      { ...form, governorate: 'baghdad', area: 'karrada', tariff_size: 'ship', delivery_fee: 8000 },
+    ]) await expect(command('create_shipment', payload)).rejects.toThrow('postal_invalid_tariff')
+
+    let draft = await command('create_shipment', form)
+    const edit = { ...form, id: draft.id, revision: draft.revision, area: 'erbil-centre' }
+    await expect(command('edit_shipment', edit)).rejects.toThrow('postal_invalid_tariff')
+    draft = await command('edit_shipment', { ...edit, delivery_fee: 5000 })
+    expect(draft).toMatchObject({ shipment_size: 'small_package', delivery_fee: 5000, tariff_zone: 'center' })
+    const history = await pg.query<{ metadata: { before?: Record<string, unknown> } }>(
+      'SELECT metadata FROM public.postal_events WHERE shipment_id=$1 ORDER BY sequence', [draft.id],
+    )
+    expect(history.rows[1].metadata.before).toHaveProperty('area', 'ankawa')
+    expect(history.rows[1].metadata.before).not.toHaveProperty('shipment_size')
+    expect(history.rows[1].metadata.before).not.toHaveProperty('delivery_fee')
+  })
+  it.each([admin, staff])('lets authorized intake staff %s retain or overwrite a draft tariff without preserving the original', async (receiver) => {
+    await actor(merchant)
+    const creationRequest = crypto.randomUUID()
+    const input = { ...form, governorate: 'baghdad', area: 'karrada', tariff_size: 'carton', delivery_fee: 8000 }
+    let draft = await command('create_shipment', input, creationRequest)
+    const originalAssignment = { tariff_assigned_at: draft.tariff_assigned_at, tariff_assigned_by: draft.tariff_assigned_by }
+    const editRequest = crypto.randomUUID()
+    const editInput = { ...input, id: draft.id, revision: draft.revision, recipient_name: 'Tariff review recipient' }
+    draft = await command('edit_shipment', editInput, editRequest)
+    await actor(receiver)
+    const receiptRequest = crypto.randomUUID()
+    const receipt = { id: draft.id, revision: draft.revision, branch_id: branchA.id, tariff_size: 'ship', delivery_fee: 24000 }
+    await expect(command('receive', { ...receipt, delivery_fee: 8000 })).rejects.toThrow('postal_invalid_tariff')
+    const received = await command('receive', receipt, receiptRequest)
+    expect(received).toMatchObject({ state: 'received', shipment_size: 'ship', delivery_fee: 24000, tariff_assigned_by: receiver })
+    expect(await command('receive', receipt, receiptRequest)).toEqual(received)
+    expect(originalAssignment.tariff_assigned_by).toBe(merchant)
+
+    await pg.exec('RESET ROLE')
+    const history = await pg.query<{ event_type: string; metadata: Record<string, unknown> }>(
+      'SELECT event_type,metadata FROM public.postal_events WHERE shipment_id=$1 ORDER BY sequence', [draft.id],
+    )
+    expect(history.rows.map((event) => event.event_type)).toEqual(['created', 'edited', 'receive'])
+    expect(JSON.stringify(history.rows)).not.toContain('carton')
+    expect(history.rows[2].metadata).toMatchObject({ shipment_size: 'ship', delivery_fee: 24000 })
+    expect(history.rows[1].metadata.before).toHaveProperty('recipient_name', 'Recipient')
+    const requests = await pg.query<{ payload: object; response: object }>(
+      "SELECT payload,response FROM postal_private.requests WHERE response->>'id'=$1", [draft.id],
+    )
+    expect(JSON.stringify(requests.rows)).not.toContain('carton')
+    expect(JSON.stringify(requests.rows)).not.toContain('"delivery_fee":8000')
+    await expect(pg.query('UPDATE public.postal_shipments SET delivery_fee=35000 WHERE id=$1', [draft.id])).rejects.toThrow('postal_tariff_locked')
+    await expect(pg.query("UPDATE public.postal_events SET metadata='{}' WHERE shipment_id=$1", [draft.id])).rejects.toThrow('postal_history_is_immutable')
+
+    await actor(merchant)
+    expect(await command('create_shipment', input, creationRequest)).toMatchObject({ id: draft.id, shipment_size: 'ship', delivery_fee: 24000 })
+    expect(await command('edit_shipment', editInput, editRequest)).toMatchObject({ id: draft.id, shipment_size: 'ship', delivery_fee: 24000 })
+    await expect(command('create_shipment', { ...input, cod_amount: 1 }, creationRequest)).rejects.toThrow('postal_request_conflict')
+
+    const unchanged = await command('create_shipment', input)
+    await actor(receiver)
+    const retained = await command('receive', { id: unchanged.id, revision: unchanged.revision, branch_id: branchA.id })
+    expect(retained).toMatchObject({ shipment_size: 'carton', delivery_fee: 8000, tariff_assigned_by: merchant, tariff_assigned_at: unchanged.tariff_assigned_at })
+  })
+  it('still receives legacy drafts after staff select a valid tariff', async () => {
+    await pg.exec('RESET ROLE')
+    const legacy = (await pg.query<{ id: string; revision: number }>(
+      `INSERT INTO public.postal_shipments(workspace_id,organization_id,recipient_name,primary_phone,backup_phone,governorate,area,cod_amount,created_by)
+       SELECT $1,organization_id,'Legacy draft','07501234567','07701234567','erbil','ankawa',0,$2
+       FROM public.postal_memberships WHERE user_id=$2 RETURNING id,revision`, [w, merchant],
+    )).rows[0]
+    await actor(staff)
+    const receipt = { ...legacy, branch_id: branchA.id }
+    await expect(command('receive', receipt)).rejects.toThrow('postal_tariff_required')
+    expect(await command('receive', { ...receipt, tariff_size: 'small_package', delivery_fee: 6000 }))
+      .toMatchObject({ state: 'received', shipment_size: 'small_package', delivery_fee: 6000 })
+  })
   it('keeps delivery and signed COD settlement separate, requiring a real payment transaction', async () => {
     await actor(staff)
     expect(
@@ -836,6 +931,8 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
       collected: 7000,
       settled: 3000,
       record_count: 2,
+      delivery_fee_collected: 0,
+      delivery_fee_record_count: 0,
     })
     expect(positive.state).toBe('delivered')
     await expect(
@@ -1013,7 +1110,7 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
           "SELECT * FROM pg_publication_tables WHERE pubname='supabase_realtime' AND tablename LIKE 'postal_%'",
         )
       ).rows,
-    ).toHaveLength(7)
+    ).toHaveLength(8)
     expect(rpc.rows).toHaveLength(5)
     expect(rpc.rows.every((x) => !x.prosecdef && !x.anonymous)).toBe(true)
   })

@@ -67,7 +67,8 @@ export function ShipmentLabel({
         {shipment.recipient_name}
       </h2>
       <p style={{ margin: '1mm 0', fontSize: 15 }} dir="ltr">
-        {shipment.primary_phone} / {shipment.backup_phone}
+        {shipment.primary_phone}
+        {shipment.backup_phone && ` / ${shipment.backup_phone}`}
       </p>
       <p style={{ margin: '2mm 0', fontSize: 15 }}>
         {locationLabel(shipment.governorate, i18n.language)} —{' '}

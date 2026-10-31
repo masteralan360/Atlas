@@ -3,6 +3,7 @@ export interface CreateWorkspaceAccountInput {
     name: string
     password: string
     merchant?: { mode: 'join'; code: string } | { mode: 'create'; name: string }
+    coach?: { agentTypeId: string }
 }
 
 export interface WorkspaceAccountCreationAuthorizationInput {
@@ -27,6 +28,7 @@ export function buildWorkspaceAccountProfile(userId: string, name: string, works
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export function parseCreateWorkspaceAccountInput(body: unknown): CreateWorkspaceAccountInput | null {
     if (!body || typeof body !== 'object' || Array.isArray(body)) return null
@@ -43,6 +45,7 @@ export function parseCreateWorkspaceAccountInput(body: unknown): CreateWorkspace
     // Only identity fields are returned. Any client-supplied workspace or role
     // is deliberately discarded so the caller cannot choose either value.
     let merchant: CreateWorkspaceAccountInput['merchant']
+    let coach: CreateWorkspaceAccountInput['coach']
     if (values.merchant !== undefined) {
         if (!values.merchant || typeof values.merchant !== 'object' || Array.isArray(values.merchant)) return null
         const enrollment = values.merchant as Record<string, unknown>
@@ -54,7 +57,13 @@ export function parseCreateWorkspaceAccountInput(body: unknown): CreateWorkspace
             merchant = { mode: 'create', name: enrollment.name.trim() }
         } else return null
     }
-    return { email, name, password: values.password, ...(merchant ? { merchant } : {}) }
+    if (values.coach !== undefined) {
+        if (merchant || !values.coach || typeof values.coach !== 'object' || Array.isArray(values.coach)) return null
+        const coachInput = values.coach as Record<string, unknown>
+        if (typeof coachInput.agentTypeId !== 'string' || !UUID_PATTERN.test(coachInput.agentTypeId.trim())) return null
+        coach = { agentTypeId: coachInput.agentTypeId.trim() }
+    }
+    return { email, name, password: values.password, ...(merchant ? { merchant } : {}), ...(coach ? { coach } : {}) }
 }
 
 export function getWorkspaceAccountCreationAuthorizationError(

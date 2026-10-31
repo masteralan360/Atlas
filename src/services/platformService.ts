@@ -272,18 +272,26 @@ class PlatformService implements PlatformAPI {
     async pickImageFile(): Promise<File | null> {
         if (!isTauri() || isMobile()) return this.pickImageFileFromInput();
 
-        const { open } = await import('@tauri-apps/plugin-dialog');
-        const { readFile } = await import('@tauri-apps/plugin-fs');
-        const selected = await open({
-            multiple: false,
-            filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif'] }]
-        });
-        if (!selected || typeof selected !== 'string') return null;
+        try {
+            const { open } = await import('@tauri-apps/plugin-dialog');
+            const selected = await open({
+                multiple: false,
+                filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif'] }]
+            });
+            if (!selected || typeof selected !== 'string') return null;
 
-        const bytes = await readFile(selected);
-        const fileName = selected.split(/[\\/]/).pop() || 'image';
-        const ext = fileName.split('.').pop()?.toLowerCase();
-        return new File([bytes], fileName, { type: this.getImageContentType(ext) });
+            const { readFile } = await import('@tauri-apps/plugin-fs');
+            const bytes = await readFile(selected);
+            const fileName = selected.split(/[\\/]/).pop() || 'image';
+            const ext = fileName.split('.').pop()?.toLowerCase();
+            return new File([bytes], fileName, { type: this.getImageContentType(ext) });
+        } catch (error) {
+            // Vite can temporarily abort a stale optimized plugin import while
+            // the dev server refreshes its dependency cache. Keep image uploads
+            // usable through the WebView's native file input in that case.
+            console.warn('[PlatformService] Native image picker unavailable; falling back to file input:', error);
+            return this.pickImageFileFromInput();
+        }
     }
 
     async pickAndSaveImage(workspaceId: string, subDir: string, source: ImageUploadSource): Promise<string | null> {

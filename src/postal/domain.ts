@@ -171,6 +171,10 @@ export function postalTariffOptions(
   governorate: string,
   area: string,
 ): PostalTariffOption[] {
+  const destination = locations.find((location) => location.id === governorate);
+  if (!destination?.areas.some((entry) => entry[0] === area)) {
+    return [];
+  }
   if (["sulaymaniyah", "erbil", "duhok"].includes(governorate)) {
     const center = /center|centre/i.test(area);
     return [
@@ -190,6 +194,18 @@ export function postalTariffOptions(
     { size: "ship", fee: 35000, zone: null },
     { size: "ship", fee: 55000, zone: null },
   ];
+}
+export function findPostalTariff(
+  governorate: string,
+  area: string,
+  size: PostalShipmentSize | null | undefined,
+  fee: number | null | undefined,
+): PostalTariffOption | null {
+  return (
+    postalTariffOptions(governorate, area).find(
+      (option) => option.size === size && option.fee === fee,
+    ) ?? null
+  );
 }
 export function locationLabel(
   id: string,
@@ -247,10 +263,10 @@ export function shipmentValidationErrors(input: ShipmentInput) {
   if (!input.recipient_name.trim()) errors.recipient_name = "required";
   else if (input.recipient_name.trim().length > 160)
     errors.recipient_name = "recipientName";
-  for (const field of ["primary_phone", "backup_phone"] as const) {
-    if (!input[field]) errors[field] = "required";
-    else if (!isIraqiPhone(input[field])) errors[field] = "phone";
-  }
+  if (!input.primary_phone) errors.primary_phone = "required";
+  else if (!isIraqiPhone(input.primary_phone)) errors.primary_phone = "phone";
+  if (input.backup_phone && !isIraqiPhone(input.backup_phone))
+    errors.backup_phone = "phone";
   const governorate = locations.find((x) => x.id === input.governorate);
   if (!governorate)
     errors.governorate = input.governorate ? "location" : "required";

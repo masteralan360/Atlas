@@ -637,6 +637,16 @@ export const WORKSPACE_PERMISSION_DEFINITIONS = [
     section: "people-and-workspace",
   },
   {
+    key: "coach",
+    module: "coach",
+    labelKey: "members.permissions.coach",
+    defaultLabel: "Coach",
+    descriptionKey: "members.permissions.coachDescription",
+    defaultDescription: "Marks a staff account as a coach and grants access to the Coach Data module.",
+    icon: UsersRound,
+    section: "people-and-workspace",
+  },
+  {
     key: "global.NOprint",
     module: "global",
     labelKey: "members.permissions.globalPrint",

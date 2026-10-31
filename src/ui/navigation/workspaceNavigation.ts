@@ -278,6 +278,21 @@ export function buildWorkspaceNavigation({
         name: t("commerceOperations.title", { defaultValue: "Commerce Operations" }),
         href: "/commerce-operations",
         icon: ShoppingBag,
+        children: role === "admin" || canAccessPermission("coach")
+          ? [{
+            name: t("commerceOperations.coachData.title", { defaultValue: "Coach Data" }),
+            href: "/commerce-operations/coach-data",
+            icon: UsersRound,
+          }]
+          : [],
+      }]
+      : []),
+    ...(role === "staff" && canAccessPermission("coach")
+      && !(hasFeature("commerce_operations") && canAccessPermission("commerceOperations.access"))
+      ? [{
+        name: t("commerceOperations.coachData.title", { defaultValue: "Coach Data" }),
+        href: "/commerce-operations/coach-data",
+        icon: UsersRound,
       }]
       : []),
     ...(isCoreRole && hasFeature("agents") && canAccessPermission("agents.access")

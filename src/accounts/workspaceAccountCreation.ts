@@ -12,6 +12,7 @@ export interface WorkspaceAccountCreationRequest {
     email: string
     password: string
     merchant?: { mode: 'join'; code: string } | { mode: 'create'; name: string }
+    coach?: { agentTypeId: string }
 }
 
 export type WorkspaceAccountCreationContext =
@@ -21,6 +22,7 @@ export type WorkspaceAccountCreationContext =
           organizationMode: 'join' | 'create' | ''
           organizationValue: string
       }
+    | { type: 'coach'; agentTypeId: string }
 
 export type WorkspaceAccountCreationValidationError =
     | 'nameRequired'
@@ -79,6 +81,10 @@ export function buildWorkspaceAccountCreationRequest(
         } else {
             return null
         }
+    } else if (context.type === 'coach') {
+        const agentTypeId = context.agentTypeId.trim()
+        if (!agentTypeId) return null
+        request.coach = { agentTypeId }
     }
     return request
 }
@@ -100,6 +106,8 @@ export function getWorkspaceAccountCreationErrorKey(code: string | undefined) {
             return 'workspaceAccountCreation.errors.invalidRequest'
         case 'invalid_password':
             return 'workspaceAccountCreation.errors.invalidPassword'
+        case 'invalid_coach_agent_type':
+            return 'workspaceAccountCreation.errors.invalidCoachAgentType'
         default:
             return 'workspaceAccountCreation.errors.createFailed'
     }

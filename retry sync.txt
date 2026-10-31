@@ -1,5 +1,7 @@
 Simplify QR code
 
+Save usage mode
+
 Remove optional number
 
 #

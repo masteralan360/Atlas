@@ -39,17 +39,19 @@ export function RecipientContactFlow({
             {[
               { key: 'primary_phone', value: primary },
               { key: 'backup_phone', value: backup },
-            ].map(({ key, value }) => (
-              <Button
-                key={key}
-                variant="outline"
-                className="h-auto flex-wrap justify-between gap-2 p-3"
-                onClick={() => setPhone(value)}
-              >
-                <span>{t(`postal.${key}`)}</span>
-                <span dir="ltr">{value}</span>
-              </Button>
-            ))}
+            ]
+              .filter(({ value }) => value.trim().length > 0)
+              .map(({ key, value }) => (
+                <Button
+                  key={key}
+                  variant="outline"
+                  className="h-auto flex-wrap justify-between gap-2 p-3"
+                  onClick={() => setPhone(value)}
+                >
+                  <span>{t(`postal.${key}`)}</span>
+                  <span dir="ltr">{value}</span>
+                </Button>
+              ))}
           </SmallDialogBody>
         </SmallDialogContent>
       </SmallDialog>

@@ -1,7 +1,7 @@
 import { usePostalAction } from './usePostalAccess'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, Loader2, Package, ShieldCheck } from 'lucide-react'
+import { Loader2, ShieldCheck } from 'lucide-react'
 import {
   AppDialog,
   AppDialogBody,
@@ -22,8 +22,9 @@ import { useWorkspace } from '@/workspace'
 import { useWorkspacePermissions } from '@/permissions'
 */
 import type { PostalShipment, PostalBranch, PostalTransfer } from './domain'
-import { postalTariffOptions } from './domain'
+import { findPostalTariff, postalTariffOptions } from './domain'
 import { BranchPicker } from './shared'
+import { ShipmentTariffSelector } from './ShipmentTariffSelector'
 
 export function OperationDialog({
   scope,
@@ -68,9 +69,13 @@ export function OperationDialog({
     operation === 'receive'
       ? postalTariffOptions(shipment.governorate, shipment.area)
       : []
-  const [selectedTariff, setSelectedTariff] = useState<string | null>(null)
-  const tariff = tariffs.find(
-    (option) => `${option.size}:${option.fee}` === selectedTariff,
+  const [selectedTariff, setSelectedTariff] = useState(() =>
+    findPostalTariff(
+      shipment.governorate, shipment.area, shipment.shipment_size, shipment.delivery_fee,
+    ),
+  )
+  const tariff = findPostalTariff(
+    shipment.governorate, shipment.area, selectedTariff?.size, selectedTariff?.fee,
   )
   const needsBranch =
     operation === 'receive' ||
@@ -121,49 +126,14 @@ export function OperationDialog({
             />
           )}
           {operation === 'receive' && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium">
-                {t('postal.shipmentSize')} *
-              </label>
-              <p className="text-sm text-muted-foreground">
-                {t('postal.tariffAssignmentHint')}
-              </p>
-              <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label={t('postal.shipmentSize')}>
-                {tariffs.map((option) => {
-                  const value = `${option.size}:${option.fee}`
-                  const selected = selectedTariff === value
-                  return (
-                    <Button
-                      key={value}
-                      type="button"
-                      variant={selected ? 'default' : 'outline'}
-                      className="h-auto min-h-20 justify-between gap-3 p-4 text-start"
-                      disabled={action.busy}
-                      aria-pressed={selected}
-                      onClick={() => setSelectedTariff(value)}
-                    >
-                      <span className="flex items-start gap-3">
-                        <Package className="mt-0.5 h-5 w-5 shrink-0" />
-                        <span className="space-y-1">
-                          <span className="block font-semibold">
-                            {t(`postal.shipmentSizes.${option.size}`)}
-                          </span>
-                          {option.zone && (
-                            <span className="block text-xs opacity-80">
-                              {t(`postal.tariffZones.${option.zone}`)}
-                            </span>
-                          )}
-                          <span className="block text-sm">
-                            {option.fee.toLocaleString()} {t('postal.iqd')}
-                          </span>
-                        </span>
-                      </span>
-                      {selected && <Check className="h-5 w-5 shrink-0" />}
-                    </Button>
-                  )
-                })}
-              </div>
-            </div>
+            <ShipmentTariffSelector
+              id="receive-shipment-tariff"
+              options={tariffs}
+              value={tariff}
+              reviewing
+              disabled={action.busy}
+              onChange={setSelectedTariff}
+            />
           )}
           {operation === 'arrive' && (
             <p className="break-all text-sm">
