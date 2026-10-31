@@ -1,7 +1,7 @@
 import { usePostalAction } from './usePostalAccess'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Building2, Loader2, ShieldCheck } from 'lucide-react'
+import { Building2, Loader2, ShieldCheck, Users } from 'lucide-react'
 import {
   AppDialog,
   AppDialogBody,
@@ -22,6 +22,7 @@ import {
 } from '@/local-db/postal'
 import type { PostalBranch, PostalOrganization } from './domain'
 import { MembershipDialog } from './MembershipDialog'
+import { OrganizationCode } from './OrganizationCode'
 import { LocationPicker, PostalLoading, PostalError } from './shared'
 
 export function BranchDialog({
@@ -150,18 +151,22 @@ export function OrganizationDialog({
 }) {
   const { t } = useTranslation()
   const [name, setName] = useState(organization.name)
-  const [leader, setLeader] = useState(organization.leader_id)
+  const [leader, setLeader] = useState(organization.leader_id ?? '')
   const [movingMember, setMovingMember] = useState('')
   const members = usePostalMembers(scope, organization.id)
   const choices = members.data?.pages.flat() ?? []
   const action = usePostalAction()
-  const payload = { id: organization.id, name: name.trim(), leader_id: leader }
+  const payload = {
+    id: organization.id,
+    name: name.trim(),
+    leader_id: leader || null,
+  }
   if (movingMember)
     return (
       <MembershipDialog
         scope={scope}
         userId={movingMember}
-        leaderId={organization.leader_id}
+        leaderId={organization.leader_id ?? ''}
         members={choices.map((x) => ({
           user_id: x.user_id,
           name: x.profiles?.name,
@@ -180,11 +185,9 @@ export function OrganizationDialog({
       <AppDialogContent className="max-w-xl" showCloseButton={!action.busy}>
         <AppDialogHeader>
           <AppDialogTitle>{t('postal.manageOrganization')}</AppDialogTitle>
-          <p className="font-mono text-sm">
-            {organization.code.slice(0, 4)}-{organization.code.slice(4)}
-          </p>
         </AppDialogHeader>
         <AppDialogBody className="space-y-4">
+          <OrganizationCode code={organization.code} />
           <Label htmlFor="postal-org-name">
             {t('postal.organizationName')} *
           </Label>
@@ -195,17 +198,17 @@ export function OrganizationDialog({
             disabled={action.busy}
             onChange={(e) => setName(e.target.value)}
           />
-          <Label>{t('postal.leader')} *</Label>
-          <p className="text-sm text-muted-foreground">
-            {t('postal.leaderHint')}
-          </p>
           {members.isLoading ? (
             <PostalLoading />
           ) : members.error ? (
             <PostalError retry={() => void members.refetch()} />
-          ) : (
+          ) : choices.length > 0 ? (
             <div className="grid gap-2">
-              {!choices.some((x) => x.user_id === leader) && (
+              <Label>{t('postal.leader')} *</Label>
+              <p className="text-sm text-muted-foreground">
+                {t('postal.leaderHint')}
+              </p>
+              {leader && !choices.some((x) => x.user_id === leader) && (
                 <p className="break-all text-sm">{leader}</p>
               )}
               {choices.map((member) => (
@@ -244,6 +247,11 @@ export function OrganizationDialog({
                 </Button>
               )}
             </div>
+          ) : (
+            <p className="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+              <Users className="h-4 w-4 shrink-0" />
+              {t('postal.noOrganizationMembers')}
+            </p>
           )}
         </AppDialogBody>
         <AppDialogFooter>
@@ -254,8 +262,11 @@ export function OrganizationDialog({
             disabled={
               action.busy ||
               !name.trim() ||
-              !leader ||
-              !choices.some((x) => x.user_id === leader)
+              members.isLoading ||
+              Boolean(members.error) ||
+              (choices.length > 0 &&
+                !choices.some((x) => x.user_id === leader)) ||
+              (choices.length === 0 && Boolean(organization.leader_id))
             }
             onClick={() =>
               void action.run(JSON.stringify(payload), async (id) => {

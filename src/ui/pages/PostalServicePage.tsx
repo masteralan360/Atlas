@@ -76,8 +76,10 @@ import { getPaymentMethodLabel } from '@/lib/paymentMethods'
 import type { PaymentMethodOption } from '@/lib/paymentMethods'
 import { OrganizationAccountStatement } from '@/postal/OrganizationAccountStatement'
 import { canReadPostalStatement } from '@/local-db/postalStatement'
+import { CreateOrganizationDialog } from '@/postal/CreateOrganizationDialog'
 
-type Row = PostalShipment | PostalBranch | PostalOrganization | PostalCodRecord
+type PostalShipmentPageRow = PostalShipment & { organization_name?: string | null }
+type Row = PostalShipmentPageRow | PostalBranch | PostalOrganization | PostalCodRecord
 const SINGLE = ['single'] as const
 
 function formatCodIqd(value: string, language: string, currency: string) {
@@ -99,6 +101,7 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
   const [scanner, setScanner] = useState(false)
   const scannedId = useRef<string | null>(null)
   const [branch, setBranch] = useState<PostalBranch | 'new' | null>(null)
+  const [createOrganizationOpen, setCreateOrganizationOpen] = useState(false)
   const [organization, setOrganization] = useState<PostalOrganization | null>(
     null,
   )
@@ -161,6 +164,20 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
             </span>
           ),
         },
+        ...(scope.role === 'admin'
+          ? [
+              {
+                id: 'organization',
+                header: t('postal.organizationName'),
+                cell: ({ row }) => (
+                  <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                    <Building2 className="h-4 w-4 text-muted-foreground" />
+                    {(row.original as PostalShipmentPageRow).organization_name ?? '—'}
+                  </span>
+                ),
+              } satisfies ColumnDef<Row>,
+            ]
+          : []),
         {
           id: 'recipient',
           header: t('postal.recipient_name'),
@@ -403,7 +420,7 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
         },
       ]
     return []
-  }, [tab, t, i18n.language, navigate])
+  }, [tab, t, i18n.language, navigate, scope.role])
   const table = useReactTable({
     data: query.data?.rows ?? [],
     columns,
@@ -443,7 +460,9 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
           {!accountStatement && <ModulePageFreshness
             tableNames={
               tab === 'shipments'
-                ? postalSummaryTables
+                ? scope.role === 'admin'
+                  ? [...postalSummaryTables, 'postal_organizations']
+                  : postalSummaryTables
                 : tab === 'cod'
                   ? ['postal_cod_records', 'postal_shipments', 'postal_organizations']
                   : [postalTables[tab]]
@@ -451,10 +470,11 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
           />}
         </div>
         <div className="flex flex-wrap gap-2">
-          {scope.role === 'admin' && (
-            <WorkspaceAccountCreation accountType="postalMerchant" />
-          )}
-          {scope.role === 'merchant' && (
+          {(
+            scope.role === 'merchant' ||
+            scope.role === 'admin' ||
+            scope.role === 'office'
+          ) && (
             <Button onClick={() => setCreating(true)}>
               <Plus className="me-2 h-4 w-4" />
               {t('postal.createShipment')}
@@ -542,6 +562,15 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
               <Plus className="me-2 h-4 w-4" />
               {t('postal.createBranch')}
             </Button>
+          )}
+          {tab === 'organizations' && scope.role === 'admin' && (
+            <>
+              <WorkspaceAccountCreation accountType="postalMerchant" />
+              <Button onClick={() => setCreateOrganizationOpen(true)}>
+                <Plus className="me-2 h-4 w-4" />
+                {t('postal.createOrganization')}
+              </Button>
+            </>
           )}
         </div>
         {(tab === 'shipments' || tab === 'cod') && <DateRangeFilters />}
@@ -654,6 +683,13 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
           scope={scope}
           branch={branch === 'new' ? undefined : branch}
           onClose={() => setBranch(null)}
+        />
+      )}
+      {createOrganizationOpen && (
+        <CreateOrganizationDialog
+          open={createOrganizationOpen}
+          scope={scope}
+          onClose={() => setCreateOrganizationOpen(false)}
         />
       )}
       {organization && (

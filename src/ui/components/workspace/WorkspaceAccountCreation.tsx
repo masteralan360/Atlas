@@ -1,4 +1,11 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react'
+import {
+    useMemo,
+    useRef,
+    useState,
+    type ChangeEvent,
+    type FormEvent,
+    type KeyboardEvent,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import {
     AtSign,
@@ -30,6 +37,10 @@ import {
 import { useWorkspace } from '@/workspace'
 import { queryClient } from '@/query/queryClient'
 import { queryKeys } from '@/query/queryKeys'
+import {
+    formatPostalOrganizationCode,
+    normalizePostalOrganizationCode,
+} from '@/postal/domain'
 
 interface WorkspaceAccountCreationProps {
     accountType?: 'staff' | 'postalMerchant'
@@ -85,6 +96,7 @@ export function WorkspaceAccountCreation({
         'join' | 'create' | ''
     >('')
     const [organizationValue, setOrganizationValue] = useState('')
+    const organizationCodeInputRef = useRef<HTMLInputElement>(null)
 
     const workspaceId = user?.workspaceId ?? ''
     const canManage = Boolean(
@@ -119,6 +131,77 @@ export function WorkspaceAccountCreation({
         setSubmitAttempted(false)
         setOrganizationMode('')
         setOrganizationValue('')
+    }
+
+    const handleOrganizationCodeChange = (
+        event: ChangeEvent<HTMLInputElement>,
+    ) => {
+        const inputValue = event.currentTarget.value
+        const cursor = event.currentTarget.selectionStart ?? inputValue.length
+        const codeCharactersBeforeCursor = normalizePostalOrganizationCode(
+            inputValue.slice(0, cursor),
+        ).length
+        const formattedCode = formatPostalOrganizationCode(inputValue)
+        setOrganizationValue(formattedCode)
+
+        const nextCursor =
+            codeCharactersBeforeCursor +
+            (codeCharactersBeforeCursor >= 4 ? 1 : 0)
+        requestAnimationFrame(() => {
+            organizationCodeInputRef.current?.setSelectionRange(
+                Math.min(nextCursor, formattedCode.length),
+                Math.min(nextCursor, formattedCode.length),
+            )
+        })
+    }
+
+    const handleOrganizationValueChange = (
+        event: ChangeEvent<HTMLInputElement>,
+    ) => {
+        if (organizationMode === 'join') {
+            handleOrganizationCodeChange(event)
+            return
+        }
+        setOrganizationValue(event.currentTarget.value)
+    }
+
+    const handleOrganizationCodeKeyDown = (
+        event: KeyboardEvent<HTMLInputElement>,
+    ) => {
+        const input = event.currentTarget
+        const cursor = input.selectionStart ?? input.value.length
+        const selectionEnd = input.selectionEnd ?? cursor
+        if (cursor !== selectionEnd || input.value[4] !== '-') {
+            return
+        }
+
+        const code = normalizePostalOrganizationCode(input.value)
+        let nextCode: string
+        let nextCursor: number
+        if (event.key === 'Backspace' && cursor === 5) {
+            if (code.length > 4) {
+                nextCode = `${code.slice(0, 4)}${code.slice(5)}`
+                nextCursor = 5
+            } else {
+                nextCode = code.slice(0, 3)
+                nextCursor = 3
+            }
+        } else if (event.key === 'Delete' && cursor === 4 && code.length > 4) {
+            nextCode = `${code.slice(0, 4)}${code.slice(5)}`
+            nextCursor = 4
+        } else {
+            return
+        }
+
+        event.preventDefault()
+        const formattedCode = formatPostalOrganizationCode(nextCode)
+        setOrganizationValue(formattedCode)
+        requestAnimationFrame(() => {
+            organizationCodeInputRef.current?.setSelectionRange(
+                nextCursor,
+                nextCursor,
+            )
+        })
     }
 
     const handleOpenChange = (open: boolean) => {
@@ -290,11 +373,15 @@ export function WorkspaceAccountCreation({
                                             </Label>
                                             <Input
                                                 id="postal-organization"
+                                                ref={organizationCodeInputRef}
                                                 value={organizationValue}
-                                                onChange={(e) =>
-                                                    setOrganizationValue(
-                                                        e.target.value,
-                                                    )
+                                                onChange={
+                                                    handleOrganizationValueChange
+                                                }
+                                                onKeyDown={
+                                                    organizationMode === 'join'
+                                                        ? handleOrganizationCodeKeyDown
+                                                        : undefined
                                                 }
                                                 disabled={isCreating}
                                                 maxLength={

@@ -108,6 +108,8 @@ export function usePostalAction() {
         e && typeof e === 'object' && 'message' in e ? String(e.message) : ''
       const key = message.includes('stale_shipment')
         ? 'stale'
+        : message.includes('postal_invalid_organization')
+          ? 'invalidOrganization'
         : message.includes('invalid_tariff') || message.includes('tariff_required')
           ? 'invalidTariff'
           : message.includes('tariff_locked')

@@ -1,3 +1,5 @@
+import { normalizePostalOrganizationName } from '@/postal/domain'
+
 export interface WorkspaceAccountCreationFormValues {
     name: string
     email: string
@@ -71,8 +73,8 @@ export function buildWorkspaceAccountCreationRequest(
             if (!/^[A-Z0-9]{8}$/.test(code)) return null
             request.merchant = { mode: 'join', code }
         } else if (context.organizationMode === 'create') {
-            const name = context.organizationValue.trim()
-            if (!name || name.length > 120) return null
+            const name = normalizePostalOrganizationName(context.organizationValue)
+            if (!name) return null
             request.merchant = { mode: 'create', name }
         } else {
             return null

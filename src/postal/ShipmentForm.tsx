@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Wine,
   Package,
+  Link2,
 } from "lucide-react";
 import {
   AppDialog,
@@ -16,6 +17,7 @@ import {
   AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
+  Badge,
   Button,
   Input,
   Label,
@@ -29,9 +31,11 @@ import {
   type ShipmentValidationError,
   type ShipmentInput,
   type PostalShipment,
+  type PostalOrganization,
 } from "./domain";
 import { postalCommand, type PostalScope } from "@/local-db/postal";
 import { LocationPicker } from "./shared";
+import { OrganizationAutoCompleteInput } from "./OrganizationAutoCompleteInput";
 
 const validationFields = {
   recipient_name: ["shipment-recipient_name", "postal.recipient_name"],
@@ -61,6 +65,10 @@ export function ShipmentForm({
   onSaved: (shipment: PostalShipment) => void;
 }) {
   const { t } = useTranslation();
+  const requiresOrganization = !editing && scope.role !== "merchant";
+  const [organizationQuery, setOrganizationQuery] = useState("");
+  const [selectedOrganization, setSelectedOrganization] =
+    useState<PostalOrganization | null>(null);
   const [form, setForm] = useState<ShipmentInput>(() =>
     source
       ? copyShipment(source)
@@ -103,7 +111,8 @@ export function ShipmentForm({
   const invalidFields = Object.keys(validationFields).filter(
     (field) => errors[field as ValidationField],
   ) as ValidationField[];
-  const valid = invalidFields.length === 0;
+  const organizationInvalid = requiresOrganization && !selectedOrganization;
+  const valid = invalidFields.length === 0 && !organizationInvalid;
   const showNegativePrefix = negative && amount.length > 0;
   const fieldError = (field: ValidationField) => {
     if (!touched[field] || !errors[field]) return null;
@@ -138,7 +147,13 @@ export function ShipmentForm({
         <AppDialogHeader>
           <AppDialogTitle className="flex items-center gap-2">
             <PackagePlus className="h-5 w-5 text-primary" />
-            {t(editing ? "postal.editShipment" : "postal.createShipment")}
+            {t(
+              editing
+                ? "postal.editShipment"
+                : requiresOrganization
+                  ? "postal.createShipmentForOrganization"
+                  : "postal.createShipment",
+            )}
           </AppDialogTitle>
         </AppDialogHeader>
         <form
@@ -146,14 +161,20 @@ export function ShipmentForm({
           onSubmit={(e) => {
             e.preventDefault();
             if (!valid) return;
+            const commandPayload = {
+              ...payload,
+              ...(requiresOrganization
+                ? { organization_id: selectedOrganization?.id }
+                : {}),
+            };
             void action.run(
-              JSON.stringify(payload) + reason,
+              JSON.stringify(commandPayload) + reason,
               async (request) => {
                 const shipment = await postalCommand<PostalShipment>(
                   scope,
                   editing ? "edit_shipment" : "create_shipment",
                   {
-                    ...payload,
+                    ...commandPayload,
                     ...(editing
                       ? {
                           id: source?.id,
@@ -170,6 +191,48 @@ export function ShipmentForm({
           }}
         >
           <AppDialogBody className="space-y-5">
+            {requiresOrganization && (
+              <div className="space-y-2">
+                <Label htmlFor="shipment-organization">
+                  {t("postal.organizationName")} *
+                </Label>
+                <OrganizationAutoCompleteInput
+                  id="shipment-organization"
+                  scope={scope}
+                  value={organizationQuery}
+                  required
+                  aria-invalid={organizationInvalid}
+                  aria-describedby={
+                    organizationInvalid
+                      ? "shipment-organization-error"
+                      : undefined
+                  }
+                  disabled={action.busy}
+                  onChange={(value) => {
+                    setOrganizationQuery(value);
+                    setSelectedOrganization(null);
+                  }}
+                  onSelectOrganization={(organization) => {
+                    setOrganizationQuery(organization.name);
+                    setSelectedOrganization(organization);
+                  }}
+                />
+                {selectedOrganization && (
+                  <Badge variant="secondary" className="w-fit gap-1">
+                    <Link2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    {t("postal.linked")}
+                  </Badge>
+                )}
+                {organizationInvalid && (
+                  <p
+                    id="shipment-organization-error"
+                    className="text-sm text-destructive"
+                  >
+                    {t("postal.validation.required")}
+                  </p>
+                )}
+              </div>
+            )}
             <div className="grid gap-4 sm:grid-cols-2">
               {(
                 ["primary_phone", "backup_phone", "recipient_name"] as const

@@ -1,3 +1,21 @@
+Simplify QR code
+
+Remove optional number
+
+#
+Free item commerce operations
+Ad Expense
+Price of product
+Sales details profit
+Easy Coach Agent creation
+#
+
+offline data load for server-side only lists
+
+Create simple loan business partner + attached
+
+Discount by Price books
+
 Sale Order Exchange
 
 Fix Purchase Order form page and fix purchase order error, order_payment_source_not_found

@@ -81,7 +81,20 @@ export interface PostalOrganization {
   workspace_id: string;
   name: string;
   code: string;
-  leader_id: string;
+  leader_id: string | null;
+}
+export function normalizePostalOrganizationName(value: string) {
+  const name = value.trim();
+  return name.length >= 1 && name.length <= 120 ? name : null;
+}
+export function normalizePostalOrganizationCode(code: string) {
+  return code.replace(/[^a-z\d]/gi, '').slice(0, 8).toUpperCase();
+}
+export function formatPostalOrganizationCode(code: string) {
+  const normalizedCode = normalizePostalOrganizationCode(code);
+  return normalizedCode.length >= 4
+    ? `${normalizedCode.slice(0, 4)}-${normalizedCode.slice(4)}`
+    : normalizedCode;
 }
 export interface PostalMember {
   user_id: string;

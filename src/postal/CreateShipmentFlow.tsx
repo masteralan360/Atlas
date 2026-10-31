@@ -41,7 +41,13 @@ export function CreateShipmentFlow({
       >
         <AppDialogContent className="max-w-md">
           <AppDialogHeader>
-            <AppDialogTitle>{t('postal.createShipment')}</AppDialogTitle>
+            <AppDialogTitle>
+              {t(
+                scope.role === 'merchant'
+                  ? 'postal.createShipment'
+                  : 'postal.createShipmentForOrganization',
+              )}
+            </AppDialogTitle>
           </AppDialogHeader>
           <AppDialogBody className="grid gap-3">
             <Button

@@ -277,12 +277,18 @@ export function usePostalPage<T>(input: PostalPageInput, enabled = true) {
       }
       return tracked(
         input,
-        table,
+        input.kind === 'shipments' && input.role === 'admin'
+          ? [table, 'postal_organizations']
+          : table,
         signal,
         async () => {
+          const selectColumns =
+            input.kind === 'shipments' && input.role === 'admin'
+              ? '*, postal_organizations(name)'
+              : '*'
           let query = supabase
             .from(table)
-            .select('*', { count: 'exact' })
+            .select(selectColumns, { count: 'exact' })
             .eq('workspace_id', input.workspaceId)
           if (input.kind === 'shipments') {
             query = query.is('deleted_at', null)
@@ -334,16 +340,41 @@ export function usePostalPage<T>(input: PostalPageInput, enabled = true) {
           const rows: unknown[] = data ?? []
           const normalizedRows =
             input.kind === 'shipments'
-              ? rows.map((row) =>
-                  normalizeShipment(row as PostalShipment),
-                )
+              ? rows.map((row) => {
+                  const shipment = row as PostalShipment & {
+                    postal_organizations?: { name?: unknown } | null
+                  }
+                  const { postal_organizations, ...shipmentFields } = shipment
+                  return {
+                    ...normalizeShipment(shipmentFields),
+                    ...(input.role === 'admin'
+                      ? {
+                          organization_name:
+                            typeof postal_organizations?.name === 'string'
+                              ? postal_organizations.name
+                              : null,
+                        }
+                      : {}),
+                  }
+                })
               : rows
           return {
             data: { rows: normalizedRows as T[], total: count ?? 0 },
             error: null,
           }
         },
-        (result) => result.rows.length,
+        (result, trackedTable) => {
+          if (
+            trackedTable === 'postal_organizations' &&
+            input.kind === 'shipments'
+          ) {
+            const shipmentRows = result.rows as PostalShipment[]
+            return new Set(
+              shipmentRows.map((shipment) => shipment.organization_id),
+            ).size
+          }
+          return result.rows.length
+        },
       )
     },
   })

@@ -138,6 +138,15 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
         'utf8',
       ),
     )
+    await pg.exec(
+      readFileSync(
+        new URL(
+          '../../supabase/migrations/20261031173159_postal_create_shipments_for_admin_and_office.sql',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    )
     const registrationSql = readFileSync(
       new URL(
         '../../supabase/migrations/20261002000858_scope_resilience_actor_permits.sql',
@@ -515,6 +524,56 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
         ])
       ).rows,
     ).toHaveLength(1)
+  })
+  it('requires admin and office shipment creation to select an organization in the workspace', async () => {
+    await pg.exec('RESET ROLE')
+    const memberships = await pg.query<{
+      user_id: string
+      organization_id: string
+    }>(
+      'SELECT user_id,organization_id FROM public.postal_memberships WHERE user_id IN ($1,$2)',
+      [merchant, merchant2],
+    )
+    const adminOrganizationId = memberships.rows.find(
+      (row) => row.user_id === merchant,
+    )!.organization_id
+    const officeOrganizationId = memberships.rows.find(
+      (row) => row.user_id === merchant2,
+    )!.organization_id
+
+    await actor(admin)
+    await expect(command('create_shipment', form)).rejects.toThrow(
+      'postal_invalid_organization',
+    )
+    const adminRequest = crypto.randomUUID()
+    const adminShipment = await command('create_shipment', {
+      ...form,
+      organization_id: adminOrganizationId,
+    }, adminRequest)
+    expect(adminShipment.organization_id).toBe(adminOrganizationId)
+    expect(
+      await command(
+        'create_shipment',
+        { ...form, organization_id: adminOrganizationId },
+        adminRequest,
+      ),
+    ).toEqual(adminShipment)
+    await expect(
+      command('create_shipment', {
+        ...form,
+        organization_id: crypto.randomUUID(),
+      }),
+    ).rejects.toThrow('postal_invalid_organization')
+
+    await actor(staff)
+    await expect(command('create_shipment', form)).rejects.toThrow(
+      'postal_invalid_organization',
+    )
+    const officeShipment = await command('create_shipment', {
+      ...form,
+      organization_id: officeOrganizationId,
+    })
+    expect(officeShipment.organization_id).toBe(officeOrganizationId)
   })
   it('enforces workspace and organization privacy including QR and payment metadata', async () => {
     await actor(merchant2)

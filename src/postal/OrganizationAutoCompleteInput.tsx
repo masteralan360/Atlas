@@ -10,6 +10,7 @@ import type { PostalOrganization } from './domain'
 
 export function OrganizationAutoCompleteInput({
   id, scope, value, onChange, onSelectOrganization, disabled = false,
+  required = false, ...inputProps
 }: {
   id?: string
   scope: PostalScope
@@ -17,6 +18,9 @@ export function OrganizationAutoCompleteInput({
   onChange: (value: string) => void
   onSelectOrganization: (organization: PostalOrganization) => void
   disabled?: boolean
+  required?: boolean
+  'aria-invalid'?: boolean
+  'aria-describedby'?: string
 }) {
   const { t } = useTranslation()
   const listId = useId()
@@ -41,7 +45,9 @@ export function OrganizationAutoCompleteInput({
   return (
     <AutocompletePopover open={open} onOpenChange={setFocused} anchor={(
       <div data-autocomplete-popover-anchor className="w-full min-w-0">
-        <Input id={id} ref={inputRef} value={value} disabled={disabled}
+        <Input id={id} ref={inputRef} value={value} disabled={disabled} required={required}
+          aria-invalid={inputProps['aria-invalid']}
+          aria-describedby={inputProps['aria-describedby']}
           placeholder={t('postal.statement.searchOrganization')}
           role="combobox" aria-autocomplete="list" aria-expanded={open}
           aria-controls={open ? listId : undefined}
