@@ -1021,7 +1021,7 @@ function UpdateHandler() {
   return (
     <>
       {isBlocked && (
-        <div className="fixed inset-0 z-[9999] bg-background/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300">
+        <div className="fixed inset-0 z-[10030] bg-background/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300">
         <div className="max-w-md w-full p-8 border border-border/50 bg-card rounded-2xl shadow-2xl flex flex-col items-center gap-6">
           <div className="w-16 h-16 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mb-2">
             <RotateCw className="w-8 h-8 animate-spin-slow" />
@@ -1047,7 +1047,7 @@ function UpdateHandler() {
       )}
 
       {updateDialog && !isDownloading && (
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-background/95 p-6 text-center backdrop-blur-md animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[10031] flex items-center justify-center bg-background/95 p-6 text-center backdrop-blur-md animate-in fade-in duration-200">
           <div
             role="alertdialog"
             aria-modal="true"
@@ -1112,7 +1112,7 @@ function UpdateHandler() {
       )}
 
       {downloadState && (
-        <div className="fixed inset-0 z-[10001] flex items-center justify-center bg-background/95 p-6 backdrop-blur-md animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[10032] flex items-center justify-center bg-background/95 p-6 backdrop-blur-md animate-in fade-in duration-200">
           <div
             role="alertdialog"
             aria-modal="true"

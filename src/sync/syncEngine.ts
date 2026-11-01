@@ -1326,14 +1326,23 @@ export async function processMutationQueue(
       ) {
         dbPayload.workspace_id = workspaceId;
       }
-      if (entityType === "products" && workspaceId) {
+      if (
+        entityType === "products"
+        && operation !== "delete"
+        && workspaceId
+      ) {
         const localProduct = await db.products.get(entityId);
-        if (localProduct?.workspaceId === workspaceId) {
-          // Older queued payloads can retain a stale workspace field after a
-          // workspace switch. The local product row is the verified scope for
-          // this queued mutation; keep the server insert inside that scope.
-          dbPayload.workspace_id = workspaceId;
+        if (!localProduct || localProduct.workspaceId !== workspaceId) {
+          throw new Error("Queued product does not belong to its recorded workspace");
         }
+
+        // The queue payload may have been captured by an older client or
+        // before this product's workspace context was corrected. Rebuild the
+        // RLS-relevant fields from the local row whose workspace we just
+        // verified, rather than trusting stale queued values.
+        dbPayload.workspace_id = localProduct.workspaceId;
+        dbPayload.is_service = localProduct.isService === true;
+        dbPayload.created_by = localProduct.createdBy ?? null;
       }
 
       if (partnerSyncWriteRpc) {
@@ -1746,6 +1755,15 @@ export async function processMutationQueue(
             .maybeSingle();
           if (error) throw error;
           if (!data) throw new Error("Garden job update was not applied.");
+        } else if (entityType === "product_uoms") {
+          // Product inserts create or refresh their base UoM in a database
+          // trigger. Resolve queued UoM writes by the product/unit identity so
+          // that retry updates that row instead of colliding with its server
+          // generated ID.
+          const { error } = await client
+            .from(remoteTableName)
+            .upsert(dbPayload, { onConflict: "product_id,unit_ref" });
+          if (error) throw error;
         } else {
           const { error } = await client.from(remoteTableName).upsert(dbPayload);
           if (error) throw error;
