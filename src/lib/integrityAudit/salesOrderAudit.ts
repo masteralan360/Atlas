@@ -14,6 +14,17 @@ const active = <T extends { isDeleted?: boolean }>(rows: T[]) => rows.filter(row
 const amount = (value: unknown) => Number(value ?? 0)
 const quantityEqual = (a: number, b: number) => Math.abs(roundQuantity(a) - roundQuantity(b)) < 0.000001
 
+function sameQuantityMultiset(expected: number[], actual: number[]): boolean {
+  if (expected.length !== actual.length) return false
+  const unmatched = [...actual]
+  for (const expectedQuantity of expected) {
+    const index = unmatched.findIndex(actualQuantity => quantityEqual(expectedQuantity, actualQuantity))
+    if (index < 0) return false
+    unmatched.splice(index, 1)
+  }
+  return unmatched.length === 0
+}
+
 function buildCheck(
   category: AuditCategory, code: string, matches: boolean, entityType: string,
   entityId?: string, expected?: unknown, actual?: unknown, warning = false
@@ -47,6 +58,7 @@ export function auditSalesOrderGraph(graph: SalesOrderTransactionGraph, workspac
   const itemIds = new Set<string>()
   let originalSubtotal = 0
   const expectedInventory = new Map<string, number>()
+  const expectedInventoryLineDeltas = new Map<string, number[]>()
   for (const item of items) {
     add('items', 'DUPLICATE_ORDER_ITEM', !itemIds.has(item.id), 'sales_order_item', item.id)
     itemIds.add(item.id)
@@ -73,7 +85,9 @@ export function auditSalesOrderGraph(graph: SalesOrderTransactionGraph, workspac
       add('items', 'PAID_INVENTORY_QUANTITY_MISMATCH', quantityEqual(paidUnits, getOrderLinePaidInventoryQuantity(item)), 'sales_order_item', item.id, paidUnits, getOrderLinePaidInventoryQuantity(item))
       add('items', 'BONUS_INVENTORY_QUANTITY_MISMATCH', quantityEqual(bonusUnits, getOrderLineFreeBonusInventoryQuantity(item)), 'sales_order_item', item.id, bonusUnits, getOrderLineFreeBonusInventoryQuantity(item))
       const key = `${item.productId}:${storageId}`
-      expectedInventory.set(key, roundQuantity((expectedInventory.get(key) ?? 0) - paidUnits - bonusUnits))
+      const lineDelta = roundQuantity(-paidUnits - bonusUnits)
+      expectedInventory.set(key, roundQuantity((expectedInventory.get(key) ?? 0) + lineDelta))
+      expectedInventoryLineDeltas.set(key, [...(expectedInventoryLineDeltas.get(key) ?? []), lineDelta])
       add('inventory', 'FULFILLED_QUANTITY_MISMATCH', item.fulfilledQuantity == null || quantityEqual(amount(item.fulfilledQuantity), paidUnits + bonusUnits), 'sales_order_item', item.id, paidUnits + bonusUnits, item.fulfilledQuantity)
     }
   }
@@ -184,7 +198,15 @@ export function auditSalesOrderGraph(graph: SalesOrderTransactionGraph, workspac
     const legacyOrLocal = source !== 'supabase' || Date.parse(order.actualDeliveryDate ?? order.createdAt ?? '') < Date.parse('2026-09-25T14:28:44Z')
     add('inventory', 'INVENTORY_MOVEMENT_MISSING', rows.length > 0, 'inventory_transaction', key, expectedDelta, actualInventory.get(key) ?? null, legacyOrLocal)
     if (rows.length) {
-      add('inventory', 'INVENTORY_MOVEMENT_DUPLICATE', rows.length === 1, 'inventory_transaction', key, 1, rows.length)
+      const expectedLineDeltas = expectedInventoryLineDeltas.get(key) ?? []
+      const allowedMovementCounts = [...new Set([1, expectedLineDeltas.length])]
+      const expectedMovementCount = allowedMovementCounts.length === 1 ? allowedMovementCounts[0] : allowedMovementCounts
+      const oneMovementPerLine = sameQuantityMultiset(
+        expectedLineDeltas,
+        rows.map(row => amount(row.quantityDelta))
+      )
+      add('inventory', 'INVENTORY_MOVEMENT_DUPLICATE', rows.length === 1 || oneMovementPerLine,
+        'inventory_transaction', key, expectedMovementCount, rows.length)
       add('inventory', 'INVENTORY_QUANTITY_MISMATCH', quantityEqual(expectedDelta, actualInventory.get(key) ?? 0), 'inventory_transaction', key, expectedDelta, actualInventory.get(key))
     }
   }

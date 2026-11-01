@@ -93,6 +93,18 @@ export const queryKeys = {
       input.userId, input.permissionScope,
     ] as const,
   },
+  coachData: {
+    all: (workspaceId?: string) => ['atlas', 'workspace', workspaceId ?? 'unscoped', 'coach-data'] as const,
+    own: (workspaceId: string, userId: string) => [
+      ...queryKeys.coachData.all(workspaceId), 'own', userId,
+    ] as const,
+    directory: (workspaceId: string, viewerId: string) => [
+      ...queryKeys.coachData.all(workspaceId), 'directory', viewerId,
+    ] as const,
+    selected: (workspaceId: string, viewerId: string, coachUserId: string) => [
+      ...queryKeys.coachData.all(workspaceId), 'selected', viewerId, coachUserId,
+    ] as const,
+  },
   inventoryTransactions: {
     all: (workspaceId: string | undefined) =>
       ['atlas', 'workspace', workspaceId ?? 'unscoped', 'inventory-transactions'] as const,

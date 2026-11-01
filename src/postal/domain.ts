@@ -72,7 +72,6 @@ export interface PostalBranch {
   workspace_id: string;
   name: string;
   governorate: string;
-  area: string;
   address: string | null;
   active: boolean;
 }
@@ -167,6 +166,33 @@ export interface PostalTariffOption {
   fee: number;
   zone: PostalTariffZone | null;
 }
+const northernGovernorates = new Set(["sulaymaniyah", "erbil", "duhok"]);
+const nonNorthernTariffLabels: Partial<
+  Record<PostalShipmentSize, Record<number, string>>
+> = {
+  carton: {
+    8000: "carton_8000",
+    12000: "carton_12000",
+    15000: "carton_15000",
+    20000: "carton_20000",
+  },
+  ship: {
+    15000: "ship_15000",
+    24000: "ship_24000",
+    35000: "ship_35000",
+    55000: "ship_55000",
+  },
+};
+export function postalShipmentSizeTranslationKey(
+  governorate: string,
+  size: PostalShipmentSize,
+  fee: number | null | undefined,
+) {
+  const tariffLabel = fee == null || northernGovernorates.has(governorate)
+    ? undefined
+    : nonNorthernTariffLabels[size]?.[fee];
+  return `postal.shipmentSizes.${tariffLabel ?? size}`;
+}
 export function postalTariffOptions(
   governorate: string,
   area: string,
@@ -175,7 +201,7 @@ export function postalTariffOptions(
   if (!destination?.areas.some((entry) => entry[0] === area)) {
     return [];
   }
-  if (["sulaymaniyah", "erbil", "duhok"].includes(governorate)) {
+  if (northernGovernorates.has(governorate)) {
     const center = /center|centre/i.test(area);
     return [
       {
@@ -189,6 +215,7 @@ export function postalTariffOptions(
     { size: "carton", fee: 8000, zone: null },
     { size: "carton", fee: 12000, zone: null },
     { size: "carton", fee: 15000, zone: null },
+    { size: "carton", fee: 20000, zone: null },
     { size: "ship", fee: 15000, zone: null },
     { size: "ship", fee: 24000, zone: null },
     { size: "ship", fee: 35000, zone: null },

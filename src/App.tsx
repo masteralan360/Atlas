@@ -1339,13 +1339,19 @@ function FirstTimeRedirect() {
       user?.role === 'staff' &&
       hasFeature('postal_service') &&
       hasPermission('postService.merchant');
-    window.location.hash = getPathWithLang(isMerchantStaff ? '/post-service' : '/modules', i18n.language);
+    const isCoachStaff = user?.role === 'staff' && hasPermission('coach');
+    const landingPath = isCoachStaff
+      ? '/commerce-operations/coach-data'
+      : isMerchantStaff
+        ? '/post-service'
+        : '/modules';
+    window.location.hash = getPathWithLang(landingPath, i18n.language);
   }, [hasFeature, hasPermission, isAuthenticated, isLoading, isPermissionsLoading, isWorkspaceLoading, user?.role]);
 
   return null;
 }
 
-function MerchantStaffRedirect({ children }: { children: ReactNode }) {
+function RestrictedStaffLandingRedirect({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const { hasFeature } = useWorkspace();
   const { hasPermission, isLoading } = useWorkspacePermissions();
@@ -1356,7 +1362,9 @@ function MerchantStaffRedirect({ children }: { children: ReactNode }) {
     user?.role === 'staff' &&
     hasFeature('postal_service') &&
     hasPermission('postService.merchant');
+  const isCoachStaff = user?.role === 'staff' && hasPermission('coach');
 
+  if (isCoachStaff) return <Redirect to="/commerce-operations/coach-data" />;
   return isMerchantStaff ? <Redirect to="/post-service" /> : <>{children}</>;
 }
 
@@ -1525,11 +1533,11 @@ function App() {
                       <Route path="/">
                         <ProtectedRoute>
                           <Layout>
-                            <MerchantStaffRedirect>
+                            <RestrictedStaffLandingRedirect>
                               <Suspense fallback={<DashboardSkeleton />}>
                                 <Dashboard />
                               </Suspense>
-                            </MerchantStaffRedirect>
+                            </RestrictedStaffLandingRedirect>
                           </Layout>
                         </ProtectedRoute>
                       </Route>
@@ -2244,11 +2252,11 @@ function App() {
                       </Route>
                       <Route path="/modules">
                         <ProtectedRoute>
-                          <MerchantStaffRedirect>
+                          <RestrictedStaffLandingRedirect>
                             <Layout>
                               <ModuleLauncher />
                             </Layout>
-                          </MerchantStaffRedirect>
+                          </RestrictedStaffLandingRedirect>
                         </ProtectedRoute>
                       </Route>
                       <Route path="/revenue">

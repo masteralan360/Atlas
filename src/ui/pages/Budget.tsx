@@ -740,7 +740,9 @@ export function Budget() {
         [monthRevenueRecords, baseCurrency, rates]
     )
 
-    const surplusPoolBase = netProfitBase - operationalTotals.totalBase - payrollTotals.totalBase
+    // Keep pending expense and payroll obligations in Outstanding without letting
+    // them reduce the surplus pool or Surplus card.
+    const surplusPoolBase = netProfitBase - operationalTotals.paidBase - payrollTotals.paidBase
 
     const dividendResult = useMemo(
         () => buildDividendItems(employees, dividendStatuses, selectedMonth as any, baseCurrency, rates, surplusPoolBase),
@@ -768,7 +770,7 @@ export function Budget() {
     const totalAllocatedBase = operationalTotals.totalBase + payrollTotals.totalBase
     const totalPaidBase = operationalTotals.paidBase + payrollTotals.paidBase
     const totalOutstandingBase = totalAllocatedBase - totalPaidBase
-    const surplusRemainderBase = netProfitBase - operationalTotals.totalBase - payrollTotals.totalBase - dividendResult.totalBase
+    const surplusRemainderBase = netProfitBase - operationalTotals.paidBase - payrollTotals.paidBase - dividendResult.totalBase
 
 
     const currentBudgetAllocation = useMemo(() => {

@@ -106,9 +106,9 @@ describe("Post Service domain", () => {
             zone: center ? "center" : "outside",
           }]);
         } else {
-          expect(options).toHaveLength(7);
+          expect(options).toHaveLength(8);
           expect(options.map((option) => option.size)).toEqual([
-            "carton", "carton", "carton", "ship", "ship", "ship", "ship",
+            "carton", "carton", "carton", "carton", "ship", "ship", "ship", "ship",
           ]);
         }
       }

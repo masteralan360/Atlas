@@ -2,12 +2,12 @@ import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { QrCode, ScanLine } from 'lucide-react'
 import {
-  AppDialog,
-  AppDialogBody,
-  AppDialogContent,
-  AppDialogHeader,
-  AppDialogTitle,
-  AppDialogFooter,
+  SmallDialog,
+  SmallDialogBody,
+  SmallDialogContent,
+  SmallDialogFooter,
+  SmallDialogHeader,
+  SmallDialogTitle,
   Button,
   useToast,
 } from '@/ui/components'
@@ -33,23 +33,23 @@ export function CreateShipmentFlow({
   const scanned = useRef<PostalShipment>()
   return (
     <>
-      <AppDialog
+      <SmallDialog
         open={step === 'choose'}
         onOpenChange={(open) => {
           if (!open) onClose()
         }}
       >
-        <AppDialogContent className="max-w-md">
-          <AppDialogHeader>
-            <AppDialogTitle>
+        <SmallDialogContent className="max-w-md">
+          <SmallDialogHeader>
+            <SmallDialogTitle>
               {t(
                 scope.role === 'merchant'
                   ? 'postal.createShipment'
                   : 'postal.createShipmentForOrganization',
               )}
-            </AppDialogTitle>
-          </AppDialogHeader>
-          <AppDialogBody className="grid gap-3">
+            </SmallDialogTitle>
+          </SmallDialogHeader>
+          <SmallDialogBody className="grid gap-3">
             <Button
               className="min-h-14 justify-start"
               onClick={() => setStep('form')}
@@ -65,14 +65,14 @@ export function CreateShipmentFlow({
               <ScanLine className="me-3 h-5 w-5" />
               {t('postal.readShipmentQr')}
             </Button>
-          </AppDialogBody>
-          <AppDialogFooter>
+          </SmallDialogBody>
+          <SmallDialogFooter>
             <Button variant="outline" onClick={onClose}>
               {t('common.cancel')}
             </Button>
-          </AppDialogFooter>
-        </AppDialogContent>
-      </AppDialog>
+          </SmallDialogFooter>
+        </SmallDialogContent>
+      </SmallDialog>
       {step === 'scan' && (
         <CameraBarcodeScannerModal
           open

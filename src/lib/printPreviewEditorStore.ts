@@ -67,6 +67,8 @@ export type TemplatePreview = {
     fields: TemplatePreviewField[]
     dataKeys?: TemplatePreviewDataKey[]
     movableComponents?: TemplatePreviewMovableComponent[]
+    /** Ignores a small measured overflow caused by pixel rounding for fixed-size previews. */
+    measurementRoundingToleranceMm?: number
     /** Enables the common background watermark editor in the preview's edit panel. */
     supportsBackgroundEdit?: boolean
     /** Shows a development-only control for simulating extra order item rows. */

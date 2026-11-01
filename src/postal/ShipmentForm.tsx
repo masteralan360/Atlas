@@ -434,6 +434,7 @@ export function ShipmentForm({
             {needsTariff && (
               <ShipmentTariffSelector
                 id="shipment-tariff"
+                governorate={form.governorate}
                 options={postalTariffOptions(form.governorate, form.area)}
                 value={tariff}
                 disabled={action.busy}

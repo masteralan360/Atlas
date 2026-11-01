@@ -17,6 +17,7 @@ import {
   Search,
   Eye,
   Building2,
+  MapPin,
   Users,
   Wallet,
   HandCoins,
@@ -70,7 +71,11 @@ import {
 } from '@/postal/domain'
 import { PostalLoading, PostalError } from '@/postal/shared'
 import { CreateShipmentFlow } from '@/postal/CreateShipmentFlow'
-import { BranchDialog, OrganizationDialog } from '@/postal/ManagementDialogs'
+import {
+  AddAllGovernoratesDialog,
+  BranchDialog,
+  OrganizationDialog,
+} from '@/postal/ManagementDialogs'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { getPaymentMethodLabel } from '@/lib/paymentMethods'
 import type { PaymentMethodOption } from '@/lib/paymentMethods'
@@ -101,6 +106,7 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
   const [scanner, setScanner] = useState(false)
   const scannedId = useRef<string | null>(null)
   const [branch, setBranch] = useState<PostalBranch | 'new' | null>(null)
+  const [addAllGovernoratesOpen, setAddAllGovernoratesOpen] = useState(false)
   const [createOrganizationOpen, setCreateOrganizationOpen] = useState(false)
   const [organization, setOrganization] = useState<PostalOrganization | null>(
     null,
@@ -558,10 +564,19 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
             </Select>
           )}
           {tab === 'branches' && (
-            <Button onClick={() => setBranch('new')}>
-              <Plus className="me-2 h-4 w-4" />
-              {t('postal.createBranch')}
-            </Button>
+            <>
+              <Button onClick={() => setBranch('new')}>
+                <Plus className="me-2 h-4 w-4" />
+                {t('postal.createBranch')}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setAddAllGovernoratesOpen(true)}
+              >
+                <MapPin className="me-2 h-4 w-4" />
+                {t('postal.addAllGovernorates')}
+              </Button>
+            </>
           )}
           {tab === 'organizations' && scope.role === 'admin' && (
             <>
@@ -683,6 +698,12 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
           scope={scope}
           branch={branch === 'new' ? undefined : branch}
           onClose={() => setBranch(null)}
+        />
+      )}
+      {addAllGovernoratesOpen && (
+        <AddAllGovernoratesDialog
+          scope={scope}
+          onClose={() => setAddAllGovernoratesOpen(false)}
         />
       )}
       {createOrganizationOpen && (

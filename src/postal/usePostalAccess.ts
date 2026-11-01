@@ -108,19 +108,23 @@ export function usePostalAction() {
         e && typeof e === 'object' && 'message' in e ? String(e.message) : ''
       const key = message.includes('stale_shipment')
         ? 'stale'
-        : message.includes('postal_invalid_organization')
-          ? 'invalidOrganization'
-        : message.includes('invalid_tariff') || message.includes('tariff_required')
-          ? 'invalidTariff'
-          : message.includes('tariff_locked')
-            ? 'tariffLocked'
-            : message.includes('invalid_transition')
-              ? 'invalidTransition'
-              : message.includes('invalid_payment')
-                ? 'invalidPayment'
-                : message.includes('cod_locked')
-                  ? 'codLocked'
-                  : 'failed'
+        : message.includes('postal_duplicate_branch_name')
+          ? 'duplicateBranchName'
+          : message.includes('postal_invalid_branch_governorate')
+            ? 'invalidBranchGovernorate'
+            : message.includes('postal_invalid_organization')
+              ? 'invalidOrganization'
+              : message.includes('invalid_tariff') || message.includes('tariff_required')
+                ? 'invalidTariff'
+                : message.includes('tariff_locked')
+                  ? 'tariffLocked'
+                  : message.includes('invalid_transition')
+                    ? 'invalidTransition'
+                    : message.includes('invalid_payment')
+                      ? 'invalidPayment'
+                      : message.includes('cod_locked')
+                        ? 'codLocked'
+                        : 'failed'
       toast({
         title: t('common.error'),
         description: t(`postal.errors.${key}`),

@@ -665,6 +665,7 @@ export function PrintPreviewEditorPage() {
     const templatePreview = source?.templatePreview
     const initialTemplateLayout = source?.initialTemplateLayout
     const isLabelPrintTemplate = source?.customTemplate?.moduleTypeKey === LABEL_PRINT_TEMPLATE_KEY
+    const isFixedLabelTemplate = source?.printFormat === 'label'
     const [labelWidthInput, setLabelWidthInput] = useState(() => (
         isLabelPrintTemplate && initialTemplateLayout?.page.widthMm
             ? String(initialTemplateLayout.page.widthMm)
@@ -682,7 +683,10 @@ export function PrintPreviewEditorPage() {
         heightMm: labelHeightMm ?? Number.NaN
     }
     const isLabelPageSizeValid = isValidLabelPrintPageSize(labelPageSize)
-    const isTemplatePageSizeValid = !isLabelPrintTemplate || isLabelPageSizeValid
+    const isFixedTemplatePageSizeValid = Boolean(templatePreview?.page && isValidLabelPrintPageSize(templatePreview.page))
+    const isTemplatePageSizeValid = isLabelPrintTemplate
+        ? isLabelPageSizeValid
+        : !isFixedLabelTemplate || isFixedTemplatePageSizeValid
     const [templateHiddenFields, setTemplateHiddenFields] = useState<Record<string, boolean>>(
         () => initialTemplateLayout?.hiddenFields || {}
     )
@@ -755,9 +759,11 @@ export function PrintPreviewEditorPage() {
     const isTemplatePrintReady = !requiresFreshPartnerBalance
         || freshPartnerBalanceState === 'ready'
     const fixedTemplatePrintLang = templatePreview?.fixedPrintLang
-    const templatePage = initialTemplateLayout?.page
-        || templatePreview?.page
-        || (isLabelPrintTemplate ? undefined : { widthMm: 210, heightMm: 297 })
+    const templatePage = isFixedLabelTemplate && !isLabelPrintTemplate
+        ? templatePreview?.page
+        : initialTemplateLayout?.page
+            || templatePreview?.page
+            || (isFixedLabelTemplate ? undefined : { widthMm: 210, heightMm: 297 })
     const templatePageWidth = isLabelPrintTemplate
         ? labelWidthMm ?? 1
         : templatePage?.widthMm || 210
@@ -873,7 +879,7 @@ export function PrintPreviewEditorPage() {
     // Thermal receipts grow with their content; they do not have fixed page breaks.
     // The width fallback keeps older saved receipt templates free of A4-style guides.
     const isFixedPageTemplatePreview = source?.printFormat !== 'receipt'
-        && (isLabelPrintTemplate || templatePageWidth > 80)
+        && (isFixedLabelTemplate || templatePageWidth > 80)
     const templateLayoutForMeasurement = {
         page: {
             widthMm: templatePageWidth,
@@ -886,11 +892,19 @@ export function PrintPreviewEditorPage() {
         componentPositions: templateComponentPositions
     }
     const estimatedTemplateHeightMm = getCustomTemplateLayoutHeightMm(templateLayoutForMeasurement)
+    const measurementRoundingToleranceMm = Math.max(
+        0,
+        templatePreview?.measurementRoundingToleranceMm || 0
+    )
+    const measuredTemplateHeightForPagination = measurementRoundingToleranceMm > 0
+        && measuredTemplateHeightMm <= templatePageHeight + measurementRoundingToleranceMm
+        ? templatePageHeight
+        : measuredTemplateHeightMm
     const templateContentHeightMm = isFixedPageTemplatePreview
         ? Math.max(
             templatePageHeight,
             estimatedTemplateHeightMm,
-            measuredTemplateHeightMm
+            measuredTemplateHeightForPagination
         )
         : Math.max(1, measuredTemplateHeightMm)
     const templatePageCount = isFixedPageTemplatePreview
@@ -2723,7 +2737,7 @@ export function PrintPreviewEditorPage() {
                                 <div
                                     ref={templateContentLayerRef}
                                     className="relative"
-                                    style={isLabelPrintTemplate ? {
+                                    style={isFixedLabelTemplate ? {
                                         width: `${templatePageWidth}mm`,
                                         height: `${templatePageHeight}mm`
                                     } : undefined}

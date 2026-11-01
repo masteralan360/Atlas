@@ -434,7 +434,21 @@ export function usePostalDetail(scope: PostalScope, shipmentId: string) {
             .single(),
         () => 1,
       )
-      const [transfers, summary] = await Promise.all([
+      const [organization, transfers, summary] = await Promise.all([
+        tracked<{ id: string; name: string }>(
+          scope,
+          'postal_organizations',
+          signal,
+          () =>
+            supabase
+              .from('postal_organizations')
+              .select('id,name')
+              .eq('workspace_id', scope.workspaceId)
+              .eq('id', shipment.organization_id)
+              .abortSignal(signal)
+              .single(),
+          () => 1,
+        ),
         tracked<PostalTransfer[]>(
           scope,
           'postal_transfers',
@@ -468,6 +482,7 @@ export function usePostalDetail(scope: PostalScope, shipmentId: string) {
       ])
       return {
         shipment: normalizeShipment(shipment as PostalShipment),
+        organizationName: organization.name,
         transfer: transfers[0],
         summary: {
           collected: Number(summary.collected),
@@ -698,4 +713,34 @@ export async function postalCommand<T>(
     window.dispatchEvent(new CustomEvent('payment-transactions:changed'))
   }
   return data as T
+}
+
+export async function postalAddGovernorateBranches(
+  scope: PostalScope,
+  locale: 'en' | 'ar' | 'ku',
+  branches: Array<{ name: string; governorate: string }>,
+  requestId: string,
+): Promise<{ count: number }> {
+  const { data, error } = await supabase.rpc(
+    'postal_add_governorate_branches',
+    {
+      p_locale: locale,
+      p_branches: branches,
+      p_request_id: requestId,
+    },
+  )
+  if (error) throw error
+  await queryClient.invalidateQueries({
+    queryKey: queryKeys.postal.all(scope.workspaceId),
+  })
+  if (
+    !data ||
+    typeof data !== 'object' ||
+    !('count' in data) ||
+    typeof data.count !== 'number' ||
+    !Number.isSafeInteger(data.count) ||
+    data.count !== branches.length
+  )
+    throw new Error('postal_invalid_result')
+  return data as { count: number }
 }

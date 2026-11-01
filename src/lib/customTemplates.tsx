@@ -97,6 +97,8 @@ import type { ProductPrintImageUrls } from '@/ui/components/print/ProductPrintIm
 import { LabelPrintTemplate } from '@/ui/components/LabelPrintTemplate'
 import type { BarcodeLabelData } from '@/lib/barcodeLabel'
 import { LABEL_PRINT_TEMPLATE_KEY, type LabelPrintPageSize } from '@/lib/labelPrint'
+import { ShipmentLabel, SmallShipmentLabel } from '@/postal/ShipmentLabel'
+import type { PostalShipment } from '@/postal/domain'
 import { ModernA4InvoiceTemplate, MODERN_A4_MOVABLE_COMPONENT_KEYS } from '@/ui/components/ModernA4InvoiceTemplate'
 import {
     ProfessionalA4InvoiceTemplate,
@@ -133,6 +135,8 @@ export const ORDER_DETAILS_TEMPLATE_KEY = 'orders.Details'
 export const ORDER_RECEIPT_TEMPLATE_KEY = 'orders.Receipt'
 export const TRAVEL_BOOKING_TEMPLATE_KEY = 'travelTransportation.Booking'
 export const INVENTORY_TRANSFER_BATCH_TEMPLATE_KEY = 'inventoryTransfer.Batch'
+export const POSTAL_SHIPMENT_LABEL_TEMPLATE_KEY = 'postal.ShipmentLabel'
+export const POSTAL_SMALL_SHIPMENT_LABEL_TEMPLATE_KEY = 'postal.SmallShipmentLabel'
 export const PARTNER_DETAILS_TEMPLATE_FIELD_KEYS = {
     showWhoOwesWhom: 'showWhoOwesWhom',
     showOrders: 'showOrders'
@@ -152,7 +156,7 @@ export const PARTNER_ORDER_ITEMS_TEMPLATE_FIELD_KEYS = {
 
 export type CustomTemplateTarget = {
     moduleTypeKey: string
-    workspaceModuleKey: 'instant_pos' | 'real_estate' | 'sales_history' | 'crm' | 'loans' | 'products' | 'travel_transportation' | 'inventory_transfer'
+    workspaceModuleKey: 'instant_pos' | 'real_estate' | 'sales_history' | 'crm' | 'loans' | 'products' | 'travel_transportation' | 'inventory_transfer' | 'postal_service'
     moduleLabel: string
     typeLabel: string
     description: string
@@ -419,6 +423,28 @@ export const CUSTOM_TEMPLATE_TARGETS: CustomTemplateTarget[] = [
         nativeTemplateKey: LABEL_PRINT_TEMPLATE_KEY,
         nativeTemplateAvailable: true,
         printFormat: 'label'
+    },
+    {
+        moduleTypeKey: POSTAL_SHIPMENT_LABEL_TEMPLATE_KEY,
+        workspaceModuleKey: 'postal_service',
+        get moduleLabel() { return i18n.t('postal.title', { defaultValue: 'Post Service' }) },
+        get typeLabel() { return i18n.t('postal.shipmentLabel', { defaultValue: 'Shipment Label' }) },
+        get description() { return i18n.t('postal.labelSize', { defaultValue: '100 × 100 mm shipment label' }) },
+        nativeTemplateKey: POSTAL_SHIPMENT_LABEL_TEMPLATE_KEY,
+        nativeTemplateAvailable: true,
+        printFormat: 'label',
+        page: { widthMm: 100, heightMm: 100 }
+    },
+    {
+        moduleTypeKey: POSTAL_SMALL_SHIPMENT_LABEL_TEMPLATE_KEY,
+        workspaceModuleKey: 'postal_service',
+        get moduleLabel() { return i18n.t('postal.title', { defaultValue: 'Post Service' }) },
+        get typeLabel() { return i18n.t('postal.smallShipmentLabel', { defaultValue: 'Small Shipment Label' }) },
+        get description() { return i18n.t('postal.smallShipmentLabelSize', { defaultValue: '40 × 58 mm compact shipment label' }) },
+        nativeTemplateKey: POSTAL_SMALL_SHIPMENT_LABEL_TEMPLATE_KEY,
+        nativeTemplateAvailable: true,
+        printFormat: 'label',
+        page: { widthMm: 40, heightMm: 58 }
     },
     ...REAL_ESTATE_CONTRACT_TARGETS.map((target) => ({
         ...target,
@@ -702,6 +728,39 @@ export type CustomTemplatePreviewOptions = {
     barcodeLabel?: BarcodeLabelData
     labelPageSizeMm?: LabelPrintPageSize
     inventoryTransferBatchData?: InventoryTransferBatchPrintData
+    postalShipment?: PostalShipment
+    postalOrganizationName?: string
+}
+
+const SAMPLE_POSTAL_SHIPMENT: PostalShipment = {
+    id: 'sample-postal-shipment',
+    shipment_number: 7,
+    workspace_id: 'sample-workspace',
+    organization_id: 'sample-organization',
+    qr_id: '00000000-0000-4000-8000-000000000007',
+    recipient_name: 'Sample Recipient',
+    primary_phone: '07701234567',
+    backup_phone: '',
+    governorate: 'sulaymaniyah',
+    area: 'sulaymaniyah-centre',
+    address: 'Sample destination address',
+    cod_amount: 20000,
+    shipment_size: 'small_package',
+    tariff_zone: 'center',
+    delivery_fee: 5000,
+    tariff_assigned_by: null,
+    tariff_assigned_at: '2026-10-28T00:00:00.000Z',
+    pieces: 5,
+    fragile: false,
+    delivery_notes: null,
+    state: 'draft',
+    current_branch_id: null,
+    revision: 1,
+    driver_id: null,
+    driver_name: null,
+    created_at: '2026-10-28T00:00:00.000Z',
+    updated_at: '2026-10-28T00:00:00.000Z',
+    deleted_at: null
 }
 
 const SAMPLE_TRAVEL_BOOKING_DATA = {
@@ -2447,6 +2506,58 @@ export function createCustomTemplatePreview(
     target: CustomTemplateTarget,
     options: CustomTemplatePreviewOptions = {}
 ): TemplatePreview {
+    if (target.moduleTypeKey === POSTAL_SHIPMENT_LABEL_TEMPLATE_KEY
+        || target.moduleTypeKey === POSTAL_SMALL_SHIPMENT_LABEL_TEMPLATE_KEY) {
+        const configuredLanguage = options.printLang
+            || (options.features?.print_lang && options.features.print_lang !== 'auto'
+                ? options.features.print_lang
+                : i18n.language)
+        const fixedPrintLang: TemplatePreview['fixedPrintLang'] = configuredLanguage.startsWith('ar')
+            ? 'ar'
+            : configuredLanguage.startsWith('ku')
+                ? 'ku'
+                : 'en'
+        const isSmallLabel = target.moduleTypeKey === POSTAL_SMALL_SHIPMENT_LABEL_TEMPLATE_KEY
+
+        return {
+            fields: isSmallLabel ? [] : [{
+                key: 'note',
+                label: i18n.t('postal.notes', { defaultValue: 'Notes' }),
+                value: '',
+                type: 'text'
+            }],
+            page: target.page,
+            fixedPrintLang,
+            measurementRoundingToleranceMm: 0.5,
+            createElement: (fields) => {
+                const shipment = options.postalShipment || SAMPLE_POSTAL_SHIPMENT
+                const workspaceName = options.workspaceName || 'Atlas'
+
+                return isSmallLabel ? (
+                    <SmallShipmentLabel shipment={shipment} workspaceName={workspaceName} />
+                ) : (
+                    <ShipmentLabel
+                        shipment={shipment}
+                        organizationName={options.postalOrganizationName || i18n.t('postal.title', { defaultValue: 'Post Service' })}
+                        workspaceName={workspaceName}
+                        note={fields.note || ''}
+                    />
+                )
+            },
+            buildPdf: (element, printLangOverride) => {
+                if (!target.page) {
+                    return Promise.reject(new Error('The shipment label size is unavailable.'))
+                }
+                return generateTemplatePdf({
+                    element,
+                    format: 'label',
+                    pageSizeMm: target.page,
+                    printLang: printLangOverride || fixedPrintLang
+                })
+            }
+        }
+    }
+
     if (target.moduleTypeKey === LABEL_PRINT_TEMPLATE_KEY) {
         const configuredLanguage = options.printLang
             || (options.features?.print_lang && options.features.print_lang !== 'auto'

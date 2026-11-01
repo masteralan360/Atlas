@@ -42,6 +42,7 @@ import {
     type StockBatch
 } from '@/local-db'
 import { ACTIVITIES_VIRTUAL_STORAGE_ID, isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
+import { getPersistedSalesOrderItemStorageId } from '@/lib/salesOrderLineStorage'
 import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
 import { isPosPaymentTypeAllowed, getPosCheckoutRoute, shouldShowPosLoanPaymentOption, type PosPaymentType } from '@/lib/posPaymentPolicy'
 import { createPosServiceNameMetadata, formatPosServiceName, normalizePosServiceNameSuffix } from '@/lib/posServiceName'
@@ -3959,7 +3960,7 @@ export function POS() {
                     id: generateId(),
                     productId: product.id,
                     note: item.note?.trim() || null,
-                    storageId,
+                    storageId: getPersistedSalesOrderItemStorageId(product, storageId),
                     productName: formatPosServiceName(product.name, service ? item.service_name_suffix : undefined),
                     stockSourceType: service ? undefined : item.stock_source_type,
                     stockSourceBatchId: service ? undefined : item.stock_source_batch_id,

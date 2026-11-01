@@ -47,7 +47,6 @@ export function OperationDialog({
           name: transfer.destination_name ?? transfer.destination_id,
           workspace_id: scope.workspaceId,
           governorate: '',
-          area: '',
           address: null,
           active: true,
         }
@@ -128,6 +127,7 @@ export function OperationDialog({
           {operation === 'receive' && (
             <ShipmentTariffSelector
               id="receive-shipment-tariff"
+              governorate={shipment.governorate}
               options={tariffs}
               value={tariff}
               reviewing

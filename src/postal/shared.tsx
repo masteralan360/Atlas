@@ -157,6 +157,95 @@ export function LocationPicker({
     </>
   )
 }
+
+export function GovernoratePicker({
+  governorate,
+  disabled,
+  onChange,
+}: {
+  governorate: string
+  disabled?: boolean
+  onChange: (governorate: string) => void
+}) {
+  const { t, i18n } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const options = locations.map((location) => ({
+    id: location.id,
+    label: locationLabel(location.id, i18n.language),
+    aliases: `${location.en} ${location.ar} ${location.ku}`,
+  }))
+
+  return (
+    <div className="space-y-2">
+      <label className="text-sm font-medium" htmlFor="postal-branch-governorate">
+        {t('postal.governorate')} *
+      </label>
+      <Button
+        id="postal-branch-governorate"
+        className="w-full justify-start"
+        type="button"
+        variant="outline"
+        disabled={disabled}
+        onClick={() => {
+          setSearch('')
+          setOpen(true)
+        }}
+      >
+        <MapPin className="me-2 h-4 w-4 shrink-0" />
+        {governorate
+          ? locationLabel(governorate, i18n.language)
+          : t('postal.select')}
+      </Button>
+      <SmallDialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setOpen(false)
+        }}
+      >
+        <SmallDialogContent layout="structured">
+          <SmallDialogHeader layout="structured" className="shrink-0">
+            <SmallDialogTitle>{t('postal.governorate')}</SmallDialogTitle>
+          </SmallDialogHeader>
+          <SmallDialogBody className="space-y-3">
+            <Input
+              autoFocus
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              aria-label={t('common.search')}
+              placeholder={t('common.search')}
+            />
+            <div className="grid gap-1">
+              {options
+                .filter((option) =>
+                  `${option.aliases} ${option.label}`
+                    .toLocaleLowerCase()
+                    .includes(search.toLocaleLowerCase()),
+                )
+                .map((option) => (
+                  <Button
+                    key={option.id}
+                    type="button"
+                    variant="ghost"
+                    className="justify-between"
+                    disabled={disabled}
+                    onClick={() => {
+                      onChange(option.id)
+                      setOpen(false)
+                    }}
+                  >
+                    {option.label}
+                    {option.id === governorate && <Check className="h-4 w-4" />}
+                  </Button>
+                ))}
+            </div>
+          </SmallDialogBody>
+        </SmallDialogContent>
+      </SmallDialog>
+    </div>
+  )
+}
+
 export function BranchPicker({
   scope,
   value,

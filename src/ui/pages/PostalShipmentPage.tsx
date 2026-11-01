@@ -1,5 +1,5 @@
 import { usePostalScope, usePostalAction } from '@/postal/usePostalAccess'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 import {
@@ -39,7 +39,15 @@ import {
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { PrintSelectionModal } from '@/ui/components/PrintSelectionModal'
+import {
+  getCustomTemplateTarget,
+  readCustomTemplateLayout,
+  getStoredCustomTemplateLabel,
+  type StoredCustomTemplateRow,
+} from '@/lib/customTemplates'
+import { loadPostalShipmentLabelTemplates } from '@/lib/postalShipmentLabelTemplates'
 import { useWorkspacePermissions } from '@/permissions'
+import { useWorkspace } from '@/workspace'
 import {
   usePostalDetail,
   usePostalEvents,
@@ -51,9 +59,14 @@ import {
   availableOperations,
   formatPostalShipmentId,
   locationLabel,
+  postalShipmentSizeTranslationKey,
 } from '@/postal/domain'
 import { PostalError, PostalLoading } from '@/postal/shared'
-import { preparePostalLabel } from '@/postal/printing'
+import {
+  preparePostalCustomLabel,
+  preparePostalLabel,
+  type PostalShipmentLabelSize,
+} from '@/postal/printing'
 import { RecipientContactFlow } from '@/postal/RecipientContactFlow'
 import { ShipmentForm } from '@/postal/ShipmentForm'
 import { CreateShipmentFlow } from '@/postal/CreateShipmentFlow'
@@ -99,6 +112,7 @@ export default function PostalShipmentPage({
 }) {
   const { t, i18n } = useTranslation()
   const scope = usePostalScope()
+  const { workspaceName } = useWorkspace()
   const { permissionKeys } = useWorkspacePermissions()
   const canPrint = !permissionKeys.includes('global.NOprint')
   const [, navigate] = useLocation()
@@ -117,11 +131,22 @@ export default function PostalShipmentPage({
   const [payment, setPayment] = useState<
     'collection' | 'settlement' | 'delivery_fee' | null
   >(null)
+  const [shipmentLabelTemplates, setShipmentLabelTemplates] = useState<StoredCustomTemplateRow[]>([])
   const action = usePostalAction()
+  useEffect(() => {
+    let isCurrent = true
+    setShipmentLabelTemplates([])
+    void loadPostalShipmentLabelTemplates(scope.workspaceId).then((result) => {
+      if (isCurrent && !result.failed) setShipmentLabelTemplates(result.templates)
+    })
+    return () => {
+      isCurrent = false
+    }
+  }, [scope.workspaceId])
   if (detail.isPending) return <PostalLoading />
   if (detail.error || !detail.data)
     return <PostalError retry={() => void detail.refetch()} />
-  const { shipment, transfer, summary } = detail.data
+  const { shipment, transfer, summary, organizationName } = detail.data
   const cod = codHistory.data?.pages.flat() ?? []
   const deliveryFeeRecords = deliveryFeeHistory.data?.pages.flat() ?? []
   const operations = availableOperations(shipment, transfer, scope.role)
@@ -147,9 +172,35 @@ export default function PostalShipmentPage({
     Number(shipment.delivery_fee ?? 0) - deliveryFeeCollected,
   )
   const events = history.data?.pages.flat() ?? []
-  const openPrint = () => {
+  const shipmentLabelTemplateOptions = shipmentLabelTemplates.flatMap((template) => {
+    const target = getCustomTemplateTarget(template.module_type_key)
+    const layout = readCustomTemplateLayout(template)
+    if (!target?.page || !layout) return []
+    return [{
+      format: 'label' as const,
+      template,
+      label: getStoredCustomTemplateLabel(template),
+      description: t('postal.customLabelTemplateDescription', {
+        width: target.page.widthMm,
+        height: target.page.heightMm,
+      }),
+      primary: template.primary,
+    }]
+  })
+  const openPrint = (labelSize: PostalShipmentLabelSize) => {
     setPrint(false)
-    preparePostalLabel(shipment, scope.workspaceId, t)
+    preparePostalLabel(shipment, scope.workspaceId, t, {
+      organizationName,
+      workspaceName: workspaceName || 'Atlas',
+    }, labelSize)
+    navigate('/print-preview-editor')
+  }
+  const openCustomLabelPrint = (template: StoredCustomTemplateRow) => {
+    preparePostalCustomLabel(shipment, scope.workspaceId, {
+      organizationName,
+      workspaceName: workspaceName || 'Atlas',
+    }, template, i18n.language)
+    setPrint(false)
     navigate('/print-preview-editor')
   }
   return (
@@ -255,7 +306,11 @@ export default function PostalShipmentPage({
                 ...(shipment.shipment_size
                   ? [[
                       'shipmentSize',
-                      t(`postal.shipmentSizes.${shipment.shipment_size}`),
+                      t(postalShipmentSizeTranslationKey(
+                        shipment.governorate,
+                        shipment.shipment_size,
+                        shipment.delivery_fee,
+                      )),
                     ]]
                   : []),
                 ...(shipment.tariff_zone
@@ -687,9 +742,27 @@ export default function PostalShipmentPage({
             format: 'label',
             label: t('postal.shipmentLabel'),
             description: t('postal.labelSize'),
+            nativeTemplateKey: 'postal-standard-shipment-label',
+          },
+          {
+            format: 'label',
+            label: t('postal.smallShipmentLabel'),
+            description: t('postal.smallShipmentLabelSize'),
+            nativeTemplateKey: 'postal-small-shipment-label',
           },
         ]}
-        onSelect={openPrint}
+        templateOptions={shipmentLabelTemplateOptions}
+        onSelect={(_, template, nativeTemplateKey) => {
+          if (template) {
+            openCustomLabelPrint(template)
+            return
+          }
+          openPrint(
+            nativeTemplateKey === 'postal-small-shipment-label'
+              ? 'small'
+              : 'standard',
+          )
+        }}
       />
       <SmallDialog open={qr} onOpenChange={setQr}>
         <SmallDialogContent>

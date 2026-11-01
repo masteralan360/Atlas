@@ -1,10 +1,11 @@
 import { useTranslation } from 'react-i18next'
 import { Check, Package } from 'lucide-react'
 import { Button } from '@/ui/components'
-import type { PostalTariffOption } from './domain'
+import { postalShipmentSizeTranslationKey, type PostalTariffOption } from './domain'
 
 export function ShipmentTariffSelector({
   id,
+  governorate,
   options,
   value,
   disabled,
@@ -12,6 +13,7 @@ export function ShipmentTariffSelector({
   onChange,
 }: {
   id: string
+  governorate: string
   options: PostalTariffOption[]
   value: PostalTariffOption | null
   disabled?: boolean
@@ -52,7 +54,7 @@ export function ShipmentTariffSelector({
                 <Package className="mt-0.5 h-5 w-5 shrink-0" />
                 <span className="space-y-1">
                   <span className="block font-semibold">
-                    {t(`postal.shipmentSizes.${option.size}`)}
+                    {t(postalShipmentSizeTranslationKey(governorate, option.size, option.fee))}
                   </span>
                   {option.zone && (
                     <span className="block text-xs opacity-80">

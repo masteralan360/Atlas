@@ -1,21 +1,29 @@
 import { usePostalAction } from './usePostalAccess'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Building2, Loader2, ShieldCheck, Users } from 'lucide-react'
+import { Building2, Loader2, MapPin, ShieldCheck, Users } from 'lucide-react'
 import {
   AppDialog,
   AppDialogBody,
   AppDialogContent,
+  AppDialogDescription,
   AppDialogFooter,
   AppDialogHeader,
   AppDialogTitle,
   Button,
   Input,
   Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Textarea,
   Checkbox,
+  useToast,
 } from '@/ui/components'
 import {
+  postalAddGovernorateBranches,
   postalCommand,
   usePostalMembers,
   type PostalScope,
@@ -23,7 +31,115 @@ import {
 import type { PostalBranch, PostalOrganization } from './domain'
 import { MembershipDialog } from './MembershipDialog'
 import { OrganizationCode } from './OrganizationCode'
-import { LocationPicker, PostalLoading, PostalError } from './shared'
+import { GovernoratePicker, PostalLoading, PostalError } from './shared'
+import iraqPostalLocations from '@/data/iraqPostalLocations.json'
+
+type BranchNameLocale = 'en' | 'ar' | 'ku'
+
+export function AddAllGovernoratesDialog({
+  scope,
+  onClose,
+}: {
+  scope: PostalScope
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  const { toast } = useToast()
+  const [locale, setLocale] = useState<BranchNameLocale | ''>('')
+  const action = usePostalAction()
+
+  return (
+    <AppDialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !action.busy) onClose()
+      }}
+    >
+      <AppDialogContent className="max-w-xl" showCloseButton={!action.busy}>
+        <AppDialogHeader>
+          <AppDialogTitle className="flex items-center gap-2">
+            <MapPin className="h-5 w-5" />
+            {t('postal.bulkBranchesTitle')}
+          </AppDialogTitle>
+          <AppDialogDescription>
+            {t('postal.bulkBranchesDescription', {
+              count: iraqPostalLocations.governorates.length,
+            })}
+          </AppDialogDescription>
+        </AppDialogHeader>
+        <AppDialogBody className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="postal-branch-name-locale">
+              {t('postal.branchNameLocale')} *
+            </Label>
+            <Select
+              value={locale}
+              onValueChange={(value) => setLocale(value as BranchNameLocale)}
+              disabled={action.busy}
+            >
+              <SelectTrigger id="postal-branch-name-locale">
+                <SelectValue placeholder={t('postal.selectBranchNameLocale')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="en">
+                  {t('settings.monthDisplay.english')}
+                </SelectItem>
+                <SelectItem value="ar">
+                  {t('settings.monthDisplay.arabic')}
+                </SelectItem>
+                <SelectItem value="ku">
+                  {t('settings.monthDisplay.kurdish')}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </AppDialogBody>
+        <AppDialogFooter>
+          <Button
+            type="button"
+            disabled={action.busy}
+            variant="outline"
+            onClick={onClose}
+          >
+            {t('common.cancel')}
+          </Button>
+          <Button
+            type="button"
+            disabled={action.busy || !locale}
+            onClick={() => {
+              if (!locale) return
+              const branches = iraqPostalLocations.governorates.map(
+                (governorate) => ({
+                  name: governorate[locale],
+                  governorate: governorate.id,
+                }),
+              )
+              const signature = JSON.stringify({ locale, branches })
+              void action.run(signature, async (requestId) => {
+                await postalAddGovernorateBranches(
+                  scope,
+                  locale,
+                  branches,
+                  requestId,
+                )
+                toast({
+                  title: t('postal.bulkBranchesAddedTitle'),
+                  description: t('postal.bulkBranchesAdded', {
+                    count: branches.length,
+                  }),
+                })
+                onClose()
+              })
+            }}
+          >
+            {action.busy && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
+            {t('postal.addAllGovernorates')}
+          </Button>
+        </AppDialogFooter>
+      </AppDialogContent>
+    </AppDialog>
+  )
+}
 
 export function BranchDialog({
   scope,
@@ -37,7 +153,6 @@ export function BranchDialog({
   const { t } = useTranslation()
   const [name, setName] = useState(branch?.name ?? '')
   const [governorate, setGovernorate] = useState(branch?.governorate ?? '')
-  const [area, setArea] = useState(branch?.area ?? '')
   const [address, setAddress] = useState(branch?.address ?? '')
   const [active, setActive] = useState(branch?.active ?? true)
   const action = usePostalAction()
@@ -45,7 +160,6 @@ export function BranchDialog({
     id: branch?.id,
     name: name.trim(),
     governorate,
-    area,
     address: address.trim(),
     active,
   }
@@ -67,7 +181,7 @@ export function BranchDialog({
           className="flex min-h-0 flex-1 flex-col"
           onSubmit={(e) => {
             e.preventDefault()
-            if (!name.trim() || !area) return
+            if (!name.trim() || !governorate) return
             void action.run(JSON.stringify(payload), async (id) => {
               await postalCommand(scope, 'save_branch', payload, id)
               onClose()
@@ -88,14 +202,10 @@ export function BranchDialog({
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
-            <LocationPicker
+            <GovernoratePicker
               governorate={governorate}
-              area={area}
               disabled={action.busy}
-              onChange={(g, a) => {
-                setGovernorate(g)
-                setArea(a)
-              }}
+              onChange={setGovernorate}
             />
             <div className="space-y-2">
               <Label htmlFor="postal-branch-address">
@@ -129,7 +239,7 @@ export function BranchDialog({
             </Button>
             <Button
               type="submit"
-              disabled={action.busy || !name.trim() || !area}
+              disabled={action.busy || !name.trim() || !governorate}
             >
               {action.busy && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
               {t('common.save')}
