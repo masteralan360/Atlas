@@ -5,12 +5,13 @@ export interface StockOperationAlias { table: string; from: string; to: string }
 export type StockOperationAliases = StockOperationAlias[]
 
 const aliasKey = (workspaceId: string, actorId: string, id: string) => `stock-alias:v2:${workspaceId}:${actorId}:${id}`
+const stockPositionIdPattern = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}:[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i
 
 /** Read only identities referenced by this operation, never the whole history. */
 export async function readStockAliases(workspaceId: string, actorId: string, inputs: unknown[]) {
   const ids = new Set<string>()
   const visit = (value: unknown) => {
-    if (typeof value === 'string' && /^[\da-f]{8}-[\da-f-]{27}$/i.test(value)) ids.add(value)
+    if (typeof value === 'string' && (/^[\da-f]{8}-[\da-f-]{27}$/i.test(value) || stockPositionIdPattern.test(value))) ids.add(value)
     else if (Array.isArray(value)) value.forEach(visit)
     else if (value && typeof value === 'object') Object.entries(value).forEach(([key, nested]) => { visit(key); visit(nested) })
   }
