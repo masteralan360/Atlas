@@ -152,6 +152,8 @@ import {
 } from '@/ui/components/commissions/ProductCommissionPreview'
 import { getProductCommissionPreviewAgentIds } from '@/ui/components/commissions/productCommissionAgent'
 import { useCommissionAgentDirectory } from '@/ui/components/commissions/useCommissionAgentDirectory'
+import { useTieredCommissionOrderPreview } from '@/local-db/tieredPerformanceCommissions'
+import { TieredCommissionOrderPreview } from '@/ui/components/commissions/TieredCommissionOrderPreview'
 
 function statusLabel(t: (key: string) => string, status: string) {
     const translated = t(`orders.status.${status}`)
@@ -485,7 +487,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         || (creatorId === user?.id ? user?.name?.trim() : '')
         || null
 
-    const { permissionKeys } = useWorkspacePermissions()
+    const { permissionKeys, hasPermission } = useWorkspacePermissions()
     const salesAgentCommissionsEnabled = hasFeature('sales_agent_commissions')
     const isTrackedCommission = salesOrder?.commissionMode === 'tracked'
     const canAssignSalesAgents = salesAgentCommissionsEnabled
@@ -494,6 +496,26 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.viewAll')
     const canViewOwnAgentCommissions = salesAgentCommissionsEnabled
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.viewOwn')
+    const canViewTieredCommissionOrder = salesAgentCommissionsEnabled
+        && commerceOperationsEnabled
+        && hasPermission('commerceOperations.access')
+        && (canViewAllAgentCommissions || canViewOwnAgentCommissions)
+    const isEligibleTieredCommerceOrder = Boolean(
+        salesOrder
+        && salesOrder.status === 'completed'
+        && salesOrder.isPaid
+        && commerceOrderAttribution?.channel === 'social'
+        && commerceOrderAttribution.platform === 'coach'
+        && commerceOrderAttribution.agentId
+    )
+    const tieredCommissionOrderPreview = useTieredCommissionOrderPreview({
+        workspaceId,
+        orderId: salesOrder?.id,
+        userId: user?.id,
+        permissionScope: canViewAllAgentCommissions ? 'view-all' : canViewOwnAgentCommissions ? 'view-own' : 'none',
+        sourceMode: isLocalMode ? 'local' : 'remote',
+        enabled: canViewTieredCommissionOrder && isEligibleTieredCommerceOrder && isOnline,
+    })
     const canPaySalesAgentCommissions = salesAgentCommissionsEnabled
         && !isTrackedCommission
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.pay')
@@ -1702,6 +1724,15 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             )}
                         </CardContent>
                     </Card>
+
+                    {!order.isArchived && isSales && canViewTieredCommissionOrder && isEligibleTieredCommerceOrder ? (
+                        <TieredCommissionOrderPreview
+                            preview={tieredCommissionOrderPreview.data}
+                            isLoading={tieredCommissionOrderPreview.isLoading}
+                            hasError={Boolean(tieredCommissionOrderPreview.error)}
+                            iqdPreference={iqd}
+                        />
+                    ) : null}
 
                     {isSales && commerceOperationsEnabled && commerceOrderAttribution ? (
                         <Card className="border-emerald-500/20 bg-emerald-500/[0.02]">

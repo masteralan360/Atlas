@@ -460,7 +460,7 @@ function ProgramEditorDialog({
       const minimum = parseMinimum(tier.minimumSales)
       const previousMinimum = index > 0 ? parseMinimum(draft.tiers[index - 1].minimumSales) : null
       return Boolean(tier.name.trim()) && Number.isSafeInteger(minimum) && minimum >= 0
-        && (index === 0 ? minimum === 0 : minimum > (previousMinimum ?? Number.POSITIVE_INFINITY))
+        && (index === 0 ? minimum <= 1 : minimum > (previousMinimum ?? Number.POSITIVE_INFINITY))
     })
   const valid = Boolean(draft.name.trim() && tiersValid)
   const nextTierMinimum = (index: number) => draft.tiers[index + 1] ? parseMinimum(draft.tiers[index + 1].minimumSales) : null
@@ -481,7 +481,7 @@ function ProgramEditorDialog({
     <AppDialog open={open} onOpenChange={onOpenChange}>
       <AppDialogContent className="max-w-3xl">
         <AppDialogHeader><AppDialogTitle className="flex items-center gap-2"><TrendingUp className="h-5 w-5 text-primary" />{t(existing ? 'salesAgentCommissions.tiered.editProgram' : 'salesAgentCommissions.tiered.newProgram')}</AppDialogTitle></AppDialogHeader>
-        <form onSubmit={submit}>
+        <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <AppDialogBody>
             <div className="space-y-6">
               <div className="grid gap-4 sm:grid-cols-2">

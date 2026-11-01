@@ -12,7 +12,7 @@ import {
 import { useOptionalAuth } from '@/auth/AuthContext'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
-import { useWorkspacePermissions } from '@/permissions'
+import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
 import { db } from '@/local-db/database'
 import type { Agent, BusinessPartner, CommerceOperationRecord, CommerceOperationRecordType, CurrencyCode, CustomAgentType, ExchangeRateSnapshot, PaymentAccount, Product, SalesOrder, SalesOrderItem } from '@/local-db/models'
 import { createQuickSalesOrder, resolveSocialOrderAgentCreator } from '@/local-db/orders'
@@ -30,6 +30,7 @@ import { PriceBookName } from '@/ui/components/PriceBookName'
 import { PaymentMethodSelector } from '@/ui/components/PaymentMethodSelector'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
 import { WorkspaceAccountCreation } from '@/ui/components/workspace/WorkspaceAccountCreation'
+import { useTieredCommissionOrderEstimate } from '@/local-db/tieredPerformanceCommissions'
 import { Button } from '@/ui/components/button'
 import { Input } from '@/ui/components/input'
 import {
@@ -69,6 +70,7 @@ import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { isOnline } from '@/lib/network'
 import { STANDARD_PAYMENT_METHODS, type PaymentMethodOption } from '@/lib/paymentMethods'
 import { getCommerceOperationsPartnerLabels } from './commerceOperationsPartnerLabels'
+import { TieredCommissionOrderEstimate } from '@/ui/components/commissions/TieredCommissionOrderEstimate'
 
 type CommerceSection = 'social' | 'wholesale' | 'data' | 'coaches'
 type OrderChannel = 'social' | 'wholesale'
@@ -194,7 +196,7 @@ export function CommerceOperations() {
   const user = auth?.user
   const workspaceId = user?.workspaceId
   const { features, hasFeature } = useWorkspace()
-  const { hasPermission } = useWorkspacePermissions()
+  const { hasPermission, permissionKeys } = useWorkspacePermissions()
   const [, navigate] = useLocation()
   const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
   const [section, setSection] = useState<CommerceSection>('social')
@@ -275,6 +277,16 @@ export function CommerceOperations() {
   const socialOrders = orderDetailRecords.filter((record) => record.payload.channel === 'social')
   const wholesaleOrders = orderDetailRecords.filter((record) => record.payload.channel === 'wholesale')
   const canCreateOrders = hasFeature('orders') && hasFeature('products') && hasFeature('crm') && hasPermission('orders.saleOrdersAccess')
+  const tieredCommissionPermissionScope = hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.viewAll')
+    ? 'view-all'
+    : hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.viewOwn')
+      ? 'view-own'
+      : 'none'
+  const canPreviewTieredCommissions = hasFeature('commerce_operations')
+    && hasFeature('sales_agent_commissions')
+    && (user?.workspaceMode === 'cloud' || user?.workspaceMode === 'hybrid')
+    && hasPermission('commerceOperations.access')
+    && tieredCommissionPermissionScope !== 'none'
   const canManageRecords = user?.role === 'admin' || user?.role === 'staff'
   const canUseCoaches = hasFeature('agents')
   const canCreateCoachAccount = canUseCoaches
@@ -326,6 +338,8 @@ export function CommerceOperations() {
               agentsLoaded={agentsQuery !== undefined}
               businessPartners={businessPartners}
               available={canCreateOrders}
+              canPreviewTieredCommissions={canPreviewTieredCommissions}
+              tieredCommissionPermissionScope={tieredCommissionPermissionScope}
               maxDiscountPercent={features.max_discount_percent}
               iqdPreference={features.iqd_display_preference}
               onSaved={() => { if (workspaceId) void refreshCommerceOperationRecords(workspaceId) }}
@@ -361,6 +375,8 @@ export function CommerceOperations() {
               agentsLoaded={agentsQuery !== undefined}
               businessPartners={businessPartners}
               available={canCreateOrders}
+              canPreviewTieredCommissions={canPreviewTieredCommissions}
+              tieredCommissionPermissionScope={tieredCommissionPermissionScope}
               maxDiscountPercent={features.max_discount_percent}
               iqdPreference={features.iqd_display_preference}
               onSaved={() => { if (workspaceId) void refreshCommerceOperationRecords(workspaceId) }}
@@ -718,7 +734,7 @@ function recordSummary(record: CommerceOperationRecord, t: (key: string, options
   }
 }
 
-function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userRole, products, storages, priceBooks, priceBookItems, agents, agentsLoaded, businessPartners, available, maxDiscountPercent, iqdPreference, onSaved, t }: {
+function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userRole, products, storages, priceBooks, priceBookItems, agents, agentsLoaded, businessPartners, available, canPreviewTieredCommissions, tieredCommissionPermissionScope, maxDiscountPercent, iqdPreference, onSaved, t }: {
   active: boolean
   channel: OrderChannel
   workspaceId?: string
@@ -733,6 +749,8 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
   agentsLoaded: boolean
   businessPartners: BusinessPartner[]
   available: boolean
+  canPreviewTieredCommissions: boolean
+  tieredCommissionPermissionScope: 'view-all' | 'view-own' | 'none'
   maxDiscountPercent: number
   iqdPreference: 'IQD' | 'د.ع'
   onSaved: () => void
@@ -818,7 +836,7 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
     : selectedCityOption ? t(selectedCityOption.key) : ''
   const eligibleOrderAgents = useMemo(() => agents.flatMap((agent) => {
     const linkedUserId = agent.linkedUserId?.trim() || null
-    if (agent.workspaceId !== workspaceId || agent.isDeleted || agent.agentType !== 'seller' || !linkedUserId) return []
+    if (agent.workspaceId !== workspaceId || agent.isDeleted || agent.agentType !== 'seller' || agent.status !== 'active' || !linkedUserId) return []
     const partner = businessPartners.find((candidate) => candidate.id === agent.businessPartnerId && !candidate.isDeleted)
     const label = partner?.partnerName?.trim() || t('commerceOperations.order.agentFallback')
     return [{ id: agent.id, label, zone: agent.zone?.trim() || '', linkedUserId }]
@@ -826,6 +844,33 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
   const selectedAgent = eligibleOrderAgents.find((agent) => agent.id === agentId)
   const selectedAgentAvailable = !agentId || Boolean(selectedAgent)
   const orderAgentEnabled = channel === 'social' && platform === 'coach'
+  const tieredEstimateItems = useMemo(() => lines.flatMap((line) => {
+    if (!line.product) return []
+    const quantity = Number(line.quantity.replace(/,/g, ''))
+    return Number.isFinite(quantity) && quantity > 0
+      ? [{ lineId: line.id, productId: line.product.id, quantity }]
+      : []
+  }), [lines])
+  const isTieredEstimateEligible = Boolean(
+    active
+    && available
+    && canPreviewTieredCommissions
+    && orderAgentEnabled
+    && agentId
+    && selectedAgent
+    && lines.length > 0
+    && tieredEstimateItems.length === lines.length
+    && isOnline(workspaceId)
+  )
+  const tieredCommissionEstimate = useTieredCommissionOrderEstimate({
+    workspaceId,
+    agentId: selectedAgent?.id,
+    occurredAt: date.toISOString(),
+    items: tieredEstimateItems,
+    userId,
+    permissionScope: tieredCommissionPermissionScope,
+    enabled: isTieredEstimateEligible,
+  })
   const discountInvalid = lineSubtotal > 0 && discountAmount / lineSubtotal * 100 > maxDiscountPercent
   const paymentRequired = total !== null && total > 0.000001
   const selectedPaymentAccount = paymentAccount
@@ -1348,17 +1393,30 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
             {totalCurrency ? <p className="text-xs text-muted-foreground">{t('commerceOperations.order.currencyNote', { currency: totalCurrency.toUpperCase() })}</p> : null}
           </div>
 
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              {deliveryFeeTouched || city
-                ? <RequiredLabel htmlFor="commerce-delivery-fee">{t('commerceOperations.order.deliveryFee')}</RequiredLabel>
-                : <Label htmlFor="commerce-delivery-fee">{t('commerceOperations.order.deliveryFee')}</Label>}
-              <Input id="commerce-delivery-fee" inputMode="numeric" value={deliveryFee} placeholder="0" onChange={(event) => { setDeliveryFeeTouched(true); setDeliveryFee(amountInput(event.target.value, true)) }} disabled={saving} />
-              {attempted && deliveryFeeInvalid ? <p className="text-xs text-destructive">{t('commerceOperations.validation.amountRequired')}</p> : null}
-              <p className="text-xs text-muted-foreground">{t('commerceOperations.order.deliveryFeeHint')}</p>
+          <div className={`mt-4 grid items-start gap-4 ${isTieredEstimateEligible ? 'lg:grid-cols-2' : ''}`}>
+            {isTieredEstimateEligible ? (
+              <div className="min-w-0">
+                <TieredCommissionOrderEstimate
+                  estimate={tieredCommissionEstimate.data}
+                  isLoading={tieredCommissionEstimate.isLoading}
+                  hasError={Boolean(tieredCommissionEstimate.error)}
+                  iqdPreference={iqdPreference}
+                />
+              </div>
+            ) : null}
+
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                {deliveryFeeTouched || city
+                  ? <RequiredLabel htmlFor="commerce-delivery-fee">{t('commerceOperations.order.deliveryFee')}</RequiredLabel>
+                  : <Label htmlFor="commerce-delivery-fee">{t('commerceOperations.order.deliveryFee')}</Label>}
+                <Input id="commerce-delivery-fee" inputMode="numeric" value={deliveryFee} placeholder="0" onChange={(event) => { setDeliveryFeeTouched(true); setDeliveryFee(amountInput(event.target.value, true)) }} disabled={saving} />
+                {attempted && deliveryFeeInvalid ? <p className="text-xs text-destructive">{t('commerceOperations.validation.amountRequired')}</p> : null}
+                <p className="text-xs text-muted-foreground">{t('commerceOperations.order.deliveryFeeHint')}</p>
+              </div>
+              <div className="space-y-2"><Label htmlFor="commerce-discount">{t('commerceOperations.order.discount')}</Label><Input id="commerce-discount" inputMode="decimal" value={discount} placeholder="0" onChange={(event) => setDiscount(amountInput(event.target.value))} disabled={saving} />{discountInvalid ? <p className="text-xs text-destructive">{t('commerceOperations.validation.discountLimit', { percent: maxDiscountPercent })}</p> : null}</div>
+              <div className="space-y-2 sm:col-span-2"><Label htmlFor="commerce-order-notes">{t('commerceOperations.fields.notes')}</Label><Textarea id="commerce-order-notes" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} disabled={saving} /></div>
             </div>
-            <div className="space-y-2"><Label htmlFor="commerce-discount">{t('commerceOperations.order.discount')}</Label><Input id="commerce-discount" inputMode="decimal" value={discount} placeholder="0" onChange={(event) => setDiscount(amountInput(event.target.value))} disabled={saving} />{discountInvalid ? <p className="text-xs text-destructive">{t('commerceOperations.validation.discountLimit', { percent: maxDiscountPercent })}</p> : null}</div>
-            <div className="space-y-2 sm:col-span-2"><Label htmlFor="commerce-order-notes">{t('commerceOperations.fields.notes')}</Label><Textarea id="commerce-order-notes" rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} disabled={saving} /></div>
           </div>
           <div className="mt-4 rounded-xl bg-primary/5 p-4"><div className="flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.subtotal')}</span><span>{totalCurrency ? amountLabel(lineSubtotal, totalCurrency, iqdPreference) : '—'}</span></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.deliveryFee')}</span><span>{amountLabel(fee, 'iqd', iqdPreference)}</span></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.discount')}</span><span>{totalCurrency ? amountLabel(discountAmount, totalCurrency, iqdPreference) : '—'}</span></div><div className="mt-3 flex justify-between gap-3 border-t pt-3 text-lg font-bold"><span>{t('commerceOperations.order.total')}</span><span>{totalCurrency && total !== null ? amountLabel(total, totalCurrency, iqdPreference) : '—'}</span></div></div>
           <p className="mt-3 text-xs text-muted-foreground">{t('commerceOperations.order.paymentAtIntakeHint')}</p>

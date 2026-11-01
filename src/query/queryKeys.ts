@@ -70,6 +70,28 @@ export const queryKeys = {
       ...queryKeys.tieredPerformanceCommissions.all(workspaceId),
       'product-configuration', productId, userId,
     ] as const,
+    orderPreview: (input: {
+      workspaceId: string
+      orderId: string | null
+      userId: string
+      permissionScope: 'view-all' | 'view-own' | 'none'
+      sourceMode: 'local' | 'remote'
+    }) => [
+      ...queryKeys.tieredPerformanceCommissions.all(input.workspaceId),
+      'order-preview', input.orderId, input.userId, input.permissionScope, input.sourceMode,
+    ] as const,
+    draftOrderEstimate: (input: {
+      workspaceId: string
+      agentId: string | null
+      occurredAt: string
+      itemsKey: string
+      userId: string
+      permissionScope: 'view-all' | 'view-own' | 'none'
+    }) => [
+      ...queryKeys.tieredPerformanceCommissions.all(input.workspaceId),
+      'draft-order-estimate', input.agentId, input.occurredAt, input.itemsKey,
+      input.userId, input.permissionScope,
+    ] as const,
   },
   inventoryTransactions: {
     all: (workspaceId: string | undefined) =>

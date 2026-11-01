@@ -11,8 +11,6 @@ Back Save Orders
 
 Orders filter out returned sales total
 
-Remove optional number
-
 #
 Free item commerce operations
 Ad Expense

@@ -987,6 +987,7 @@ async function persistRemoteRowsInBatches(
 export async function processMutationQueue(
   _userId: string,
   onProgress?: (completed: number, total: number) => void,
+  workspaceId?: string,
 ): Promise<{ success: number; failed: number; errors: string[] }> {
   if (!isSupabaseConfigured) {
     return { success: 0, failed: 1, errors: ["Supabase not configured"] };
@@ -1015,7 +1016,10 @@ export async function processMutationQueue(
   const mutations = mutationGroups
     .flat()
     .concat(failedRetriableMutations)
-    .filter((mutation) => !isRetiredEntityType(mutation.entityType))
+    .filter((mutation) => (
+      !isRetiredEntityType(mutation.entityType)
+      && (!workspaceId || mutation.workspaceId === workspaceId)
+    ))
     .sort((left, right) =>
       String(left.createdAt).localeCompare(String(right.createdAt)),
     );
@@ -1321,6 +1325,15 @@ export async function processMutationQueue(
         dbPayload.workspace_id === undefined
       ) {
         dbPayload.workspace_id = workspaceId;
+      }
+      if (entityType === "products" && workspaceId) {
+        const localProduct = await db.products.get(entityId);
+        if (localProduct?.workspaceId === workspaceId) {
+          // Older queued payloads can retain a stale workspace field after a
+          // workspace switch. The local product row is the verified scope for
+          // this queued mutation; keep the server insert inside that scope.
+          dbPayload.workspace_id = workspaceId;
+        }
       }
 
       if (partnerSyncWriteRpc) {
@@ -2180,6 +2193,7 @@ export async function fullSync(
     const { success, failed, errors: pushErrors } = await processMutationQueue(
       userId,
       (completed, total) => updateSyncProgress("pushing", completed, total),
+      workspaceId,
     );
 
     // 2. Pull Changes (Force pull to ensure consistency)

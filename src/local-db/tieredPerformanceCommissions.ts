@@ -82,6 +82,64 @@ export type TieredCommissionEntry = {
   relatedEntryId: string | null
 }
 
+export type TieredCommissionOrderPreviewEntry = {
+  id: string
+  productId: string
+  productName: string
+  productSku: string | null
+  programName: string
+  tierName: string
+  quantity: number
+  commissionPerUnitIqd: number
+  amountIqd: number
+  kind: 'accrual' | 'reversal' | 'reinstatement'
+  status: 'earned' | 'settled' | 'correction_pending'
+  occurredAt: string
+  relatedEntryId: string | null
+}
+
+export type TieredCommissionOrderPreview = {
+  agentId: string
+  agentName: string
+  programName: string
+  tierName: string | null
+  saleStatus: 'pending_cycle' | 'processed' | 'reversed'
+  monthStart: string | null
+  entries: TieredCommissionOrderPreviewEntry[]
+  totalAmountIqd: number
+}
+
+export type TieredCommissionOrderEstimateLineInput = {
+  lineId: string
+  productId: string
+  quantity: number
+}
+
+export type TieredCommissionOrderEstimateLine = {
+  lineId: string
+  productId: string
+  productName: string
+  productSku: string | null
+  quantity: number
+  commissionPerUnitIqd: number
+  amountIqd: number
+}
+
+export type TieredCommissionOrderEstimate = {
+  agentId: string
+  agentName: string
+  programId: string
+  programName: string
+  tierId: string
+  tierName: string
+  qualifyingSalesBefore: number
+  qualifyingSalesAfter: number
+  monthStart: string
+  timeZone: string
+  entries: TieredCommissionOrderEstimateLine[]
+  totalAmountIqd: number
+}
+
 export type TieredCommissionDashboard = {
   cycle: TieredCommissionCycle | null
   cycles: TieredCommissionCycle[]
@@ -195,6 +253,188 @@ export function useTieredCommissionDashboard(input: {
     enabled: input.enabled && Boolean(input.workspaceId),
     refetchInterval: (query) => query.state.data?.cycle?.status === 'active' ? 15_000 : false,
     refetchIntervalInBackground: false,
+  })
+}
+
+function normalizeTieredCommissionOrderPreview(value: unknown): TieredCommissionOrderPreview | null {
+  if (value == null) return null
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid tiered commission order preview')
+  const record = value as Record<string, unknown>
+  const saleStatus = record.saleStatus
+  if (saleStatus !== 'pending_cycle' && saleStatus !== 'processed' && saleStatus !== 'reversed') {
+    throw new Error('Invalid tiered commission order status')
+  }
+  const entries = Array.isArray(record.entries) ? record.entries.flatMap((entry): TieredCommissionOrderPreviewEntry[] => {
+    if (typeof entry !== 'object' || entry == null || Array.isArray(entry)) return []
+    const row = entry as Record<string, unknown>
+    if (row.kind !== 'accrual' && row.kind !== 'reversal' && row.kind !== 'reinstatement') return []
+    if (row.status !== 'earned' && row.status !== 'settled' && row.status !== 'correction_pending') return []
+    const quantity = Number(row.quantity)
+    const commissionPerUnitIqd = Number(row.commissionPerUnitIqd)
+    const amountIqd = Number(row.amountIqd)
+    if (!Number.isFinite(quantity) || !Number.isFinite(commissionPerUnitIqd) || !Number.isFinite(amountIqd)) return []
+    return [{
+      id: String(row.id ?? ''),
+      productId: String(row.productId ?? ''),
+      productName: String(row.productName ?? ''),
+      productSku: typeof row.productSku === 'string' ? row.productSku : null,
+      programName: String(row.programName ?? ''),
+      tierName: String(row.tierName ?? ''),
+      quantity,
+      commissionPerUnitIqd,
+      amountIqd,
+      kind: row.kind,
+      status: row.status,
+      occurredAt: String(row.occurredAt ?? ''),
+      relatedEntryId: typeof row.relatedEntryId === 'string' ? row.relatedEntryId : null,
+    }]
+  }) : []
+  const totalAmountIqd = Number(record.totalAmountIqd)
+  if (!Number.isFinite(totalAmountIqd)) throw new Error('Invalid tiered commission order total')
+  return {
+    agentId: String(record.agentId ?? ''),
+    agentName: String(record.agentName ?? ''),
+    programName: String(record.programName ?? ''),
+    tierName: typeof record.tierName === 'string' ? record.tierName : null,
+    saleStatus,
+    monthStart: typeof record.monthStart === 'string' ? record.monthStart : null,
+    entries,
+    totalAmountIqd,
+  }
+}
+
+export async function fetchTieredCommissionOrderPreview(input: {
+  workspaceId: string
+  orderId: string
+  signal?: AbortSignal
+}) {
+  const value = await requestRemote<unknown>(input.workspaceId, 'get_tiered_commission_order_preview', {
+    p_workspace_id: input.workspaceId,
+    p_order_id: input.orderId,
+  }, ['tiered_commission_sales', 'tiered_commission_entries'], input.signal)
+  return normalizeTieredCommissionOrderPreview(value)
+}
+
+export function useTieredCommissionOrderPreview(input: {
+  workspaceId?: string
+  orderId?: string
+  userId?: string
+  permissionScope: 'view-all' | 'view-own' | 'none'
+  sourceMode: 'local' | 'remote'
+  enabled: boolean
+}) {
+  return useQuery({
+    queryKey: queryKeys.tieredPerformanceCommissions.orderPreview({
+      workspaceId: input.workspaceId ?? '',
+      orderId: input.orderId ?? null,
+      userId: input.userId ?? '',
+      permissionScope: input.permissionScope,
+      sourceMode: input.sourceMode,
+    }),
+    queryFn: ({ signal }) => fetchTieredCommissionOrderPreview({
+      workspaceId: input.workspaceId!,
+      orderId: input.orderId!,
+      signal,
+    }),
+    enabled: input.enabled && input.sourceMode === 'remote' && Boolean(input.workspaceId && input.orderId)
+      && input.permissionScope !== 'none',
+    refetchInterval: (query) => query.state.data?.saleStatus === 'pending_cycle' ? 15_000 : false,
+    refetchIntervalInBackground: false,
+  })
+}
+
+function normalizeTieredCommissionOrderEstimate(value: unknown): TieredCommissionOrderEstimate | null {
+  if (value == null) return null
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid tiered commission estimate')
+  const record = value as Record<string, unknown>
+  const qualifyingSalesBefore = Number(record.qualifyingSalesBefore)
+  const qualifyingSalesAfter = Number(record.qualifyingSalesAfter)
+  const totalAmountIqd = Number(record.totalAmountIqd)
+  if (!Number.isInteger(qualifyingSalesBefore) || !Number.isInteger(qualifyingSalesAfter) || !Number.isFinite(totalAmountIqd)) {
+    throw new Error('Invalid tiered commission estimate totals')
+  }
+  const entries = Array.isArray(record.entries) ? record.entries.flatMap((entry): TieredCommissionOrderEstimateLine[] => {
+    if (typeof entry !== 'object' || entry == null || Array.isArray(entry)) return []
+    const row = entry as Record<string, unknown>
+    const quantity = Number(row.quantity)
+    const commissionPerUnitIqd = Number(row.commissionPerUnitIqd)
+    const amountIqd = Number(row.amountIqd)
+    if (!Number.isFinite(quantity) || !Number.isFinite(commissionPerUnitIqd) || !Number.isFinite(amountIqd)) return []
+    return [{
+      lineId: String(row.lineId ?? ''),
+      productId: String(row.productId ?? ''),
+      productName: String(row.productName ?? ''),
+      productSku: typeof row.productSku === 'string' ? row.productSku : null,
+      quantity,
+      commissionPerUnitIqd,
+      amountIqd,
+    }]
+  }) : []
+  return {
+    agentId: String(record.agentId ?? ''),
+    agentName: String(record.agentName ?? ''),
+    programId: String(record.programId ?? ''),
+    programName: String(record.programName ?? ''),
+    tierId: String(record.tierId ?? ''),
+    tierName: String(record.tierName ?? ''),
+    qualifyingSalesBefore,
+    qualifyingSalesAfter,
+    monthStart: String(record.monthStart ?? ''),
+    timeZone: String(record.timeZone ?? ''),
+    entries,
+    totalAmountIqd,
+  }
+}
+
+export async function fetchTieredCommissionOrderEstimate(input: {
+  workspaceId: string
+  agentId: string
+  occurredAt: string
+  items: TieredCommissionOrderEstimateLineInput[]
+  signal?: AbortSignal
+}) {
+  const value = await requestRemote<unknown>(input.workspaceId, 'get_tiered_commission_order_draft_estimate', {
+    p_workspace_id: input.workspaceId,
+    p_agent_id: input.agentId,
+    p_occurred_at: input.occurredAt,
+    p_items: input.items,
+  }, [
+    'tiered_commission_programs', 'tiered_commission_tiers', 'tiered_commission_assignments',
+    'tiered_commission_product_rates', 'tiered_commission_cycles', 'tiered_commission_agent_months',
+  ], input.signal)
+  return normalizeTieredCommissionOrderEstimate(value)
+}
+
+export function useTieredCommissionOrderEstimate(input: {
+  workspaceId?: string
+  agentId?: string
+  occurredAt: string
+  items: TieredCommissionOrderEstimateLineInput[]
+  userId?: string
+  permissionScope: 'view-all' | 'view-own' | 'none'
+  enabled: boolean
+}) {
+  const itemsKey = JSON.stringify(input.items.map((item) => [item.lineId, item.productId, item.quantity]))
+  return useQuery({
+    queryKey: queryKeys.tieredPerformanceCommissions.draftOrderEstimate({
+      workspaceId: input.workspaceId ?? '',
+      agentId: input.agentId ?? null,
+      occurredAt: input.occurredAt,
+      itemsKey,
+      userId: input.userId ?? '',
+      permissionScope: input.permissionScope,
+    }),
+    queryFn: ({ signal }) => fetchTieredCommissionOrderEstimate({
+      workspaceId: input.workspaceId!,
+      agentId: input.agentId!,
+      occurredAt: input.occurredAt,
+      items: input.items,
+      signal,
+    }),
+    enabled: input.enabled && Boolean(input.workspaceId && input.agentId && input.items.length)
+      && input.permissionScope !== 'none',
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   })
 }
 
