@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useQueryClient } from '@tanstack/react-query'
 
 import { useAuth } from '@/auth'
 import {
@@ -68,6 +69,11 @@ import {
     type PriceBookItem
 } from '@/local-db'
 import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
+import { queryKeys } from '@/query/queryKeys'
+import {
+    replaceTieredProductCommissionRates,
+    useTieredProductCommissionConfiguration,
+} from '@/local-db/tieredPerformanceCommissions'
 import type { CurrencyCode } from '@/local-db/models'
 import { assetManager } from '@/lib/assetManager'
 import { normalizeBarcodeDigits, normalizeBarcodeScannerText } from '@/lib/barcodeScanner'
@@ -112,6 +118,10 @@ import {
     emptyProductCommissionRuleDraft,
     type ProductCommissionRuleDraft
 } from '@/ui/components/commissions/ProductCommissionRuleEditor'
+import {
+    ProductTierCommissionEditor,
+    type ProductTierCommissionDraft
+} from '@/ui/components/commissions/ProductTierCommissionEditor'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { Input } from '@/ui/components/input'
 import {
@@ -372,9 +382,10 @@ function mapProductToFormData(product: Product, hideCosts = false): ProductFormD
 
 function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?: string }) {
     const { t } = useTranslation()
+    const queryClient = useQueryClient()
     const { user } = useAuth()
     const { features, hasCapability, hasFeature } = useWorkspace()
-    const { permissionKeys } = useWorkspacePermissions()
+    const { permissionKeys, hasPermission } = useWorkspacePermissions()
     const hideCosts = useHideCosts()
     const [, navigate] = useLocation()
     const locationSearch = window.location.hash.split('?')[1] ?? ''
@@ -392,6 +403,11 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const priceBookUomPrices = usePriceBookUomPrices(workspaceId || undefined)
     const priceBooksEnabled = hasCapability('priceBooks')
     const productCommissionsEnabled = hasFeature('sales_agent_commissions')
+        && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.managePlans')
+    const productTierCommissionsEnabled = user?.role === 'admin'
+        && hasFeature('sales_agent_commissions')
+        && hasFeature('commerce_operations')
+        && hasPermission('commerceOperations.access')
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.managePlans')
     const {
         rules: productCommissionRules,
@@ -444,6 +460,12 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const isDesktopShell = isTauri()
     const persistedProductId = isEditing ? product?.id : undefined
     const productBarcodes = useProductBarcodes(persistedProductId)
+    const productTierCommissionCatalog = useTieredProductCommissionConfiguration({
+        workspaceId: workspaceId || undefined,
+        productId: persistedProductId,
+        userId: user?.id,
+        enabled: productTierCommissionsEnabled,
+    })
 
     const productInventoryRows = useLiveQuery(
         async () => {
@@ -474,6 +496,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const [priceBookRows, setPriceBookRows] = useState<ProductPriceBookDraft[]>([])
     const [productUomDrafts, setProductUomDrafts] = useState<ProductUomDraft[]>([])
     const [productCommissionDraft, setProductCommissionDraft] = useState<ProductCommissionRuleDraft>(() => emptyProductCommissionRuleDraft(features.default_currency))
+    const [productTierCommissionDraft, setProductTierCommissionDraft] = useState<ProductTierCommissionDraft>({ enabled: false, rates: [] })
     const [isSaving, setIsSaving] = useState(false)
     const [overrideAttention, setOverrideAttention] = useState(false)
     const [imageError, setImageError] = useState(false)
@@ -528,7 +551,15 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const initialProductUomsSnapshotRef = useRef<string | null>(null)
     const initializedProductCommissionRuleKeyRef = useRef<string | null>(null)
     const initialProductCommissionSnapshotRef = useRef<string | null>(null)
+    const initializedProductTierCommissionKeyRef = useRef<string | null>(null)
+    const initialProductTierCommissionSnapshotRef = useRef<string | null>(null)
     const createdProductIdRef = useRef<string | null>(null)
+
+    useEffect(() => {
+        setProductTierCommissionDraft({ enabled: false, rates: [] })
+        initializedProductTierCommissionKeyRef.current = null
+        initialProductTierCommissionSnapshotRef.current = null
+    }, [mode, productId, workspaceId])
 
     const hasSavedInitializationRules = mode === 'create'
         && !!readProductFormInitializationRules(workspaceId)
@@ -590,6 +621,13 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         && JSON.stringify(productCommissionDraft) !== initialProductCommissionSnapshotRef.current
     ), [isReadOnly, productCommissionDraft, productCommissionsEnabled])
 
+    const isProductTierCommissionDirty = useMemo(() => (
+        productTierCommissionsEnabled
+        && !isReadOnly
+        && initialProductTierCommissionSnapshotRef.current !== null
+        && JSON.stringify(productTierCommissionDraft) !== initialProductTierCommissionSnapshotRef.current
+    ), [isReadOnly, productTierCommissionDraft, productTierCommissionsEnabled])
+
     const areProductUomsDirty = !isReadOnly
         && initialProductUomsSnapshotRef.current !== null
         && JSON.stringify(productUomDrafts) !== initialProductUomsSnapshotRef.current
@@ -606,7 +644,26 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         return null
     }, [productCommissionDraft, productCommissionsEnabled, t])
 
-    const isDirty = isProductDirty || arePriceBookRowsDirty || isProductCommissionDirty || areProductUomsDirty
+    const productTierCommissionValidationMessage = useMemo(() => {
+        if (!productTierCommissionsEnabled || !productTierCommissionDraft.enabled) return null
+        if (productTierCommissionDraft.rates.length === 0) return t('salesAgentCommissions.tiered.productRateRequired')
+        const seen = new Set<string>()
+        for (const rate of productTierCommissionDraft.rates) {
+            const program = productTierCommissionCatalog.data?.programs.find((item) => item.id === rate.programId)
+            const tier = program?.tiers.find((item) => item.id === rate.tierId)
+            const amount = Number(rate.amountIqd.replace(/,/g, ''))
+            const key = `${rate.programId}:${rate.tierId}`
+            if (!program || !tier || !Number.isFinite(amount) || amount <= 0 || !rate.amountIqd.trim() || seen.has(key)) {
+                return t(seen.has(key)
+                    ? 'salesAgentCommissions.tiered.duplicateProductTier'
+                    : 'salesAgentCommissions.tiered.productRateInvalid')
+            }
+            seen.add(key)
+        }
+        return null
+    }, [productTierCommissionCatalog.data?.programs, productTierCommissionDraft, productTierCommissionsEnabled, t])
+
+    const isDirty = isProductDirty || arePriceBookRowsDirty || isProductCommissionDirty || isProductTierCommissionDirty || areProductUomsDirty
 
     const { showGuard, confirmNavigation, cancelNavigation, requestNavigation } = useUnsavedChangesGuard(isDirty)
 
@@ -862,6 +919,26 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         initialProductCommissionSnapshotRef.current = JSON.stringify(next)
         initializedProductCommissionRuleKeyRef.current = sourceKey
     }, [features.default_currency, formData.currency, mode, product, productCommissionsEnabled, sourceProductCommissionAgentIds, sourceProductCommissionRule])
+
+    useEffect(() => {
+        const config = productTierCommissionCatalog.data
+        if (!productTierCommissionsEnabled || !config) return
+        const sourceKey = mode === 'edit'
+            ? product ? `${mode}:${product.id}` : null
+            : `${mode}:${workspaceId}`
+        if (!sourceKey || initializedProductTierCommissionKeyRef.current === sourceKey) return
+        const next: ProductTierCommissionDraft = {
+            enabled: config.rates.length > 0,
+            rates: config.rates.map((rate) => ({
+                programId: rate.programId,
+                tierId: rate.tierId,
+                amountIqd: new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 }).format(rate.amountIqd),
+            })),
+        }
+        setProductTierCommissionDraft(next)
+        initialProductTierCommissionSnapshotRef.current = JSON.stringify(next)
+        initializedProductTierCommissionKeyRef.current = sourceKey
+    }, [mode, product, productTierCommissionCatalog.data, productTierCommissionsEnabled, workspaceId])
 
     useEffect(() => {
         if (overrideAttention && priceBookRows.length > 0) {
@@ -1654,6 +1731,22 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                 initialProductCommissionSnapshotRef.current = JSON.stringify(productCommissionDraft)
             }
 
+            if (productTierCommissionsEnabled && isProductTierCommissionDirty) {
+                if (productTierCommissionValidationMessage) throw new Error('tiered_product_commission_configuration_invalid')
+                const nextTierDraft: ProductTierCommissionDraft = {
+                    enabled: productTierCommissionDraft.enabled,
+                    rates: productTierCommissionDraft.enabled ? productTierCommissionDraft.rates : [],
+                }
+                await replaceTieredProductCommissionRates(
+                    workspaceId,
+                    savedProductId,
+                    nextTierDraft.rates,
+                )
+                setProductTierCommissionDraft(nextTierDraft)
+                initialProductTierCommissionSnapshotRef.current = JSON.stringify(nextTierDraft)
+                await queryClient.invalidateQueries({ queryKey: queryKeys.tieredPerformanceCommissions.all(workspaceId) })
+            }
+
             initialFormSnapshotRef.current = JSON.stringify(formData)
 
             if (navigateAfterSave) {
@@ -1663,7 +1756,11 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             return true
         } catch (error: any) {
             console.error('Error saving product:', error)
-            showProductSaveErrorToast(error)
+            if (error?.message === 'tiered_product_commission_configuration_invalid') {
+                toast({ variant: 'destructive', title: t('common.error'), description: t('salesAgentCommissions.tiered.productRateInvalid') })
+            } else {
+                showProductSaveErrorToast(error)
+            }
             return false
         } finally {
             setIsSaving(false)
@@ -1674,6 +1771,11 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         event.preventDefault()
         const saveForPendingNavigation = saveForPendingNavigationRef.current
         saveForPendingNavigationRef.current = false
+
+        if (productTierCommissionValidationMessage) {
+            toast({ variant: 'destructive', title: t('common.error'), description: productTierCommissionValidationMessage })
+            return
+        }
 
         if (canManageMinimumSellingPrice && formData.minimumSellingPrice.trim() !== '') {
             const minimumSellingPrice = Number(formData.minimumSellingPrice)
@@ -2844,6 +2946,22 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                                         </div>
                                     </div>
                                 )
+                            ) : null}
+                            {productTierCommissionsEnabled ? (
+                                <>
+                                    <ProductTierCommissionEditor
+                                        configuration={productTierCommissionCatalog.data || { programs: [], rates: [] }}
+                                        draft={productTierCommissionDraft}
+                                        onChange={setProductTierCommissionDraft}
+                                        validationMessage={productTierCommissionValidationMessage}
+                                        disabled={isReadOnly || isSaving || productTierCommissionCatalog.isFetching || !productTierCommissionCatalog.data}
+                                    />
+                                    {productTierCommissionCatalog.isFetching ? (
+                                        <p role="status" className="text-sm text-muted-foreground">{t('salesAgentCommissions.tiered.productConfigurationLoading')}</p>
+                                    ) : productTierCommissionCatalog.error ? (
+                                        <p role="alert" className="text-sm text-destructive">{t('salesAgentCommissions.tiered.productConfigurationLoadFailed')}</p>
+                                    ) : null}
+                                </>
                             ) : null}
                         </CardContent>
                     </Card>

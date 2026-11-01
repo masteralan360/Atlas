@@ -215,6 +215,103 @@ async function repairTravelPassengerWorkspaceMutations(
 }
 
 /**
+ * A product UoM cannot sync until its product exists in the same workspace.
+ * Offline product creation and UoM edits are normally queued together, but an
+ * interrupted or older client can leave only the child mutation behind. On an
+ * explicit integrity retry, restore that parent create only when the local
+ * product is still an unsynced, non-deleted row in the same workspace.
+ */
+async function repairProductUomParentMutations(mutations: OfflineMutation[]) {
+    const unrepairedMutationIds = new Set<string>()
+    const retryableMutationIds = new Set(mutations.map((mutation) => mutation.id))
+
+    for (const mutation of mutations) {
+        if (
+            mutation.entityType !== 'product_uoms'
+            || mutation.operation === 'delete'
+            || !/product uom must belong to a product in the same workspace/i.test(mutation.error ?? '')
+        ) {
+            continue
+        }
+
+        const productId = payloadId(mutation.payload, 'productId', 'product_id')
+        if (!productId) {
+            unrepairedMutationIds.add(mutation.id)
+            continue
+        }
+
+        const product = await db.products.get(productId)
+        if (
+            !product
+            || product.isDeleted
+            || product.workspaceId !== mutation.workspaceId
+        ) {
+            unrepairedMutationIds.add(mutation.id)
+            continue
+        }
+
+        const productMutations = await db.offline_mutations
+            .where('entityType')
+            .equals('products')
+            .filter((candidate) => candidate.entityId === productId)
+            .toArray()
+        const activeProductMutations = productMutations.filter((candidate) => (
+            candidate.status === 'pending'
+            || candidate.status === 'syncing'
+            || candidate.status === 'failed'
+        ))
+
+        // Never move a product or attach its UoMs across workspace boundaries.
+        if (activeProductMutations.some((candidate) => candidate.workspaceId !== mutation.workspaceId)) {
+            unrepairedMutationIds.add(mutation.id)
+            continue
+        }
+
+        const sameWorkspaceMutations = activeProductMutations.filter((candidate) => (
+            candidate.workspaceId === mutation.workspaceId
+        ))
+        if (sameWorkspaceMutations.some((candidate) => (
+            candidate.status === 'failed' && !retryableMutationIds.has(candidate.id)
+        ))) {
+            unrepairedMutationIds.add(mutation.id)
+            continue
+        }
+
+        const retryableParentMutations = sameWorkspaceMutations.filter((candidate) => (
+            candidate.status === 'pending'
+            || candidate.status === 'syncing'
+            || (candidate.status === 'failed' && retryableMutationIds.has(candidate.id))
+        ))
+        if (retryableParentMutations.length > 0) {
+            if (retryableParentMutations.some((candidate) => candidate.operation !== 'create')) {
+                unrepairedMutationIds.add(mutation.id)
+            }
+            continue
+        }
+
+        const wasDiscarded = productMutations.some((candidate) => candidate.status === 'discarded')
+        if (
+            wasDiscarded
+            || (product.syncStatus !== 'pending' && product.syncStatus !== 'conflict')
+            || product.lastSyncedAt != null
+        ) {
+            unrepairedMutationIds.add(mutation.id)
+            continue
+        }
+
+        await addToOfflineMutations(
+            'products',
+            product.id,
+            'create',
+            product as unknown as Record<string, unknown>,
+            mutation.workspaceId,
+        )
+    }
+
+    return unrepairedMutationIds
+}
+
+/**
  * A merchant profile may have been created while a workspace was local, then
  * later be used to create a cloud shipment. When that shipment is explicitly
  * retried, requeue its local prerequisites so the server can receive the
@@ -333,9 +430,11 @@ export async function retrySyncIntegrityMutations(workspaceId: string): Promise<
 
     const unrepairedAssignmentMutationIds = await repairSalesOrderAgentAssignmentWorkspaceMutations(rows)
     const unrepairedTravelPassengerMutationIds = await repairTravelPassengerWorkspaceMutations(workspaceId, rows)
+    const unrepairedProductUomMutationIds = await repairProductUomParentMutations(rows)
     const rowsToRetry = rows.filter((mutation) => (
         !unrepairedAssignmentMutationIds.has(mutation.id)
         && !unrepairedTravelPassengerMutationIds.has(mutation.id)
+        && !unrepairedProductUomMutationIds.has(mutation.id)
     ))
 
     await db.offline_mutations.bulkUpdate(rowsToRetry.map((mutation) => ({

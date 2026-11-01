@@ -1,5 +1,10 @@
 Surplus must not count outstanding
 
+Simplify QR code Post Service
+Cod and Delivery both and not separate
+
+PWA Lang install
+
 Save usage mode
 
 Back Save Orders

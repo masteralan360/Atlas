@@ -53,6 +53,24 @@ export const queryKeys = {
     all: (workspaceId: string | undefined) =>
       ['atlas', 'workspace', workspaceId ?? 'unscoped', 'direct-transactions'] as const,
   },
+  tieredPerformanceCommissions: {
+    all: (workspaceId: string | undefined) =>
+      ['atlas', 'workspace', workspaceId ?? 'unscoped', 'tiered-performance-commissions'] as const,
+    dashboard: (input: {
+      workspaceId: string
+      monthStart: string | null
+      page: number
+      pageSize: number
+      userId: string
+    }) => [
+      ...queryKeys.tieredPerformanceCommissions.all(input.workspaceId),
+      'dashboard', input.monthStart, input.page, input.pageSize, input.userId,
+    ] as const,
+    productConfiguration: (workspaceId: string, productId: string | null, userId: string) => [
+      ...queryKeys.tieredPerformanceCommissions.all(workspaceId),
+      'product-configuration', productId, userId,
+    ] as const,
+  },
   inventoryTransactions: {
     all: (workspaceId: string | undefined) =>
       ['atlas', 'workspace', workspaceId ?? 'unscoped', 'inventory-transactions'] as const,

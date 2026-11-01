@@ -1159,7 +1159,11 @@ export async function processMutationQueue(
       reportCompleted();
       continue;
     }
-    const mutationKey = `${mutation.entityType}:${mutation.entityId}`;
+    const mutationKey = mutationEntityKey(
+      mutation.workspaceId,
+      mutation.entityType,
+      mutation.entityId,
+    );
     const priorIntegrityIssue = integrityBlockedEntities.get(mutationKey);
     if (priorIntegrityIssue) {
       await db.offline_mutations.update(mutation.id, {
@@ -1169,6 +1173,26 @@ export async function processMutationQueue(
       failedCount++;
       reportCompleted();
       continue;
+    }
+
+    if (mutation.entityType === "product_uoms" && mutation.operation !== "delete") {
+      const productId = payloadReference(mutation.payload, "productId", "product_id");
+      const productIntegrityIssue = productId
+        ? integrityBlockedEntities.get(
+          mutationEntityKey(mutation.workspaceId, "products", productId),
+        )
+        : undefined;
+      if (productIntegrityIssue) {
+        await db.offline_mutations.update(mutation.id, {
+          status: "failed",
+          error: productIntegrityIssue,
+        });
+        await db.product_uoms.update(mutation.entityId, { syncStatus: "conflict" });
+        failedCount++;
+        errors.push(productIntegrityIssue);
+        reportCompleted();
+        continue;
+      }
     }
 
     if (mutation.entityType === "price_book_items") {

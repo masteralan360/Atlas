@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BadgeDollarSign, HandCoins } from 'lucide-react'
+import { BadgeDollarSign, HandCoins, TrendingUp } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 
@@ -12,6 +12,7 @@ import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
 import { Button, useToast } from '@/ui/components'
 import { CommissionFeatureBoundary } from '@/ui/components/commissions/useCommissionAgentDirectory'
+import { TieredPerformanceCommissionPanel } from '@/ui/components/commissions/TieredPerformanceCommissionPanel'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 // Keep this scoped to the commission page's own views. The generic table
@@ -32,12 +33,15 @@ export function AgentCommissions() {
     const { t } = useTranslation()
     const { user } = useAuth()
     const { features, hasFeature } = useWorkspace()
-    const { permissionKeys } = useWorkspacePermissions()
+    const { permissionKeys, hasPermission } = useWorkspacePermissions()
     const { toast } = useToast()
     const [, navigate] = useLocation()
     const [settlementTarget, setSettlementTarget] = useState<PaymentObligation | null>(null)
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [isCommissionModeDialogOpen, setIsCommissionModeDialogOpen] = useState(false)
+    const [activeTab, setActiveTab] = useState<'overview' | 'tiered'>(() => (
+        new URLSearchParams(window.location.search).get('commissionTab') === 'tiered' ? 'tiered' : 'overview'
+    ))
 
     const enabled = hasFeature('sales_agent_commissions')
     const canView = enabled && (
@@ -47,6 +51,11 @@ export function AgentCommissions() {
     )
     const canPay = enabled
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.pay')
+    const canAccessTiered = enabled && hasFeature('commerce_operations')
+        && hasPermission('commerceOperations.access') && user?.role === 'admin'
+    const canManageTiered = canAccessTiered
+        && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.managePlans')
+    const canSettleTiered = canAccessTiered && canPay
 
     if (!user?.workspaceId || !canView) return null
 
@@ -114,13 +123,34 @@ export function AgentCommissions() {
                     </div>
                 </div>
 
-                <AgentCommissionAdminOverview
-                    workspaceId={user.workspaceId}
-                    iqdPreference={features.iqd_display_preference}
-                    canReview={canView}
-                    canPay={canPay}
-                    onSettleCommission={setSettlementTarget}
-                />
+                <div className="flex flex-wrap gap-2 border-b pb-3" role="tablist" aria-label={t('salesAgentCommissions.title')}>
+                    <Button type="button" role="tab" aria-selected={activeTab === 'overview'} variant={activeTab === 'overview' ? 'default' : 'outline'} className="gap-2" onClick={() => {
+                        setActiveTab('overview')
+                        const url = new URL(window.location.href); url.searchParams.delete('commissionTab'); window.history.replaceState(null, '', url)
+                    }}><BadgeDollarSign className="h-4 w-4" />{t('salesAgentCommissions.overviewTab')}</Button>
+                    {canAccessTiered ? <Button type="button" role="tab" aria-selected={activeTab === 'tiered'} variant={activeTab === 'tiered' ? 'default' : 'outline'} className="gap-2" onClick={() => {
+                        setActiveTab('tiered')
+                        const url = new URL(window.location.href); url.searchParams.set('commissionTab', 'tiered'); window.history.replaceState(null, '', url)
+                    }}><TrendingUp className="h-4 w-4" />{t('salesAgentCommissions.tiered.title')}</Button> : null}
+                </div>
+
+                {activeTab === 'tiered' && canAccessTiered ? (
+                    <TieredPerformanceCommissionPanel
+                        workspaceId={user.workspaceId}
+                        userId={user.id}
+                        iqdPreference={features.iqd_display_preference}
+                        canManage={canManageTiered}
+                        canSettle={canSettleTiered}
+                    />
+                ) : (
+                    <AgentCommissionAdminOverview
+                        workspaceId={user.workspaceId}
+                        iqdPreference={features.iqd_display_preference}
+                        canReview={canView}
+                        canPay={canPay}
+                        onSettleCommission={setSettlementTarget}
+                    />
+                )}
             </div>
 
             <SettlementDialog
