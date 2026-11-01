@@ -1,6 +1,10 @@
-Simplify QR code
+Surplus must not count outstanding
 
 Save usage mode
+
+Back Save Orders
+
+Orders filter out returned sales total
 
 Remove optional number
 
