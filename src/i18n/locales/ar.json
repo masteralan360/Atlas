@@ -11158,6 +11158,8 @@
       "savedPrinterUnavailable": "الطابعة المحفوظة «{{printer}}» غير متاحة حالياً. اختر طابعة متاحة للمتابعة.",
       "nativeUnavailable": "يتوفر الوصول الصامت إلى الطابعة في تطبيق Atlas المكتبي لنظام Windows. افتح هذه الصفحة في تطبيق Atlas المكتبي وحدّث قائمة الطابعات.",
       "noPrinters": "لم يتم العثور على طابعات Windows. ثبّت طابعة أو صِلها في Windows ثم حدّث القائمة.",
+      "devPrinterName": "إخراج PDF للتطوير في Atlas (للتطوير فقط)",
+      "devOutputHint": "في وضع التطوير، اختر إخراج PDF للتطوير في Atlas لحفظ ملف الملصق نفسه محلياً. يظهر مسار الوجهة الكامل في وحدة تحكم التطبيق وإشعار النجاح.",
       "printerListFailed": "تعذر تحميل قائمة طابعات Windows. حاول التحديث أو تحقق من تشغيل خدمة الطباعة في Windows.",
       "savePrinter": "حفظ الطابعة",
       "savingPrinter": "جارٍ حفظ الطابعة…",
@@ -11173,6 +11175,8 @@
       "lookupFailed": "تعذر التحقق من الشحنة. تحقق من الاتصال وحاول مرة أخرى.",
       "labelSubmitted": "تم إرسال ملصق الشحنة إلى الطابعة.",
       "labelSubmittedDescription": "تم إرسال {{shipment}} إلى {{printer}}.",
+      "devLabelSaved": "تم حفظ ملصق التطوير.",
+      "devLabelSavedDescription": "تم حفظ {{shipment}} في {{path}}.",
       "printFailed": "تعذرت طباعة ملصق الشحنة. تحقق من اتصال الطابعة وحاول مرة أخرى."
     },
     "shipmentQr": "رمز الشحنة",

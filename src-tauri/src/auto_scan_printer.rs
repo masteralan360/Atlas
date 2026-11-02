@@ -1,8 +1,14 @@
-use serde::Serialize;
 #[cfg(target_os = "windows")]
 use base64::Engine;
+use serde::Serialize;
 #[cfg(target_os = "windows")]
 use std::io::Cursor;
+#[cfg(debug_assertions)]
+use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(debug_assertions)]
+use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(debug_assertions)]
+use tauri::Manager;
 
 #[derive(Debug, Serialize)]
 pub struct AutoScanPrinterInfo {
@@ -72,6 +78,91 @@ pub async fn print_auto_scan_label(
             title,
         );
         Err("auto_scan_native_printing_unavailable".into())
+    }
+}
+
+/// Saves the exact Shipment Label PDF for development runs instead of sending
+/// it to a physical printer. The returned value is the full destination path.
+#[tauri::command]
+pub async fn save_auto_scan_label_for_dev(
+    app: tauri::AppHandle,
+    pdf_base64: String,
+    title: String,
+) -> Result<String, String> {
+    #[cfg(debug_assertions)]
+    {
+        use base64::Engine;
+
+        static NEXT_FILE_ID: AtomicU64 = AtomicU64::new(1);
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(pdf_base64)
+            .map_err(|_| "auto_scan_invalid_label_pdf".to_string())?;
+        if !bytes.starts_with(b"%PDF-") {
+            return Err("auto_scan_invalid_label_pdf".into());
+        }
+        if bytes.len() > 50 * 1024 * 1024 {
+            return Err("auto_scan_label_pdf_too_large".into());
+        }
+
+        let output_directory = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| format!("auto_scan_dev_output_path_failed:{error}"))?
+            .join("auto-scan-dev-prints");
+        let file_stem = title
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                    character
+                } else {
+                    '_'
+                }
+            })
+            .take(72)
+            .collect::<String>()
+            .trim_matches('_')
+            .to_string();
+        let file_stem = if file_stem.is_empty() {
+            "shipment_label".to_string()
+        } else {
+            file_stem
+        };
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| format!("auto_scan_dev_output_time_failed:{error}"))?
+            .as_millis();
+        let sequence = NEXT_FILE_ID.fetch_add(1, Ordering::Relaxed);
+        let destination = output_directory.join(format!("{file_stem}_{timestamp}_{sequence}.pdf"));
+
+        tauri::async_runtime::spawn_blocking(move || {
+            let path = destination.to_string_lossy().into_owned();
+            let save_result = std::fs::create_dir_all(&output_directory)
+                .map_err(|error| format!("auto_scan_dev_output_directory_failed:{error}"))
+                .and_then(|()| {
+                    std::fs::write(&destination, bytes)
+                        .map_err(|error| format!("auto_scan_dev_output_write_failed:{error}"))
+                });
+            match save_result {
+                Ok(()) => {
+                    println!("[Auto Scan dev print] status=saved destination_path={path}");
+                    Ok(path)
+                }
+                Err(error) => {
+                    println!(
+                        "[Auto Scan dev print] status=failed destination_path={path} error={error}"
+                    );
+                    Err(error)
+                }
+            }
+        })
+        .await
+        .map_err(|error| format!("auto_scan_dev_output_task_failed:{error}"))?
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = (app, pdf_base64, title);
+        Err("auto_scan_dev_output_unavailable_in_release".into())
     }
 }
 

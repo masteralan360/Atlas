@@ -94,7 +94,11 @@ export interface SystemPrinterInfo {
     name: string
     identifier: string
     interface_type: string
+    /** Optional localized label for development-only destinations. */
+    displayName?: string
 }
+
+const DEV_AUTO_SCAN_PRINTER_NAME = '__atlas_auto_scan_dev_pdf__'
 
 export class AutoScanPrinterUnavailableError extends Error {
     constructor() {
@@ -256,7 +260,17 @@ async function connectQzTray(): Promise<QzClient> {
 async function listSystemPrinters(): Promise<SystemPrinterInfo[]> {
     if (!isDesktop()) throw new AutoScanNativePrintingUnavailableError()
     try {
-        return await invoke<SystemPrinterInfo[]>('list_auto_scan_printers')
+        const printers = await invoke<SystemPrinterInfo[]>('list_auto_scan_printers')
+        if (!import.meta.env.DEV) return printers
+        return [
+            ...printers,
+            {
+                name: DEV_AUTO_SCAN_PRINTER_NAME,
+                identifier: DEV_AUTO_SCAN_PRINTER_NAME,
+                interface_type: 'Atlas development PDF output',
+                displayName: i18n.t('postal.autoScan.devPrinterName'),
+            },
+        ]
     } catch (error) {
         if (String(error).includes('auto_scan_native_printing_unavailable')) {
             throw new AutoScanNativePrintingUnavailableError()
@@ -269,8 +283,22 @@ async function printPdfToSystemPrinter(
     pdfBlob: Blob,
     printerName: string,
     title: string,
-): Promise<void> {
+): Promise<string | null> {
     if (!isDesktop()) throw new AutoScanNativePrintingUnavailableError()
+    if (import.meta.env.DEV && printerName === DEV_AUTO_SCAN_PRINTER_NAME) {
+        const bytes = new Uint8Array(await pdfBlob.arrayBuffer())
+        let binary = ''
+        const chunkSize = 0x8000
+        for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+            binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+        }
+        const destinationPath = await invoke<string>('save_auto_scan_label_for_dev', {
+            pdfBase64: btoa(binary),
+            title,
+        })
+        console.info('[Auto Scan dev print] status=saved destination_path=', destinationPath)
+        return destinationPath
+    }
     const image = await renderPdfPageForNativePrinting(pdfBlob)
     const pngBase64 = image.pngDataUrl.replace(/^data:image\/png;base64,/, '')
     try {
@@ -281,6 +309,7 @@ async function printPdfToSystemPrinter(
             pageHeightMm: image.heightMm,
             title,
         })
+        return null
     } catch (error) {
         const message = String(error)
         if (message.includes('auto_scan_printer_unavailable')) {
@@ -298,6 +327,7 @@ async function printPdfToSystemPrinter(
 
 async function isSystemPrinterAvailable(printerName: string): Promise<boolean> {
     if (!isDesktop()) throw new AutoScanNativePrintingUnavailableError()
+    if (import.meta.env.DEV && printerName === DEV_AUTO_SCAN_PRINTER_NAME) return true
     try {
         return await invoke<boolean>('is_auto_scan_printer_available', { printerName })
     } catch (error) {

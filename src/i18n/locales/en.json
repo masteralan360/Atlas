@@ -11485,6 +11485,8 @@
       "savedPrinterUnavailable": "The saved printer “{{printer}}” is not currently available. Choose an available printer to continue.",
       "nativeUnavailable": "Silent printer access is available in the Atlas Windows desktop app. Open this page in Atlas desktop and refresh the printer list.",
       "noPrinters": "No Windows printers were found. Install or connect a printer in Windows, then refresh the list.",
+      "devPrinterName": "Atlas Dev PDF Output (development only)",
+      "devOutputHint": "In development mode, select Atlas Dev PDF Output to save the exact label PDF locally. The full destination path appears in the app console and success notification.",
       "printerListFailed": "Could not load the Windows printer list. Try refreshing, or check that the Windows print service is running.",
       "savePrinter": "Save printer",
       "savingPrinter": "Saving printer…",
@@ -11500,6 +11502,8 @@
       "lookupFailed": "Could not verify this shipment. Check your connection and try again.",
       "labelSubmitted": "Shipment label sent to printer.",
       "labelSubmittedDescription": "{{shipment}} was sent to {{printer}}.",
+      "devLabelSaved": "Development label saved.",
+      "devLabelSavedDescription": "{{shipment}} was saved to {{path}}.",
       "printFailed": "Could not print this shipment label. Check the printer connection and try again."
     },
     "shipmentQr": "Shipment QR",

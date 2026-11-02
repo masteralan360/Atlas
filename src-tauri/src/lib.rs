@@ -414,6 +414,7 @@ pub fn run() {
             auto_scan_printer::list_auto_scan_printers,
             auto_scan_printer::is_auto_scan_printer_available,
             auto_scan_printer::print_auto_scan_label,
+            auto_scan_printer::save_auto_scan_label_for_dev,
             local_mode_sqlite::begin_local_mode_sqlite_transaction,
             local_mode_sqlite::execute_local_mode_sqlite_transaction,
             local_mode_sqlite::select_local_mode_sqlite_transaction,

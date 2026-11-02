@@ -280,11 +280,26 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
         })
         return
       }
-      await printService.printPdfToSystemPrinter(
+      const destinationPath = await printService.printPdfToSystemPrinter(
         label,
         printerName,
-        t('postal.shipmentLabel'),
+        `${t('postal.shipmentLabel')} - ${formatPostalShipmentId(shipment)}`,
       )
+      if (destinationPath) {
+        const shipmentReference = formatPostalShipmentId(shipment)
+        console.info('[Auto Scan dev print] status=saved', {
+          shipment: shipmentReference,
+          destination_path: destinationPath,
+        })
+        toast({
+          title: t('postal.autoScan.devLabelSaved'),
+          description: t('postal.autoScan.devLabelSavedDescription', {
+            shipment: shipmentReference,
+            path: destinationPath,
+          }),
+        })
+        return
+      }
       toast({
         title: t('postal.autoScan.labelSubmitted'),
         description: t('postal.autoScan.labelSubmittedDescription', {
@@ -396,6 +411,10 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
     }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return
+      // Keyboard-wedge scanners and the dev simulator emit Shift as a
+      // standalone keydown before characters such as the QR payload's colons.
+      // Ignore that modifier event without discarding the buffered scan.
+      if (event.key === 'Shift') return
       const target = event.target
       if (target instanceof HTMLElement && (
         target.isContentEditable

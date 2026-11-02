@@ -107,6 +107,11 @@ export function AutoScanPrinterDialog({
           <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
             {t('postal.autoScan.scannerHint')}
           </p>
+          {import.meta.env.DEV && (
+            <p className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm text-muted-foreground">
+              {t('postal.autoScan.devOutputHint')}
+            </p>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm font-medium">{t('postal.autoScan.availablePrinters')}</p>
             <Button
@@ -164,7 +169,7 @@ export function AutoScanPrinterDialog({
                   >
                     <span className="flex min-w-0 items-center gap-3">
                       <Printer className="h-4 w-4 shrink-0" />
-                      <span className="min-w-0 break-words">{printer.name}</span>
+                      <span className="min-w-0 break-words">{printer.displayName ?? printer.name}</span>
                     </span>
                     {selected && <Check className="ms-3 h-4 w-4 shrink-0" />}
                   </Button>
