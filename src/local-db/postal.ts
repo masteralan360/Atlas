@@ -168,6 +168,14 @@ function normalizeShipment(row: PostalShipment): PostalShipment {
     row.delivery_fee === null || row.delivery_fee === undefined
       ? null
       : Number(row.delivery_fee)
+  const deliveryFeeTariff =
+    row.delivery_fee_tariff === null || row.delivery_fee_tariff === undefined
+      ? row.shipment_size == null ? null : deliveryFee
+      : Number(row.delivery_fee_tariff)
+  const deliveryFeeAddon =
+    row.delivery_fee_addon === null || row.delivery_fee_addon === undefined
+      ? row.shipment_size == null ? deliveryFee ?? 0 : 0
+      : Number(row.delivery_fee_addon)
   if (
     !row.id ||
     !row.qr_id ||
@@ -177,6 +185,14 @@ function normalizeShipment(row: PostalShipment): PostalShipment {
     !Number.isSafeInteger(Number(row.cod_amount)) ||
     (deliveryFee !== null &&
       (!Number.isSafeInteger(deliveryFee) || deliveryFee <= 0)) ||
+    (deliveryFeeTariff !== null &&
+      (!Number.isSafeInteger(deliveryFeeTariff) || deliveryFeeTariff < 0)) ||
+    !Number.isSafeInteger(deliveryFeeAddon) ||
+    deliveryFeeAddon < 0 ||
+    (deliveryFee !== null &&
+      deliveryFee !== (deliveryFeeTariff ?? 0) + deliveryFeeAddon) ||
+    (deliveryFee === null &&
+      (deliveryFeeTariff !== null || deliveryFeeAddon !== 0)) ||
     (row.shipment_size != null &&
       !['carton', 'ship', 'small_package'].includes(row.shipment_size)) ||
     (row.tariff_zone != null && !['center', 'outside'].includes(row.tariff_zone))
@@ -187,6 +203,8 @@ function normalizeShipment(row: PostalShipment): PostalShipment {
     shipment_number: Number(row.shipment_number),
     cod_amount: Number(row.cod_amount),
     delivery_fee: deliveryFee,
+    delivery_fee_tariff: deliveryFeeTariff,
+    delivery_fee_addon: deliveryFeeAddon,
   }
 }
 function normalizePostalCodActivityPage(value: unknown): PostalPage<PostalCodRecord> {

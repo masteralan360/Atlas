@@ -11456,6 +11456,7 @@
       "active": { "title": "Active Shipments", "description": "Drafts and shipments awaiting delivery" },
       "delivered": { "title": "Delivered Orders", "description": "Successfully delivered shipments" },
       "inTransit": { "title": "In-Transit Orders", "description": "On the way between offices and branches" },
+      "merchantSettlements": { "title": "Remaining Merchant Settlements", "description": "Collected funds still owed to merchants after recorded settlements" },
       "cod": { "title": "COD Balance", "description": "Remaining COD on delivered shipments" }
     },
     "merchant": "Merchant",
@@ -11546,10 +11547,11 @@
       "center": "Center",
       "outside": "Outside"
     },
-    "tariffAssignmentHint": "Review the selected size and tariff. You can change them before receiving the parcel.",
-    "tariffCreationHint": "Select the shipment size and tariff for the chosen governorate and area.",
+    "tariffAssignmentHint": "Review the selected size and tariff. You can change them before receiving the parcel, or clear the size when a Delivery Fee is already recorded.",
+    "tariffCreationHint": "Select a shipment size to apply its tariff; any delivery fee above is added to it.",
     "deliveryFeeTitle": "Delivery Fee",
     "deliveryFee": "Delivery Fee",
+    "deliveryFeeAddonHint": "If entered, this amount is added to the fee calculated from the selected size.",
     "deliveryFeeCollected": "Delivery Fee Collected",
     "deliveryFeeRemaining": "Delivery Fee Remaining",
     "totalAtDelivery": "Total Amount at Delivery",
@@ -11575,6 +11577,9 @@
       "recipientName": "Use no more than 160 characters.",
       "location": "Select a valid governorate and an area within it.",
       "amount": "Enter a whole IQD amount from 0 to 999,999,999,999.",
+      "deliveryFee": "Enter a whole IQD fee from 1 to 999,999,999,999, or leave it empty. The combined amount with the tariff must also stay within this limit.",
+      "deliveryFeeOrSizeRequired": "Please enter a Delivery Fee or select a Shipment Size.",
+      "receiveFeeOrSizeRequired": "A Shipment Size or an existing Delivery Fee is required to receive this shipment.",
       "pieces": "Enter a whole number from 1 to 2,147,483,647, or leave this field empty.",
       "textLength": "Use no more than 2,000 characters."
     },

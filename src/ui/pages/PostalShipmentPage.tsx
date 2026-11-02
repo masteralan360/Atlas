@@ -309,7 +309,7 @@ export default function PostalShipmentPage({
                       t(postalShipmentSizeTranslationKey(
                         shipment.governorate,
                         shipment.shipment_size,
-                        shipment.delivery_fee,
+                        shipment.delivery_fee_tariff ?? shipment.delivery_fee,
                       )),
                     ]]
                   : []),

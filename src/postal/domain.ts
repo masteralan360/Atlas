@@ -29,6 +29,8 @@ export interface PostalShipment {
   shipment_size?: PostalShipmentSize | null;
   tariff_zone?: PostalTariffZone | null;
   delivery_fee?: number | null;
+  delivery_fee_tariff?: number | null;
+  delivery_fee_addon?: number | null;
   tariff_assigned_by?: string | null;
   tariff_assigned_at?: string | null;
   pieces: number | null;

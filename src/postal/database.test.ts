@@ -164,6 +164,15 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
     await pg.exec(readFileSync(new URL(
       '../../supabase/migrations/20261102160133_postal_generated_qr_batches.sql', import.meta.url,
     ), 'utf8'))
+    await pg.exec(readFileSync(new URL(
+      '../../supabase/migrations/20261102231139_postal_optional_shipment_size_and_manual_delivery_fee.sql', import.meta.url,
+    ), 'utf8'))
+    await pg.exec(readFileSync(new URL(
+      '../../supabase/migrations/20261102231146_postal_additive_shipment_delivery_fee.sql', import.meta.url,
+    ), 'utf8'))
+    await pg.exec(readFileSync(new URL(
+      '../../supabase/migrations/20261103090000_postal_dashboard_merchant_settlements.sql', import.meta.url,
+    ), 'utf8'))
     const registrationSql = readFileSync(
       new URL(
         '../../supabase/migrations/20261002000858_scope_resilience_actor_permits.sql',
@@ -311,6 +320,7 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
         delivered_shipments: 3,
         in_transit_shipments: 2,
         cod_balance: '10000',
+        remaining_merchant_settlements: '6000',
         collection_records: 4,
       }
       await actor(admin)
@@ -327,6 +337,7 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
         total_shipments: 8,
         active_shipments: 4,
         in_transit_shipments: 1,
+        remaining_merchant_settlements: '6000',
       })
       expect(
         await summary(
@@ -341,6 +352,7 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
         delivered_shipments: 2,
         in_transit_shipments: 1,
         cod_balance: '13000',
+        remaining_merchant_settlements: '2000',
         collection_records: 3,
       })
       expect(await summary('', 'delivered')).toEqual({
@@ -348,6 +360,7 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
         total_shipments: 3,
         active_shipments: 0,
         in_transit_shipments: 0,
+        remaining_merchant_settlements: '6000',
       })
       const merchantTotal = {
         total_shipments: 6,
@@ -355,6 +368,7 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
         delivered_shipments: 2,
         in_transit_shipments: 1,
         cod_balance: '2000',
+        remaining_merchant_settlements: '2000',
         collection_records: 3,
       }
       expect(await summary('Alpha')).toEqual(merchantTotal)
@@ -366,6 +380,7 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
         delivered_shipments: 0,
         in_transit_shipments: 0,
         cod_balance: '0',
+        remaining_merchant_settlements: '0',
         collection_records: 0,
       })
       await actor(staff)
@@ -695,10 +710,24 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
     s = await command('deliver', { id: s.id, revision: s.revision })
     expect(s.state).toBe('delivered')
   })
-  it('requires valid creation tariffs and reevaluates them when a draft destination changes', async () => {
+  it('requires a delivery fee or valid size tariff and reevaluates draft assignments when the destination changes', async () => {
     await actor(merchant)
     const withoutTariff = { ...form, tariff_size: undefined, delivery_fee: undefined }
     await expect(command('create_shipment', withoutTariff)).rejects.toThrow('postal_tariff_required')
+    const feeOnly = await command('create_shipment', {
+      ...form, tariff_size: undefined, delivery_fee: undefined, delivery_fee_addon: 7000,
+    })
+    expect(feeOnly).toMatchObject({
+      shipment_size: null, tariff_zone: null, delivery_fee_tariff: null,
+      delivery_fee_addon: 7000, delivery_fee: 7000,
+    })
+    const feeAdditive = await command('create_shipment', {
+      ...form, delivery_fee: 6000, delivery_fee_addon: 7000,
+    })
+    expect(feeAdditive).toMatchObject({
+      shipment_size: 'small_package', delivery_fee_tariff: 6000,
+      delivery_fee_addon: 7000, delivery_fee: 13000,
+    })
     for (const payload of [
       { ...form, tariff_size: 'carton', delivery_fee: 8000 },
       { ...form, delivery_fee: 5000 },
@@ -707,6 +736,10 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
     ]) await expect(command('create_shipment', payload)).rejects.toThrow('postal_invalid_tariff')
 
     let draft = await command('create_shipment', form)
+    expect(draft).toMatchObject({
+      shipment_size: 'small_package', delivery_fee_tariff: 6000,
+      delivery_fee_addon: 0, delivery_fee: 6000,
+    })
     const edit = { ...form, id: draft.id, revision: draft.revision, area: 'erbil-centre' }
     await expect(command('edit_shipment', edit)).rejects.toThrow('postal_invalid_tariff')
     draft = await command('edit_shipment', { ...edit, delivery_fee: 5000 })
@@ -721,7 +754,10 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
   it.each([admin, staff])('lets authorized intake staff %s retain or overwrite a draft tariff without preserving the original', async (receiver) => {
     await actor(merchant)
     const creationRequest = crypto.randomUUID()
-    const input = { ...form, governorate: 'baghdad', area: 'karrada', tariff_size: 'carton', delivery_fee: 8000 }
+    const input = {
+      ...form, governorate: 'baghdad', area: 'karrada', tariff_size: 'carton',
+      delivery_fee: 8000, delivery_fee_addon: 1000,
+    }
     let draft = await command('create_shipment', input, creationRequest)
     const originalAssignment = { tariff_assigned_at: draft.tariff_assigned_at, tariff_assigned_by: draft.tariff_assigned_by }
     const editRequest = crypto.randomUUID()
@@ -729,10 +765,16 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
     draft = await command('edit_shipment', editInput, editRequest)
     await actor(receiver)
     const receiptRequest = crypto.randomUUID()
-    const receipt = { id: draft.id, revision: draft.revision, branch_id: branchA.id, tariff_size: 'ship', delivery_fee: 24000 }
+    const receipt = {
+      id: draft.id, revision: draft.revision, branch_id: branchA.id,
+      tariff_size: 'ship', delivery_fee: 24000, delivery_fee_addon: 1000,
+    }
     await expect(command('receive', { ...receipt, delivery_fee: 8000 })).rejects.toThrow('postal_invalid_tariff')
     const received = await command('receive', receipt, receiptRequest)
-    expect(received).toMatchObject({ state: 'received', shipment_size: 'ship', delivery_fee: 24000, tariff_assigned_by: receiver })
+    expect(received).toMatchObject({
+      state: 'received', shipment_size: 'ship', delivery_fee_tariff: 24000,
+      delivery_fee_addon: 1000, delivery_fee: 25000, tariff_assigned_by: receiver,
+    })
     expect(await command('receive', receipt, receiptRequest)).toEqual(received)
     expect(originalAssignment.tariff_assigned_by).toBe(merchant)
 
@@ -742,7 +784,10 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
     )
     expect(history.rows.map((event) => event.event_type)).toEqual(['created', 'edited', 'receive'])
     expect(JSON.stringify(history.rows)).not.toContain('carton')
-    expect(history.rows[2].metadata).toMatchObject({ shipment_size: 'ship', delivery_fee: 24000 })
+    expect(history.rows[2].metadata).toMatchObject({
+      shipment_size: 'ship', delivery_fee_tariff: 24000,
+      delivery_fee_addon: 1000, delivery_fee: 25000,
+    })
     expect(history.rows[1].metadata.before).toHaveProperty('recipient_name', 'Recipient')
     const requests = await pg.query<{ payload: object; response: object }>(
       "SELECT payload,response FROM postal_private.requests WHERE response->>'id'=$1", [draft.id],
@@ -753,14 +798,18 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
     await expect(pg.query("UPDATE public.postal_events SET metadata='{}' WHERE shipment_id=$1", [draft.id])).rejects.toThrow('postal_history_is_immutable')
 
     await actor(merchant)
-    expect(await command('create_shipment', input, creationRequest)).toMatchObject({ id: draft.id, shipment_size: 'ship', delivery_fee: 24000 })
-    expect(await command('edit_shipment', editInput, editRequest)).toMatchObject({ id: draft.id, shipment_size: 'ship', delivery_fee: 24000 })
+    expect(await command('create_shipment', input, creationRequest)).toMatchObject({ id: draft.id, shipment_size: 'ship', delivery_fee: 25000 })
+    expect(await command('edit_shipment', editInput, editRequest)).toMatchObject({ id: draft.id, shipment_size: 'ship', delivery_fee: 25000 })
     await expect(command('create_shipment', { ...input, cod_amount: 1 }, creationRequest)).rejects.toThrow('postal_request_conflict')
 
     const unchanged = await command('create_shipment', input)
     await actor(receiver)
     const retained = await command('receive', { id: unchanged.id, revision: unchanged.revision, branch_id: branchA.id })
-    expect(retained).toMatchObject({ shipment_size: 'carton', delivery_fee: 8000, tariff_assigned_by: merchant, tariff_assigned_at: unchanged.tariff_assigned_at })
+    expect(retained).toMatchObject({
+      shipment_size: 'carton', delivery_fee_tariff: 8000,
+      delivery_fee_addon: 1000, delivery_fee: 9000,
+      tariff_assigned_by: merchant, tariff_assigned_at: unchanged.tariff_assigned_at,
+    })
   })
   it('still receives legacy drafts after staff select a valid tariff', async () => {
     await pg.exec('RESET ROLE')

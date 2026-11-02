@@ -10,6 +10,8 @@ export function ShipmentTariffSelector({
   value,
   disabled,
   reviewing = false,
+  required = true,
+  allowDeselect = false,
   onChange,
 }: {
   id: string
@@ -18,7 +20,9 @@ export function ShipmentTariffSelector({
   value: PostalTariffOption | null
   disabled?: boolean
   reviewing?: boolean
-  onChange: (value: PostalTariffOption) => void
+  required?: boolean
+  allowDeselect?: boolean
+  onChange: (value: PostalTariffOption | null) => void
 }) {
   const { t } = useTranslation()
   return (
@@ -28,11 +32,11 @@ export function ShipmentTariffSelector({
       role="group"
       aria-labelledby={`${id}-label`}
       aria-describedby={`${id}-hint`}
-      aria-invalid={!value}
+      aria-invalid={required && !value}
       className="space-y-2"
     >
       <p id={`${id}-label`} className="text-sm font-medium">
-        {t('postal.shipmentSize')} *
+        {t('postal.shipmentSize')}{required && ' *'}
       </p>
       <p id={`${id}-hint`} className="text-sm text-muted-foreground">
         {t(reviewing ? 'postal.tariffAssignmentHint' : 'postal.tariffCreationHint')}
@@ -48,7 +52,7 @@ export function ShipmentTariffSelector({
               className="h-auto min-h-20 justify-between gap-3 p-4 text-start"
               disabled={disabled}
               aria-pressed={selected}
-              onClick={() => onChange(option)}
+              onClick={() => onChange(selected && allowDeselect ? null : option)}
             >
               <span className="flex items-start gap-3">
                 <Package className="mt-0.5 h-5 w-5 shrink-0" />

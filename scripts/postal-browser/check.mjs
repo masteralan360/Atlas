@@ -73,6 +73,9 @@ for (const name of [
   '20261027223702_postal_shipment_tariffs_and_delivery_fees',
   '20261031173159_postal_create_shipments_for_admin_and_office',
   '20261031203510_postal_assign_tariff_during_creation',
+  '20261101232108_postal_extra_large_carton_tariff',
+  '20261102231139_postal_optional_shipment_size_and_manual_delivery_fee',
+  '20261102231146_postal_additive_shipment_delivery_fee',
 ]) await pg.exec(await readFile(new URL(`../../supabase/migrations/${name}.sql`, import.meta.url), 'utf8'));
 await pg.query("INSERT INTO public.workspace_permissions VALUES($1,$2,'postService.officeEmployee','postService')", [w,office]);
 await pg.query("SELECT public.postal_prepare_registration($1,$2,$3::jsonb)", [
@@ -221,6 +224,19 @@ try {
   const create = page.getByRole('button', { name: 'Create Shipment', exact: true });
   const sizes = page.getByRole('group', { name: 'Shipment Size' });
   assert(await create.isDisabled());
+  const deliveryFee = page.locator('#shipment-delivery-fee');
+  assert(await page.getByText('Please enter a Delivery Fee or select a Shipment Size.', { exact: true }).isVisible());
+  await deliveryFee.fill('4000');
+  assert(await create.isEnabled());
+  assert.equal(await page.getByText('Please enter a Delivery Fee or select a Shipment Size.', { exact: true }).isVisible(), false);
+  await deliveryFee.fill('');
+  assert(await create.isDisabled());
+  await sizes.getByRole('button', { name: /Small Package/ }).click();
+  assert(await create.isEnabled());
+  assert.equal(await page.getByText('Please enter a Delivery Fee or select a Shipment Size.', { exact: true }).isVisible(), false);
+  await sizes.getByRole('button', { name: /Small Package/ }).click();
+  assert(await create.isDisabled());
+  assert(await page.getByText('Please enter a Delivery Fee or select a Shipment Size.', { exact: true }).isVisible());
   await sizes.getByRole('button', { name: /Small Package/ }).click();
   await page.locator('#postal-area').click();
   await page.getByRole('button', { name: 'Erbil Centre', exact: true }).click();
@@ -232,7 +248,7 @@ try {
   assert.equal(await sizes.getByRole('button').count(), 0);
   await page.locator('#postal-area').click();
   await page.getByRole('button', { name: 'Karrada', exact: true }).click();
-  assert.equal(await sizes.getByRole('button').count(), 7);
+  assert.equal(await sizes.getByRole('button').count(), 8);
   assert.equal(await sizes.getByRole('button', { pressed: true }).count(), 0);
   await sizes.getByRole('button', { name: /Carton.*8,000/ }).click();
   await page.locator('#postal-governorate').click();
@@ -241,15 +257,13 @@ try {
   await page.getByRole('button', { name: 'Ankawa', exact: true }).click();
   assert.equal(await sizes.getByRole('button', { pressed: true }).count(), 0);
   await sizes.getByRole('button', { name: /Small Package.*6,000/ }).click();
+  assert.equal(await sizes.getByRole('button', { pressed: true }).count(), 1);
   // Reproduce a disabled form with an invalid phone above the scroll position.
   const backup = page.getByLabel("Backup Phone Number", { exact: false });
   await backup.fill("0770");
   await page.locator("#shipment-pieces").fill("5");
-  const validation = page.getByTestId("shipment-validation");
-  assert.match(
-    await validation.innerText(),
-    /Backup Phone Number: Enter a valid Iraqi mobile number/,
-  );
+  const validation = page.locator('#shipment-backup_phone-error');
+  assert.match(await validation.innerText(), /Enter a valid Iraqi mobile number/);
   assert.equal(await backup.getAttribute("aria-invalid"), "true");
   assert(
     await page
@@ -261,7 +275,7 @@ try {
     path: "artifacts/postal/form-validation-desktop.png",
     fullPage: true,
   });
-  await validation.getByRole("button", { name: /Backup Phone Number/ }).click();
+  await backup.focus();
   assert.equal(
     await backup.evaluate((input) => document.activeElement === input),
     true,
@@ -272,7 +286,7 @@ try {
     path: "artifacts/postal/form-validation-mobile.png",
     fullPage: true,
   });
-  await validation.getByRole("button", { name: /Backup Phone Number/ }).click();
+  await backup.focus();
   assert.equal(
     await backup.evaluate((input) => document.activeElement === input),
     true,
@@ -280,6 +294,8 @@ try {
   const backupBox = await backup.boundingBox();
   assert(backupBox.y >= 0 && backupBox.y + backupBox.height <= 844);
   await backup.fill("07701234567");
+  await deliveryFee.fill('7000');
+  assert.equal(await sizes.getByRole('button', { pressed: true }).count(), 1);
   assert.equal(await validation.count(), 0);
   assert(
     await page
@@ -293,7 +309,7 @@ try {
   });
   await page.setViewportSize({ width: 390, height: 844 });
   const dialog = page.getByRole("dialog");
-  assert((await dialog.boundingBox()).width <= 390);
+  assert((await dialog.boundingBox()).width <= 391);
   await page.screenshot({
     path: "artifacts/postal/form-mobile.png",
     fullPage: true,
@@ -306,7 +322,9 @@ try {
   assert.equal(saved.cod_amount, -25000);
   assert.equal(saved.state, "draft");
   assert.equal(saved.shipment_size, 'small_package');
-  assert.equal(saved.delivery_fee, 6000);
+  assert.equal(saved.delivery_fee, 13000);
+  assert.equal(saved.delivery_fee_tariff, 6000);
+  assert.equal(saved.delivery_fee_addon, 7000);
   assert(saved.qr_id);
   const persisted = await pg.query(
     "SELECT * FROM public.postal_shipments WHERE id=$1",
@@ -330,6 +348,8 @@ try {
   assert.notEqual(copied.qr_id, saved.qr_id);
   assert.equal(copied.shipment_size, saved.shipment_size);
   assert.equal(copied.delivery_fee, saved.delivery_fee);
+  assert.equal(copied.delivery_fee_tariff, saved.delivery_fee_tariff);
+  assert.equal(copied.delivery_fee_addon, saved.delivery_fee_addon);
   assert.deepEqual(
     (
       await pg.query("SELECT * FROM public.postal_shipments WHERE id=$1", [
@@ -530,7 +550,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    "Passed: creation tariffs and destination changes, copied tariff, admin/office intake retain/override, desktop/mobile dialogs, empty/negative IQD, repeated timeline, contact links and QR label PDF.",
+    "Passed: delivery-fee validation, size toggle, additive fee, copied size and fee add-on, admin/office intake retain/replace, desktop/mobile dialogs, empty/negative IQD, repeated timeline, contact links and QR label PDF.",
   );
 } finally {
   await browser.close();

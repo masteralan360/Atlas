@@ -241,7 +241,7 @@ export function ShipmentLabel({
                 postalShipmentSizeTranslationKey(
                   shipment.governorate,
                   shipment.shipment_size,
-                  shipment.delivery_fee,
+                  shipment.delivery_fee_tariff ?? shipment.delivery_fee,
                 ),
               )}
               {shipment.pieces !== null && (
@@ -335,7 +335,7 @@ export function SmallShipmentLabel({
         postalShipmentSizeTranslationKey(
           shipment.governorate,
           shipment.shipment_size,
-          shipment.delivery_fee,
+          shipment.delivery_fee_tariff ?? shipment.delivery_fee,
         ),
       )
     : null

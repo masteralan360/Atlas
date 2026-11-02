@@ -17,6 +17,8 @@ for (const name of [
   '20261101232111_postal_governorate_bulk_branches', '20261101232114_postal_branch_area_optional',
   '20261102160133_postal_generated_qr_batches',
   '20261102160411_postal_generated_qr_shipment_index',
+  '20261102231139_postal_optional_shipment_size_and_manual_delivery_fee',
+  '20261102231146_postal_additive_shipment_delivery_fee',
 ]) await pg.exec(await readFile(new URL(`../../supabase/migrations/${name}.sql`, import.meta.url), 'utf8'))
 await pg.exec(await readFile(new URL('./statement-seed.sql', import.meta.url), 'utf8'))
 async function actor(user) {

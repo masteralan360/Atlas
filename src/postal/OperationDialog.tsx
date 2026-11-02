@@ -70,7 +70,10 @@ export function OperationDialog({
       : []
   const [selectedTariff, setSelectedTariff] = useState(() =>
     findPostalTariff(
-      shipment.governorate, shipment.area, shipment.shipment_size, shipment.delivery_fee,
+      shipment.governorate,
+      shipment.area,
+      shipment.shipment_size,
+      shipment.delivery_fee_tariff ?? shipment.delivery_fee,
     ),
   )
   const tariff = findPostalTariff(
@@ -85,11 +88,13 @@ export function OperationDialog({
     (operation !== 'authorize_transfer' ||
       branch.id !== shipment.current_branch_id) &&
     (operation !== 'arrive' || branch.id === transfer?.destination_id)
+  const validReceiveFee =
+    !!tariff || (shipment.delivery_fee_addon ?? 0) > 0
   const valid =
     // Driver selection is disabled and must not block confirmation.
     // (!driverText || !!driver) &&
     (!needsBranch || validBranch) &&
-    (operation !== 'receive' || !!tariff) &&
+    (operation !== 'receive' || validReceiveFee) &&
     (operation !== 'cancel' || notes.trim().length > 0)
   const payload = {
     id: shipment.id,
@@ -97,6 +102,7 @@ export function OperationDialog({
     branch_id: branch?.id,
     tariff_size: tariff?.size,
     delivery_fee: tariff?.fee,
+    delivery_fee_addon: shipment.delivery_fee_addon ?? 0,
     notes: notes.trim(),
     // driver_id: driver?.agentFacetId,
   }
@@ -131,9 +137,16 @@ export function OperationDialog({
               options={tariffs}
               value={tariff}
               reviewing
+              required={false}
+              allowDeselect
               disabled={action.busy}
               onChange={setSelectedTariff}
             />
+          )}
+          {operation === 'receive' && !validReceiveFee && (
+            <p className="text-sm text-destructive" role="alert">
+              {t('postal.validation.receiveFeeOrSizeRequired')}
+            </p>
           )}
           {operation === 'arrive' && (
             <p className="break-all text-sm">

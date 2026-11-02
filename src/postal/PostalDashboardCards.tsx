@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { CircleCheck, HandCoins, Loader2, Truck } from 'lucide-react'
+import { CircleCheck, HandCoins, Loader2, Truck, Wallet } from 'lucide-react'
 import type { PostalDashboardSummary } from '@/local-db/postalSummary'
 import { PostalError } from './shared'
 
@@ -45,6 +45,15 @@ export function PostalDashboardCards({
         'bg-amber-100 text-amber-600 dark:bg-amber-900/60 dark:text-amber-300',
     },
     {
+      key: 'merchantSettlements',
+      value: summary?.remaining_merchant_settlements,
+      icon: Wallet,
+      style:
+        'border-cyan-200 bg-gradient-to-br from-cyan-50 to-cyan-50/20 dark:border-cyan-900 dark:from-cyan-950/40 dark:to-card',
+      iconStyle:
+        'bg-cyan-100 text-cyan-600 dark:bg-cyan-900/60 dark:text-cyan-300',
+    },
+    {
       key: 'cod',
       value: summary?.cod_balance,
       icon: HandCoins,
@@ -58,7 +67,7 @@ export function PostalDashboardCards({
     <section
       aria-label={t('postal.dashboard.title')}
       aria-busy={loading}
-      className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4"
+      className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5"
       data-testid="postal-dashboard"
     >
       {cards.map(({ key, value, icon: Icon, style, iconStyle }) => (
@@ -87,7 +96,7 @@ export function PostalDashboardCards({
                 className="my-1 text-2xl font-bold tabular-nums [overflow-wrap:anywhere]"
                 data-testid={`postal-stat-${key}`}
               >
-                {key === 'cod'
+                {key === 'cod' || key === 'merchantSettlements'
                   ? `${t('postal.iqd')} ${new Intl.NumberFormat(i18n.language).format(BigInt(value))}`
                   : new Intl.NumberFormat(i18n.language).format(Number(value))}
               </p>

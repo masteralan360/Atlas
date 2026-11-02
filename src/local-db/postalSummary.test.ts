@@ -11,6 +11,7 @@ const result = {
   delivered_shipments: 3,
   in_transit_shipments: 2,
   cod_balance: '9007199254740993123',
+  remaining_merchant_settlements: '1234567890123456789',
   collection_records: 4,
 }
 describe('Post Service dashboard contract', () => {

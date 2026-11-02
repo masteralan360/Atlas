@@ -4,6 +4,7 @@ export interface PostalDashboardSummary {
   delivered_shipments: number
   in_transit_shipments: number
   cod_balance: string
+  remaining_merchant_settlements: string
   collection_records: number
 }
 
@@ -42,7 +43,12 @@ export function normalizePostalDashboardSummary(
       throw new Error('postal_invalid_result')
     }
   }
-  if (typeof row.cod_balance !== 'string' || !/^-?\d+$/.test(row.cod_balance))
+  if (
+    typeof row.cod_balance !== 'string' ||
+    !/^-?\d+$/.test(row.cod_balance) ||
+    typeof row.remaining_merchant_settlements !== 'string' ||
+    !/^\d+$/.test(row.remaining_merchant_settlements)
+  )
     throw new Error('postal_invalid_result')
   const summary = row as unknown as PostalDashboardSummary
   if (

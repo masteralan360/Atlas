@@ -51,7 +51,6 @@ const validationFields = {
   pieces: ["shipment-pieces", "postal.pieces"],
   delivery_notes: ["shipment-notes", "postal.deliveryNotes"],
   reason: ["shipment-reason", "postal.correctionReason"],
-  tariff_size: ["shipment-tariff", "postal.shipmentSize"],
 } as const;
 type ValidationField = keyof typeof validationFields;
 
@@ -94,6 +93,12 @@ export function ShipmentForm({
   const [amount, setAmount] = useState(
     source ? String(Math.abs(source.cod_amount)) : "",
   );
+  const initialDeliveryFeeAddon =
+    source?.delivery_fee_addon ??
+    (source?.shipment_size == null ? source?.delivery_fee ?? 0 : 0);
+  const [deliveryFee, setDeliveryFee] = useState(
+    initialDeliveryFeeAddon > 0 ? String(initialDeliveryFeeAddon) : "",
+  );
   const [negative, setNegative] = useState((source?.cod_amount ?? 0) < 0);
   const [pieces, setPieces] = useState(
     source?.pieces ? String(source.pieces) : "",
@@ -101,11 +106,21 @@ export function ShipmentForm({
   const [reason, setReason] = useState("");
   const needsTariff = !editing || source?.state === "draft";
   const [selectedTariff, setSelectedTariff] = useState<PostalTariffOption | null>(
-    () => source
-      ? findPostalTariff(
-          source.governorate, source.area, source.shipment_size, source.delivery_fee,
-        )
-      : null,
+    () => {
+      if (!source) return null;
+      return (
+        findPostalTariff(
+          source.governorate,
+          source.area,
+          source.shipment_size,
+          source.delivery_fee_tariff ?? source.delivery_fee,
+        ) ??
+        postalTariffOptions(source.governorate, source.area).find(
+          (option) => option.size === source.shipment_size,
+        ) ??
+        null
+      );
+    },
   );
   const tariff = findPostalTariff(
     form.governorate, form.area, selectedTariff?.size, selectedTariff?.fee,
@@ -125,12 +140,24 @@ export function ShipmentForm({
     shipmentValidationErrors(payload);
   if (editing && scope.role === "admin" && !reason.trim())
     errors.reason = "required";
-  if (needsTariff && !tariff) errors.tariff_size = "required";
+  const deliveryFeeAmount = deliveryFee === "" ? null : Number(deliveryFee);
+  const deliveryFeeInvalid =
+    deliveryFeeAmount !== null &&
+    (!Number.isSafeInteger(deliveryFeeAmount) ||
+      deliveryFeeAmount <= 0 ||
+      deliveryFeeAmount > 999999999999 ||
+      (tariff?.fee ?? 0) + deliveryFeeAmount > 999999999999);
+  const tariffRequirementMissing =
+    needsTariff && !tariff && deliveryFee === "";
   const invalidFields = Object.keys(validationFields).filter(
     (field) => errors[field as ValidationField],
   ) as ValidationField[];
   const organizationInvalid = requiresOrganization && !selectedOrganization;
-  const valid = invalidFields.length === 0 && !organizationInvalid;
+  const valid =
+    invalidFields.length === 0 &&
+    !organizationInvalid &&
+    !deliveryFeeInvalid &&
+    !tariffRequirementMissing;
   const showNegativePrefix = negative && amount.length > 0;
   const fieldError = (field: ValidationField) => {
     if (!touched[field] || !errors[field]) return null;
@@ -154,6 +181,9 @@ export function ShipmentForm({
   const set = (key: keyof ShipmentInput, value: string | boolean) =>
     setForm((f) => ({ ...f, [key]: value }));
   const money = amount ? Number(amount).toLocaleString("en-US") : "";
+  const deliveryFeeMoney = deliveryFee
+    ? Number(deliveryFee).toLocaleString("en-US")
+    : "";
   return (
     <AppDialog
       open
@@ -183,7 +213,11 @@ export function ShipmentForm({
               ...payload,
               ...(!editing && generatedQrId ? { generated_qr_id: generatedQrId } : {}),
               ...(needsTariff
-                ? { tariff_size: tariff?.size, delivery_fee: tariff?.fee }
+                ? {
+                    tariff_size: tariff?.size ?? null,
+                    delivery_fee: tariff?.fee ?? null,
+                    delivery_fee_addon: deliveryFeeAmount ?? 0,
+                  }
                 : {}),
               ...(requiresOrganization
                 ? { organization_id: selectedOrganization?.id }
@@ -366,6 +400,44 @@ export function ShipmentForm({
               </p>
             </div>
             <div className="space-y-2">
+              <Label htmlFor="shipment-delivery-fee">
+                {t("postal.deliveryFee")}
+              </Label>
+              <Input
+                id="shipment-delivery-fee"
+                inputMode="numeric"
+                placeholder="0"
+                dir="ltr"
+                value={deliveryFeeMoney}
+                disabled={action.busy || (!!editing && !needsTariff)}
+                aria-invalid={deliveryFeeInvalid}
+                aria-describedby={
+                  deliveryFeeInvalid
+                    ? "shipment-delivery-fee-error"
+                    : "shipment-delivery-fee-hint"
+                }
+                onChange={(e) => {
+                  const digits = e.target.value.replace(/,/g, "");
+                  if (/^\d{0,12}$/.test(digits)) setDeliveryFee(digits);
+                }}
+              />
+              {deliveryFeeInvalid ? (
+                <p
+                  id="shipment-delivery-fee-error"
+                  className="text-sm text-destructive"
+                >
+                  {t("postal.validation.deliveryFee")}
+                </p>
+              ) : (
+                <p
+                  id="shipment-delivery-fee-hint"
+                  className="text-xs text-muted-foreground"
+                >
+                  {t("postal.deliveryFeeAddonHint")}
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="shipment-pieces">{t("postal.pieces")}</Label>
               <Input
                 id="shipment-pieces"
@@ -444,8 +516,15 @@ export function ShipmentForm({
                 options={postalTariffOptions(form.governorate, form.area)}
                 value={tariff}
                 disabled={action.busy}
+                required={false}
+                allowDeselect
                 onChange={setSelectedTariff}
               />
+            )}
+            {tariffRequirementMissing && (
+              <p className="text-sm text-destructive" role="alert">
+                {t("postal.validation.deliveryFeeOrSizeRequired")}
+              </p>
             )}
           </AppDialogBody>
           <AppDialogFooter>
