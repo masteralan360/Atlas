@@ -393,9 +393,9 @@ class ReleaseApp(QMainWindow):
         self.msg_edit = QLineEdit(f"Release v{increment_version(current)}")
         layout.addWidget(self.msg_edit)
 
-        # Release scope
-        scope_box = QGroupBox("Changes to Include")
-        scope_box.setMinimumHeight(76)
+        # Release options
+        scope_box = QGroupBox("Release Options")
+        scope_box.setMinimumHeight(96)
         scope_box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         scope_layout = QVBoxLayout(scope_box)
         scope_layout.setContentsMargins(10, 8, 10, 8)
@@ -416,6 +416,13 @@ class ReleaseApp(QMainWindow):
         )
         self.release_scope_group.addButton(self.staged_changes_rb)
         scope_layout.addWidget(self.staged_changes_rb)
+
+        self.build_before_release_cb = QCheckBox("🏗️ Run npm run build before release")
+        self.build_before_release_cb.setChecked(False)
+        self.build_before_release_cb.setToolTip(
+            "Build the application and continue with the release only if the build succeeds."
+        )
+        scope_layout.addWidget(self.build_before_release_cb)
         layout.addWidget(scope_box)
 
         # Highlights button
@@ -497,11 +504,11 @@ class ReleaseApp(QMainWindow):
 
         # Buttons
         btn_row = QHBoxLayout()
-        release_btn = QPushButton("🚀 Release")
-        release_btn.clicked.connect(self.release)
+        self.release_btn = QPushButton("🚀 Release")
+        self.release_btn.clicked.connect(self.release)
         cancel_btn = QPushButton("❌ Cancel")
         cancel_btn.clicked.connect(self.close)
-        btn_row.addWidget(release_btn)
+        btn_row.addWidget(self.release_btn)
         btn_row.addWidget(cancel_btn)
         layout.addLayout(btn_row)
 
@@ -710,6 +717,37 @@ class ReleaseApp(QMainWindow):
         if reply != QMessageBox.Yes:
             return
 
+        if self.build_before_release_cb.isChecked():
+            self.release_btn.setEnabled(False)
+            self.status_label.setText("Building application before release...")
+            QApplication.processEvents()
+            try:
+                subprocess.run(
+                    ['npm.cmd', 'run', 'build'],
+                    cwd=SCRIPT_DIR,
+                    check=True,
+                    shell=True,
+                )
+            except subprocess.CalledProcessError as e:
+                self.status_label.setText("Build failed — release cancelled")
+                QMessageBox.critical(
+                    self,
+                    "Build Failed",
+                    f"npm run build failed (exit code {e.returncode}).\n\n"
+                    "The release was stopped.",
+                )
+                self.close()
+                return
+            except OSError as e:
+                self.status_label.setText("Build failed — release cancelled")
+                QMessageBox.critical(
+                    self,
+                    "Build Failed",
+                    f"Could not start npm run build: {e}\n\nThe release was stopped.",
+                )
+                self.close()
+                return
+
         self.status_label.setText("Updating version...")
         QApplication.processEvents()
 
@@ -764,9 +802,11 @@ class ReleaseApp(QMainWindow):
             else:
                 QMessageBox.critical(self, "Error", message)
                 self.status_label.setText("Failed")
+                self.release_btn.setEnabled(True)
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
             self.status_label.setText("Failed")
+            self.release_btn.setEnabled(True)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

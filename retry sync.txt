@@ -2,6 +2,8 @@ PWA Lang install
 
 Save usage mode
 
+Beauty procedures multiple selection
+
 Orders filter out returned sales total
 
 offline data load for server-side only lists
