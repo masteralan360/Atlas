@@ -595,3 +595,25 @@ export function PostalQrBatchShipmentLabel({
     </div>
   )
 }
+
+/** Compact QR-only label used for generated QR batches. */
+export function PostalQrBatchQrLabel({ qrId }: { qrId: string }) {
+  return (
+    <div
+      data-testid="postal-qr-batch-qr-only-label"
+      style={{
+        display: 'grid',
+        placeItems: 'center',
+        width: '40mm',
+        height: '58mm',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        background: '#fff',
+      }}
+    >
+      <div style={{ display: 'grid', placeItems: 'center', width: '38mm', height: '38mm' }}>
+        <ShipmentQr qrId={qrId} size={380} />
+      </div>
+    </div>
+  )
+}

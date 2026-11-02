@@ -11478,6 +11478,8 @@
     "labelSize": "100 × 100 mm shipment label",
     "smallShipmentLabel": "Small Shipment Label",
     "smallShipmentLabelSize": "40 × 58 mm compact label with a larger QR code",
+    "smallShipmentQrLabel": "Small Shipment QR Label",
+    "smallShipmentQrLabelSize": "40 × 58 mm label containing only the QR code",
     "customLabelTemplateDescription": "Custom layout · {{width}} × {{height}} mm",
     "qrHint": "This QR stays with this shipment. Scanning requires authorized access.",
     "primary_phone": "Primary Phone Number",

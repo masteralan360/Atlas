@@ -23,9 +23,9 @@ import { formatPostalShipmentId, type PostalOrganization } from './domain'
 import { ShipmentQr } from './ShipmentLabel'
 import { PostalError, PostalLoading } from './shared'
 import { PrintSelectionModal, type PrintSelectionTemplateOption } from '@/ui/components/PrintSelectionModal'
-import { loadPostalShipmentLabelTemplates } from '@/lib/postalShipmentLabelTemplates'
+import { loadPostalQrBatchLabelTemplates } from '@/lib/postalShipmentLabelTemplates'
 import { getCustomTemplateTarget, getStoredCustomTemplateLabel, readCustomTemplateLayout, type StoredCustomTemplateRow } from '@/lib/customTemplates'
-import { preparePostalQrBatchCustomLabel, preparePostalQrBatchLabel, type PostalShipmentLabelSize } from './printing'
+import { preparePostalQrBatchCustomLabel, preparePostalQrBatchLabel, type PostalQrBatchLabelSize } from './printing'
 import { useWorkspacePermissions } from '@/permissions'
 import { useWorkspace } from '@/workspace'
 
@@ -180,7 +180,7 @@ export function QRBatchDetail({ scope, batchId }: { scope: PostalScope; batchId:
   useEffect(() => {
     let isCurrent = true
     setShipmentLabelTemplates([])
-    void loadPostalShipmentLabelTemplates(scope.workspaceId).then((result) => {
+    void loadPostalQrBatchLabelTemplates(scope.workspaceId).then((result) => {
       if (isCurrent && !result.failed) setShipmentLabelTemplates(result.templates)
     })
     return () => { isCurrent = false }
@@ -238,7 +238,7 @@ export function QRBatchDetail({ scope, batchId }: { scope: PostalScope; batchId:
       if (template) {
         preparePostalQrBatchCustomLabel(printQrIds, scope.workspaceId, workspaceName || 'Atlas', template, i18n.language)
       } else {
-        const size: PostalShipmentLabelSize = nativeTemplateKey === 'postal-small-shipment-label' ? 'small' : 'standard'
+        const size: PostalQrBatchLabelSize = nativeTemplateKey === 'postal-small-shipment-qr-label' ? 'small-qr' : 'standard'
         preparePostalQrBatchLabel(printQrIds, scope.workspaceId, t, workspaceName || 'Atlas', size)
       }
       setPrint(false)
@@ -321,9 +321,9 @@ export function QRBatchDetail({ scope, batchId }: { scope: PostalScope; batchId:
         },
         {
           format: 'label',
-          label: t('postal.smallShipmentLabel'),
-          description: t('postal.smallShipmentLabelSize'),
-          nativeTemplateKey: 'postal-small-shipment-label',
+          label: t('postal.smallShipmentQrLabel'),
+          description: t('postal.smallShipmentQrLabelSize'),
+          nativeTemplateKey: 'postal-small-shipment-qr-label',
         },
       ]}
       templateOptions={shipmentLabelTemplateOptions}

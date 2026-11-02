@@ -12,14 +12,15 @@ import { setPrintPreviewEditorSource } from '@/lib/printPreviewEditorStore'
 import type { CustomTemplateLayout, TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { generateTemplatePdf } from '@/services/pdfGenerator'
 import { printPdfBlob } from '@/services/pdfPrintService'
-import { PostalQrBatchShipmentLabel, ShipmentLabel, SmallShipmentLabel } from './ShipmentLabel'
+import { PostalQrBatchQrLabel, PostalQrBatchShipmentLabel, ShipmentLabel, SmallShipmentLabel } from './ShipmentLabel'
 import { formatPostalShipmentId, type PostalShipment } from './domain'
 
 export type PostalShipmentLabelSize = 'standard' | 'small'
+export type PostalQrBatchLabelSize = 'standard' | 'small-qr'
 
 function replaceBatchQrId(node: ReactNode, qrId: string): ReactNode {
   if (!isValidElement<{ children?: ReactNode; qrId?: string }>(node)) return node
-  if (node.type === PostalQrBatchShipmentLabel) {
+  if (node.type === PostalQrBatchShipmentLabel || node.type === PostalQrBatchQrLabel) {
     return cloneElement(node as ReactElement<{ qrId: string }>, { qrId })
   }
   if (node.props.children === undefined) return node
@@ -31,24 +32,18 @@ export function preparePostalQrBatchLabel(
   workspaceId: string,
   t: TFunction,
   workspaceName: string,
-  labelSize: PostalShipmentLabelSize = 'standard',
+  labelSize: PostalQrBatchLabelSize = 'standard',
 ) {
   if (!qrIds.length) throw new Error('The QR batch has no printable labels.')
 
-  const isSmallLabel = labelSize === 'small'
-  const pageSizeMm = isSmallLabel
+  const isQrOnlyLabel = labelSize === 'small-qr'
+  const pageSizeMm = isQrOnlyLabel
     ? { widthMm: 40, heightMm: 58 }
     : { widthMm: 100, heightMm: 100 }
-  const title = t(
-    isSmallLabel ? 'postal.smallShipmentLabel' : 'postal.shipmentLabel',
-  )
-  const render = (qrId: string) => (
-    <PostalQrBatchShipmentLabel
-      qrId={qrId}
-      workspaceName={workspaceName}
-      small={isSmallLabel}
-    />
-  )
+  const title = t(isQrOnlyLabel ? 'postal.smallShipmentQrLabel' : 'postal.shipmentLabel')
+  const render = (qrId: string) => isQrOnlyLabel
+    ? <PostalQrBatchQrLabel qrId={qrId} />
+    : <PostalQrBatchShipmentLabel qrId={qrId} workspaceName={workspaceName} />
   const templatePreview: TemplatePreview = {
     page: pageSizeMm,
     bulkPageIds: qrIds,

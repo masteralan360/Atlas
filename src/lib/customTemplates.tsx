@@ -97,7 +97,7 @@ import type { ProductPrintImageUrls } from '@/ui/components/print/ProductPrintIm
 import { LabelPrintTemplate } from '@/ui/components/LabelPrintTemplate'
 import type { BarcodeLabelData } from '@/lib/barcodeLabel'
 import { LABEL_PRINT_TEMPLATE_KEY, type LabelPrintPageSize } from '@/lib/labelPrint'
-import { PostalQrBatchShipmentLabel, ShipmentLabel, SmallShipmentLabel } from '@/postal/ShipmentLabel'
+import { PostalQrBatchQrLabel, PostalQrBatchShipmentLabel, ShipmentLabel, SmallShipmentLabel } from '@/postal/ShipmentLabel'
 import type { PostalShipment } from '@/postal/domain'
 import { ModernA4InvoiceTemplate, MODERN_A4_MOVABLE_COMPONENT_KEYS } from '@/ui/components/ModernA4InvoiceTemplate'
 import {
@@ -137,6 +137,7 @@ export const TRAVEL_BOOKING_TEMPLATE_KEY = 'travelTransportation.Booking'
 export const INVENTORY_TRANSFER_BATCH_TEMPLATE_KEY = 'inventoryTransfer.Batch'
 export const POSTAL_SHIPMENT_LABEL_TEMPLATE_KEY = 'postal.ShipmentLabel'
 export const POSTAL_SMALL_SHIPMENT_LABEL_TEMPLATE_KEY = 'postal.SmallShipmentLabel'
+export const POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY = 'postal.SmallShipmentQrLabel'
 export const PARTNER_DETAILS_TEMPLATE_FIELD_KEYS = {
     showWhoOwesWhom: 'showWhoOwesWhom',
     showOrders: 'showOrders'
@@ -446,6 +447,17 @@ export const CUSTOM_TEMPLATE_TARGETS: CustomTemplateTarget[] = [
         printFormat: 'label',
         page: { widthMm: 40, heightMm: 58 }
     },
+    {
+        moduleTypeKey: POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY,
+        workspaceModuleKey: 'postal_service',
+        get moduleLabel() { return i18n.t('postal.title', { defaultValue: 'Post Service' }) },
+        get typeLabel() { return i18n.t('postal.smallShipmentQrLabel', { defaultValue: 'Small Shipment QR Label' }) },
+        get description() { return i18n.t('postal.smallShipmentQrLabelSize', { defaultValue: '40 × 58 mm label with only the QR code' }) },
+        nativeTemplateKey: POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY,
+        nativeTemplateAvailable: true,
+        printFormat: 'label',
+        page: { widthMm: 40, heightMm: 58 }
+    },
     ...REAL_ESTATE_CONTRACT_TARGETS.map((target) => ({
         ...target,
         workspaceModuleKey: 'real_estate' as const,
@@ -461,6 +473,9 @@ export function getCustomTemplateDisplayName(moduleTypeKey: string) {
     const target = getCustomTemplateTarget(moduleTypeKey)
     if (target) {
         if (moduleTypeKey === LABEL_PRINT_TEMPLATE_KEY) {
+            return target.typeLabel
+        }
+        if (moduleTypeKey === POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY) {
             return target.typeLabel
         }
         if (moduleTypeKey === ORDER_ATLAS_STANDARD_TEMPLATE_KEY
@@ -2510,7 +2525,8 @@ export function createCustomTemplatePreview(
     options: CustomTemplatePreviewOptions = {}
 ): TemplatePreview {
     if (target.moduleTypeKey === POSTAL_SHIPMENT_LABEL_TEMPLATE_KEY
-        || target.moduleTypeKey === POSTAL_SMALL_SHIPMENT_LABEL_TEMPLATE_KEY) {
+        || target.moduleTypeKey === POSTAL_SMALL_SHIPMENT_LABEL_TEMPLATE_KEY
+        || target.moduleTypeKey === POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY) {
         const configuredLanguage = options.printLang
             || (options.features?.print_lang && options.features.print_lang !== 'auto'
                 ? options.features.print_lang
@@ -2521,9 +2537,10 @@ export function createCustomTemplatePreview(
                 ? 'ku'
                 : 'en'
         const isSmallLabel = target.moduleTypeKey === POSTAL_SMALL_SHIPMENT_LABEL_TEMPLATE_KEY
+        const isQrOnlyLabel = target.moduleTypeKey === POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY
 
         return {
-            fields: isSmallLabel ? [] : [{
+            fields: isSmallLabel || isQrOnlyLabel ? [] : [{
                 key: 'note',
                 label: i18n.t('postal.notes', { defaultValue: 'Notes' }),
                 value: '',
@@ -2535,9 +2552,12 @@ export function createCustomTemplatePreview(
             measurementRoundingToleranceMm: 0.5,
             createElement: (fields, effectiveId) => {
                 if (options.postalQrBatchLabel && options.postalQrId) {
+                    if (isQrOnlyLabel) {
+                        return <PostalQrBatchQrLabel qrId={options.postalQrId || effectiveId || SAMPLE_POSTAL_SHIPMENT.qr_id} />
+                    }
                     return (
                         <PostalQrBatchShipmentLabel
-                            qrId={effectiveId || options.postalQrId}
+                            qrId={options.postalQrId || effectiveId || ''}
                             workspaceName={options.workspaceName || 'Atlas'}
                             small={isSmallLabel}
                         />
@@ -2545,6 +2565,10 @@ export function createCustomTemplatePreview(
                 }
                 const shipment = options.postalShipment || SAMPLE_POSTAL_SHIPMENT
                 const workspaceName = options.workspaceName || 'Atlas'
+
+                if (isQrOnlyLabel) {
+                    return <PostalQrBatchQrLabel qrId={options.postalQrId || shipment.qr_id} />
+                }
 
                 return isSmallLabel ? (
                     <SmallShipmentLabel shipment={shipment} workspaceName={workspaceName} />
