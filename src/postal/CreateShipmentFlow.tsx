@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { QrCode, ScanLine } from 'lucide-react'
+import { QrCode, ScanLine, Link2 } from 'lucide-react'
 import {
   SmallDialog,
   SmallDialogBody,
@@ -15,6 +15,7 @@ import { CameraBarcodeScannerModal } from '@/ui/components/pos/CameraBarcodeScan
 import { ShipmentForm } from './ShipmentForm'
 import { resolvePostalQr, type PostalScope } from '@/local-db/postal'
 import type { PostalShipment } from './domain'
+import { validateGeneratedPostalQr, postalQrErrorKey } from '@/local-db/postalQrBatches'
 
 const SINGLE = ['single'] as const
 export function CreateShipmentFlow({
@@ -28,9 +29,11 @@ export function CreateShipmentFlow({
 }) {
   const { t } = useTranslation()
   const { toast } = useToast()
-  const [step, setStep] = useState<'choose' | 'scan' | 'form'>('choose')
+  const [step, setStep] = useState<'choose' | 'scan' | 'claim' | 'form'>('choose')
   const [source, setSource] = useState<PostalShipment>()
   const scanned = useRef<PostalShipment>()
+  const scannedClaim = useRef<string>()
+  const [generatedQrId, setGeneratedQrId] = useState<string>()
   return (
     <>
       <SmallDialog
@@ -65,6 +68,9 @@ export function CreateShipmentFlow({
               <ScanLine className="me-3 h-5 w-5" />
               {t('postal.readShipmentQr')}
             </Button>
+            {scope.role === 'merchant' && <Button className="min-h-14 justify-start" variant="outline" onClick={() => setStep('claim')}>
+              <Link2 className="me-3 h-5 w-5" />{t('postal.qr.claim')}
+            </Button>}
           </SmallDialogBody>
           <SmallDialogFooter>
             <Button variant="outline" onClick={onClose}>
@@ -73,21 +79,22 @@ export function CreateShipmentFlow({
           </SmallDialogFooter>
         </SmallDialogContent>
       </SmallDialog>
-      {step === 'scan' && (
+      {(step === 'scan' || step === 'claim') && (
         <CameraBarcodeScannerModal
           open
           qrMode
           allowImageUpload
           modes={SINGLE}
-          title={t('postal.readShipmentQr')}
+          title={t(step === 'claim' ? 'postal.qr.claim' : 'postal.readShipmentQr')}
           onScan={async (raw) => {
             try {
-              scanned.current = await resolvePostalQr(scope, raw)
+              if (step === 'claim') scannedClaim.current = await validateGeneratedPostalQr(scope, raw)
+              else scanned.current = await resolvePostalQr(scope, raw)
               return true
-            } catch {
+            } catch (error) {
               toast({
                 title: t('common.error'),
-                description: t('postal.errors.qrUnavailable'),
+                description: t(step === 'claim' ? `postal.qr.errors.${postalQrErrorKey(error) ?? 'failed'}` : 'postal.errors.qrUnavailable'),
                 variant: 'destructive',
               })
               return false
@@ -95,7 +102,10 @@ export function CreateShipmentFlow({
           }}
           onOpenChange={(open) => {
             if (!open) {
-              if (scanned.current) {
+              if (step === 'claim' && scannedClaim.current) {
+                setGeneratedQrId(scannedClaim.current)
+                setStep('form')
+              } else if (scanned.current) {
                 setSource(scanned.current)
                 setStep('form')
               } else onClose()
@@ -107,6 +117,7 @@ export function CreateShipmentFlow({
         <ShipmentForm
           scope={scope}
           source={source}
+          generatedQrId={generatedQrId}
           onClose={onClose}
           onSaved={onSaved}
         />

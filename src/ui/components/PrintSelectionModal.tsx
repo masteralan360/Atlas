@@ -1,4 +1,4 @@
-import { AlertTriangle, Barcode, FileText, Printer, Receipt } from 'lucide-react'
+import { AlertTriangle, Barcode, FileText, Loader2, Printer, Receipt } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -51,6 +51,9 @@ interface PrintSelectionModalProps {
     onCreateReturnTemplate?: () => void
     /** A4 business documents that are independent of the invoice entitlement. */
     allowA4Document?: boolean
+    /** Temporarily disables format choices while their printable data is loading. */
+    isLoading?: boolean
+    loadingMessage?: string
 }
 
 function PrintOptionIcon({ format, custom = false }: { format: PrintFormat; custom?: boolean }) {
@@ -111,7 +114,9 @@ export function PrintSelectionModal({
     nativeOptions,
     templateOptions = [],
     onCreateReturnTemplate,
-    allowA4Document = false
+    allowA4Document = false,
+    isLoading = false,
+    loadingMessage,
 }: PrintSelectionModalProps) {
     const { t } = useTranslation()
     const { hasCapability } = useWorkspace()
@@ -147,8 +152,8 @@ export function PrintSelectionModal({
         + (shouldShowCreateReturnTemplate ? 1 : 0)
 
     return (
-        <SmallDialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <SmallDialogContent className="sm:max-w-lg">
+        <SmallDialog open={isOpen} onOpenChange={(open) => !open && !isLoading && onClose()}>
+            <SmallDialogContent className="sm:max-w-lg" showCloseButton={!isLoading}>
                 <SmallDialogHeader>
                     <SmallDialogTitle className="flex items-center gap-2">
                         <Printer className="h-5 w-5 text-primary" />
@@ -184,6 +189,12 @@ export function PrintSelectionModal({
                 ) : null}
 
                 <div className="grid max-h-[65vh] grid-cols-1 gap-4 overflow-y-auto py-4 sm:grid-cols-2">
+                    {isLoading ? (
+                        <div className="col-span-full flex items-center justify-center gap-2 py-3 text-sm text-muted-foreground" role="status">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            {loadingMessage || t('common.loading', { defaultValue: 'Loading…' })}
+                        </div>
+                    ) : null}
                     {visibleNativeOptions.length === 0 && visibleTemplateOptions.length === 0 ? (
                         <div className="col-span-full rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
                             {t('print.noFormatsAvailable', {
@@ -199,7 +210,7 @@ export function PrintSelectionModal({
                                 visibleOptionCount === 1 ? 'sm:col-span-2' : ''
                             }`}
                             onClick={() => onSelect(format, undefined, nativeTemplateKey, printVersion)}
-                            disabled={disabled}
+                            disabled={disabled || isLoading}
                         >
                             <PrintOptionBadges
                                 returned={returned}
@@ -257,7 +268,7 @@ export function PrintSelectionModal({
                                 visibleOptionCount === 1 ? 'sm:col-span-2' : ''
                             }`}
                             onClick={() => onSelect(format, template, undefined, printVersion)}
-                            disabled={disabled}
+                            disabled={disabled || isLoading}
                         >
                             <PrintOptionBadges
                                 primary={primary}

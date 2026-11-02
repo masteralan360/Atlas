@@ -1,5 +1,73 @@
 # Post Service
 
+## Generated unclaimed QR batches (V1)
+
+Administrators use **QR Batches** at `/post-service/qr-batches` to generate
+1–10,000 codes atomically, optionally restricted to an existing organization.
+The tab inherits the existing `postal_service` admin grant and Cloud/Hybrid
+requirements. Only administrators can list, inspect, activate, deactivate, or
+delete batches. `/post-service/qr-batches/:batchId` is the dedicated `QRBatchView`.
+Both tables use source pagination, scoped Query keys, shared pagination/loading
+controls, and postal freshness tracking. The batch list has creation-date filters.
+
+Migration `20261102160133_postal_generated_qr_batches.sql` adds
+`postal_qr_batches`, `postal_generated_qrs`, an invoker summary view, and an
+authenticated validation RPC. Client writes are revoked and RLS restricts reads
+to administrators in the current workspace. Batch commands reuse `postal_command`,
+its request IDs and audit records. A batch and all its codes commit together.
+
+This migration was applied to ERP (`eboispangcayxxheoufy`) on 2026-11-02. Hosted
+checks exercised generation, replay, activation, merchant authorization, failed
+shipment rollback, successful claiming, duplicate denial, draft tombstones and
+conditional deletion inside a rolled-back transaction. No verification batches
+or shipments remain. The security advisor reported no findings for the new
+tables, view or functions. Deploy the Atlas frontend to expose the new controls.
+Migration `20261102160411_postal_generated_qr_shipment_index.sql`, also applied to
+ERP, adds the covering index for the permanent claim's composite shipment foreign key.
+
+Merchant staff see **Claim QR** directly below **Read Shipment QR**. Both use the
+same camera/image-upload scanner and `atlas:postal:v1:` payload parser. Validation
+does not reserve or claim a code. The existing shipment form carries the validated
+identity in `generated_qr_id`; regular creation and copying keep their existing
+behavior. A successful claim becomes the shipment's normal immutable QR identity,
+so normal shipment QR reading works afterward.
+
+Shipment insertion rechecks merchant permissions, current organization, batch
+activation and restrictions, and claim status. It locks membership, then the batch
+in SHARE mode, then the code FOR UPDATE. Different codes can be claimed concurrently;
+activation changes and deletion take an exclusive batch row lock. The existing
+shipment transaction includes claim recording, tariffs, events and request replay.
+Any later failure rolls back the shipment and claim together. A retry of the same
+successful request returns its existing shipment; a different request cannot claim
+that identity again. Claim metadata includes immutable actor/organization snapshots
+and shipment reference/number/date. Draft tombstones retain this history. A batch
+with any historical claim cannot be deleted, even through a privileged direct delete;
+individual codes cannot be moved between batches or deleted independently.
+
+V1 adds no printing, export, PDF, or batch-processing controls. Existing shipment
+printing is unchanged.
+
+Verification commands:
+
+```powershell
+node node_modules/vitest/vitest.mjs run src/postal src/local-db/postalSummary.test.ts src/local-db/postalStatementData.test.ts --maxWorkers=1 --no-file-parallelism
+node --max-old-space-size=6144 node_modules/typescript/bin/tsc -p tsconfig.app.json --noEmit
+node --max-old-space-size=6144 node_modules/typescript/bin/tsc -p tsconfig.node.json --noEmit
+# With Vite listening on port 5188:
+node scripts/postal-browser/qr-batches-check.mjs
+```
+
+The isolated browser fixture runs real RPC SQL in PostgreSQL/PGlite, including
+batch generation, restrictions, asynchronous selection/unlink, reload, activation,
+source pagination, loading/failure/retry, desktop/mobile and Arabic/Kurdish RTL,
+image decoding, a real QR-bearing canvas camera stream, cancellation, failed
+submission/retry, persisted claims and delete confirmation. It also checks normal
+shipment creation, reading/copying a claimed shipment QR, and the existing 100 × 100 mm label PDF.
+PGlite serializes
+connections, so simultaneous JavaScript requests test duplicate-conflict behavior
+but do not replace a multi-session PostgreSQL lock-contention test. Physical camera
+hardware and hosted signed-in browser sessions require deployment verification.
+
 This is an independent module using the `postal_service` platform grant, `postService.merchant` / `postService.officeEmployee` permissions, `/post-service` routes and new `postal_*` tables. It has no dependency on retired Post Service data, permissions, identities or code.
 
 ## Deployment

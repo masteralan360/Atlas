@@ -100,6 +100,8 @@ export type TemplatePreview = {
         widthMm: number
         heightMm: number
     }
+    /** Individual fixed-size pages shown as separate canvases in the preview editor. */
+    bulkPageIds?: string[]
     createElement: (
         data: Record<string, string>,
         effectiveId?: string,

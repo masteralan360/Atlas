@@ -161,6 +161,9 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
     await pg.exec(readFileSync(new URL(
       '../../supabase/migrations/20261031203510_postal_assign_tariff_during_creation.sql', import.meta.url,
     ), 'utf8'))
+    await pg.exec(readFileSync(new URL(
+      '../../supabase/migrations/20261102160133_postal_generated_qr_batches.sql', import.meta.url,
+    ), 'utf8'))
     const registrationSql = readFileSync(
       new URL(
         '../../supabase/migrations/20261002000858_scope_resilience_actor_permits.sql',
@@ -1102,7 +1105,7 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
       tables.rows.every((x) => x.relrowsecurity && !x.anonymous && !x.writes),
     ).toBe(true)
     const rpc = await pg.query<{ prosecdef: boolean; anonymous: boolean }>(
-      `SELECT p.prosecdef,has_function_privilege('anon',p.oid,'EXECUTE') AS anonymous FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('postal_command','postal_financial_summary','postal_prepare_registration','postal_cancel_registration','postal_dashboard_summary')`,
+      `SELECT p.prosecdef,has_function_privilege('anon',p.oid,'EXECUTE') AS anonymous FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname IN ('postal_command','postal_financial_summary','postal_prepare_registration','postal_cancel_registration','postal_dashboard_summary','postal_validate_generated_qr')`,
     )
     expect(
       (
@@ -1110,8 +1113,8 @@ describe('Post Service PostgreSQL authorization and transactions', () => {
           "SELECT * FROM pg_publication_tables WHERE pubname='supabase_realtime' AND tablename LIKE 'postal_%'",
         )
       ).rows,
-    ).toHaveLength(8)
-    expect(rpc.rows).toHaveLength(5)
+    ).toHaveLength(10)
+    expect(rpc.rows).toHaveLength(6)
     expect(rpc.rows.every((x) => !x.prosecdef && !x.anonymous)).toBe(true)
   })
 })

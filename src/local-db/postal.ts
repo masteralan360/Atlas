@@ -703,7 +703,9 @@ export async function postalCommand<T>(
     }
   }
   await queryClient.invalidateQueries({
-    queryKey: queryKeys.postal.all(scope.workspaceId),
+    queryKey: ['generate_qr_batch', 'set_qr_batch_active', 'delete_qr_batch'].includes(command)
+      ? queryKeys.postal.qrBatches(scope.workspaceId)
+      : queryKeys.postal.all(scope.workspaceId),
   })
   if (
     command === 'collection' ||

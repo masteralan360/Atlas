@@ -8,6 +8,7 @@ import type { PostalRole } from './domain'
 import { supabase } from '@/auth/supabase'
 import { queryClient } from '@/query/queryClient'
 import { queryKeys } from '@/query/queryKeys'
+import { postalQrErrorKey } from '@/local-db/postalQrBatches'
 
 export function usePostalScope(): PostalScope {
   const { user } = useAuth()
@@ -41,6 +42,8 @@ export function usePostalScope(): PostalScope {
       'postal_branches',
       'postal_organizations',
       'postal_memberships',
+      'postal_qr_batches',
+      'postal_generated_qrs',
     ]) {
       channel.on(
         'postgres_changes',
@@ -127,7 +130,7 @@ export function usePostalAction() {
                         : 'failed'
       toast({
         title: t('common.error'),
-        description: t(`postal.errors.${key}`),
+        description: t(postalQrErrorKey(e) ? `postal.qr.errors.${postalQrErrorKey(e)}` : `postal.errors.${key}`),
         variant: 'destructive',
       })
     } finally {

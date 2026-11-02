@@ -1,5 +1,6 @@
 import { type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Virtuoso } from 'react-virtuoso'
 import { ArrowLeft, Printer, Loader2, Edit3, X, ZoomIn, ZoomOut, Maximize, ImagePlus, Trash2, PenTool, Brush, Palette, Eraser, Hand, Type, RotateCw, Scaling, Move, Languages, Check, Shapes, Download, Share2 } from 'lucide-react'
 import {
     A4_PAGE_HEIGHT_MM,
@@ -528,6 +529,7 @@ export function PrintPreviewEditorPage() {
     const [previewPdfFailed, setPreviewPdfFailed] = useState(false)
     const templateStageRef = useRef<HTMLDivElement>(null)
     const templateContentLayerRef = useRef<HTMLDivElement>(null)
+    const [bulkPreviewScrollParent, setBulkPreviewScrollParent] = useState<HTMLDivElement | null>(null)
     const [editableData, setEditableData] = useState<UniversalInvoice | null>(null)
     const [zoom, setZoom] = useState(100)
     const [isFitToWidth, setIsFitToWidth] = useState(false)
@@ -666,6 +668,8 @@ export function PrintPreviewEditorPage() {
     const initialTemplateLayout = source?.initialTemplateLayout
     const isLabelPrintTemplate = source?.customTemplate?.moduleTypeKey === LABEL_PRINT_TEMPLATE_KEY
     const isFixedLabelTemplate = source?.printFormat === 'label'
+    const bulkTemplatePageIds = isFixedLabelTemplate ? templatePreview?.bulkPageIds || [] : []
+    const isBulkLabelPreview = bulkTemplatePageIds.length > 0
     const [labelWidthInput, setLabelWidthInput] = useState(() => (
         isLabelPrintTemplate && initialTemplateLayout?.page.widthMm
             ? String(initialTemplateLayout.page.widthMm)
@@ -900,20 +904,29 @@ export function PrintPreviewEditorPage() {
         && measuredTemplateHeightMm <= templatePageHeight + measurementRoundingToleranceMm
         ? templatePageHeight
         : measuredTemplateHeightMm
-    const templateContentHeightMm = isFixedPageTemplatePreview
+    const templateContentHeightMm = isBulkLabelPreview
+        ? templatePageHeight || A4_PAGE_HEIGHT_MM
+        : isFixedPageTemplatePreview
         ? Math.max(
             templatePageHeight,
             estimatedTemplateHeightMm,
             measuredTemplateHeightForPagination
         )
         : Math.max(1, measuredTemplateHeightMm)
-    const templatePageCount = isFixedPageTemplatePreview
+    const templatePageCount = isBulkLabelPreview
+        ? 1
+        : isFixedPageTemplatePreview
         ? getFixedPageCountForHeight(templateContentHeightMm, templatePageHeight || A4_PAGE_HEIGHT_MM)
         : 1
     const templateStackHeight = isFixedPageTemplatePreview
         ? templatePageCount * (templatePageHeight || A4_PAGE_HEIGHT_MM)
         : templateContentHeightMm
-    const drawingCoordinateHeight = templatePreview ? templateStackHeight : templatePageHeight
+    const drawingCoordinateHeight = isBulkLabelPreview
+        ? templatePageHeight
+        : templatePreview ? templateStackHeight : templatePageHeight
+    const bulkPreviewScale = isFitToWidth ? 1 : zoom / 100
+    const bulkPreviewPageHeightBasePx = templatePageHeight * (96 / 25.4)
+    const bulkPreviewPageHeightPx = templatePageHeight * (96 / 25.4) * bulkPreviewScale
     const measureTemplateTextFlowStart = useCallback(() => {
         if (!isTemplateTextFlowEnabled(templatePreview, fieldValues)) {
             setTemplateTextFlowStartMm((current) => current === null ? current : null)
@@ -942,6 +955,12 @@ export function PrintPreviewEditorPage() {
     const measureTemplatePreviewHeight = useCallback(() => {
         const stage = templateStageRef.current
         if (!stage || !templatePreview) return
+        if (isBulkLabelPreview) {
+            setMeasuredTemplateHeightMm((current) => (
+                Math.abs(current - templateStackHeight) < 0.5 ? current : templateStackHeight
+            ))
+            return
+        }
 
         const stageRect = stage.getBoundingClientRect()
         if (stageRect.width <= 0) return
@@ -964,12 +983,12 @@ export function PrintPreviewEditorPage() {
         setMeasuredTemplateHeightMm((current) => (
             Math.abs(current - maxBottomMm) < 0.5 ? current : maxBottomMm
         ))
-    }, [isFixedPageTemplatePreview, templatePageHeight, templatePageWidth, templatePreview])
+    }, [isBulkLabelPreview, isFixedPageTemplatePreview, templatePageHeight, templatePageWidth, templatePreview, templateStackHeight])
 
     const syncPreviewPageBreaks = useCallback(() => {
         const stage = templateStageRef.current
         const contentLayer = templateContentLayerRef.current
-        if (!stage || !contentLayer || !templatePreview || !isFixedPageTemplatePreview) return
+        if (!stage || !contentLayer || !templatePreview || !isFixedPageTemplatePreview || isBulkLabelPreview) return
 
         resetPreviewPageBreakMargins(contentLayer)
 
@@ -1054,6 +1073,7 @@ export function PrintPreviewEditorPage() {
 
     }, [
         isFixedPageTemplatePreview,
+        isBulkLabelPreview,
         measureTemplatePreviewHeight,
         measureTemplateTextFlowStart,
         templatePageHeight,
@@ -1063,7 +1083,7 @@ export function PrintPreviewEditorPage() {
 
     useLayoutEffect(() => {
         const contentLayer = templateContentLayerRef.current
-        if (!contentLayer || !templatePreview || !isFixedPageTemplatePreview) return
+        if (!contentLayer || !templatePreview || !isFixedPageTemplatePreview || isBulkLabelPreview) return
 
         syncPreviewPageBreaks()
         const frame = window.requestAnimationFrame(syncPreviewPageBreaks)
@@ -1074,6 +1094,7 @@ export function PrintPreviewEditorPage() {
         }
     }, [
         fieldValues,
+        isBulkLabelPreview,
         isFixedPageTemplatePreview,
         measuredTemplateHeightMm,
         templateAnnotations,
@@ -1117,7 +1138,7 @@ export function PrintPreviewEditorPage() {
     useEffect(() => {
         const stage = templateStageRef.current
         const contentLayer = templateContentLayerRef.current
-        if (!stage || !contentLayer || !templatePreview || !isFixedPageTemplatePreview) return
+        if (!stage || !contentLayer || !templatePreview || !isFixedPageTemplatePreview || isBulkLabelPreview) return
 
         let frame: number | null = null
         const schedulePaginationSync = () => {
@@ -1152,7 +1173,7 @@ export function PrintPreviewEditorPage() {
                 image.removeEventListener('error', schedulePaginationSync)
             })
         }
-    }, [isFixedPageTemplatePreview, syncPreviewPageBreaks, templatePreview])
+    }, [isBulkLabelPreview, isFixedPageTemplatePreview, syncPreviewPageBreaks, templatePreview])
 
     useEffect(() => {
         if (!templatePreview) return
@@ -1922,6 +1943,48 @@ export function PrintPreviewEditorPage() {
         setCurrentPath(null)
     }, [isDrawing, currentPath, drawingMode, brushColor, brushSize])
 
+    const templatePreviewRenderOptions = {
+        editableFields: canEditTemplateFields && drawingMode === 'none',
+        editableComponents: canEditTemplateFields && drawingMode === 'none' && (Boolean(source?.onSaveTemplateLayout) || isAccessKeyHeld),
+        dataKeys: templatePreview?.dataKeys,
+        componentPositions: templateComponentPositions,
+        hiddenFields: templateHiddenFields,
+        fieldOrders: templateFieldOrders,
+        fieldLabelOverrides: templateFieldLabelOverrides,
+        fieldValueOverrides: templateFieldValueOverrides,
+        fieldDisplayModes: templateFieldDisplayModes,
+        background: templateBackground ?? undefined,
+        partnerBalanceProgress: requiresFreshPartnerBalance && nextFreshPartnerBalanceState === 'loading'
+            ? freshPartnerBalanceProgress
+            : undefined,
+        devPreviewAdditionalRows: canPreviewDevelopmentOrderRows
+            ? devPreviewAdditionalOrderRows
+            : undefined,
+        onFieldChange: handleFieldChange,
+        onComponentPositionChange: handleTemplateComponentPositionChange,
+        onHiddenFieldChange: drawingMode === 'none' ? handleTemplateHiddenFieldChange : undefined,
+        onFieldOrderChange: drawingMode === 'none' ? handleTemplateFieldOrderChange : undefined,
+        onFieldLabelChange: drawingMode === 'none' ? handleTemplateFieldLabelChange : undefined,
+        onFieldValueChange: source?.onSaveTemplateLayout && drawingMode === 'none'
+            ? handleTemplateFieldValueChange
+            : undefined,
+        onFieldDisplayModeChange: drawingMode === 'none' ? handleTemplateFieldDisplayModeChange : undefined,
+        workspaceFooterContacts: sourceWorkspaceFooterContacts
+    }
+    const renderTemplatePreviewElement = (effectiveId?: string) => templatePreview?.createElement(
+        fieldValues || {},
+        effectiveId || source?.effectiveId,
+        fixedTemplatePrintLang || (tempPrintLang !== 'auto' ? tempPrintLang : undefined),
+        templatePreviewRenderOptions
+    )
+    const bulkPageOverlayLayout = {
+        page: { widthMm: templatePageWidth, heightMm: templatePageHeight },
+        annotations: templateAnnotations,
+        texts: templateTexts,
+        images: templateImages,
+        shapes: templateShapes
+    }
+
     if (source.generatePreviewPdfBlob && !templatePreview && !source.data) {
         return (
             <div className="flex h-screen w-screen flex-col overflow-hidden bg-background animate-in fade-in slide-in-from-right-4 duration-300 motion-reduce:animate-none"
@@ -2326,14 +2389,25 @@ export function PrintPreviewEditorPage() {
                                 </p>
                             </div>
                         ) : (
-                        <div className="h-full w-full overflow-auto p-6 bg-slate-100/50 flex flex-col items-center">
+                        <div className={cn(
+                            "h-full w-full bg-slate-100/50 flex flex-col",
+                            "overflow-auto",
+                            isBulkLabelPreview ? "p-3" : "p-6"
+                        )} ref={isBulkLabelPreview ? setBulkPreviewScrollParent : undefined}>
+                            <div className={isBulkLabelPreview
+                                ? "flex w-full flex-none justify-center pb-3"
+                                : "contents"}
+                            >
                             <div
                                 className={cn(
-                                    "mx-auto transition-all duration-200 ease-in-out origin-top relative group",
+                                    "mx-auto shrink-0 transition-all duration-200 ease-in-out origin-top relative group",
                                     isFitToWidth ? "w-full" : "w-fit"
                                 )}
                                 style={{
                                     transform: isFitToWidth ? 'none' : `scale(${zoom / 100})`,
+                                    marginBottom: isBulkLabelPreview
+                                        ? `${bulkPreviewPageHeightPx - bulkPreviewPageHeightBasePx}px`
+                                        : undefined,
                                 }}
                             >
                                 <div
@@ -2346,7 +2420,7 @@ export function PrintPreviewEditorPage() {
                                         height: `${templateStackHeight}mm`
                                     }}
                                 >
-                                    {Array.from({ length: templatePageCount }).map((_, pageIndex) => (
+                                    {!isBulkLabelPreview && Array.from({ length: templatePageCount }).map((_, pageIndex) => (
                                         <div
                                             key={`template-preview-page-${pageIndex}`}
                                             className="absolute left-0 z-0 overflow-hidden bg-white shadow-sm ring-1 ring-slate-200"
@@ -2363,7 +2437,7 @@ export function PrintPreviewEditorPage() {
                                             ) : null}
                                         </div>
                                     ))}
-                                    {templatePageCount > 1 ? Array.from({ length: templatePageCount - 1 }).map((_, pageIndex) => (
+                                    {!isBulkLabelPreview && templatePageCount > 1 ? Array.from({ length: templatePageCount - 1 }).map((_, pageIndex) => (
                                         <div
                                             key={`template-preview-break-${pageIndex}`}
                                             className="pointer-events-none absolute left-0 right-0 z-[45] border-t border-dashed border-red-400"
@@ -2373,10 +2447,14 @@ export function PrintPreviewEditorPage() {
                                 {/* Drawing Overlay for templatePreview */}
                                 <svg
                                     className={cn(
-                                        "absolute inset-0 z-[40] touch-none",
+                                        isBulkLabelPreview ? "absolute left-0 top-0 z-[40] touch-none" : "absolute inset-0 z-[40] touch-none",
                                         drawingMode !== 'none' ? "cursor-crosshair" : "pointer-events-none"
                                     )}
-                                    viewBox={`0 0 ${templatePageWidth} ${templateStackHeight}`}
+                                    viewBox={`0 0 ${templatePageWidth} ${drawingCoordinateHeight}`}
+                                    style={isBulkLabelPreview ? {
+                                        width: `${templatePageWidth}mm`,
+                                        height: `${drawingCoordinateHeight}mm`
+                                    } : undefined}
                                     onPointerDown={handlePointerDown}
                                     onPointerMove={handlePointerMove}
                                     onPointerUp={() => {
@@ -2739,42 +2817,28 @@ export function PrintPreviewEditorPage() {
                                     className="relative"
                                     style={isFixedLabelTemplate ? {
                                         width: `${templatePageWidth}mm`,
-                                        height: `${templatePageHeight}mm`
+                                        height: `${isBulkLabelPreview ? templateStackHeight : templatePageHeight}mm`
                                     } : undefined}
                                 >
-                                    {templatePreview.createElement(
-                                        fieldValues,
-                                        source.effectiveId,
-                                        fixedTemplatePrintLang || (tempPrintLang !== 'auto' ? tempPrintLang : undefined),
-                                        {
-                                            editableFields: canEditTemplateFields && drawingMode === 'none',
-                                            editableComponents: canEditTemplateFields && drawingMode === 'none' && (Boolean(source?.onSaveTemplateLayout) || isAccessKeyHeld),
-                                            dataKeys: templatePreview.dataKeys,
-                                            componentPositions: templateComponentPositions,
-                                            hiddenFields: templateHiddenFields,
-                                            fieldOrders: templateFieldOrders,
-                                            fieldLabelOverrides: templateFieldLabelOverrides,
-                                            fieldValueOverrides: templateFieldValueOverrides,
-                                            fieldDisplayModes: templateFieldDisplayModes,
-                                            background: templateBackground ?? undefined,
-                                            partnerBalanceProgress: requiresFreshPartnerBalance && nextFreshPartnerBalanceState === 'loading'
-                                                ? freshPartnerBalanceProgress
-                                                : undefined,
-                                            devPreviewAdditionalRows: canPreviewDevelopmentOrderRows
-                                                ? devPreviewAdditionalOrderRows
-                                                : undefined,
-                                            onFieldChange: handleFieldChange,
-                                            onComponentPositionChange: handleTemplateComponentPositionChange,
-                                            onHiddenFieldChange: drawingMode === 'none' ? handleTemplateHiddenFieldChange : undefined,
-                                            onFieldOrderChange: drawingMode === 'none' ? handleTemplateFieldOrderChange : undefined,
-                                            onFieldLabelChange: drawingMode === 'none' ? handleTemplateFieldLabelChange : undefined,
-                                            onFieldValueChange: source.onSaveTemplateLayout && drawingMode === 'none'
-                                                ? handleTemplateFieldValueChange
-                                                : undefined,
-                                            onFieldDisplayModeChange: drawingMode === 'none' ? handleTemplateFieldDisplayModeChange : undefined,
-                                            workspaceFooterContacts: sourceWorkspaceFooterContacts
-                                        }
-                                    )}
+                                    {isBulkLabelPreview
+                                        ? (
+                                            <div
+                                                key={bulkTemplatePageIds[0]}
+                                                data-bulk-label-canvas={1}
+                                                className="absolute left-0 top-0 overflow-hidden bg-white shadow-sm ring-1 ring-slate-200"
+                                                style={{
+                                                    top: 0,
+                                                    width: `${templatePageWidth}mm`,
+                                                    height: `${templatePageHeight}mm`,
+                                                }}
+                                            >
+                                                {renderTemplatePreviewElement(bulkTemplatePageIds[0])}
+                                                <div className="absolute end-2 top-2 z-[110] rounded bg-slate-900/60 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                                                    1
+                                                </div>
+                                            </div>
+                                        )
+                                        : renderTemplatePreviewElement(source.effectiveId)}
                                 </div>
                                 {source.printFormat === 'a4' && (
                                     <TooltipProvider>
@@ -2790,6 +2854,51 @@ export function PrintPreviewEditorPage() {
                                 )}
                                 </div>
                             </div>
+                            </div>
+                            {isBulkLabelPreview && bulkTemplatePageIds.length > 1 ? (
+                                <div className="w-full">
+                                    <Virtuoso
+                                        key={`bulk-labels-${bulkTemplatePageIds[0]}-${bulkTemplatePageIds.length}`}
+                                        data={bulkTemplatePageIds.slice(1)}
+                                        customScrollParent={bulkPreviewScrollParent ?? undefined}
+                                        style={{ width: '100%' }}
+                                        increaseViewportBy={400}
+                                        itemContent={(index, qrId) => (
+                                            <div
+                                                className="flex justify-center py-3"
+                                                style={{ height: `${bulkPreviewPageHeightPx + 24}px` }}
+                                            >
+                                                <div
+                                                    style={{
+                                                        width: `${templatePageWidth}mm`,
+                                                        height: `${templatePageHeight}mm`,
+                                                        transform: `scale(${bulkPreviewScale})`,
+                                                        transformOrigin: 'top center',
+                                                        marginInline: 'auto',
+                                                    }}
+                                                >
+                                                    <div
+                                                        data-bulk-label-canvas={index + 2}
+                                                        className="relative overflow-hidden bg-white shadow-sm ring-1 ring-slate-200"
+                                                        style={{ width: `${templatePageWidth}mm`, height: `${templatePageHeight}mm` }}
+                                                    >
+                                                        {renderTemplatePreviewElement(qrId)}
+                                                        <CustomTemplateLayoutOverlay
+                                                            layout={bulkPageOverlayLayout}
+                                                            heightMm={templatePageHeight}
+                                                            reflowLowerPageText={isTemplateTextFlowEnabled(templatePreview, fieldValues)}
+                                                            resolveLayoutText={templatePreview.resolveLayoutText}
+                                                        />
+                                                        <div className="absolute end-2 top-2 z-[110] rounded bg-slate-900/60 px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                                                            {index + 2}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    />
+                                </div>
+                            ) : null}
                         </div>
                         )}
                     </div>

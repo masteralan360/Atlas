@@ -11376,6 +11376,43 @@
     }
   },
   "postal": {
+    "qrBatches": "QR Batches",
+    "qr": {
+      "generate": "Generate Batch",
+      "generated": "QR batch generated",
+      "loadingLabels": "Loading QR codes for the batch…",
+      "printLoadError": "Could not load every QR code in this batch. Check your connection and try again.",
+      "quantity": "QR Code Quantity",
+      "quantityHint": "Enter a whole number from 1 to 10,000.",
+      "restriction": "Organization Restriction",
+      "unrestricted": "Unrestricted",
+      "unrestrictedHint": "Leave empty to allow any authorized merchant to claim these codes.",
+      "batchId": "Batch ID",
+      "claimed_count": "Claimed Codes",
+      "unclaimed": "Unclaimed",
+      "claimed": "Claimed",
+      "activate": "Activate",
+      "deactivate": "Deactivate",
+      "deleteTitle": "Delete QR Batch",
+      "deleteDescription": "Delete this batch and all its unclaimed QR codes? A batch that has ever been claimed cannot be deleted.",
+      "viewTitle": "QR Batch Details",
+      "identifier": "QR Identifier",
+      "claimant": "Claimed By",
+      "claimedAt": "Claimed At",
+      "createdBy": "Created By",
+      "claim": "Claim QR",
+      "pendingClaim": "This QR will be claimed only after the shipment is successfully created:",
+      "errors": {
+        "alreadyClaimed": "This QR code has already been claimed.",
+        "inactive": "This QR batch is inactive. Ask an administrator to activate it.",
+        "restricted": "This QR code is restricted to another organization.",
+        "notAuthorized": "Only authorized merchant staff can claim QR codes.",
+        "unknown": "This is not a recognized generated QR code.",
+        "hasClaims": "This batch cannot be deleted because at least one code has been claimed.",
+        "quantity": "Enter a whole number from 1 to 10,000.",
+        "failed": "Could not validate the QR code. Check your connection and try again."
+      }
+    },
     "accountStatement": "Account Statement",
     "statement": {
       "searchOrganization": "Search organization name or code",

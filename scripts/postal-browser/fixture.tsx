@@ -31,6 +31,9 @@ import { queryClient } from '../../src/query/queryClient'
 import { AuthProvider } from '../../src/auth/AuthContext'
 import { WorkspaceProvider } from '../../src/workspace/WorkspaceContext'
 import { WorkspacePermissionsProvider } from '../../src/permissions/WorkspacePermissionsContext'
+import { QRBatches, QRBatchDetail } from '../../src/postal/QRBatches'
+import { ShipmentQr } from '../../src/postal/ShipmentLabel'
+import { Toaster } from '../../src/ui/components/toaster'
 
 if (
   !import.meta.env.DEV ||
@@ -117,6 +120,19 @@ function Fixture() {
   const [open, setOpen] = useState(true)
   const [saved, setSaved] = useState<PostalShipment>()
   const [source, setSource] = useState<PostalShipment>()
+  if (view === 'qr-code') return <ShipmentQr qrId={new URLSearchParams(location.search).get('qr')!} size={480} />
+  if (view === 'qr-batches' || view === 'qr-batch') {
+    const adminScope = { ...scope, userId: '00000000-0000-4000-8000-000000000010', role: 'admin' as const }
+    return <Providers><DateRangeProvider><UiAccessProvider>
+      <Toaster />
+      {view === 'qr-batches' ? <main className="min-w-0 p-3 sm:p-6"><QRBatches scope={adminScope} /></main>
+        : <QRBatchDetail scope={adminScope} batchId={new URLSearchParams(location.search).get('batch')!} />}
+    </UiAccessProvider></DateRangeProvider></Providers>
+  }
+  if (view === 'qr-claim') return <Providers><Toaster />
+    {open && <CreateShipmentFlow scope={scope} onClose={() => setOpen(false)} onSaved={(row) => { setSaved(row); setOpen(false) }} />}
+    {saved && <p data-testid="saved">{JSON.stringify(saved)}</p>}
+  </Providers>
   if (view === 'statement')
     return <Providers><DateRangeProvider><UiAccessProvider>
       <main className="w-full min-w-0 p-3 sm:p-6"><OrganizationAccountStatement scope={{ ...scope,
@@ -273,10 +289,12 @@ function Fixture() {
   if (view === 'label')
     return (
       <>
-        <ShipmentLabel shipment={shipment} />
+        <ShipmentLabel shipment={shipment} organizationName="Browser Merchant" workspaceName="Browser Post Service" />
         <button
           onClick={async () => {
-            preparePostalLabel(shipment, scope.workspaceId, i18n.t.bind(i18n))
+            preparePostalLabel(shipment, scope.workspaceId, i18n.t.bind(i18n), {
+              organizationName: 'Browser Merchant', workspaceName: 'Browser Post Service',
+            })
             const source = getPrintPreviewEditorSource()!
             const element = source.templatePreview!.createElement({
               note: 'Edited label note',

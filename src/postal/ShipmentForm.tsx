@@ -59,12 +59,14 @@ export function ShipmentForm({
   scope,
   source,
   editing,
+  generatedQrId,
   onClose,
   onSaved,
 }: {
   scope: PostalScope;
   source?: PostalShipment;
   editing?: boolean;
+  generatedQrId?: string;
   onClose: () => void;
   onSaved: (shipment: PostalShipment) => void;
 }) {
@@ -179,6 +181,7 @@ export function ShipmentForm({
             if (!valid) return;
             const commandPayload = {
               ...payload,
+              ...(!editing && generatedQrId ? { generated_qr_id: generatedQrId } : {}),
               ...(needsTariff
                 ? { tariff_size: tariff?.size, delivery_fee: tariff?.fee }
                 : {}),
@@ -210,6 +213,9 @@ export function ShipmentForm({
           }}
         >
           <AppDialogBody className="space-y-5">
+            {generatedQrId && !editing && <p className="break-all rounded-lg border bg-muted/30 p-3 text-sm">
+              {t('postal.qr.pendingClaim')} <bdi dir="ltr" className="font-mono">{generatedQrId}</bdi>
+            </p>}
             {requiresOrganization && (
               <div className="space-y-2">
                 <Label htmlFor="shipment-organization">

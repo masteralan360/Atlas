@@ -25,6 +25,7 @@ import {
   Loader2,
   CircleDollarSign,
   FileText,
+  QrCode,
 } from 'lucide-react'
 import {
   Button,
@@ -82,6 +83,7 @@ import type { PaymentMethodOption } from '@/lib/paymentMethods'
 import { OrganizationAccountStatement } from '@/postal/OrganizationAccountStatement'
 import { canReadPostalStatement } from '@/local-db/postalStatement'
 import { CreateOrganizationDialog } from '@/postal/CreateOrganizationDialog'
+import { QRBatches } from '@/postal/QRBatches'
 
 type PostalShipmentPageRow = PostalShipment & { organization_name?: string | null }
 type Row = PostalShipmentPageRow | PostalBranch | PostalOrganization | PostalCodRecord
@@ -91,7 +93,7 @@ function formatCodIqd(value: string, language: string, currency: string) {
   return `${new Intl.NumberFormat(language).format(BigInt(value))} ${currency}`
 }
 
-export default function PostalServicePage({ accountStatement = false }: { accountStatement?: boolean }) {
+export default function PostalServicePage({ accountStatement = false, qrBatches = false }: { accountStatement?: boolean; qrBatches?: boolean }) {
   const { t, i18n } = useTranslation()
   const scope = usePostalScope()
   const [, navigate] = useLocation()
@@ -141,7 +143,7 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
     ...(tab === 'shipments' || tab === 'cod'
       ? { start: dates.start?.toISOString(), end: dates.end?.toISOString() }
       : {}),
-  }, !accountStatement)
+  }, !accountStatement && !qrBatches)
   const summary = usePostalSummary(
     {
       ...scope,
@@ -150,7 +152,7 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
       start: dates.start?.toISOString(),
       end: dates.end?.toISOString(),
     },
-    !accountStatement && tab === 'shipments',
+    !accountStatement && !qrBatches && tab === 'shipments',
   )
   const bounds = usePaginationBounds({
     ...pagination,
@@ -448,6 +450,7 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
       ? [
           { key: 'branches', icon: Building2 },
           { key: 'organizations', icon: Users },
+          { key: 'qrBatches', icon: QrCode },
         ]
       : []),
     { key: 'cod', icon: Wallet },
@@ -463,7 +466,7 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
               scope.role === 'merchant' ? 'postal.myShipments' : 'postal.title',
             )}
           </h1>
-          {!accountStatement && <ModulePageFreshness
+          {!accountStatement && !qrBatches && <ModulePageFreshness
             tableNames={
               tab === 'shipments'
                 ? scope.role === 'admin'
@@ -506,14 +509,15 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
         {tabs.map(({ key, icon: Icon }) => (
           <Button
             role="tab"
-            aria-selected={accountStatement ? key === 'accountStatement' : tab === key}
+            aria-selected={qrBatches ? key === 'qrBatches' : accountStatement ? key === 'accountStatement' : tab === key}
             key={key}
-            variant={(accountStatement ? key === 'accountStatement' : tab === key) ? 'default' : 'outline'}
+            variant={(qrBatches ? key === 'qrBatches' : accountStatement ? key === 'accountStatement' : tab === key) ? 'default' : 'outline'}
             onClick={() => {
-              if (key === 'accountStatement') navigate('/post-service/account-statement')
+              if (key === 'qrBatches') navigate('/post-service/qr-batches')
+              else if (key === 'accountStatement') navigate('/post-service/account-statement')
               else {
                 setTab(key as keyof typeof postalTables)
-                if (accountStatement) navigate('/post-service')
+                if (accountStatement || qrBatches) navigate('/post-service')
               }
             }}
           >
@@ -522,7 +526,7 @@ export default function PostalServicePage({ accountStatement = false }: { accoun
           </Button>
         ))}
       </div>
-      {accountStatement ? canReadPostalStatement(scope) && <OrganizationAccountStatement scope={scope} /> : <div className="space-y-4 rounded-xl border bg-card p-3 sm:p-4">
+      {qrBatches ? scope.role === 'admin' && <QRBatches key={JSON.stringify(scope)} scope={scope} /> : accountStatement ? canReadPostalStatement(scope) && <OrganizationAccountStatement scope={scope} /> : <div className="space-y-4 rounded-xl border bg-card p-3 sm:p-4">
         <div className="flex flex-wrap items-center gap-3">
           {(tab === 'shipments' || tab === 'cod') && (
             <div className="relative min-w-40 flex-1">

@@ -121,6 +121,7 @@ const Sales = __ATLAS_TAURI_BUILD__
 
 const PostalServicePage = lazy(() => import('@/ui/pages/PostalServicePage'));
 const PostalShipmentPage = lazy(() => import('@/ui/pages/PostalShipmentPage'));
+const QRBatchView = lazy(() => import('@/ui/pages/QRBatchView'));
 
 // Other pages - always lazy loaded
 const Login = lazy(() =>
@@ -1718,6 +1719,12 @@ function App() {
 
                       <Route path="/post-service/shipments/:shipmentId">
                         {(params) => <ProtectedRoute allowedRoles={["admin", "staff"]} requiredFeature="postal_service" requiredAnyPermission={['postService.merchant','postService.officeEmployee']}><Layout><PostalShipmentPage shipmentId={params.shipmentId} /></Layout></ProtectedRoute>}
+                      </Route>
+                      <Route path="/post-service/qr-batches/:batchId">
+                        {(params) => <ProtectedRoute allowedRoles={["admin"]} requiredFeature="postal_service"><Layout><QRBatchView batchId={params.batchId} /></Layout></ProtectedRoute>}
+                      </Route>
+                      <Route path="/post-service/qr-batches">
+                        <ProtectedRoute allowedRoles={["admin"]} requiredFeature="postal_service"><Layout><PostalServicePage qrBatches /></Layout></ProtectedRoute>
                       </Route>
                       <Route path="/post-service/account-statement">
                         <ProtectedRoute allowedRoles={["admin", "staff"]} requiredFeature="postal_service" requiredPermission="postService.officeEmployee"><Layout><PostalServicePage accountStatement /></Layout></ProtectedRoute>

@@ -97,7 +97,7 @@ import type { ProductPrintImageUrls } from '@/ui/components/print/ProductPrintIm
 import { LabelPrintTemplate } from '@/ui/components/LabelPrintTemplate'
 import type { BarcodeLabelData } from '@/lib/barcodeLabel'
 import { LABEL_PRINT_TEMPLATE_KEY, type LabelPrintPageSize } from '@/lib/labelPrint'
-import { ShipmentLabel, SmallShipmentLabel } from '@/postal/ShipmentLabel'
+import { PostalQrBatchShipmentLabel, ShipmentLabel, SmallShipmentLabel } from '@/postal/ShipmentLabel'
 import type { PostalShipment } from '@/postal/domain'
 import { ModernA4InvoiceTemplate, MODERN_A4_MOVABLE_COMPONENT_KEYS } from '@/ui/components/ModernA4InvoiceTemplate'
 import {
@@ -730,6 +730,9 @@ export type CustomTemplatePreviewOptions = {
     inventoryTransferBatchData?: InventoryTransferBatchPrintData
     postalShipment?: PostalShipment
     postalOrganizationName?: string
+    postalQrBatchLabel?: boolean
+    postalQrId?: string
+    postalQrIds?: string[]
 }
 
 const SAMPLE_POSTAL_SHIPMENT: PostalShipment = {
@@ -2527,9 +2530,19 @@ export function createCustomTemplatePreview(
                 type: 'text'
             }],
             page: target.page,
+            bulkPageIds: options.postalQrBatchLabel ? options.postalQrIds : undefined,
             fixedPrintLang,
             measurementRoundingToleranceMm: 0.5,
-            createElement: (fields) => {
+            createElement: (fields, effectiveId) => {
+                if (options.postalQrBatchLabel && options.postalQrId) {
+                    return (
+                        <PostalQrBatchShipmentLabel
+                            qrId={effectiveId || options.postalQrId}
+                            workspaceName={options.workspaceName || 'Atlas'}
+                            small={isSmallLabel}
+                        />
+                    )
+                }
                 const shipment = options.postalShipment || SAMPLE_POSTAL_SHIPMENT
                 const workspaceName = options.workspaceName || 'Atlas'
 
@@ -2795,6 +2808,7 @@ export async function buildCustomTemplateLayoutPdf({
     options,
     effectiveId,
     barcodeLabels,
+    postalQrIds,
     fieldMode = 'nonBlankLayoutOverrides',
     receiptQuality
 }: {
@@ -2804,6 +2818,7 @@ export async function buildCustomTemplateLayoutPdf({
     options?: CustomTemplatePreviewOptions
     effectiveId?: string
     barcodeLabels?: BarcodeLabelData[]
+    postalQrIds?: string[]
     fieldMode?: 'nonBlankLayoutOverrides' | 'layoutOverrides'
     receiptQuality?: PosReceiptPrintQuality
 }) {
@@ -2814,7 +2829,16 @@ export async function buildCustomTemplateLayoutPdf({
             ...layout,
             fields: nonBlankFields(layout.fields || {})
         }
-    const pages = target.printFormat === 'label' && barcodeLabels?.length
+    const pages = target.printFormat === 'label' && postalQrIds?.length
+        ? postalQrIds.map((postalQrId) => renderCustomTemplateLayoutElement({
+            target,
+            layout: printableLayout,
+            values,
+            options: { ...options, postalQrBatchLabel: true, postalQrId, labelPageSizeMm: printableLayout.page },
+            effectiveId,
+            fieldMode
+        }))
+        : target.printFormat === 'label' && barcodeLabels?.length
         ? barcodeLabels.map((barcodeLabel) => renderCustomTemplateLayoutElement({
             target,
             layout: printableLayout,
