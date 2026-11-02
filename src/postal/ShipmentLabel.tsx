@@ -48,7 +48,7 @@ function LabelRow({
       style={{
         display: 'grid',
         gridTemplateColumns: '32% minmax(0, 1fr)',
-        borderBottom: '1px solid #777',
+        borderBottom: '1px solid #000',
         minHeight: compact ? '4mm' : '5mm',
         breakInside: 'avoid',
       }}
@@ -58,7 +58,7 @@ function LabelRow({
           display: 'flex',
           alignItems: 'center',
           padding: compact ? '0.15mm 1mm' : '0.35mm 1.5mm',
-          borderInlineEnd: '1px solid #777',
+          borderInlineEnd: '1px solid #000',
           fontSize: compact ? (prominent ? 8 : 7) : (prominent ? 10.5 : 9.5),
           fontWeight: 700,
           lineHeight: 1.25,
@@ -75,7 +75,7 @@ function LabelRow({
           padding: compact ? '0.15mm 1mm' : '0.35mm 1.5mm',
           textAlign: 'center',
           fontSize: compact ? (prominent ? 8 : 7) : (prominent ? 13.5 : 10.5),
-          fontWeight: prominent ? 700 : 500,
+          fontWeight: 700,
           lineHeight: 1.3,
           overflowWrap: 'anywhere',
         }}
@@ -128,12 +128,13 @@ export function ShipmentLabel({
         minHeight: '100mm',
         boxSizing: 'border-box',
         padding: '2mm',
-        border: '1px solid #b8b8b8',
+        border: '1px solid #000',
         borderRadius: '2mm',
         background: '#fff',
         color: '#000',
         fontFamily: 'Arial, sans-serif',
         overflowWrap: 'anywhere',
+        fontWeight: 700,
       }}
     >
       <header
@@ -151,7 +152,7 @@ export function ShipmentLabel({
               display: 'inline-block',
               maxWidth: '100%',
               paddingBottom: '0.5mm',
-              borderBottom: '1px solid #111',
+              borderBottom: '1px solid #000',
               fontSize: 17,
               fontWeight: 800,
               lineHeight: 1.2,
@@ -189,7 +190,7 @@ export function ShipmentLabel({
 
       <section
         aria-label={t('postal.recipient_name')}
-        style={{ border: '1px solid #777' }}
+        style={{ border: '1px solid #000' }}
       >
         <LabelRow label={t('postal.merchant')}>
           {organizationName}
@@ -231,7 +232,7 @@ export function ShipmentLabel({
       <LabelSectionTitle>{t('postal.shipmentDetails')}</LabelSectionTitle>
       <section
         aria-label={t('postal.shipmentDetails')}
-        style={{ border: '1px solid #777' }}
+        style={{ border: '1px solid #000' }}
       >
         {shipment.shipment_size && (
           <LabelRow label={t('postal.shipmentSize')}>
@@ -290,8 +291,9 @@ export function ShipmentLabel({
           style={{
             marginTop: '1mm',
             padding: '0.7mm 1mm',
-            border: '1px solid #aaa',
+            border: '1px solid #000',
             fontSize: 7.5,
+            fontWeight: 700,
             lineHeight: 1.15,
           }}
         >
@@ -358,13 +360,14 @@ export function SmallShipmentLabel({
         height: '58mm',
         boxSizing: 'border-box',
         padding: '1mm',
-        border: '0.5px solid #aaa',
+        border: '0.5px solid #000',
         borderRadius: '1.5mm',
         background: '#fff',
         color: '#000',
         fontFamily: 'Arial, sans-serif',
         overflow: 'hidden',
         textAlign: 'center',
+        fontWeight: 700,
       }}
     >
       <div
@@ -419,7 +422,7 @@ export function SmallShipmentLabel({
       </div>
       <div
         dir="ltr"
-        style={{ marginTop: '0.2mm', fontSize: 7.5, lineHeight: 1.1 }}
+        style={{ marginTop: '0.2mm', fontSize: 7.5, fontWeight: 700, lineHeight: 1.1 }}
       >
         {shipment.primary_phone}
       </div>
@@ -429,6 +432,7 @@ export function SmallShipmentLabel({
           marginTop: '0.3mm',
           overflow: 'hidden',
           fontSize: 7,
+          fontWeight: 700,
           lineHeight: 1.15,
         }}
       >
@@ -443,6 +447,7 @@ export function SmallShipmentLabel({
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
             fontSize: 6.8,
+            fontWeight: 700,
             lineHeight: 1.1,
           }}
         >
@@ -454,8 +459,9 @@ export function SmallShipmentLabel({
           style={{
             marginTop: '0.5mm',
             paddingTop: '0.4mm',
-            borderTop: '1px solid #777',
+            borderTop: '1px solid #000',
             fontSize: 6.5,
+            fontWeight: 700,
             lineHeight: 1.1,
           }}
         >
@@ -496,14 +502,14 @@ export function PostalQrBatchShipmentLabel({
           display: 'grid',
           gridTemplateColumns: '45% minmax(0, 1fr)',
           minHeight: '3.2mm',
-          borderBottom: '0.5px solid #777',
+          borderBottom: '0.5px solid #000',
           fontSize: prominent ? 6.3 : 5.7,
-          fontWeight: prominent ? 700 : 500,
+          fontWeight: 700,
           lineHeight: 1.05,
           textAlign: 'start',
         }}
       >
-        <span style={{ padding: '0.1mm 0.5mm', borderInlineEnd: '0.5px solid #777', overflow: 'hidden', whiteSpace: 'nowrap' }}>{label}</span>
+        <span style={{ padding: '0.1mm 0.5mm', borderInlineEnd: '0.5px solid #000', overflow: 'hidden', whiteSpace: 'nowrap' }}>{label}</span>
         <span style={{ minWidth: 0, padding: '0.1mm 0.5mm' }}>{empty}</span>
       </div>
     )
@@ -517,12 +523,13 @@ export function PostalQrBatchShipmentLabel({
           height: '58mm',
           boxSizing: 'border-box',
           padding: '1mm',
-          border: '0.5px solid #aaa',
+          border: '0.5px solid #000',
           borderRadius: '1.5mm',
           background: '#fff',
           color: '#000',
           fontFamily: 'Arial, sans-serif',
           overflow: 'hidden',
+          fontWeight: 700,
         }}
       >
         <div style={{ height: '3mm', overflow: 'hidden', textAlign: 'center', fontSize: 7, fontWeight: 700, lineHeight: '3mm', whiteSpace: 'nowrap' }}>
@@ -531,7 +538,7 @@ export function PostalQrBatchShipmentLabel({
         <div style={{ display: 'grid', placeItems: 'center', width: '20mm', height: '20mm', margin: '0 auto', background: '#fff' }}>
           <ShipmentQr qrId={qrId} size={240} />
         </div>
-        <div style={{ border: '0.5px solid #777' }}>
+        <div style={{ border: '0.5px solid #000' }}>
           {row(t('postal.shipmentId'))}
           {row(t('postal.merchant'))}
           {row(t('postal.recipient_name'), true)}
@@ -554,17 +561,18 @@ export function PostalQrBatchShipmentLabel({
         minHeight: '100mm',
         boxSizing: 'border-box',
         padding: '2mm',
-        border: '1px solid #b8b8b8',
+        border: '1px solid #000',
         borderRadius: '2mm',
         background: '#fff',
         color: '#000',
         fontFamily: 'Arial, sans-serif',
         overflowWrap: 'anywhere',
+        fontWeight: 700,
       }}
     >
       <header style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 28mm', alignItems: 'center', gap: '2mm', minHeight: '28mm' }}>
         <div style={{ minWidth: 0, textAlign: 'center' }}>
-          <div style={{ display: 'inline-block', maxWidth: '100%', paddingBottom: '0.5mm', borderBottom: '1px solid #111', fontSize: 17, fontWeight: 800, lineHeight: 1.2 }}>
+          <div style={{ display: 'inline-block', maxWidth: '100%', paddingBottom: '0.5mm', borderBottom: '1px solid #000', fontSize: 17, fontWeight: 800, lineHeight: 1.2 }}>
             {workspaceName}
           </div>
         </div>
@@ -575,14 +583,14 @@ export function PostalQrBatchShipmentLabel({
       <div style={{ margin: '0.2mm 0 0.8mm', textAlign: 'center', fontSize: 13, fontWeight: 800 }}>
         {t('postal.shipmentId')}: <bdi dir="ltr" style={{ whiteSpace: 'nowrap' }}>{empty}</bdi>
       </div>
-      <section aria-label={t('postal.recipient_name')} style={{ border: '1px solid #777' }}>
+      <section aria-label={t('postal.recipient_name')} style={{ border: '1px solid #000' }}>
         <LabelRow label={t('postal.merchant')} compact>{empty}</LabelRow>
         <LabelRow label={t('postal.recipient_name')} prominent compact>{empty}</LabelRow>
         <LabelRow label={t('postal.primary_phone')} compact>{empty}</LabelRow>
         <LabelRow label={t('postal.destination')} compact>{empty}</LabelRow>
       </section>
       <LabelSectionTitle>{t('postal.shipmentDetails')}</LabelSectionTitle>
-      <section aria-label={t('postal.shipmentDetails')} style={{ border: '1px solid #777' }}>
+      <section aria-label={t('postal.shipmentDetails')} style={{ border: '1px solid #000' }}>
         <LabelRow label={t('postal.shipmentSize')} compact>{empty}</LabelRow>
         <LabelRow label={t('postal.pieces')} compact>{empty}</LabelRow>
         <LabelRow label={t('postal.fragility')} compact>{empty}</LabelRow>

@@ -46,6 +46,15 @@ tauri-plugin-sql = { version = "2.3.2", features = ["sqlite"] }
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 window-vibrancy = "0.7.1"
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_Printing",
+  "Win32_Storage_Xps",
+] }
+png = "0.17.16"
+
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-biometric = "2"
 tauri-plugin-opener = "2"

@@ -8,6 +8,17 @@ interface PdfPageImageOptions {
     bottomPaddingPx?: number
 }
 
+export interface NativePdfPageImage {
+    pngDataUrl: string
+    widthMm: number
+    heightMm: number
+}
+
+interface NativePdfRenderOptions {
+    maxWidthPx?: number
+    pageNumber?: number
+}
+
 let isPdfWorkerConfigured = false
 
 function ensurePdfWorkerConfigured(pdfjsLib: typeof import('pdfjs-dist')) {
@@ -102,6 +113,46 @@ export async function renderPdfPageToPngDataUrl(
             : canvas
 
         return outputCanvas.toDataURL('image/png')
+    } finally {
+        await loadingTask.destroy()
+    }
+}
+
+/** Rasterizes a PDF page while retaining its physical page size for native label printing. */
+export async function renderPdfPageForNativePrinting(
+    pdfBlob: Blob,
+    { maxWidthPx = 2048, pageNumber = 1 }: NativePdfRenderOptions = {},
+): Promise<NativePdfPageImage> {
+    const pdfjsLib = await import('pdfjs-dist')
+    ensurePdfWorkerConfigured(pdfjsLib)
+
+    const pdfData = new Uint8Array(await pdfBlob.arrayBuffer())
+    const loadingTask = pdfjsLib.getDocument({ data: pdfData })
+
+    try {
+        const pdf = await loadingTask.promise
+        const safePageNumber = Math.min(Math.max(1, pageNumber), pdf.numPages)
+        const page = await pdf.getPage(safePageNumber)
+        const baseViewport = page.getViewport({ scale: 1 })
+        const widthMm = baseViewport.width * 25.4 / 72
+        const heightMm = baseViewport.height * 25.4 / 72
+        const scale = resolvePdfRenderScale(baseViewport.width, maxWidthPx)
+        const viewport = page.getViewport({ scale })
+        const canvas = document.createElement('canvas')
+        canvas.width = Math.ceil(viewport.width)
+        canvas.height = Math.ceil(viewport.height)
+        const context = canvas.getContext('2d', { alpha: false })
+        if (!context) throw new Error('Unable to create an image for native label printing.')
+
+        context.fillStyle = '#ffffff'
+        context.fillRect(0, 0, canvas.width, canvas.height)
+        await page.render({ canvas, viewport, background: '#ffffff', intent: 'print' }).promise
+
+        return {
+            pngDataUrl: canvas.toDataURL('image/png'),
+            widthMm,
+            heightMm,
+        }
     } finally {
         await loadingTask.destroy()
     }

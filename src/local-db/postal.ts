@@ -644,6 +644,27 @@ export async function resolvePostalQr(scope: PostalScope, raw: string) {
   )
   return normalizeShipment(data)
 }
+
+export async function getPostalShipmentOrganizationName(
+  scope: PostalScope,
+  shipment: Pick<PostalShipment, 'organization_id'>,
+): Promise<string> {
+  const organization = await tracked<{ id: string; name: string }>(
+    scope,
+    'postal_organizations',
+    undefined,
+    () =>
+      supabase
+        .from('postal_organizations')
+        .select('id,name')
+        .eq('workspace_id', scope.workspaceId)
+        .eq('id', shipment.organization_id)
+        .single(),
+    () => 1,
+  )
+  return organization.name
+}
+
 export async function searchPostalDrivers(
   scope: PostalScope,
   search: string,

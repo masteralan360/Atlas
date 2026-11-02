@@ -1,5 +1,6 @@
 import { usePostalScope } from '@/postal/usePostalAccess'
-import { useMemo, useRef, useState } from 'react'
+import { useAuth } from '@/auth'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'wouter'
 import { useTranslation } from 'react-i18next'
 import {
@@ -26,6 +27,7 @@ import {
   CircleDollarSign,
   FileText,
   QrCode,
+  Printer,
 } from 'lucide-react'
 import {
   Button,
@@ -59,12 +61,14 @@ import {
   postalSummaryTables,
   postalTables,
   resolvePostalQr,
+  getPostalShipmentOrganizationName,
 } from '@/local-db/postal'
 import { PostalDashboardCards } from '@/postal/PostalDashboardCards'
 import {
   postalStates,
   locationLabel,
   formatPostalShipmentId,
+  parseShipmentQr,
   type PostalShipment,
   type PostalBranch,
   type PostalOrganization,
@@ -84,6 +88,23 @@ import { OrganizationAccountStatement } from '@/postal/OrganizationAccountStatem
 import { canReadPostalStatement } from '@/local-db/postalStatement'
 import { CreateOrganizationDialog } from '@/postal/CreateOrganizationDialog'
 import { QRBatches } from '@/postal/QRBatches'
+import { useWorkspace } from '@/workspace'
+import { AutoScanPrinterDialog } from '@/postal/AutoScanPrinterDialog'
+import {
+  getPostalAutoScanEnabled,
+  getPostalAutoScanPrinter,
+  savePostalAutoScanEnabled,
+} from '@/postal/autoScanSettings'
+import { loadPostalShipmentLabelTemplates } from '@/lib/postalShipmentLabelTemplates'
+import { buildPostalLabelPdf } from '@/postal/printing'
+import {
+  printService,
+  AutoScanNativePrintingUnavailableError,
+  AutoScanPrinterPaperSizeUnsupportedError,
+  AutoScanPrinterUnavailableError,
+} from '@/services/printService'
+import type { StoredCustomTemplateRow } from '@/lib/customTemplates'
+import { useWorkspacePermissions } from '@/permissions'
 
 type PostalShipmentPageRow = PostalShipment & { organization_name?: string | null }
 type Row = PostalShipmentPageRow | PostalBranch | PostalOrganization | PostalCodRecord
@@ -96,8 +117,24 @@ function formatCodIqd(value: string, language: string, currency: string) {
 export default function PostalServicePage({ accountStatement = false, qrBatches = false }: { accountStatement?: boolean; qrBatches?: boolean }) {
   const { t, i18n } = useTranslation()
   const scope = usePostalScope()
+  const { user } = useAuth()
   const [, navigate] = useLocation()
   const { toast } = useToast()
+  const { workspaceName } = useWorkspace()
+  const { permissionKeys } = useWorkspacePermissions()
+  const canAccessAutoScan = user?.role === 'admin'
+    || (user?.role === 'staff' && permissionKeys.includes('postService.officeEmployee'))
+  const canAutoPrint = canAccessAutoScan && !permissionKeys.includes('global.NOprint')
+  const canAutoPrintRef = useRef(canAutoPrint)
+  canAutoPrintRef.current = canAutoPrint
+  const autoScanContextRef = useRef({
+    scope,
+    workspaceName,
+    language: i18n.language,
+    t,
+    toast,
+  })
+  autoScanContextRef.current = { scope, workspaceName, language: i18n.language, t, toast }
   const [tab, setTab] = useState<keyof typeof postalTables>('shipments')
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
@@ -107,12 +144,395 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
   const [creating, setCreating] = useState(false)
   const [scanner, setScanner] = useState(false)
   const scannedId = useRef<string | null>(null)
+  const [autoScanEnabled, setAutoScanEnabled] = useState(false)
+  const autoScanEnabledRef = useRef(false)
+  const [autoScanStarting, setAutoScanStarting] = useState(false)
+  const [autoScanPrinter, setAutoScanPrinter] = useState<string | null>(null)
+  const autoScanPrinterRef = useRef<string | null>(null)
+  const [autoScanPrinterUnavailable, setAutoScanPrinterUnavailable] = useState(false)
+  const autoScanPrinterUnavailableRef = useRef(false)
+  const [autoScanPrinterDialogOpen, setAutoScanPrinterDialogOpen] = useState(false)
+  const resumeAutoScanAfterPrinterSaveRef = useRef(false)
+  const autoScanQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const labelTemplatesPromiseRef = useRef<Promise<StoredCustomTemplateRow[]> | null>(null)
   const [branch, setBranch] = useState<PostalBranch | 'new' | null>(null)
   const [addAllGovernoratesOpen, setAddAllGovernoratesOpen] = useState(false)
   const [createOrganizationOpen, setCreateOrganizationOpen] = useState(false)
   const [organization, setOrganization] = useState<PostalOrganization | null>(
     null,
   )
+  useEffect(() => {
+    let current = true
+    autoScanEnabledRef.current = false
+    setAutoScanEnabled(false)
+    autoScanPrinterRef.current = null
+    setAutoScanPrinter(null)
+    autoScanPrinterUnavailableRef.current = false
+    setAutoScanPrinterUnavailable(false)
+
+    void Promise.all([
+      getPostalAutoScanPrinter(scope.workspaceId),
+      getPostalAutoScanEnabled(scope.workspaceId),
+    ]).then(async ([printerName, shouldResume]) => {
+      if (!current) return
+      autoScanPrinterRef.current = printerName
+      setAutoScanPrinter(printerName)
+      labelTemplatesPromiseRef.current = loadPostalShipmentLabelTemplates(scope.workspaceId)
+        .then((result) => result.failed ? [] : result.templates)
+
+      if (!shouldResume || !printerName || !canAutoPrintRef.current) return
+
+      // Keep scans blocked until the saved printer's current status is known.
+      autoScanPrinterUnavailableRef.current = true
+      let printerAvailable = false
+      try {
+        printerAvailable = await printService.isSystemPrinterAvailable(printerName)
+      } catch {
+        printerAvailable = false
+      }
+      if (!current) return
+
+      autoScanPrinterUnavailableRef.current = !printerAvailable
+      setAutoScanPrinterUnavailable(!printerAvailable)
+      autoScanEnabledRef.current = true
+      setAutoScanEnabled(true)
+      if (!printerAvailable) {
+        const { t, toast } = autoScanContextRef.current
+        toast({
+          title: t('common.error'),
+          description: t('postal.autoScan.printerUnavailable'),
+          variant: 'destructive',
+        })
+      }
+    }).catch(() => undefined)
+    return () => {
+      current = false
+    }
+  }, [scope.workspaceId, canAutoPrint])
+
+  const processAutoScan = useCallback(async (
+    raw: string,
+    context = autoScanContextRef.current,
+    configuredPrinter = autoScanPrinterRef.current,
+    templatesPromise = labelTemplatesPromiseRef.current,
+  ) => {
+    if (!canAutoPrintRef.current) return
+    if (autoScanPrinterUnavailableRef.current) return
+    const { scope, workspaceName, language, t, toast } = context
+    const qrId = parseShipmentQr(raw.trim())
+    if (!qrId) {
+      toast({
+        title: t('common.error'),
+        description: t('postal.autoScan.invalidQr'),
+        variant: 'destructive',
+      })
+      return
+    }
+
+    let shipment: PostalShipment
+    try {
+      shipment = await resolvePostalQr(scope, raw.trim())
+    } catch (error) {
+      const errorCode = (error as { code?: unknown } | null)?.code
+      toast({
+        title: t('common.error'),
+        description: errorCode === 'PGRST116'
+          ? t('postal.autoScan.shipmentNotFound')
+          : t('postal.autoScan.lookupFailed'),
+        variant: 'destructive',
+      })
+      return
+    }
+
+    let organizationName: string
+    try {
+      organizationName = await getPostalShipmentOrganizationName(scope, shipment)
+    } catch {
+      toast({
+        title: t('common.error'),
+        description: t('postal.autoScan.lookupFailed'),
+        variant: 'destructive',
+      })
+      return
+    }
+
+    try {
+      const templates = await templatesPromise?.catch(() => []) ?? []
+      const primaryTemplate = templates.find((template) => template.primary)
+      const label = await buildPostalLabelPdf(
+        shipment,
+        scope.workspaceId,
+        {
+          organizationName,
+          workspaceName: workspaceName || 'Atlas',
+        },
+        language,
+        primaryTemplate,
+      )
+      if (!canAutoPrintRef.current) return
+      if (autoScanPrinterUnavailableRef.current) return
+      const printerName = configuredPrinter
+      if (!printerName) {
+        toast({
+          title: t('common.error'),
+          description: t('postal.autoScan.printerRequired'),
+          variant: 'destructive',
+        })
+        return
+      }
+      await printService.printPdfToSystemPrinter(
+        label,
+        printerName,
+        t('postal.shipmentLabel'),
+      )
+      toast({
+        title: t('postal.autoScan.labelSubmitted'),
+        description: t('postal.autoScan.labelSubmittedDescription', {
+          shipment: formatPostalShipmentId(shipment),
+          printer: printerName,
+        }),
+      })
+    } catch (error) {
+      toast({
+        title: t('common.error'),
+        description: error instanceof AutoScanPrinterUnavailableError
+          ? t('postal.autoScan.printerUnavailable')
+          : error instanceof AutoScanPrinterPaperSizeUnsupportedError
+            ? t('postal.autoScan.paperSizeUnsupported')
+            : error instanceof AutoScanNativePrintingUnavailableError
+              ? t('postal.autoScan.nativeUnavailable')
+              : t('postal.autoScan.printFailed'),
+        variant: 'destructive',
+      })
+    }
+  }, [])
+
+  const enqueueAutoScan = useCallback((raw: string) => {
+    if (!autoScanEnabledRef.current) return
+    const context = autoScanContextRef.current
+    const configuredPrinter = autoScanPrinterRef.current
+    const templatesPromise = labelTemplatesPromiseRef.current
+    autoScanQueueRef.current = autoScanQueueRef.current
+      .then(() => processAutoScan(raw, context, configuredPrinter, templatesPromise))
+      .catch(() => undefined)
+  }, [processAutoScan])
+
+  useEffect(() => {
+    if (canAutoPrint) return
+    autoScanEnabledRef.current = false
+    setAutoScanEnabled(false)
+  }, [canAutoPrint])
+
+  useEffect(() => {
+    if (!autoScanEnabled || !autoScanPrinter) return
+    let current = true
+    let stopWatching: (() => void) | undefined
+    autoScanPrinterUnavailableRef.current = false
+    setAutoScanPrinterUnavailable(false)
+    const reportAvailability = (available: boolean) => {
+      if (!current) return
+      const unavailable = !available
+      if (unavailable && !autoScanPrinterUnavailableRef.current) {
+        const { t, toast } = autoScanContextRef.current
+        toast({
+          title: t('common.error'),
+          description: t('postal.autoScan.printerUnavailable'),
+          variant: 'destructive',
+        })
+      }
+      autoScanPrinterUnavailableRef.current = unavailable
+      setAutoScanPrinterUnavailable(unavailable)
+    }
+    void printService.watchSystemPrinterStatus(autoScanPrinter, reportAvailability)
+      .then((stop) => {
+        if (!current) {
+          stop()
+          return
+        }
+        stopWatching = stop
+      })
+      .catch((error) => {
+        if (error instanceof AutoScanPrinterUnavailableError) reportAvailability(false)
+      })
+    return () => {
+      current = false
+      stopWatching?.()
+    }
+  }, [autoScanEnabled, autoScanPrinter])
+
+  useEffect(() => {
+    if (!autoScanEnabled || autoScanPrinterDialogOpen || scanner) return
+
+    let buffer = ''
+    let startedAt = 0
+    let lastKeyAt = 0
+    let largestGap = 0
+    let idleTimer: number | undefined
+    let lastCompleted: { value: string; at: number } | null = null
+
+    const reset = () => {
+      buffer = ''
+      startedAt = 0
+      lastKeyAt = 0
+      largestGap = 0
+      if (idleTimer !== undefined) window.clearTimeout(idleTimer)
+      idleTimer = undefined
+    }
+    const finish = (): boolean => {
+      const value = buffer.trim()
+      const endedAt = lastKeyAt
+      const duration = endedAt - startedAt
+      const scannerLike = value.length >= 12
+        && duration <= Math.max(1800, value.length * 80)
+        && largestGap <= 120
+      reset()
+      if (!scannerLike) return false
+
+      const now = Date.now()
+      if (lastCompleted?.value === value && now - lastCompleted.at < 300) return true
+      lastCompleted = { value, at: now }
+      enqueueAutoScan(value)
+      return true
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return
+      const target = event.target
+      if (target instanceof HTMLElement && (
+        target.isContentEditable
+        || target.closest('input, textarea, select, [role="textbox"], [role="combobox"]')
+      )) {
+        reset()
+        return
+      }
+
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        if (buffer && finish()) {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+        return
+      }
+      if (event.key.length !== 1) {
+        reset()
+        return
+      }
+
+      const now = Date.now()
+      const gap = lastKeyAt ? now - lastKeyAt : 0
+      if (buffer && gap > 120) reset()
+      if (!buffer) startedAt = now
+      else largestGap = Math.max(largestGap, gap)
+      buffer += event.key
+      lastKeyAt = now
+      if (idleTimer !== undefined) window.clearTimeout(idleTimer)
+      idleTimer = window.setTimeout(finish, 130)
+    }
+
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true)
+      reset()
+    }
+  }, [autoScanEnabled, autoScanPrinterDialogOpen, scanner, enqueueAutoScan])
+
+  const openAutoScanPrinterDialog = (resumeAfterSave: boolean) => {
+    resumeAutoScanAfterPrinterSaveRef.current = resumeAfterSave
+    setAutoScanPrinterDialogOpen(true)
+  }
+  const onAutoScanPrinterDialogOpenChange = (open: boolean) => {
+    if (!open) resumeAutoScanAfterPrinterSaveRef.current = false
+    setAutoScanPrinterDialogOpen(open)
+  }
+  const onAutoScanPrinterSaved = async (printerName: string) => {
+    autoScanPrinterRef.current = printerName
+    setAutoScanPrinter(printerName)
+    const resume = resumeAutoScanAfterPrinterSaveRef.current
+    resumeAutoScanAfterPrinterSaveRef.current = false
+    setAutoScanPrinterDialogOpen(false)
+    toast({ title: t('postal.autoScan.printerSaved') })
+    if (resume && canAutoPrintRef.current) {
+      try {
+        await savePostalAutoScanEnabled(scope.workspaceId, true)
+      } catch {
+        toast({
+          title: t('common.error'),
+          description: t('postal.autoScan.settingSaveFailed'),
+          variant: 'destructive',
+        })
+        return
+      }
+      autoScanPrinterUnavailableRef.current = false
+      setAutoScanPrinterUnavailable(false)
+      autoScanEnabledRef.current = true
+      setAutoScanEnabled(true)
+      toast({ title: t('postal.autoScan.enabled') })
+    }
+  }
+  const toggleAutoScan = async () => {
+    if (autoScanEnabledRef.current) {
+      autoScanEnabledRef.current = false
+      setAutoScanEnabled(false)
+      setAutoScanStarting(true)
+      try {
+        await savePostalAutoScanEnabled(scope.workspaceId, false)
+        toast({ title: t('postal.autoScan.disabled') })
+      } catch {
+        toast({
+          title: t('common.error'),
+          description: t('postal.autoScan.settingSaveFailed'),
+          variant: 'destructive',
+        })
+      } finally {
+        setAutoScanStarting(false)
+      }
+      return
+    }
+    if (!canAutoPrint) {
+      toast({
+        title: t('common.error'),
+        description: t('postal.autoScan.printPermissionRequired'),
+        variant: 'destructive',
+      })
+      return
+    }
+    if (!autoScanPrinterRef.current) {
+      openAutoScanPrinterDialog(true)
+      return
+    }
+
+    setAutoScanStarting(true)
+    try {
+      const printers = await printService.listSystemPrinters()
+      if (!printers.some((printer) => printer.name === autoScanPrinterRef.current)) {
+        toast({
+          title: t('common.error'),
+          description: t('postal.autoScan.printerUnavailable'),
+          variant: 'destructive',
+        })
+        openAutoScanPrinterDialog(false)
+        return
+      }
+      try {
+        await savePostalAutoScanEnabled(scope.workspaceId, true)
+      } catch {
+        toast({
+          title: t('common.error'),
+          description: t('postal.autoScan.settingSaveFailed'),
+          variant: 'destructive',
+        })
+        return
+      }
+      autoScanEnabledRef.current = true
+      autoScanPrinterUnavailableRef.current = false
+      setAutoScanPrinterUnavailable(false)
+      setAutoScanEnabled(true)
+      toast({ title: t('postal.autoScan.enabled') })
+    } catch {
+      openAutoScanPrinterDialog(false)
+    } finally {
+      setAutoScanStarting(false)
+    }
+  }
   const { dateRange, customDates } = useDateRange()
   const dates = getDateRangeBounds(dateRange, customDates)
   const pagination = usePaginationState({
@@ -499,6 +919,32 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
             <ScanLine className="me-2 h-4 w-4" />
             {t('postal.trackShipment')}
           </Button>
+          {canAccessAutoScan && (
+            <Button
+              type="button"
+              variant={autoScanEnabled ? 'default' : 'outline'}
+              aria-pressed={autoScanEnabled}
+              disabled={autoScanStarting || !canAutoPrint}
+              title={!canAutoPrint
+                ? t('postal.autoScan.printPermissionRequired')
+                : autoScanPrinterUnavailable
+                  ? t('postal.autoScan.printerUnavailable')
+                  : t('postal.autoScan.contextHint')}
+              onContextMenu={(event) => {
+                event.preventDefault()
+                openAutoScanPrinterDialog(autoScanEnabledRef.current)
+              }}
+              onClick={(event) => {
+                event.currentTarget.blur()
+                void toggleAutoScan()
+              }}
+            >
+              {autoScanStarting
+                ? <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                : <Printer className="me-2 h-4 w-4" />}
+              {t('postal.autoScan.title')}
+            </Button>
+          )}
         </div>
       </header>
       <div
@@ -722,6 +1168,15 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
           scope={scope}
           organization={organization}
           onClose={() => setOrganization(null)}
+        />
+      )}
+      {canAccessAutoScan && (
+        <AutoScanPrinterDialog
+          open={autoScanPrinterDialogOpen}
+          onOpenChange={onAutoScanPrinterDialogOpenChange}
+          workspaceId={scope.workspaceId}
+          selectedPrinterName={autoScanPrinter}
+          onSaved={onAutoScanPrinterSaved}
         />
       )}
       {scanner && (

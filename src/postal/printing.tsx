@@ -183,6 +183,55 @@ export function preparePostalLabel(
   })
 }
 
+/** Builds the same saved primary custom label, or standard shipment label, used by the shipment print flow. */
+export async function buildPostalLabelPdf(
+  shipment: PostalShipment,
+  workspaceId: string,
+  sender: { organizationName: string; workspaceName: string },
+  printLang: string,
+  template?: StoredCustomTemplateRow,
+): Promise<Blob> {
+  if (template) {
+    const target = getCustomTemplateTarget(template.module_type_key)
+    const layout = readCustomTemplateLayout(template)
+    if (!target || target.printFormat !== 'label' || !target.page || !layout) {
+      throw new Error('The saved shipment label template is unavailable.')
+    }
+
+    return buildCustomTemplateLayoutPdf({
+      target,
+      layout: {
+        ...layout,
+        page: target.page,
+      },
+      values: layout.fields || {},
+      options: {
+        workspaceId,
+        workspaceName: sender.workspaceName,
+        postalShipment: shipment,
+        postalOrganizationName: sender.organizationName,
+        printLang,
+        labelPageSizeMm: target.page,
+      },
+      effectiveId: formatPostalShipmentId(shipment),
+      fieldMode: 'layoutOverrides',
+    })
+  }
+
+  return generateTemplatePdf({
+    element: (
+      <ShipmentLabel
+        shipment={shipment}
+        organizationName={sender.organizationName}
+        workspaceName={sender.workspaceName}
+      />
+    ),
+    format: 'label',
+    printLang,
+    pageSizeMm: { widthMm: 100, heightMm: 100 },
+  })
+}
+
 export function preparePostalCustomLabel(
   shipment: PostalShipment,
   workspaceId: string,

@@ -259,6 +259,7 @@ dependencies = [
  "futures-util",
  "if-addrs",
  "log",
+ "png 0.17.16",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -281,6 +282,7 @@ dependencies = [
  "tokio-tungstenite",
  "tower-http 0.5.2",
  "window-vibrancy 0.7.1",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

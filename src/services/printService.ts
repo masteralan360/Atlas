@@ -2,6 +2,7 @@ import i18n from '@/i18n/config'
 import { formatCurrency, formatDocumentDateTime } from '@/lib/utils'
 import { invoke } from '@tauri-apps/api/core'
 import { isAndroidPwa, isDesktop, isTauriAndroid } from '@/lib/platform'
+import { renderPdfPageForNativePrinting } from '@/services/pdfRasterizer'
 import { clearAppSetting, getAppSetting, getAppSettingSync, setAppSetting } from '@/local-db/settings'
 import {
     getDirectMobileThermalCapabilities,
@@ -87,6 +88,33 @@ interface QzClient {
         create: (printer: string, options?: Record<string, unknown>) => unknown
     }
     print: (config: unknown, data: Array<string | Record<string, unknown>>) => Promise<void>
+}
+
+export interface SystemPrinterInfo {
+    name: string
+    identifier: string
+    interface_type: string
+}
+
+export class AutoScanPrinterUnavailableError extends Error {
+    constructor() {
+        super('auto_scan_printer_unavailable')
+        this.name = 'AutoScanPrinterUnavailableError'
+    }
+}
+
+export class AutoScanNativePrintingUnavailableError extends Error {
+    constructor() {
+        super('auto_scan_native_printing_unavailable')
+        this.name = 'AutoScanNativePrintingUnavailableError'
+    }
+}
+
+export class AutoScanPrinterPaperSizeUnsupportedError extends Error {
+    constructor() {
+        super('auto_scan_printer_paper_size_unsupported')
+        this.name = 'AutoScanPrinterPaperSizeUnsupportedError'
+    }
 }
 
 interface ThermalReceiptPrintRequest {
@@ -222,6 +250,84 @@ async function connectQzTray(): Promise<QzClient> {
     } catch (error) {
         console.warn('[PrintService] QZ Tray connection failed:', error)
         throw new Error('Could not connect to QZ Tray. Install and run QZ Tray on this device, then approve its connection prompt and try again.')
+    }
+}
+
+async function listSystemPrinters(): Promise<SystemPrinterInfo[]> {
+    if (!isDesktop()) throw new AutoScanNativePrintingUnavailableError()
+    try {
+        return await invoke<SystemPrinterInfo[]>('list_auto_scan_printers')
+    } catch (error) {
+        if (String(error).includes('auto_scan_native_printing_unavailable')) {
+            throw new AutoScanNativePrintingUnavailableError()
+        }
+        throw error
+    }
+}
+
+async function printPdfToSystemPrinter(
+    pdfBlob: Blob,
+    printerName: string,
+    title: string,
+): Promise<void> {
+    if (!isDesktop()) throw new AutoScanNativePrintingUnavailableError()
+    const image = await renderPdfPageForNativePrinting(pdfBlob)
+    const pngBase64 = image.pngDataUrl.replace(/^data:image\/png;base64,/, '')
+    try {
+        await invoke('print_auto_scan_label', {
+            printerName,
+            pngBase64,
+            pageWidthMm: image.widthMm,
+            pageHeightMm: image.heightMm,
+            title,
+        })
+    } catch (error) {
+        const message = String(error)
+        if (message.includes('auto_scan_printer_unavailable')) {
+            throw new AutoScanPrinterUnavailableError()
+        }
+        if (message.includes('auto_scan_native_printing_unavailable')) {
+            throw new AutoScanNativePrintingUnavailableError()
+        }
+        if (message.includes('auto_scan_printer_paper_size_unsupported')) {
+            throw new AutoScanPrinterPaperSizeUnsupportedError()
+        }
+        throw error
+    }
+}
+
+async function isSystemPrinterAvailable(printerName: string): Promise<boolean> {
+    if (!isDesktop()) throw new AutoScanNativePrintingUnavailableError()
+    try {
+        return await invoke<boolean>('is_auto_scan_printer_available', { printerName })
+    } catch (error) {
+        if (String(error).includes('auto_scan_native_printing_unavailable')) {
+            throw new AutoScanNativePrintingUnavailableError()
+        }
+        if (String(error).includes('auto_scan_printer_unavailable')) return false
+        throw error
+    }
+}
+
+async function watchSystemPrinterStatus(
+    printerName: string,
+    onAvailabilityChange: (available: boolean) => void,
+): Promise<() => void> {
+    if (!isDesktop()) throw new AutoScanNativePrintingUnavailableError()
+    let stopped = false
+    const checkAvailability = async () => {
+        try {
+            const available = await isSystemPrinterAvailable(printerName)
+            if (!stopped) onAvailabilityChange(available)
+        } catch {
+            if (!stopped) onAvailabilityChange(false)
+        }
+    }
+    await checkAvailability()
+    const timer = window.setInterval(() => void checkAvailability(), 10_000)
+    return () => {
+        stopped = true
+        window.clearInterval(timer)
     }
 }
 
@@ -399,6 +505,18 @@ export function isLikelyThermalPrinter(printer: Pick<ThermalPrinterInfo, 'name' 
 
 export const printService = {
     getDirectMobileThermalCapabilities,
+
+    /** Lists the device's installed printers through Atlas's native desktop print bridge. */
+    listSystemPrinters,
+
+    /** Sends a PDF directly to the named local printer without opening a print dialog. */
+    printPdfToSystemPrinter,
+
+    /** Checks the OS-reported status of the selected Auto Scan printer. */
+    isSystemPrinterAvailable,
+
+    /** Watches the selected installed printer for OS-reported offline and error states. */
+    watchSystemPrinterStatus,
 
     /**
      * This preference lives alongside the selected thermal printer, keeping

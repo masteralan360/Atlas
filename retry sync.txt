@@ -1,3 +1,9 @@
+QR Code Reader
+
+Auto Print Upon Scan
+
+Bold Font Shipment Print
+
 PWA Lang install
 
 Save usage mode

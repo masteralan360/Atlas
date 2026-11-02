@@ -11,6 +11,7 @@ use tokio::sync::broadcast;
 mod kds_server;
 mod kurdishtts_website_stt;
 mod android_bluetooth_printer;
+mod auto_scan_printer;
 mod local_mode_sqlite;
 
 const SINGLE_INSTANCE_PORT: u16 = 41931;
@@ -410,6 +411,9 @@ pub fn run() {
             list_android_bluetooth_thermal_printers,
             print_android_bluetooth_thermal_printer,
             test_android_bluetooth_thermal_printer,
+            auto_scan_printer::list_auto_scan_printers,
+            auto_scan_printer::is_auto_scan_printer_available,
+            auto_scan_printer::print_auto_scan_label,
             local_mode_sqlite::begin_local_mode_sqlite_transaction,
             local_mode_sqlite::execute_local_mode_sqlite_transaction,
             local_mode_sqlite::select_local_mode_sqlite_transaction,
