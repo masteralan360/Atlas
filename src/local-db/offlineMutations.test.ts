@@ -9,6 +9,7 @@ const mutationStore = vi.hoisted(() => {
     const salesOrders: Array<Record<string, any>> = []
     const agents: Array<Record<string, any>> = []
     const salesOrderAgentAssignments: Array<Record<string, any>> = []
+    const products: Array<Record<string, any>> = []
 
     const table = {
         where: vi.fn((indexName: string) => ({
@@ -30,6 +31,14 @@ const mutationStore = vi.hoisted(() => {
                     return {
                         filter: vi.fn((predicate: (row: Record<string, any>) => boolean) => ({
                             toArray: vi.fn(async () => rows.filter((row) => row.status === key && predicate(row)))
+                        }))
+                    }
+                }
+
+                if (indexName === 'entityType') {
+                    return {
+                        filter: vi.fn((predicate: (row: Record<string, any>) => boolean) => ({
+                            toArray: vi.fn(async () => rows.filter((row) => row.entityType === key && predicate(row)))
                         }))
                     }
                 }
@@ -104,6 +113,7 @@ const mutationStore = vi.hoisted(() => {
     const salesOrdersTable = byIdTable(salesOrders)
     const agentsTable = byIdTable(agents)
     const salesOrderAgentAssignmentsTable = byIdTable(salesOrderAgentAssignments)
+    const productsTable = byIdTable(products)
 
     return {
         rows,
@@ -115,6 +125,7 @@ const mutationStore = vi.hoisted(() => {
         salesOrders,
         agents,
         salesOrderAgentAssignments,
+        products,
         merchantProfilesTable,
         businessPartnersTable,
         deliveryShipmentsTable,
@@ -122,6 +133,7 @@ const mutationStore = vi.hoisted(() => {
         salesOrdersTable,
         agentsTable,
         salesOrderAgentAssignmentsTable,
+        productsTable,
         reset() {
             rows.splice(0)
             deliveryMerchantProfiles.splice(0)
@@ -131,6 +143,7 @@ const mutationStore = vi.hoisted(() => {
             salesOrders.splice(0)
             agents.splice(0)
             salesOrderAgentAssignments.splice(0)
+            products.splice(0)
             table.where.mockClear()
             table.add.mockClear()
             table.update.mockClear()
@@ -142,6 +155,8 @@ const mutationStore = vi.hoisted(() => {
             agentsTable.get.mockClear()
             salesOrderAgentAssignmentsTable.get.mockClear()
             salesOrderAgentAssignmentsTable.update.mockClear()
+            productsTable.get.mockClear()
+            productsTable.update.mockClear()
         }
     }
 })
@@ -173,6 +188,7 @@ vi.mock('./database', () => ({
         sales_orders: mutationStore.salesOrdersTable,
         agents: mutationStore.agentsTable,
         sales_order_agent_assignments: mutationStore.salesOrderAgentAssignmentsTable,
+        products: mutationStore.productsTable,
     }
 }))
 
@@ -477,6 +493,61 @@ describe('addToOfflineMutations', () => {
             workspaceId: 'workspace-stale', status: 'failed',
             payload: { orderId: 'order-1', agentId: 'agent-1' }
         })
+    })
+
+    function failedProductUom() {
+        return {
+            id: 'uom-failure', workspaceId: 'workspace-1', entityType: 'product_uoms',
+            entityId: 'uom-1', operation: 'create',
+            payload: { id: 'uom-1', productId: 'product-1', workspaceId: 'workspace-1', unitRef: 'builtin:pcs' },
+            createdAt: '2026-11-01T20:49:00.000Z', status: 'failed',
+            error: 'Sync integrity issue: Product UoM must belong to a product in the same workspace'
+        }
+    }
+
+    it.each([
+        { syncStatus: 'synced', lastSyncedAt: '2026-11-02T11:37:48.000Z' },
+        { syncStatus: 'synced', lastSyncedAt: null },
+        { syncStatus: 'pending', lastSyncedAt: '2026-11-02T11:37:48.000Z' },
+    ])('retries a previously orphaned UoM after its parent was uploaded: %j', async metadata => {
+        mutationStore.products.push({ id: 'product-1', workspaceId: 'workspace-1', isDeleted: false, ...metadata })
+        mutationStore.rows.push(failedProductUom())
+
+        await expect(retrySyncIntegrityMutations('workspace-1')).resolves.toBe(1)
+        expect(mutationStore.rows).toHaveLength(1)
+        expect(mutationStore.rows[0]).toMatchObject({ entityType: 'product_uoms', status: 'pending', error: undefined })
+        expect(mutationStore.table.add).not.toHaveBeenCalled()
+    })
+
+    it('still restores a genuinely unsynced parent before retrying its UoM', async () => {
+        mutationStore.products.push({ id: 'product-1', workspaceId: 'workspace-1', isDeleted: false, syncStatus: 'pending', lastSyncedAt: null })
+        mutationStore.rows.push(failedProductUom())
+
+        await expect(retrySyncIntegrityMutations('workspace-1')).resolves.toBe(1)
+        expect(mutationStore.rows[0]).toMatchObject({ status: 'pending', error: undefined })
+        expect(mutationStore.rows[1]).toMatchObject({ entityType: 'products', entityId: 'product-1', operation: 'create', status: 'pending' })
+    })
+
+    it.each([
+        undefined,
+        { id: 'product-1', workspaceId: 'workspace-other', isDeleted: false, syncStatus: 'synced', lastSyncedAt: '2026-11-02T11:37:48.000Z' },
+        { id: 'product-1', workspaceId: 'workspace-1', isDeleted: true, syncStatus: 'synced', lastSyncedAt: '2026-11-02T11:37:48.000Z' },
+    ])('does not requeue a UoM whose local parent is unavailable: %j', async parent => {
+        if (parent) mutationStore.products.push(parent)
+        mutationStore.rows.push(failedProductUom())
+        await expect(retrySyncIntegrityMutations('workspace-1')).resolves.toBe(0)
+        expect(mutationStore.rows[0]).toMatchObject({ status: 'failed' })
+        expect(mutationStore.table.add).not.toHaveBeenCalled()
+    })
+
+    it('does not revive a deliberately discarded parent when retrying its UoM', async () => {
+        mutationStore.products.push({ id: 'product-1', workspaceId: 'workspace-1', isDeleted: false, syncStatus: 'synced', lastSyncedAt: '2026-11-02T11:37:48.000Z' })
+        mutationStore.rows.push(failedProductUom(), {
+            id: 'discarded-parent', workspaceId: 'workspace-1', entityType: 'products', entityId: 'product-1',
+            operation: 'create', status: 'discarded', payload: {}, createdAt: '2026-11-01T20:48:00.000Z'
+        })
+        await expect(retrySyncIntegrityMutations('workspace-1')).resolves.toBe(0)
+        expect(mutationStore.rows[0]).toMatchObject({ status: 'failed' })
     })
 
 })

@@ -219,7 +219,8 @@ async function repairTravelPassengerWorkspaceMutations(
  * Offline product creation and UoM edits are normally queued together, but an
  * interrupted or older client can leave only the child mutation behind. On an
  * explicit integrity retry, restore that parent create only when the local
- * product is still an unsynced, non-deleted row in the same workspace.
+ * product is still an unsynced, non-deleted row in the same workspace. A parent
+ * that has since synced needs no repair: retry its child against the server.
  */
 async function repairProductUomParentMutations(mutations: OfflineMutation[]) {
     const unrepairedMutationIds = new Set<string>()
@@ -290,11 +291,18 @@ async function repairProductUomParentMutations(mutations: OfflineMutation[]) {
         }
 
         const wasDiscarded = productMutations.some((candidate) => candidate.status === 'discarded')
-        if (
-            wasDiscarded
-            || (product.syncStatus !== 'pending' && product.syncStatus !== 'conflict')
-            || product.lastSyncedAt != null
-        ) {
+        if (wasDiscarded) {
+            unrepairedMutationIds.add(mutation.id)
+            continue
+        }
+
+        // A stock operation or another device may have uploaded the parent
+        // after this UoM first failed. Keeping the child failed here makes the
+        // explicit Retry button a permanent dead end despite a valid parent.
+        // Retry only the child; Supabase still verifies its parent/workspace.
+        if (product.syncStatus === 'synced' || product.lastSyncedAt != null) continue
+
+        if (product.syncStatus !== 'pending' && product.syncStatus !== 'conflict') {
             unrepairedMutationIds.add(mutation.id)
             continue
         }

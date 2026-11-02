@@ -26,6 +26,7 @@ import {
     normalizeOrderAdjustments
 } from '@/lib/orderAdjustments'
 import { getOrderPrintOriginalTotal, getOrderPrintReturnState } from '@/lib/orderPrintReturnState'
+import { convertCurrencyAmountWithAvailableSnapshot } from '@/lib/orderCurrency'
 import {
     ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MAX_MM,
     ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM
@@ -1133,8 +1134,22 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const profit = salesOrderProfitBasis && netSalesRevenue !== null
         ? netSalesRevenue - salesOrderProfitBasis.salesCost
         : null
-    const margin = profit !== null && netSalesRevenue !== null && netSalesRevenue > 0
-        ? (profit / netSalesRevenue) * 100
+    const tierCommissionTotalIqd = tieredCommissionOrderPreview.data?.entries.length
+        ? tieredCommissionOrderPreview.data.totalAmountIqd
+        : 0
+    const tierCommissionTotalInOrderCurrency = tierCommissionTotalIqd !== 0
+        ? convertCurrencyAmountWithAvailableSnapshot(
+            tierCommissionTotalIqd,
+            'iqd',
+            currency,
+            salesOrder?.exchangeRates
+        )
+        : 0
+    const profitAfterTierCommission = profit !== null && tierCommissionTotalInOrderCurrency !== null
+        ? profit - tierCommissionTotalInOrderCurrency
+        : profit
+    const margin = profitAfterTierCommission !== null && netSalesRevenue !== null && netSalesRevenue > 0
+        ? (profitAfterTierCommission / netSalesRevenue) * 100
         : null
     const receivedUnits = !isSales
         ? (order.status === 'received' || order.status === 'completed'
@@ -2118,11 +2133,11 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                         <div className="mt-2 text-2xl font-black">{totalFreeBonus}</div>
                                     </div>
                                 ) : null}
-                                {isSales && canViewProfit && profit !== null ? (
+                                {isSales && canViewProfit && profitAfterTierCommission !== null ? (
                                     <>
                                         <div className="rounded-2xl border bg-background/70 p-4">
                                             <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">{t('orders.details.grossProfit') || 'Gross Profit'}</div>
-                                            <div className={cn('mt-2 text-2xl font-black', profit >= 0 ? 'text-emerald-600' : 'text-rose-600')}>{formatCurrency(profit, currency, iqd)}</div>
+                                            <div className={cn('mt-2 text-2xl font-black', profitAfterTierCommission >= 0 ? 'text-emerald-600' : 'text-rose-600')}>{formatCurrency(profitAfterTierCommission, currency, iqd)}</div>
                                         </div>
                                         <div className="rounded-2xl border bg-background/70 p-4">
                                             <div className="text-xs font-bold uppercase tracking-[0.16em] text-muted-foreground">{t('orders.details.margin') || 'Margin'}</div>

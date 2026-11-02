@@ -1,8 +1,3 @@
-Surplus must not count outstanding
-
-Simplify QR code Post Service
-Cod and Delivery both and not separate
-
 PWA Lang install
 
 Save usage mode
@@ -13,10 +8,6 @@ Orders filter out returned sales total
 
 #
 Free item commerce operations
-Ad Expense
-Price of product
-Sales details profit
-Easy Coach Agent creation
 #
 
 offline data load for server-side only lists

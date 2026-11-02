@@ -62,7 +62,9 @@ import {
   useToast,
 } from '@/ui/components'
 import { calculateOrderTotalWithAdjustments, createOrderAdjustment } from '@/lib/orderAdjustments'
+import { hasOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import { buildOrderExchangeRatesSnapshot, getAppliedCurrencyConversion } from '@/lib/orderCurrency'
+import { assertValidOrderUnitQuantity, soldQuantityToInventoryQuantity } from '@/lib/productUoms'
 import { fetchEURToIQDRate, fetchTRYToIQDRate, fetchUSDToIQDRate } from '@/lib/exchangeRate'
 import { formatCurrency, formatNumericInput, generateId, sanitizeNumericInput } from '@/lib/utils'
 import { useDateRange } from '@/context/DateRangeContext'
@@ -76,10 +78,10 @@ type CommerceSection = 'social' | 'wholesale' | 'data' | 'coaches'
 type OrderChannel = 'social' | 'wholesale'
 type OrderSectionTab = 'recent' | 'newOrder'
 type DataRecordKind = Extract<CommerceOperationRecordType, 'ad_spend' | 'dm_funnel' | 'city_market' | 'competitor'>
-type OrderLineDraft = { id: string; product: Product | null; productQuery: string; quantity: string; price: number; costPrice: number; currency?: CurrencyCode; priceBookItemId?: string }
+type OrderLineDraft = { id: string; product: Product | null; productQuery: string; quantity: string; freeBonusQuantity: string; price: string; costPrice: string; currency?: CurrencyCode; priceBookItemId?: string }
 
 function createEmptyOrderLine(): OrderLineDraft {
-  return { id: generateId(), product: null, productQuery: '', quantity: '1', price: 0, costPrice: 0 }
+  return { id: generateId(), product: null, productQuery: '', quantity: '1', freeBonusQuantity: '', price: '', costPrice: '' }
 }
 
 const PLATFORM_OPTIONS = ['instagram', 'tiktok', 'whatsapp', 'messenger', 'coach', 'other'] as const
@@ -120,8 +122,21 @@ function parseAmount(value: string) {
   return Number.isFinite(amount) && amount >= 0 ? amount : null
 }
 
-function amountInput(value: string, integer = false) {
-  return formatNumericInput(sanitizeNumericInput(value, { allowDecimal: !integer, maxFractionDigits: integer ? 0 : 2 }))
+function amountInput(value: string, integer = false, maxFractionDigits = 2) {
+  return formatNumericInput(sanitizeNumericInput(value, { allowDecimal: !integer, maxFractionDigits: integer ? 0 : maxFractionDigits }))
+}
+
+function orderLineQuantity(value: string) {
+  return value.trim() ? Number(value.replace(/,/g, '')) : 0
+}
+
+function isValidOrderLineQuantity(value: string) {
+  try {
+    assertValidOrderUnitQuantity(orderLineQuantity(value), false)
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function fetchDeliveryFeeExchangeRates(orderCurrency: CurrencyCode): Promise<ExchangeRateSnapshot[]> {
@@ -186,8 +201,8 @@ function MetricCard({ title, value, icon: Icon, hint }: { title: string; value: 
   )
 }
 
-function RequiredLabel({ htmlFor, children }: { htmlFor?: string; children: ReactNode }) {
-  return <Label htmlFor={htmlFor}>{children} *</Label>
+function RequiredLabel({ htmlFor, children, className }: { htmlFor?: string; children: ReactNode; className?: string }) {
+  return <Label htmlFor={htmlFor} className={className}>{children} *</Label>
 }
 
 export function CommerceOperations() {
@@ -758,6 +773,8 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
 }) {
   const { toast } = useToast()
   const { exchangeData, eurRates, tryRates } = useExchangeRate()
+  const { hasCapability } = useWorkspace()
+  const canUseFreeBonus = hasCapability('orderFreeBonus')
   const [buyerName, setBuyerName] = useState('')
   const [buyerPhone, setBuyerPhone] = useState('')
   const [buyerPartner, setBuyerPartner] = useState<BusinessPartner | null>(null)
@@ -813,7 +830,9 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
     ? priceBookItems.find((item) => item.priceBookId === priceBookId && item.productId === product.id)
     : undefined
   const totalCurrency = lines.find((line) => line.product)?.currency
-  const lineSubtotal = lines.reduce((sum, line) => sum + (line.product ? (Number(line.quantity.replace(/,/g, '')) || 0) * line.price : 0), 0)
+  const lineSubtotal = lines.reduce((sum, line) => sum + (line.product
+    ? (Number(line.quantity.replace(/,/g, '')) || 0) * (parseAmount(line.price) ?? 0)
+    : 0), 0)
   const fee = parseAmount(deliveryFee) ?? 0
   const deliveryFeeInvalid = (deliveryFeeTouched || Boolean(city)) && parseAmount(deliveryFee) === null
   const discountAmount = parseAmount(discount) ?? 0
@@ -894,7 +913,15 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
   )
   const canSave = Boolean(
     available && !saving && workspaceId && seller.trim() && buyerName.trim() && buyerPhone.trim()
-    && storageId && lines.length && lines.every((line) => line.product && line.currency && Number(line.quantity.replace(/,/g, '')) > 0)
+    && storageId && lines.length && lines.every((line) => line.product && line.currency
+      && isValidOrderLineQuantity(line.quantity)
+      && (!canUseFreeBonus || isValidOrderLineQuantity(line.freeBonusQuantity))
+      && hasOrderLineInventoryQuantity({
+        quantity: orderLineQuantity(line.quantity),
+        freeBonusQuantity: canUseFreeBonus ? orderLineQuantity(line.freeBonusQuantity) : 0,
+      })
+      && parseAmount(line.price) !== null
+      && parseAmount(line.costPrice) !== null)
     && (city !== 'other' || otherCity.trim()) && !deliveryFeeInvalid && !discountInvalid && totalCurrency
     && (!agentId || (orderAgentEnabled && agentsLoaded && selectedAgentAvailable)),
   )
@@ -1003,8 +1030,9 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
       ...line,
       product,
       productQuery: product.name,
-      price: bookItem?.price ?? product.price,
-      costPrice: costPrice ?? 0,
+      freeBonusQuantity: '',
+      price: amountInput(String(bookItem?.price ?? product.price), false, 3),
+      costPrice: amountInput(String(costPrice ?? 0), false, 3),
       currency,
       priceBookItemId: bookItem?.id,
     } : line))
@@ -1016,8 +1044,9 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
       product: null,
       productQuery: '',
       quantity: '1',
-      price: 0,
-      costPrice: 0,
+      freeBonusQuantity: '',
+      price: '',
+      costPrice: '',
       currency: undefined,
       priceBookItemId: undefined,
     } : line))
@@ -1090,14 +1119,25 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
       ))
       const items: SalesOrderItem[] = lines.flatMap((line) => {
         if (!line.product || !line.currency) return []
-        const quantity = Number(line.quantity.replace(/,/g, ''))
+        const quantity = orderLineQuantity(line.quantity)
+        const freeBonusQuantity = canUseFreeBonus ? orderLineQuantity(line.freeBonusQuantity) : 0
+        const price = parseAmount(line.price)
+        const costPrice = parseAmount(line.costPrice)
+        if (price === null || costPrice === null) return []
+        assertValidOrderUnitQuantity(freeBonusQuantity, false)
+        const inventoryQuantity = soldQuantityToInventoryQuantity(quantity)
+        const freeBonusInventoryQuantity = soldQuantityToInventoryQuantity(freeBonusQuantity)
         return [{
           id: generateId(), productId: line.product.id, productName: line.product.name,
           productSku: line.product.sku || '', unit: line.product.unit || null, quantity,
-          lineTotal: Math.round(quantity * line.price * 100) / 100,
-          originalCurrency: line.currency, originalUnitPrice: line.price,
-          convertedUnitPrice: line.price, settlementCurrency: line.currency,
-          costPrice: line.costPrice, convertedCostPrice: line.costPrice,
+          unitFactor: 1,
+          ...(freeBonusQuantity > 0 ? { freeBonusQuantity } : {}),
+          inventoryQuantity,
+          freeBonusInventoryQuantity,
+          lineTotal: Math.round(quantity * price * 100) / 100,
+          originalCurrency: line.currency, originalUnitPrice: price,
+          convertedUnitPrice: price, settlementCurrency: line.currency,
+          costPrice, convertedCostPrice: costPrice,
           storageId, ...(priceBookId ? { priceBookId, priceBookItemId: line.priceBookItemId } : {}),
         }]
       })
@@ -1324,6 +1364,9 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
               <div className="space-y-3">
                 {lines.map((line, index) => {
                   const quantity = Number(line.quantity.replace(/,/g, '')) || 0
+                  const productName = line.product?.name ?? ''
+                  const freeBonusQuantity = canUseFreeBonus ? orderLineQuantity(line.freeBonusQuantity) : 0
+                  const hasInventoryQuantity = hasOrderLineInventoryQuantity({ quantity, freeBonusQuantity })
                   return (
                     <div key={line.id} className="space-y-3 rounded-lg border bg-muted/20 p-3">
                       <div className="flex items-center justify-between gap-2">
@@ -1332,7 +1375,7 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
                           <X className="h-4 w-4" />
                         </Button>
                       </div>
-                      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem]">
+                      <div className={`grid gap-3 ${canUseFreeBonus ? 'sm:grid-cols-[minmax(0,1fr)_17rem]' : 'sm:grid-cols-[minmax(0,1fr)_8rem]'}`}>
                         <div className="min-w-0 space-y-2">
                           <RequiredLabel>{t('commerceOperations.fields.product')}</RequiredLabel>
                           <div className="flex min-w-0">
@@ -1344,7 +1387,7 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
                             <ProductAutocompleteInput
                               value={line.productQuery}
                               onChange={(value) => setLines((current) => current.map((entry) => entry.id === line.id ? {
-                                ...entry, product: null, productQuery: value, quantity: '1', price: 0, costPrice: 0, currency: undefined, priceBookItemId: undefined,
+                                ...entry, product: null, productQuery: value, quantity: '1', freeBonusQuantity: '', price: '', costPrice: '', currency: undefined, priceBookItemId: undefined,
                               } : entry))}
                               onSelectProduct={(product) => selectProduct(line.id, product)}
                               hasSelection={Boolean(line.product)}
@@ -1373,16 +1416,72 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
                           </div>
                           {attempted && !line.product ? <p className="text-xs text-destructive">{t('commerceOperations.validation.productRequired')}</p> : null}
                         </div>
-                        <div className="space-y-2">
-                          <RequiredLabel htmlFor={`commerce-line-quantity-${line.id}`}>{t('commerceOperations.fields.quantity')}</RequiredLabel>
-                          <Input id={`commerce-line-quantity-${line.id}`} aria-label={t('commerceOperations.fields.quantity')} inputMode="numeric" value={line.quantity} placeholder="0" onChange={(event) => setLines((current) => current.map((entry) => entry.id === line.id ? { ...entry, quantity: amountInput(event.target.value, true) } : entry))} disabled={saving || !line.product} className="text-end" />
+                        <div className={`grid w-fit max-w-full gap-2 ${canUseFreeBonus ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                          <div className="w-32 max-w-full space-y-1.5 rounded-lg border border-green-500/40 bg-green-500/5 p-2 ring-1 ring-green-500/15">
+                            <RequiredLabel htmlFor={`commerce-line-quantity-${line.id}`} className="text-xs font-semibold text-green-700 dark:text-green-300">{t('commerceOperations.fields.paidQuantity')}</RequiredLabel>
+                            <Input id={`commerce-line-quantity-${line.id}`} aria-label={t('commerceOperations.fields.paidQuantity')} inputMode="numeric" value={line.quantity} placeholder="0" onChange={(event) => setLines((current) => current.map((entry) => entry.id === line.id ? { ...entry, quantity: amountInput(event.target.value, true) } : entry))} disabled={saving || !line.product} className="h-9 border-green-500/40 bg-background px-2 text-end focus-visible:ring-green-500/30" aria-invalid={Boolean(line.product && !hasInventoryQuantity)} />
+                            {line.product && !hasInventoryQuantity ? <p className="text-xs text-destructive">{t('orders.form.errors.invalidQuantity', { productName: line.product.name, defaultValue: `Enter a valid quantity for ${line.product.name}.` })}</p> : null}
+                          </div>
+                          {canUseFreeBonus ? (
+                            <div className="w-32 max-w-full space-y-1.5 rounded-lg border border-blue-500/40 bg-blue-500/5 p-2 ring-1 ring-blue-500/15">
+                              <div className="flex min-w-0 items-center justify-between gap-1">
+                                <Label htmlFor={`commerce-line-free-bonus-${line.id}`} className="min-w-0 truncate text-xs font-semibold text-blue-700 dark:text-blue-300">{t('orders.form.freeBonus', { defaultValue: 'Free Bonus' })}</Label>
+                              </div>
+                              <Input
+                                id={`commerce-line-free-bonus-${line.id}`}
+                                aria-label={t('orders.form.freeBonus', { defaultValue: 'Free Bonus' })}
+                                inputMode="numeric"
+                                value={line.freeBonusQuantity}
+                                placeholder="0"
+                                onChange={(event) => setLines((current) => current.map((entry) => entry.id === line.id ? { ...entry, freeBonusQuantity: amountInput(event.target.value, true) } : entry))}
+                                disabled={saving}
+                                className="h-9 border-blue-500/40 bg-background px-2 text-end focus-visible:ring-blue-500/30"
+                                aria-invalid={!isValidOrderLineQuantity(line.freeBonusQuantity)}
+                              />
+                              {!isValidOrderLineQuantity(line.freeBonusQuantity) ? <p className="text-xs text-destructive">{t('orders.form.errors.invalidFreeBonus', { productName, defaultValue: `Enter a valid free bonus for ${productName}.` })}</p> : null}
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                       {line.product && line.currency ? (
-                        <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-sm">
-                          <p className="min-w-0 truncate text-xs text-muted-foreground">{line.product.sku || t('commerceOperations.order.noSku')} · {amountLabel(line.price, line.currency, iqdPreference)} {t('commerceOperations.order.each')}</p>
-                          <span className="font-semibold">{amountLabel(line.price * quantity, line.currency, iqdPreference)}</span>
-                        </div>
+                        <>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div className="space-y-2">
+                              <RequiredLabel htmlFor={`commerce-line-price-${line.id}`}>{t('common.sellingPrice', { defaultValue: 'Selling Price' })} ({line.currency.toUpperCase()})</RequiredLabel>
+                              <Input
+                                id={`commerce-line-price-${line.id}`}
+                                aria-label={t('common.sellingPrice', { defaultValue: 'Selling Price' })}
+                                inputMode="decimal"
+                                value={line.price}
+                                placeholder="0"
+                                onChange={(event) => setLines((current) => current.map((entry) => entry.id === line.id ? { ...entry, price: amountInput(event.target.value, false, 3) } : entry))}
+                                disabled={saving}
+                                className="text-end"
+                                aria-invalid={parseAmount(line.price) === null}
+                              />
+                              {parseAmount(line.price) === null ? <p className="text-xs text-destructive">{t('commerceOperations.validation.amountRequired')}</p> : null}
+                            </div>
+                            <div className="space-y-2">
+                              <RequiredLabel htmlFor={`commerce-line-cost-${line.id}`}>{t('orders.form.costPrice', { defaultValue: 'Cost Price' })} ({line.currency.toUpperCase()})</RequiredLabel>
+                              <Input
+                                id={`commerce-line-cost-${line.id}`}
+                                aria-label={t('orders.form.costPrice', { defaultValue: 'Cost Price' })}
+                                inputMode="decimal"
+                                value={line.costPrice}
+                                placeholder="0"
+                                onChange={(event) => setLines((current) => current.map((entry) => entry.id === line.id ? { ...entry, costPrice: amountInput(event.target.value, false, 3) } : entry))}
+                                disabled={saving}
+                                className="text-end"
+                                aria-invalid={parseAmount(line.costPrice) === null}
+                              />
+                              {parseAmount(line.costPrice) === null ? <p className="text-xs text-destructive">{t('commerceOperations.validation.amountRequired')}</p> : null}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-sm">
+                            <p className="min-w-0 truncate text-xs text-muted-foreground">{line.product.sku || t('commerceOperations.order.noSku')} · {amountLabel(parseAmount(line.price) ?? 0, line.currency, iqdPreference)} {t('commerceOperations.order.each')}</p>
+                            <span className="font-semibold">{amountLabel((parseAmount(line.price) ?? 0) * quantity, line.currency, iqdPreference)}</span>
+                          </div>
+                        </>
                       ) : null}
                     </div>
                   )

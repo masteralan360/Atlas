@@ -249,6 +249,7 @@
       "priceBook": "Price book",
       "catalogPrices": "Use product prices",
       "quantity": "Quantity",
+      "paidQuantity": "Paid Quantity",
       "product": "Product",
       "currency": "Currency",
       "platform": "Platform",

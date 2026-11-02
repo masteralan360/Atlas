@@ -12,6 +12,9 @@ let pg: PGlite
 const migration = readFileSync(new URL('../../supabase/migrations/20261029221116_offline_stock_operations.sql', import.meta.url), 'utf8')
 const receiptPolicyMigration = readFileSync(new URL('../../supabase/migrations/20261030131040_optimize_offline_stock_receipt_policies.sql', import.meta.url), 'utf8')
 const auditLockMigration = readFileSync(new URL('../../supabase/migrations/20261030132510_fix_offline_stock_read_only_audit_locks.sql', import.meta.url), 'utf8')
+const compositeIdMigration = readFileSync(new URL('../../supabase/migrations/20261101200401_support_composite_inventory_ids_in_offline_stock.sql', import.meta.url), 'utf8')
+const typedIdMigration = readFileSync(new URL('../../supabase/migrations/20261102113622_preserve_text_ids_in_offline_stock_replay.sql', import.meta.url), 'utf8')
+let replayBeforeTypedIds: string
 
 function command(delta = -2) {
   return { version: 1, id: operation, workspaceId: workspace, actorId: actor, kind: 'product', sequence: 1, dependencies: [], effects: [{
@@ -34,6 +37,9 @@ describe('PostgreSQL offline stock transaction replay', () => {
       INSERT INTO public.workspaces VALUES('${workspace}');
       CREATE TABLE public.inventory(id uuid PRIMARY KEY,workspace_id uuid,product_id uuid,storage_id uuid,quantity numeric,version int,is_deleted boolean DEFAULT false);
       CREATE TABLE public.products(id uuid PRIMARY KEY,workspace_id uuid,name text,version int,updated_at timestamptz);
+      CREATE TABLE public.product_storage_assignments(id text PRIMARY KEY,workspace_id uuid,product_id uuid REFERENCES public.products(id),storage_id uuid,
+        version int DEFAULT 1,is_deleted boolean DEFAULT false,
+        UNIQUE(workspace_id,product_id,storage_id),CHECK(id=product_id::text||':'||storage_id::text));
       CREATE TABLE public.stock_batches(id uuid PRIMARY KEY,workspace_id uuid,product_id uuid,storage_id uuid,quantity numeric,version int,is_deleted boolean DEFAULT false);
       CREATE TABLE public.inventory_transactions(id uuid PRIMARY KEY,workspace_id uuid,product_id uuid,storage_id uuid,transaction_type text,quantity_delta numeric);
       CREATE TABLE public.inventory_transfer_batches(id uuid PRIMARY KEY,workspace_id uuid);
@@ -111,10 +117,13 @@ describe('PostgreSQL offline stock transaction replay', () => {
     await pg.exec(migration)
     await pg.exec(receiptPolicyMigration)
     await pg.exec(auditLockMigration)
+    await pg.exec(compositeIdMigration)
+    replayBeforeTypedIds = (await pg.query<{ definition: string }>("SELECT pg_get_functiondef('public.apply_offline_stock_operation(jsonb)'::regprocedure) definition")).rows[0].definition
+    await pg.exec(typedIdMigration)
   }, 60_000)
   afterAll(async () => { await pg?.close() })
   beforeEach(async () => {
-    await pg.exec(`RESET ROLE; TRUNCATE public.offline_stock_operation_receipts,public.inventory,public.stock_batches,public.products,crm.sales_orders,crm.purchase_orders,public.loans,public.sales,public.sale_returns,public.sale_return_items,public.payment_transactions,public.inventory_transactions,public.inventory_transfer_batches;
+    await pg.exec(`RESET ROLE; TRUNCATE public.offline_stock_operation_receipts,public.inventory,public.stock_batches,public.products,public.product_storage_assignments,crm.sales_orders,crm.purchase_orders,public.loans,public.sales,public.sale_returns,public.sale_return_items,public.payment_transactions,public.inventory_transactions,public.inventory_transfer_batches;
       INSERT INTO public.inventory VALUES('${inventory}','${workspace}','${product}','${storage}',7,3,false);`)
   })
   it('applies a relative movement to current authoritative stock instead of a stale offline balance', async () => {
@@ -126,6 +135,64 @@ describe('PostgreSQL offline stock transaction replay', () => {
     expect(await apply(command())).toEqual(first)
     expect((await pg.query('SELECT quantity::float8 quantity FROM public.inventory')).rows).toEqual([{ quantity: 5 }])
     expect((await pg.query('SELECT count(*)::int count FROM public.offline_stock_operation_receipts')).rows).toEqual([{ count: 1 }])
+  })
+  it('replays a legacy composite inventory key against the authoritative position exactly once', async () => {
+    const value = command()
+    const composite = `${product}:${storage}`
+    value.effects[0].id = composite
+    value.effects[0].before.id = composite
+    value.effects[0].after.id = composite
+    const first = await apply(value)
+    expect(first).toMatchObject({ aliases: [{ table: 'inventory', from: composite, to: inventory }] })
+    expect(await apply(value)).toEqual(first)
+    expect((await pg.query('SELECT id,quantity::float8 quantity FROM public.inventory')).rows).toEqual([{ id: inventory, quantity: 5 }])
+  })
+  it('rejects a composite inventory key belonging to a different position', async () => {
+    const value = command()
+    const composite = `${actor}:${storage}`
+    value.effects[0].id = composite
+    value.effects[0].before.id = composite
+    value.effects[0].after.id = composite
+    await expect(apply(value)).rejects.toThrow('offline_stock_inventory_identity_invalid')
+    expect((await pg.query('SELECT quantity::float8 quantity FROM public.inventory')).rows).toEqual([{ quantity: 7 }])
+    expect((await pg.query('SELECT count(*)::int count FROM public.offline_stock_operation_receipts')).rows).toEqual([{ count: 0 }])
+  })
+  function productWithStorageOperation() {
+    return { ...command(), effects: [
+      { table: 'products', id: product, before: null, after: { id: product, workspace_id: workspace, name: 'Created offline', version: 1 } },
+      { table: 'product_storage_assignments', id: `${product}:${storage}`, before: null,
+        after: { id: `${product}:${storage}`, workspace_id: workspace, product_id: product, storage_id: storage, version: 1, is_deleted: false } },
+      ...command().effects,
+    ] }
+  }
+  it('reproduces text assignment ID failures even with the earlier inventory repair installed', async () => {
+    await pg.exec(replayBeforeTypedIds)
+    try {
+      await expect(apply(productWithStorageOperation())).rejects.toThrow('invalid input syntax for type uuid')
+      expect((await pg.query('SELECT count(*)::int count FROM public.products')).rows).toEqual([{ count: 0 }])
+    } finally { await pg.exec(typedIdMigration) }
+  })
+  it('creates the product, text-ID storage membership and stock movement together exactly once', async () => {
+    const value = productWithStorageOperation()
+    const first = await apply(value)
+    expect(await apply(value)).toEqual(first)
+    expect(first.rows).toContainEqual({ table: 'product_storage_assignments', row: expect.objectContaining({ id: `${product}:${storage}` }) })
+    expect((await pg.query('SELECT id FROM public.products')).rows).toEqual([{ id: product }])
+    expect((await pg.query('SELECT id FROM public.product_storage_assignments')).rows).toEqual([{ id: `${product}:${storage}` }])
+    expect((await pg.query('SELECT quantity::float8 quantity FROM public.inventory')).rows).toEqual([{ quantity: 5 }])
+    expect((await pg.query('SELECT count(*)::int count FROM public.offline_stock_operation_receipts')).rows).toEqual([{ count: 1 }])
+  })
+  it('updates an existing text-ID storage membership without replacing its identity', async () => {
+    await pg.exec(`INSERT INTO public.products(id,workspace_id,name,version) VALUES('${product}','${workspace}','Existing product',1);
+      INSERT INTO public.product_storage_assignments VALUES('${product}:${storage}','${workspace}','${product}','${storage}',1,false)`)
+    const before = { id: `${product}:${storage}`, workspace_id: workspace, product_id: product, storage_id: storage, version: 1, is_deleted: false }
+    const value = { ...command(), effects: [{ table: 'product_storage_assignments', id: before.id, before, after: { ...before, version: 2, is_deleted: true } }] }
+    expect((await apply(value)).rows).toContainEqual({ table: 'product_storage_assignments', row: { ...before, version: 2, is_deleted: true } })
+  })
+  it('retains workspace checks for text-ID effects', async () => {
+    const value = productWithStorageOperation()
+    value.effects[1].after = { ...value.effects[1].after, workspace_id: actor } as typeof value.effects[1]['after']
+    await expect(apply(value)).rejects.toThrow('offline_stock_workspace_mismatch')
   })
   it('replays a stock adjustment with a read-only audit ledger exactly once', async () => {
     const value = { ...command(), kind: 'adjustment', effects: [...command().effects, {

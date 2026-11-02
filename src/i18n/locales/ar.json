@@ -249,6 +249,7 @@
       "priceBook": "قائمة الأسعار",
       "catalogPrices": "استخدام أسعار المنتجات",
       "quantity": "الكمية",
+      "paidQuantity": "الكمية المدفوعة",
       "product": "المنتج",
       "currency": "العملة",
       "platform": "المنصة",
