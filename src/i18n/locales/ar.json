@@ -11182,6 +11182,7 @@
     "shipmentQr": "رمز الشحنة",
     "printQr": "طباعة ملصق QR",
     "shipmentLabel": "ملصق الشحنة",
+    "emptyShipmentLabel": "ملصق شحنة فارغ",
     "labelSize": "ملصق شحنة بقياس 100 × 100 مم",
     "smallShipmentLabel": "ملصق شحنة صغير",
     "smallShipmentLabelSize": "ملصق مدمج بقياس 40 × 58 مم مع رمز QR أكبر",

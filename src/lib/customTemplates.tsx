@@ -97,7 +97,8 @@ import type { ProductPrintImageUrls } from '@/ui/components/print/ProductPrintIm
 import { LabelPrintTemplate } from '@/ui/components/LabelPrintTemplate'
 import type { BarcodeLabelData } from '@/lib/barcodeLabel'
 import { LABEL_PRINT_TEMPLATE_KEY, type LabelPrintPageSize } from '@/lib/labelPrint'
-import { PostalQrBatchQrLabel, PostalQrBatchShipmentLabel, ShipmentLabel, SmallShipmentLabel } from '@/postal/ShipmentLabel'
+import { EmptyShipmentLabel, EmptyShipmentQrLabel } from '@/postal/EmptyShipmentLabel'
+import { ShipmentLabel, SmallShipmentLabel } from '@/postal/ShipmentLabel'
 import type { PostalShipment } from '@/postal/domain'
 import { ModernA4InvoiceTemplate, MODERN_A4_MOVABLE_COMPONENT_KEYS } from '@/ui/components/ModernA4InvoiceTemplate'
 import {
@@ -137,6 +138,8 @@ export const TRAVEL_BOOKING_TEMPLATE_KEY = 'travelTransportation.Booking'
 export const INVENTORY_TRANSFER_BATCH_TEMPLATE_KEY = 'inventoryTransfer.Batch'
 export const POSTAL_SHIPMENT_LABEL_TEMPLATE_KEY = 'postal.ShipmentLabel'
 export const POSTAL_SMALL_SHIPMENT_LABEL_TEMPLATE_KEY = 'postal.SmallShipmentLabel'
+export const POSTAL_EMPTY_SHIPMENT_LABEL_TEMPLATE_KEY = 'postal.EmptyShipmentLabel'
+export const POSTAL_EMPTY_SHIPMENT_LABEL_NATIVE_KEY = 'postal-empty-shipment-label'
 export const POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY = 'postal.SmallShipmentQrLabel'
 export const PARTNER_DETAILS_TEMPLATE_FIELD_KEYS = {
     showWhoOwesWhom: 'showWhoOwesWhom',
@@ -448,6 +451,17 @@ export const CUSTOM_TEMPLATE_TARGETS: CustomTemplateTarget[] = [
         page: { widthMm: 40, heightMm: 58 }
     },
     {
+        moduleTypeKey: POSTAL_EMPTY_SHIPMENT_LABEL_TEMPLATE_KEY,
+        workspaceModuleKey: 'postal_service',
+        get moduleLabel() { return i18n.t('postal.title', { defaultValue: 'Post Service' }) },
+        get typeLabel() { return i18n.t('postal.emptyShipmentLabel', { defaultValue: 'Empty Shipment Label' }) },
+        get description() { return i18n.t('postal.labelSize', { defaultValue: '100 × 100 mm shipment label' }) },
+        nativeTemplateKey: POSTAL_EMPTY_SHIPMENT_LABEL_NATIVE_KEY,
+        nativeTemplateAvailable: true,
+        printFormat: 'label',
+        page: { widthMm: 100, heightMm: 100 }
+    },
+    {
         moduleTypeKey: POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY,
         workspaceModuleKey: 'postal_service',
         get moduleLabel() { return i18n.t('postal.title', { defaultValue: 'Post Service' }) },
@@ -475,7 +489,8 @@ export function getCustomTemplateDisplayName(moduleTypeKey: string) {
         if (moduleTypeKey === LABEL_PRINT_TEMPLATE_KEY) {
             return target.typeLabel
         }
-        if (moduleTypeKey === POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY) {
+        if (moduleTypeKey === POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY
+            || moduleTypeKey === POSTAL_EMPTY_SHIPMENT_LABEL_TEMPLATE_KEY) {
             return target.typeLabel
         }
         if (moduleTypeKey === ORDER_ATLAS_STANDARD_TEMPLATE_KEY
@@ -2526,6 +2541,7 @@ export function createCustomTemplatePreview(
 ): TemplatePreview {
     if (target.moduleTypeKey === POSTAL_SHIPMENT_LABEL_TEMPLATE_KEY
         || target.moduleTypeKey === POSTAL_SMALL_SHIPMENT_LABEL_TEMPLATE_KEY
+        || target.moduleTypeKey === POSTAL_EMPTY_SHIPMENT_LABEL_TEMPLATE_KEY
         || target.moduleTypeKey === POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY) {
         const configuredLanguage = options.printLang
             || (options.features?.print_lang && options.features.print_lang !== 'auto'
@@ -2537,10 +2553,11 @@ export function createCustomTemplatePreview(
                 ? 'ku'
                 : 'en'
         const isSmallLabel = target.moduleTypeKey === POSTAL_SMALL_SHIPMENT_LABEL_TEMPLATE_KEY
+        const isEmptyShipmentLabel = target.moduleTypeKey === POSTAL_EMPTY_SHIPMENT_LABEL_TEMPLATE_KEY
         const isQrOnlyLabel = target.moduleTypeKey === POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY
 
         return {
-            fields: isSmallLabel || isQrOnlyLabel ? [] : [{
+            fields: isSmallLabel || isEmptyShipmentLabel || isQrOnlyLabel ? [] : [{
                 key: 'note',
                 label: i18n.t('postal.notes', { defaultValue: 'Notes' }),
                 value: '',
@@ -2551,23 +2568,20 @@ export function createCustomTemplatePreview(
             fixedPrintLang,
             measurementRoundingToleranceMm: 0.5,
             createElement: (fields, effectiveId) => {
-                if (options.postalQrBatchLabel && options.postalQrId) {
-                    if (isQrOnlyLabel) {
-                        return <PostalQrBatchQrLabel qrId={options.postalQrId || effectiveId || SAMPLE_POSTAL_SHIPMENT.qr_id} />
-                    }
-                    return (
-                        <PostalQrBatchShipmentLabel
-                            qrId={options.postalQrId || effectiveId || ''}
-                            workspaceName={options.workspaceName || 'Atlas'}
-                            small={isSmallLabel}
-                        />
-                    )
-                }
                 const shipment = options.postalShipment || SAMPLE_POSTAL_SHIPMENT
                 const workspaceName = options.workspaceName || 'Atlas'
 
+                if (isEmptyShipmentLabel) {
+                    return (
+                        <EmptyShipmentLabel
+                            qrId={options.postalQrId || effectiveId || shipment.qr_id}
+                            workspaceName={workspaceName}
+                        />
+                    )
+                }
+
                 if (isQrOnlyLabel) {
-                    return <PostalQrBatchQrLabel qrId={options.postalQrId || shipment.qr_id} />
+                    return <EmptyShipmentQrLabel qrId={options.postalQrId || effectiveId || shipment.qr_id} />
                 }
 
                 return isSmallLabel ? (

@@ -11509,6 +11509,7 @@
     "shipmentQr": "Shipment QR",
     "printQr": "Print QR Label",
     "shipmentLabel": "Shipment Label",
+    "emptyShipmentLabel": "Empty Shipment Label",
     "labelSize": "100 × 100 mm shipment label",
     "smallShipmentLabel": "Small Shipment Label",
     "smallShipmentLabelSize": "40 × 58 mm compact label with a larger QR code",

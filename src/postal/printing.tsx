@@ -5,6 +5,8 @@ import {
   createCustomTemplatePreview,
   getStoredCustomTemplateLabel,
   getCustomTemplateTarget,
+  POSTAL_EMPTY_SHIPMENT_LABEL_TEMPLATE_KEY,
+  POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY,
   readCustomTemplateLayout,
   type StoredCustomTemplateRow,
 } from '@/lib/customTemplates'
@@ -12,7 +14,8 @@ import { setPrintPreviewEditorSource } from '@/lib/printPreviewEditorStore'
 import type { CustomTemplateLayout, TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { generateTemplatePdf } from '@/services/pdfGenerator'
 import { printPdfBlob } from '@/services/pdfPrintService'
-import { PostalQrBatchQrLabel, PostalQrBatchShipmentLabel, ShipmentLabel, SmallShipmentLabel } from './ShipmentLabel'
+import { EmptyShipmentLabel, EmptyShipmentQrLabel } from './EmptyShipmentLabel'
+import { ShipmentLabel, SmallShipmentLabel } from './ShipmentLabel'
 import { formatPostalShipmentId, type PostalShipment } from './domain'
 
 export type PostalShipmentLabelSize = 'standard' | 'small'
@@ -20,7 +23,7 @@ export type PostalQrBatchLabelSize = 'standard' | 'small-qr'
 
 function replaceBatchQrId(node: ReactNode, qrId: string): ReactNode {
   if (!isValidElement<{ children?: ReactNode; qrId?: string }>(node)) return node
-  if (node.type === PostalQrBatchShipmentLabel || node.type === PostalQrBatchQrLabel) {
+  if (node.type === EmptyShipmentLabel || node.type === EmptyShipmentQrLabel) {
     return cloneElement(node as ReactElement<{ qrId: string }>, { qrId })
   }
   if (node.props.children === undefined) return node
@@ -40,10 +43,10 @@ export function preparePostalQrBatchLabel(
   const pageSizeMm = isQrOnlyLabel
     ? { widthMm: 40, heightMm: 58 }
     : { widthMm: 100, heightMm: 100 }
-  const title = t(isQrOnlyLabel ? 'postal.smallShipmentQrLabel' : 'postal.shipmentLabel')
+  const title = t(isQrOnlyLabel ? 'postal.smallShipmentQrLabel' : 'postal.emptyShipmentLabel')
   const render = (qrId: string) => isQrOnlyLabel
-    ? <PostalQrBatchQrLabel qrId={qrId} />
-    : <PostalQrBatchShipmentLabel qrId={qrId} workspaceName={workspaceName} />
+    ? <EmptyShipmentQrLabel qrId={qrId} />
+    : <EmptyShipmentLabel qrId={qrId} workspaceName={workspaceName} />
   const templatePreview: TemplatePreview = {
     page: pageSizeMm,
     bulkPageIds: qrIds,
@@ -79,7 +82,12 @@ export function preparePostalQrBatchCustomLabel(
   if (!qrIds.length) throw new Error('The QR batch has no printable labels.')
   const target = getCustomTemplateTarget(template.module_type_key)
   const layout = readCustomTemplateLayout(template)
-  if (!target || target.printFormat !== 'label' || !target.page || !layout) {
+  if (!target
+    || (target.moduleTypeKey !== POSTAL_EMPTY_SHIPMENT_LABEL_TEMPLATE_KEY
+      && target.moduleTypeKey !== POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY)
+    || target.printFormat !== 'label'
+    || !target.page
+    || !layout) {
     throw new Error('The saved shipment label template is unavailable.')
   }
 

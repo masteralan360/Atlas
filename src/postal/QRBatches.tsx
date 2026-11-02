@@ -24,7 +24,13 @@ import { ShipmentQr } from './ShipmentLabel'
 import { PostalError, PostalLoading } from './shared'
 import { PrintSelectionModal, type PrintSelectionTemplateOption } from '@/ui/components/PrintSelectionModal'
 import { loadPostalQrBatchLabelTemplates } from '@/lib/postalShipmentLabelTemplates'
-import { getCustomTemplateTarget, getStoredCustomTemplateLabel, readCustomTemplateLayout, type StoredCustomTemplateRow } from '@/lib/customTemplates'
+import {
+  getCustomTemplateTarget,
+  getStoredCustomTemplateLabel,
+  POSTAL_EMPTY_SHIPMENT_LABEL_NATIVE_KEY,
+  readCustomTemplateLayout,
+  type StoredCustomTemplateRow,
+} from '@/lib/customTemplates'
 import { preparePostalQrBatchCustomLabel, preparePostalQrBatchLabel, type PostalQrBatchLabelSize } from './printing'
 import { useWorkspacePermissions } from '@/permissions'
 import { useWorkspace } from '@/workspace'
@@ -315,9 +321,9 @@ export function QRBatchDetail({ scope, batchId }: { scope: PostalScope; batchId:
       nativeOptions={[
         {
           format: 'label',
-          label: t('postal.shipmentLabel'),
+          label: t('postal.emptyShipmentLabel'),
           description: t('postal.labelSize'),
-          nativeTemplateKey: 'postal-standard-shipment-label',
+          nativeTemplateKey: POSTAL_EMPTY_SHIPMENT_LABEL_NATIVE_KEY,
         },
         {
           format: 'label',

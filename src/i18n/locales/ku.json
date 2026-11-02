@@ -11223,6 +11223,7 @@
     "shipmentQr": "QRی بار",
     "printQr": "چاپکردنی لیبڵی QR",
     "shipmentLabel": "لیبڵی بار",
+    "emptyShipmentLabel": "لیبڵی بەتاڵی بار",
     "labelSize": "لیبڵی بار بە قەبارەی ١٠٠ × ١٠٠ ملم",
     "smallShipmentLabel": "لیبڵی بچوکی بار",
     "smallShipmentLabelSize": "لیبڵێکی بچووک بە قەبارەی ٤٠ × ٥٨ ملم و QRی گەورەتر",
