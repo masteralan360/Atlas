@@ -7,7 +7,7 @@ import { getLocalizedOrderError } from '@/lib/orderErrors'
 import { isOrderArchiveEligible } from '@/lib/orderArchiving'
 import { ORDER_STATUS_ADVANCE_HOLD_DURATION_MS } from '@/lib/pressAndHold'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
-import { Link, useLocation } from 'wouter'
+import { useLocation } from 'wouter'
 
 import { useAuth } from '@/auth'
 import { useProfileData } from '@/hooks/useProfileData'
@@ -280,6 +280,14 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
     const invoiceViewOwnScope = useViewOwnRecordScope('invoice_history.view_own')
     const { features, workspaceName, isLocalMode, hasFeature } = useWorkspace()
     const [, navigate] = useLocation()
+    const hash = window.location.hash
+    const queryIndex = hash.indexOf('?')
+    const returnParams = new URLSearchParams(queryIndex >= 0 ? hash.slice(queryIndex + 1) : '')
+    const returnSearch = returnParams.get('ordersReturnSearch')
+    const returnTab = returnParams.get('ordersReturnTab') === 'purchase' ? 'purchase' : 'sales'
+    const ordersReturnPath = returnSearch !== null && returnSearch !== ''
+        ? `/orders/${returnTab}?${new URLSearchParams({ ordersReturnSearch: returnSearch }).toString()}`
+        : '/orders'
     const { toast } = useToast()
     const isOnline = useNetworkStatus()
     const [lookupRetryVersion, setLookupRetryVersion] = useState(0)
@@ -1048,7 +1056,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             <RotateCcw className="mr-2 h-4 w-4" />
                             {t('orders.details.retry')}
                         </Button>
-                        <Button variant="outline" onClick={() => navigate('/orders')}>
+                        <Button variant="outline" onClick={() => navigate(ordersReturnPath)}>
                             <ArrowLeft className="mr-2 h-4 w-4" />
                             {t('nav.orders') || 'Orders'}
                         </Button>
@@ -1065,7 +1073,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                     <div className="text-lg font-semibold">{t('orders.details.notFound') || 'Order not found'}</div>
                     <div className="text-sm text-muted-foreground">{t('orders.details.notFoundDescription') || 'The order may have been deleted or moved out of this workspace.'}</div>
                     <div>
-                        <Button variant="outline" onClick={() => navigate('/orders')}>
+                        <Button variant="outline" onClick={() => navigate(ordersReturnPath)}>
                             <ArrowLeft className="mr-2 h-4 w-4" />
                             {t('nav.orders') || 'Orders'}
                         </Button>
@@ -1240,7 +1248,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
             else await deletePurchaseOrder(order.id)
             toast({ title: t('orders.details.messages.deleteSuccess') || 'Order deleted successfully.' })
             setDeleteOpen(false)
-            navigate('/orders')
+            navigate(ordersReturnPath)
         } catch (error: any) {
             toast({ title: t('orders.details.messages.deleteError') || 'Error', description: error?.message || 'Failed to delete order.', variant: 'destructive' })
         } finally {
@@ -1508,10 +1516,15 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
             {isSales && <StockDemandNotice workspaceId={workspaceId} guard={reservationGuard} />}
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Link href="/orders" className="inline-flex items-center gap-1 hover:text-foreground">
-                        <ArrowLeft className="h-4 w-4" />
+                    <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 gap-2 rounded-xl border-primary/30 bg-primary/5 px-3 font-semibold text-foreground shadow-sm hover:bg-primary/10"
+                        onClick={() => navigate(ordersReturnPath)}
+                    >
+                        <ArrowLeft className="h-4 w-4 text-primary" />
                         {t('nav.orders') || 'Orders'}
-                    </Link>
+                    </Button>
                     <span>/</span>
                     <span className="inline-flex items-center gap-1 text-foreground">
                         <span className="font-semibold">{order.orderNumber}</span>

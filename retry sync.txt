@@ -2,13 +2,7 @@ PWA Lang install
 
 Save usage mode
 
-Back Save Orders
-
 Orders filter out returned sales total
-
-#
-Free item commerce operations
-#
 
 offline data load for server-side only lists
 

@@ -409,8 +409,20 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     } : {}, [previousDateRange])
     const [activeTab, setActiveTab] = useState<OrderTab>(initialTab)
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(() => (localStorage.getItem('orders_view_mode') as 'table' | 'grid') || 'table')
-    const [search, setSearch] = useState('')
+    const [search, setSearch] = useState(() => {
+        const hashQuery = window.location.hash.split('?')[1] ?? ''
+        return new URLSearchParams(hashQuery).get('ordersReturnSearch') ?? ''
+    })
     const deferredSearch = useDeferredValue(search)
+    const openOrderDetails = (orderId: string) => {
+        const path = `/orders/${orderId}`
+        if (search === '') {
+            navigate(path)
+            return
+        }
+        const returnParams = new URLSearchParams({ ordersReturnSearch: search, ordersReturnTab: activeTab })
+        navigate(`${path}?${returnParams.toString()}`)
+    }
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
     const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all')
     const [ecommerceFilter, setEcommerceFilter] = useState<EcommerceFilter>('all')
@@ -570,6 +582,17 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     useEffect(() => {
         localStorage.setItem('orders_view_mode', viewMode)
     }, [viewMode])
+
+    useEffect(() => {
+        const hash = window.location.hash
+        const queryIndex = hash.indexOf('?')
+        if (queryIndex < 0 || !new URLSearchParams(hash.slice(queryIndex + 1)).has('ordersReturnSearch')) return
+        window.history.replaceState(
+            window.history.state,
+            '',
+            `${window.location.pathname}${window.location.search}${hash.slice(0, queryIndex)}`
+        )
+    }, [])
 
     useEffect(() => {
         localStorage.setItem(ORDERS_PAGE_SIZE_STORAGE_KEY, String(pagination.pageSize))
@@ -1732,7 +1755,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                     </TableCell>
                                     <TableCell className="text-end">
                                         <div className="flex flex-wrap justify-end gap-2">
-                                            <Button variant="outline" size="sm" allowViewer={true} onClick={() => navigate(`/orders/${row.id}`)}>
+                                            <Button variant="outline" size="sm" allowViewer={true} onClick={() => openOrderDetails(row.id)}>
                                                 <Eye className="me-1 h-3.5 w-3.5" />
                                                 {t('common.view') || 'View'}
                                             </Button>
@@ -1911,7 +1934,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             </div>
 
                             <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
-                                <Button variant="outline" size="sm" allowViewer={true} className="flex-1 h-9 rounded-xl font-bold gap-2 text-xs" onClick={() => navigate(`/orders/${row.id}`)}>
+                                <Button variant="outline" size="sm" allowViewer={true} className="flex-1 h-9 rounded-xl font-bold gap-2 text-xs" onClick={() => openOrderDetails(row.id)}>
                                     <Eye className="w-3.5 h-3.5" />
                                     {t('common.view') || 'View'}
                                 </Button>
@@ -3085,7 +3108,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                         className="shrink-0 gap-2"
                                         onClick={() => {
                                             setArchivesOpen(false)
-                                            navigate(`/orders/${order.id}`)
+                                            openOrderDetails(order.id)
                                         }}
                                     >
                                         <Eye className="h-4 w-4" />
