@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Loader2, AlertCircle, MapPin, Check } from 'lucide-react'
+import { Loader2, AlertCircle, MapPin, Check, Star } from 'lucide-react'
 import { Button, Input } from '@/ui/components'
 import {
   SmallDialog,
@@ -293,7 +293,15 @@ export function BranchPicker({
         onClick={() => setOpen(true)}
       >
         <MapPin className="me-2 h-4 w-4" />
-        {value?.name ?? t('postal.select')}
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="truncate">{value?.name ?? t('postal.select')}</span>
+          {value?.is_primary && (
+            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
+              <Star className="h-3 w-3" />
+              {t('postal.primary')}
+            </span>
+          )}
+        </span>
       </Button>
       <SmallDialog open={open} onOpenChange={setOpen}>
         <SmallDialogContent layout="structured">
@@ -331,7 +339,15 @@ export function BranchPicker({
                       setOpen(false)
                     }}
                   >
-                    {branch.name}
+                    <span className="flex items-center gap-2">
+                      <span>{branch.name}</span>
+                      {branch.is_primary && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
+                          <Star className="h-3 w-3" />
+                          {t('postal.primary')}
+                        </span>
+                      )}
+                    </span>
                     {!branch.active && ` (${t('postal.inactive')})`}
                   </Button>
                 ))}

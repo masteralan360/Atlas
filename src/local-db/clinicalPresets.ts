@@ -49,11 +49,14 @@ async function ensureBeauty3ProcedureUnused(preset: ClinicalPreset, workspaceId:
   let localAppointments: number
   try {
     const matchingAppointments = db.beauty3_appointments
-      .where('[workspaceId+procedureType]')
-      .equals([workspaceId, preset.name])
+      .where('workspaceId')
+      .equals(workspaceId)
     localAppointments = await matchingAppointments
       .filter((appointment) => !appointment.isDeleted && (
         !shouldUseCloudBusinessData(workspaceId) || appointment.syncStatus !== 'synced'
+      ) && (
+        appointment.procedureType === preset.name
+        || appointment.procedureTypes?.includes(preset.name) === true
       ))
       .count()
   } catch {
@@ -65,16 +68,31 @@ async function ensureBeauty3ProcedureUnused(preset: ClinicalPreset, workspaceId:
   if (!isOnline()) throw new Beauty3ProcedureUsageCheckError()
 
   try {
-    const { count, error } = await runSupabaseAction('beauty3Appointments.checkProcedureUsage', () => (
-      (getSupabaseClientForTable(BEAUTY3_APPOINTMENTS_TABLE) as any)
-        .from(BEAUTY3_APPOINTMENTS_TABLE)
-        .select('id', { count: 'exact', head: true })
-        .eq('workspace_id', workspaceId)
-        .eq('procedure_type', preset.name)
-        .eq('is_deleted', false)
-    ))
-    if (error) throw error
-    if (Number(count ?? 0) > 0) throw new Beauty3ProcedureInUseError()
+    const supabaseClient = getSupabaseClientForTable(BEAUTY3_APPOINTMENTS_TABLE) as any
+    const [primaryProcedureResult, procedureTypesResult] = await Promise.all([
+      runSupabaseAction('beauty3Appointments.checkPrimaryProcedureUsage', () => (
+        supabaseClient
+          .from(BEAUTY3_APPOINTMENTS_TABLE)
+          .select('id', { count: 'exact', head: true })
+          .eq('workspace_id', workspaceId)
+          .eq('procedure_type', preset.name)
+          .eq('is_deleted', false)
+      )),
+      runSupabaseAction('beauty3Appointments.checkProcedureTypesUsage', () => (
+        supabaseClient
+          .from(BEAUTY3_APPOINTMENTS_TABLE)
+          .select('id', { count: 'exact', head: true })
+          .eq('workspace_id', workspaceId)
+          .contains('procedure_types', [preset.name])
+          .eq('is_deleted', false)
+      )),
+    ])
+    if (primaryProcedureResult.error) throw primaryProcedureResult.error
+    if (procedureTypesResult.error) throw procedureTypesResult.error
+    if (
+      Number(primaryProcedureResult.count ?? 0) > 0
+      || Number(procedureTypesResult.count ?? 0) > 0
+    ) throw new Beauty3ProcedureInUseError()
   } catch (error) {
     if (error instanceof Beauty3ProcedureInUseError) throw error
     throw new Beauty3ProcedureUsageCheckError()

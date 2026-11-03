@@ -234,6 +234,18 @@ export type Beauty3AppointmentDraft = Omit<
   keyof BaseEntity | 'createdBy'
 >
 
+export function getBeauty3AppointmentProcedureTypes(
+  appointment: Pick<Beauty3Appointment, 'procedureType' | 'procedureTypes'>,
+): string[] {
+  const procedureTypes = Array.isArray(appointment.procedureTypes)
+    ? appointment.procedureTypes.filter((value) => (
+      typeof value === 'string' && value.trim().length > 0
+    ))
+    : []
+  if (procedureTypes.length > 0) return procedureTypes
+  return appointment.procedureType ? [appointment.procedureType] : []
+}
+
 const EMPTY_PAGE: Beauty3AppointmentPage = { items: [], totalCount: 0 }
 
 function isLocalSource(workspaceId: string) {
@@ -267,6 +279,20 @@ function normalizeRemoteAppointment(raw: Record<string, unknown>): Beauty3Appoin
   }
 
   const updatedAt = typeof row.updatedAt === 'string' ? row.updatedAt : new Date().toISOString()
+  const procedureType = typeof row.procedureType === 'string' && row.procedureType.trim()
+    ? row.procedureType
+    : null
+  const remoteProcedureTypes = Array.isArray(row.procedureTypes)
+    ? row.procedureTypes.filter((value): value is string => (
+      typeof value === 'string' && value.trim().length > 0
+    ))
+    : []
+  const procedureTypes = remoteProcedureTypes.length > 0
+    ? remoteProcedureTypes
+    : procedureType
+      ? [procedureType]
+      : []
+
   return {
     id: row.id,
     workspaceId: row.workspaceId,
@@ -275,9 +301,8 @@ function normalizeRemoteAppointment(raw: Record<string, unknown>): Beauty3Appoin
     maritalStatus: maritalStatus as Beauty3MaritalStatus,
     address: row.address,
     phoneNumber: row.phoneNumber,
-    procedureType: typeof row.procedureType === 'string' && row.procedureType.trim()
-      ? row.procedureType
-      : null,
+    procedureTypes,
+    procedureType: procedureType ?? procedureTypes[0] ?? null,
     procedureTypeOther: typeof row.procedureTypeOther === 'string' && row.procedureTypeOther.trim()
       ? row.procedureTypeOther
       : null,
@@ -304,6 +329,7 @@ function matchesSearch(appointment: Beauty3Appointment, search: string) {
     appointment.address,
     appointment.phoneNumber,
     appointment.procedureType ?? '',
+    (appointment.procedureTypes ?? []).join(' '),
     appointment.procedureTypeOther ?? '',
   ].some((value) => value.toLocaleLowerCase().includes(normalized))
 }
@@ -524,6 +550,7 @@ async function persistBeauty3AppointmentRemote(
 }
 
 function validateDraft(draft: Beauty3AppointmentDraft) {
+  const procedureTypes = getBeauty3AppointmentProcedureTypes(draft)
   return Boolean(
     draft.name.trim()
     && Number.isInteger(draft.age)
@@ -533,8 +560,12 @@ function validateDraft(draft: Beauty3AppointmentDraft) {
     && draft.phoneNumber.trim()
     && typeof draft.procedureType === 'string'
     && draft.procedureType.trim().length > 0
+    && procedureTypes.length > 0
+    && new Set(procedureTypes).size === procedureTypes.length
+    && procedureTypes.every((procedureType) => procedureType.trim().length > 0)
+    && draft.procedureType === procedureTypes[0]
     && (
-      draft.procedureType === BEAUTY3_OTHER_PROCEDURE_TYPE
+      procedureTypes.includes(BEAUTY3_OTHER_PROCEDURE_TYPE)
         ? Boolean(draft.procedureTypeOther?.trim())
         : !draft.procedureTypeOther?.trim()
     )
@@ -556,25 +587,31 @@ export class InvalidBeauty3ProcedureTypeError extends Error {
 }
 
 async function validateProcedureType(draft: Beauty3AppointmentDraft, workspaceId: string) {
-  const procedureType = draft.procedureType
-  if (!procedureType) return false
-  if (isBeauty3BuiltInProcedureType(procedureType)) return true
-  if (procedureType === BEAUTY3_OTHER_PROCEDURE_TYPE) {
-    return Boolean(draft.procedureTypeOther?.trim())
+  const procedureTypes = getBeauty3AppointmentProcedureTypes(draft)
+  if (procedureTypes.length === 0) return false
+
+  for (const procedureType of procedureTypes) {
+    if (procedureType === BEAUTY3_OTHER_PROCEDURE_TYPE) {
+      if (!draft.procedureTypeOther?.trim()) return false
+      continue
+    }
+    if (isBeauty3BuiltInProcedureType(procedureType)) continue
+    if (isReservedBeauty3ProcedureName(procedureType)) return false
+
+    const preset = await db.clinical_presets
+      .where('[workspaceId+category]')
+      .equals([workspaceId, BEAUTY3_PROCEDURE_PRESET_CATEGORY])
+      .filter((item) => (
+        !item.isDeleted
+        && item.isActive
+        && item.name === procedureType
+      ))
+      .first()
+
+    if (!preset) return false
   }
-  if (isReservedBeauty3ProcedureName(procedureType)) return false
 
-  const preset = await db.clinical_presets
-    .where('[workspaceId+category]')
-    .equals([workspaceId, BEAUTY3_PROCEDURE_PRESET_CATEGORY])
-    .filter((item) => (
-      !item.isDeleted
-      && item.isActive
-      && item.name === procedureType
-    ))
-    .first()
-
-  return Boolean(preset)
+  return true
 }
 
 export async function saveBeauty3Appointment(
@@ -599,8 +636,11 @@ export async function saveBeauty3Appointment(
 
   const now = new Date().toISOString()
   const localSource = isLocalSource(workspaceId)
+  const procedureTypes = getBeauty3AppointmentProcedureTypes(draft)
   const appointment: Beauty3Appointment = {
     ...draft,
+    procedureTypes,
+    procedureType: procedureTypes[0] ?? draft.procedureType,
     id: existing?.id ?? generateId(),
     workspaceId,
     createdBy: existing?.createdBy ?? createdBy ?? null,

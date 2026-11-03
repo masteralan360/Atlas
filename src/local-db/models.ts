@@ -1712,6 +1712,8 @@ export interface Beauty3Appointment extends BaseEntity {
   maritalStatus: Beauty3MaritalStatus
   address: string
   phoneNumber: string
+  /** All selected procedures. Legacy rows fall back to the primary procedureType. */
+  procedureTypes?: string[]
   procedureType: string | null
   procedureTypeOther: string | null
   procedurePlace: Beauty3ProcedurePlace

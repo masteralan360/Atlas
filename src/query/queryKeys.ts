@@ -45,6 +45,7 @@ export const queryKeys = {
     qrBatch: (scope: import('@/local-db/postal').PostalScope, id: string) => [...queryKeys.postal.qrBatches(scope.workspaceId), 'detail', scope, id] as const,
     generatedQrPage: (input: import('@/local-db/postalQrBatches').PostalQrPageInput) => [...queryKeys.postal.qrBatches(input.workspaceId), 'codes', input] as const,
     all: (workspaceId: string) => ['atlas', 'workspace', workspaceId, 'postal'] as const,
+    primaryBranch: (scope: import('@/local-db/postal').PostalScope) => [...queryKeys.postal.all(scope.workspaceId), 'primary-branch', scope.userId, scope.role, scope.permissionScope] as const,
     statement: (input: import('@/local-db/postalStatement').PostalStatementInput) => [...queryKeys.postal.all(input.workspaceId), 'statement', input] as const,
     statementOrganizations: (scope: import('@/local-db/postal').PostalScope, search: string) => [...queryKeys.postal.all(scope.workspaceId), 'statement-organizations', scope, search] as const,
     page: (input: import('@/local-db/postal').PostalPageInput) => [...queryKeys.postal.all(input.workspaceId), 'page', input] as const,

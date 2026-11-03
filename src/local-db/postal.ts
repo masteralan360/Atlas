@@ -23,6 +23,7 @@ import {
   parsePostalShipmentId,
   postalStates,
   type PostalShipment,
+  type PostalBranch,
   type PostalRole,
   type PostalEvent,
   type PostalTransfer,
@@ -397,6 +398,30 @@ export function usePostalPage<T>(input: PostalPageInput, enabled = true) {
     },
   })
 }
+export function usePrimaryPostalBranch(scope: PostalScope, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.postal.primaryBranch(scope),
+    enabled: enabled && !!scope.workspaceId,
+    queryFn: async ({ signal }): Promise<PostalBranch | null> => {
+      const rows = await tracked<PostalBranch[]>(
+        scope,
+        'postal_branches',
+        signal,
+        () =>
+          supabase
+            .from('postal_branches')
+            .select('*')
+            .eq('workspace_id', scope.workspaceId)
+            .eq('is_primary', true)
+            .eq('active', true)
+            .limit(1)
+            .abortSignal(signal),
+        (data) => data.length,
+      )
+      return rows[0] ?? null
+    },
+  })
+}
 export function usePostalSummary(input: PostalSummaryInput, enabled = true) {
   return useQuery({
     queryKey: queryKeys.postal.summary(input),
@@ -754,6 +779,24 @@ export async function postalCommand<T>(
     window.dispatchEvent(new CustomEvent('payment-transactions:changed'))
   }
   return data as T
+}
+
+export async function postalSaveBranch(
+  scope: PostalScope,
+  payload: object,
+  requestId: string,
+): Promise<PostalBranch> {
+  const { data, error } = await supabase.rpc('postal_save_branch', {
+    p_payload: { ...payload, workspace_id: scope.workspaceId },
+    p_request_id: requestId,
+  })
+  if (error) throw error
+  await queryClient.invalidateQueries({
+    queryKey: queryKeys.postal.all(scope.workspaceId),
+  })
+  if (!data || typeof data !== 'object' || !('id' in data))
+    throw new Error('postal_invalid_result')
+  return data as PostalBranch
 }
 
 export async function postalAddGovernorateBranches(

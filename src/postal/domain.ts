@@ -6,6 +6,7 @@ export const postalStates = [
   "in_transit",
   "arrived",
   "out_for_delivery",
+  "postponed",
   "delivered",
   "cancelled",
 ] as const;
@@ -76,6 +77,7 @@ export interface PostalBranch {
   governorate: string;
   address: string | null;
   active: boolean;
+  is_primary: boolean;
 }
 export interface PostalOrganization {
   id: string;
@@ -359,9 +361,15 @@ export function availableOperations(
   }
   if (s.state === "in_transit" && transfer?.status === "dispatched")
     actions.push("arrive");
-  if (s.state === "out_for_delivery") actions.push("deliver");
+  if (s.state === "out_for_delivery")
+    actions.push("deliver", "postpone_delivery");
+  if (s.state === "postponed") {
+    if (transfer?.status === "authorized") actions.push("dispatch");
+    else if (!transfer)
+      actions.push("out_for_delivery", "authorize_transfer");
+  }
   if (
-    role === "admin" &&
+    (role === "admin" || (role === "office" && s.state === "postponed")) &&
     !["delivered", "cancelled"].includes(s.state) &&
     transfer?.status !== "dispatched"
   )

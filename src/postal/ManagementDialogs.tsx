@@ -25,6 +25,7 @@ import {
 import {
   postalAddGovernorateBranches,
   postalCommand,
+  postalSaveBranch,
   usePostalMembers,
   type PostalScope,
 } from '@/local-db/postal'
@@ -155,6 +156,7 @@ export function BranchDialog({
   const [governorate, setGovernorate] = useState(branch?.governorate ?? '')
   const [address, setAddress] = useState(branch?.address ?? '')
   const [active, setActive] = useState(branch?.active ?? true)
+  const [isPrimary, setIsPrimary] = useState(branch?.is_primary ?? false)
   const action = usePostalAction()
   const payload = {
     id: branch?.id,
@@ -162,6 +164,7 @@ export function BranchDialog({
     governorate,
     address: address.trim(),
     active,
+    is_primary: active && isPrimary,
   }
   return (
     <AppDialog
@@ -183,7 +186,7 @@ export function BranchDialog({
             e.preventDefault()
             if (!name.trim() || !governorate) return
             void action.run(JSON.stringify(payload), async (id) => {
-              await postalCommand(scope, 'save_branch', payload, id)
+              await postalSaveBranch(scope, payload, id)
               onClose()
             })
           }}
@@ -223,9 +226,26 @@ export function BranchDialog({
               <Checkbox
                 checked={active}
                 disabled={action.busy}
-                onCheckedChange={setActive}
+                onCheckedChange={(checked) => {
+                  const nextActive = checked === true
+                  setActive(nextActive)
+                  if (!nextActive) setIsPrimary(false)
+                }}
               />
               {t('postal.active')}
+            </Label>
+            <Label className="flex gap-2">
+              <Checkbox
+                checked={isPrimary && active}
+                disabled={action.busy || !active}
+                onCheckedChange={(checked) => setIsPrimary(checked === true)}
+              />
+              <span className="space-y-1">
+                <span className="block">{t('postal.setPrimary')}</span>
+                <span className="block text-xs font-normal text-muted-foreground">
+                  {t('postal.setPrimaryHint')}
+                </span>
+              </span>
             </Label>
           </AppDialogBody>
           <AppDialogFooter>

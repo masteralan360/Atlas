@@ -1,5 +1,5 @@
 import { usePostalAction } from './usePostalAccess'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Loader2, ShieldCheck } from 'lucide-react'
 import {
@@ -13,7 +13,11 @@ import {
   Label,
   Textarea,
 } from '@/ui/components'
-import { postalCommand, type PostalScope } from '@/local-db/postal'
+import {
+  postalCommand,
+  usePrimaryPostalBranch,
+  type PostalScope,
+} from '@/local-db/postal'
 /* Driver selection is temporarily disabled together with its field below.
 import { searchPostalDrivers } from '@/local-db/postal'
 import type { BusinessPartner } from '@/local-db/models'
@@ -40,18 +44,46 @@ export function OperationDialog({
   onClose: () => void
 }) {
   const { t } = useTranslation()
-  const [branch, setBranch] = useState<PostalBranch | null>(
-    operation === 'arrive' && transfer
-      ? {
-          id: transfer.destination_id,
-          name: transfer.destination_name ?? transfer.destination_id,
-          workspace_id: scope.workspaceId,
-          governorate: '',
-          address: null,
-          active: true,
-        }
-      : null,
-  )
+  const needsBranch =
+    operation === 'receive' ||
+    operation === 'authorize_transfer' ||
+    operation === 'arrive'
+  const destinationId = transfer?.destination_id
+  const destinationName = transfer?.destination_name
+  const [branch, setBranch] = useState<PostalBranch | null>(null)
+  const branchWasManuallySelected = useRef(false)
+  const primaryBranch = usePrimaryPostalBranch(scope, needsBranch)
+  useEffect(() => {
+    if (
+      !needsBranch ||
+      !primaryBranch.isFetched ||
+      branchWasManuallySelected.current
+    )
+      return
+    if (primaryBranch.data) {
+      setBranch(primaryBranch.data)
+      return
+    }
+    if (operation === 'arrive' && destinationId) {
+      setBranch({
+        id: destinationId,
+        name: destinationName ?? destinationId,
+        workspace_id: scope.workspaceId,
+        governorate: '',
+        address: null,
+        active: true,
+        is_primary: false,
+      })
+    }
+  }, [
+    needsBranch,
+    operation,
+    primaryBranch.data,
+    primaryBranch.isFetched,
+    scope.workspaceId,
+    destinationId,
+    destinationName,
+  ])
   const [notes, setNotes] = useState('')
   /* Restore with the driver selector when driver assignment is enabled again.
   const [driver, setDriver] = useState<BusinessPartner | null>(null)
@@ -79,10 +111,6 @@ export function OperationDialog({
   const tariff = findPostalTariff(
     shipment.governorate, shipment.area, selectedTariff?.size, selectedTariff?.fee,
   )
-  const needsBranch =
-    operation === 'receive' ||
-    operation === 'authorize_transfer' ||
-    operation === 'arrive'
   const validBranch =
     !!branch?.active &&
     (operation !== 'authorize_transfer' ||
@@ -99,6 +127,7 @@ export function OperationDialog({
   const payload = {
     id: shipment.id,
     revision: shipment.revision,
+    expected_state: shipment.state,
     branch_id: branch?.id,
     tariff_size: tariff?.size,
     delivery_fee: tariff?.fee,
@@ -127,7 +156,10 @@ export function OperationDialog({
               value={branch}
               label={t('postal.branch')}
               disabled={action.busy}
-              onChange={setBranch}
+              onChange={(value) => {
+                branchWasManuallySelected.current = true
+                setBranch(value)
+              }}
             />
           )}
           {operation === 'receive' && (

@@ -11,6 +11,7 @@ import {
   CalendarDays,
   CheckCircle2,
   CircleDollarSign,
+  ChevronDown,
   FolderCog,
   Loader2,
   MapPin,
@@ -20,6 +21,7 @@ import {
   Search,
   Trash2,
   UserRound,
+  X,
 } from 'lucide-react'
 import { useAuth } from '@/auth/AuthContext'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
@@ -35,6 +37,10 @@ import {
   AppPagination,
   Button,
   DateTimePicker,
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
   Input,
   Label,
   Select,
@@ -67,6 +73,7 @@ import {
   BEAUTY3_APPOINTMENTS_TABLE,
   BEAUTY3_APPOINTMENT_PROFIT_SOURCE_TYPE,
   deleteBeauty3Appointment,
+  getBeauty3AppointmentProcedureTypes,
   getBeauty3AppointmentProfitTransactions,
   InvalidBeauty3ProcedureTypeError,
   saveBeauty3Appointment,
@@ -79,6 +86,8 @@ import {
   BEAUTY3_BUILT_IN_PROCEDURES,
   BEAUTY3_OTHER_PROCEDURE_TYPE,
   BEAUTY3_PROCEDURE_PRESET_CATEGORY,
+  getBeauty3BuiltInProcedurePriceIqd,
+  isBeauty3BuiltInProcedureType,
 } from '@/local-db/beauty3Procedures'
 import { formatCurrency, formatDate, formatLocalDateValue, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
@@ -87,6 +96,7 @@ import { useWorkspace } from '@/workspace/WorkspaceContext'
 import type {
   Beauty3Appointment,
   CurrencyCode,
+  IQDDisplayPreference,
   PaymentObligation,
   PaymentTransaction,
   WorkspacePaymentMethod,
@@ -165,13 +175,15 @@ function isBeauty3ProfitPaymentCurrent(
 }
 
 function toBeauty3AppointmentDraft(appointment: Beauty3Appointment): Beauty3AppointmentDraft {
+  const procedureTypes = getBeauty3AppointmentProcedureTypes(appointment)
   return {
     name: appointment.name,
     age: appointment.age,
     maritalStatus: appointment.maritalStatus,
     address: appointment.address,
     phoneNumber: appointment.phoneNumber,
-    procedureType: appointment.procedureType,
+    procedureTypes,
+    procedureType: procedureTypes[0] ?? appointment.procedureType,
     procedureTypeOther: appointment.procedureTypeOther,
     procedurePlace: appointment.procedurePlace,
     procedureDate: appointment.procedureDate,
@@ -341,6 +353,10 @@ export function Beauty3Appointments() {
         }
         const hasChanges = Object.keys(draft).some((key) => {
           const draftKey = key as keyof Beauty3AppointmentDraft
+          if (draftKey === 'procedureTypes') {
+            return JSON.stringify(draft.procedureTypes ?? [])
+              !== JSON.stringify(getBeauty3AppointmentProcedureTypes(editingAppointment))
+          }
           return draft[draftKey] !== editingAppointment[draftKey]
         })
         const transactions = await getBeauty3AppointmentProfitTransactions(workspaceId, editingAppointment.id)
@@ -668,15 +684,18 @@ export function Beauty3Appointments() {
   }
 
   const formatProcedureType = useCallback((appointment: Beauty3Appointment) => {
-    if (appointment.procedureType === BEAUTY3_OTHER_PROCEDURE_TYPE) {
-      return appointment.procedureTypeOther || t('beauty3Appointments.procedureTypes.other')
-    }
-    const builtInProcedure = BEAUTY3_BUILT_IN_PROCEDURES.find(
-      (procedure) => procedure.value === appointment.procedureType,
-    )
-    return builtInProcedure
-      ? t(builtInProcedure.translationKey)
-      : appointment.procedureType || '—'
+    const procedureTypes = getBeauty3AppointmentProcedureTypes(appointment)
+    if (procedureTypes.length === 0) return '—'
+
+    return procedureTypes.map((procedureType) => {
+      if (procedureType === BEAUTY3_OTHER_PROCEDURE_TYPE) {
+        return appointment.procedureTypeOther || t('beauty3Appointments.procedureTypes.other')
+      }
+      const builtInProcedure = BEAUTY3_BUILT_IN_PROCEDURES.find(
+        (procedure) => procedure.value === procedureType,
+      )
+      return builtInProcedure ? t(builtInProcedure.translationKey) : procedureType
+    }).join(', ')
   }, [t])
 
   const columns = useMemo(() => [
@@ -1057,6 +1076,7 @@ export function Beauty3Appointments() {
         appointment={editingAppointment}
         workspaceId={workspaceId}
         defaultCurrency={features.default_currency}
+        iqdPreference={features.iqd_display_preference}
         onSaved={handleSaved}
         onManageProcedures={() => setIsProcedureManagerOpen(true)}
       />
@@ -1065,6 +1085,7 @@ export function Beauty3Appointments() {
         open={isProcedureManagerOpen}
         onOpenChange={setIsProcedureManagerOpen}
         workspaceId={workspaceId}
+        iqdPreference={features.iqd_display_preference}
       />
 
       <SettlementDialog
@@ -1123,6 +1144,7 @@ function Beauty3AppointmentFormDialog({
   appointment,
   workspaceId,
   defaultCurrency,
+  iqdPreference,
   onSaved,
   onManageProcedures,
 }: {
@@ -1131,6 +1153,7 @@ function Beauty3AppointmentFormDialog({
   appointment: Beauty3Appointment | null
   workspaceId: string
   defaultCurrency: CurrencyCode
+  iqdPreference: IQDDisplayPreference
   onSaved: (draft: Beauty3AppointmentDraft, paymentMode: Beauty3AppointmentSavePaymentMode) => Promise<void>
   onManageProcedures: () => void
 }) {
@@ -1140,7 +1163,7 @@ function Beauty3AppointmentFormDialog({
   const [maritalStatus, setMaritalStatus] = useState<Beauty3Appointment['maritalStatus'] | ''>('')
   const [address, setAddress] = useState('')
   const [phoneNumber, setPhoneNumber] = useState('')
-  const [procedureType, setProcedureType] = useState('')
+  const [procedureTypes, setProcedureTypes] = useState<string[]>([])
   const [procedureTypeOtherText, setProcedureTypeOtherText] = useState('')
   const [procedurePlace, setProcedurePlace] = useState<Beauty3Appointment['procedurePlace'] | ''>('')
   const [procedureDate, setProcedureDate] = useState<Date | undefined>()
@@ -1153,7 +1176,9 @@ function Beauty3AppointmentFormDialog({
     workspaceId,
     BEAUTY3_PROCEDURE_PRESET_CATEGORY,
   )
-  const customProcedures = (customProcedurePresets ?? []).filter((preset) => preset.isActive)
+  const customProcedures = (customProcedurePresets ?? []).filter((preset) => (
+    preset.isActive && !isBeauty3BuiltInProcedureType(preset.name)
+  ))
   const customProcedureNames = new Set(customProcedures.map((preset) => preset.name))
 
   useEffect(() => {
@@ -1163,7 +1188,7 @@ function Beauty3AppointmentFormDialog({
     setMaritalStatus(appointment?.maritalStatus ?? '')
     setAddress(appointment?.address ?? '')
     setPhoneNumber(appointment?.phoneNumber ?? '')
-    setProcedureType(appointment?.procedureType ?? '')
+    setProcedureTypes(appointment ? getBeauty3AppointmentProcedureTypes(appointment) : [])
     setProcedureTypeOtherText(appointment?.procedureTypeOther ?? '')
     setProcedurePlace(appointment?.procedurePlace ?? '')
     setProcedureDate(parseLocalDateValue(appointment?.procedureDate))
@@ -1175,25 +1200,58 @@ function Beauty3AppointmentFormDialog({
     )
   }, [appointment, open])
 
-  const isProcedureTypeBuiltin = BEAUTY3_BUILT_IN_PROCEDURES.some(
-    (option) => option.value === procedureType,
-  )
-  const procedureTypeUnavailable = Boolean(
-    procedureType
-    && !isProcedureTypeBuiltin
-    && customProcedurePresets !== undefined
-    && !customProcedureNames.has(procedureType),
-  )
-  const procedureTypeIsValid = Boolean(
-    procedureType
-    && (
-      procedureType === BEAUTY3_OTHER_PROCEDURE_TYPE
-        ? procedureTypeOtherText.trim().length > 0
-        : isProcedureTypeBuiltin
-          ? true
-          : customProcedurePresets !== undefined && customProcedureNames.has(procedureType)
-    ),
-  )
+  const getProcedurePriceIqd = (value: string) => {
+    const savedPrice = customProcedurePresets?.find((preset) => preset.name === value)?.consultationFee
+    return savedPrice ?? getBeauty3BuiltInProcedurePriceIqd(value) ?? 0
+  }
+
+  const getProcedureName = (value: string) => {
+    if (value === BEAUTY3_OTHER_PROCEDURE_TYPE) return t('beauty3Appointments.procedureTypes.other')
+    const builtInProcedure = BEAUTY3_BUILT_IN_PROCEDURES.find((procedure) => procedure.value === value)
+    return builtInProcedure ? t(builtInProcedure.translationKey) : value
+  }
+
+  const formatProcedureOption = (value: string) => {
+    if (
+      customProcedurePresets === undefined
+      && value !== BEAUTY3_OTHER_PROCEDURE_TYPE
+      && !isBeauty3BuiltInProcedureType(value)
+    ) return value
+    if (
+      customProcedurePresets !== undefined
+      && value !== BEAUTY3_OTHER_PROCEDURE_TYPE
+      && !isBeauty3BuiltInProcedureType(value)
+      && !customProcedureNames.has(value)
+    ) {
+      return t('beauty3Appointments.procedureTypeUnavailable', { value })
+    }
+    return t('beauty3Appointments.procedureOptionWithPrice', {
+      name: getProcedureName(value),
+      price: formatCurrency(getProcedurePriceIqd(value), 'iqd', iqdPreference, 0),
+    })
+  }
+
+  const updateProcedureSelection = (value: string, checked: boolean | 'indeterminate') => {
+    const shouldSelect = checked === true
+    const nextProcedureTypes = shouldSelect
+      ? procedureTypes.includes(value) ? procedureTypes : [...procedureTypes, value]
+      : procedureTypes.filter((procedureType) => procedureType !== value)
+    setProcedureTypes(nextProcedureTypes)
+    setAppointmentTotalText(formatNumericInput(String(
+      nextProcedureTypes.reduce((total, procedureType) => total + getProcedurePriceIqd(procedureType), 0),
+    )))
+    if (!shouldSelect && value === BEAUTY3_OTHER_PROCEDURE_TYPE) {
+      setProcedureTypeOtherText('')
+    }
+  }
+
+  const isOtherProcedureSelected = procedureTypes.includes(BEAUTY3_OTHER_PROCEDURE_TYPE)
+  const procedureTypesAreValid = procedureTypes.length > 0 && procedureTypes.every((procedureType) => (
+    procedureType === BEAUTY3_OTHER_PROCEDURE_TYPE
+      ? procedureTypeOtherText.trim().length > 0
+      : isBeauty3BuiltInProcedureType(procedureType)
+        || (customProcedurePresets !== undefined && customProcedureNames.has(procedureType))
+  ))
 
   const parsedAge = ageText.trim() === '' ? Number.NaN : Number(ageText)
   const parsedTotal = appointmentTotalText.trim() === ''
@@ -1210,7 +1268,7 @@ function Beauty3AppointmentFormDialog({
     && maritalStatus
     && address.trim()
     && phoneNumber.trim()
-    && procedureTypeIsValid
+    && procedureTypesAreValid
     && procedurePlace
     && procedureDate
     && Number.isFinite(parsedTotal)
@@ -1221,7 +1279,7 @@ function Beauty3AppointmentFormDialog({
 
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!isValid || !maritalStatus || !procedureType || !procedurePlace || !procedureDate || isSaving) return
+    if (!isValid || !maritalStatus || procedureTypes.length === 0 || !procedurePlace || !procedureDate || isSaving) return
     const submitter = (event.nativeEvent as SubmitEvent).submitter
     const paymentMode: Beauty3AppointmentSavePaymentMode = submitter instanceof HTMLButtonElement
       && submitter.value === 'save-and-record-payment'
@@ -1235,8 +1293,9 @@ function Beauty3AppointmentFormDialog({
       maritalStatus,
       address: address.trim(),
       phoneNumber: phoneNumber.trim(),
-      procedureType: procedureType.trim(),
-      procedureTypeOther: procedureType === BEAUTY3_OTHER_PROCEDURE_TYPE
+      procedureTypes,
+      procedureType: procedureTypes[0] ?? null,
+      procedureTypeOther: isOtherProcedureSelected
         ? procedureTypeOtherText.trim()
         : null,
       procedurePlace,
@@ -1326,37 +1385,100 @@ function Beauty3AppointmentFormDialog({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="beauty3-procedure-type">{t('beauty3Appointments.procedureType')} *</Label>
-                <Select value={procedureType} onValueChange={setProcedureType}>
-                  <SelectTrigger id="beauty3-procedure-type">
-                    <SelectValue placeholder={t('beauty3Appointments.procedureTypeEmpty')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {procedureType
-                      && !isProcedureTypeBuiltin
-                      && (procedureTypeUnavailable || customProcedurePresets === undefined) ? (
-                        <SelectItem value={procedureType} disabled>
-                          {procedureTypeUnavailable
-                            ? t('beauty3Appointments.procedureTypeUnavailable', { value: procedureType })
-                            : procedureType}
-                        </SelectItem>
-                      ) : null}
-                    {BEAUTY3_BUILT_IN_PROCEDURES
-                      .filter((procedure) => procedure.value !== BEAUTY3_OTHER_PROCEDURE_TYPE)
-                      .map((procedure) => (
-                        <SelectItem key={procedure.value} value={procedure.value}>
-                          {t(procedure.translationKey)}
-                        </SelectItem>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      id="beauty3-procedure-type"
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-between gap-2 font-normal"
+                      title={procedureTypes.map(formatProcedureOption).join(', ')}
+                      disabled={isSaving}
+                    >
+                      <span className="truncate">
+                        {procedureTypes.length > 0
+                          ? t('beauty3Appointments.procedureTypesSelected', { count: procedureTypes.length })
+                          : t('beauty3Appointments.procedureTypeEmpty')}
+                      </span>
+                      <ChevronDown className="size-4 shrink-0 opacity-50" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="start"
+                    className="max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto"
+                  >
+                    {procedureTypes
+                      .filter((procedureType) => (
+                        procedureType !== BEAUTY3_OTHER_PROCEDURE_TYPE
+                        && !isBeauty3BuiltInProcedureType(procedureType)
+                        && !customProcedureNames.has(procedureType)
+                      ))
+                      .map((procedureType) => (
+                        <DropdownMenuCheckboxItem
+                          key={`unavailable-${procedureType}`}
+                          checked
+                          disabled={isSaving}
+                          onCheckedChange={(checked) => updateProcedureSelection(procedureType, checked)}
+                          onSelect={(event) => event.preventDefault()}
+                        >
+                          {customProcedurePresets === undefined
+                            ? procedureType
+                            : t('beauty3Appointments.procedureTypeUnavailable', { value: procedureType })}
+                        </DropdownMenuCheckboxItem>
                       ))}
-                    {customProcedures.map((procedure) => (
-                      <SelectItem key={procedure.id} value={procedure.name}>
-                        {procedure.name}
-                      </SelectItem>
+                    {BEAUTY3_BUILT_IN_PROCEDURES.map((procedure) => (
+                      <DropdownMenuCheckboxItem
+                        key={procedure.value}
+                        checked={procedureTypes.includes(procedure.value)}
+                        disabled={isSaving}
+                        onCheckedChange={(checked) => updateProcedureSelection(procedure.value, checked)}
+                        onSelect={(event) => event.preventDefault()}
+                      >
+                        {formatProcedureOption(procedure.value)}
+                      </DropdownMenuCheckboxItem>
                     ))}
-                    <SelectItem value={BEAUTY3_OTHER_PROCEDURE_TYPE}>
-                      {t('beauty3Appointments.procedureTypes.other')}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+                    {customProcedures.map((procedure) => (
+                      <DropdownMenuCheckboxItem
+                        key={procedure.id}
+                        checked={procedureTypes.includes(procedure.name)}
+                        disabled={isSaving}
+                        onCheckedChange={(checked) => updateProcedureSelection(procedure.name, checked)}
+                        onSelect={(event) => event.preventDefault()}
+                      >
+                        {formatProcedureOption(procedure.name)}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {procedureTypes.length > 0 ? (
+                  <div
+                    role="list"
+                    aria-label={t('beauty3Appointments.procedureTypesSelected', { count: procedureTypes.length })}
+                    className="flex flex-wrap gap-2"
+                  >
+                    {procedureTypes.map((procedureType) => (
+                      <div
+                        key={procedureType}
+                        role="listitem"
+                        className="inline-flex max-w-full items-center gap-1 rounded-full border border-border/70 bg-muted/30 py-1 ps-2.5 pe-1 text-xs"
+                      >
+                        <span className="max-w-64 truncate">{formatProcedureOption(procedureType)}</span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-5 shrink-0"
+                          aria-label={t('beauty3Appointments.removeProcedure', { name: getProcedureName(procedureType) })}
+                          title={t('beauty3Appointments.removeProcedure', { name: getProcedureName(procedureType) })}
+                          onClick={() => updateProcedureSelection(procedureType, false)}
+                          disabled={isSaving}
+                        >
+                          <X className="size-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 <Button
                   type="button"
                   variant="link"
@@ -1368,7 +1490,7 @@ function Beauty3AppointmentFormDialog({
                   {t('beauty3Appointments.addProcedure')}
                 </Button>
               </div>
-              {procedureType === BEAUTY3_OTHER_PROCEDURE_TYPE ? (
+              {isOtherProcedureSelected ? (
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="beauty3-procedure-type-other">
                     {t('beauty3Appointments.otherProcedureDetails')} *

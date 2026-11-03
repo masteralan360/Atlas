@@ -28,6 +28,7 @@ import {
   FileText,
   QrCode,
   Printer,
+  Star,
 } from 'lucide-react'
 import {
   Button,
@@ -687,7 +688,24 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
       ]
     if (tab === 'branches')
       return [
-        { accessorKey: 'name', header: t('postal.branchName') },
+        {
+          accessorKey: 'name',
+          header: t('postal.branchName'),
+          cell: ({ row }) => {
+            const branch = row.original as PostalBranch
+            return (
+              <span className="flex flex-wrap items-center gap-2">
+                <span>{branch.name}</span>
+                {branch.is_primary && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
+                    <Star className="h-3 w-3" />
+                    {t('postal.primary')}
+                  </span>
+                )}
+              </span>
+            )
+          },
+        },
         {
           id: 'active',
           header: t('postal.status'),

@@ -12,6 +12,7 @@ import {
   ChevronDown,
   CircleDollarSign,
   CircleX,
+  CalendarClock,
   Clock3,
   Copy,
   Loader2,
@@ -154,6 +155,7 @@ export default function PostalShipmentPage({
     receive: PackageCheck,
     dispatch: Truck,
     out_for_delivery: Truck,
+    postpone_delivery: CalendarClock,
     arrive: Warehouse,
     deliver: CheckCircle2,
     authorize_transfer: ShieldCheck,
@@ -507,17 +509,20 @@ export default function PostalShipmentPage({
                 {operations.map((op, index) => {
                   const Icon = operationIcons[op] ?? ShieldCheck
                   const destructive = ['cancel', 'cancel_transfer'].includes(op)
+                  const postponed = op === 'postpone_delivery'
                   return (
                     <Button
                       key={op}
                       variant={
-                        destructive
-                          ? 'destructive'
-                          : index === 0
-                            ? 'default'
-                            : 'outline'
+                        postponed
+                          ? 'outline'
+                          : destructive
+                            ? 'destructive'
+                            : index === 0
+                              ? 'default'
+                              : 'outline'
                       }
-                      className="group h-auto min-h-12 w-full justify-start gap-3 whitespace-normal px-3 py-2.5 text-start"
+                      className={`group h-auto min-h-12 w-full justify-start gap-3 whitespace-normal px-3 py-2.5 text-start ${postponed ? 'border-yellow-400 bg-yellow-400 text-yellow-950 hover:bg-yellow-500 hover:text-yellow-950 dark:border-yellow-400 dark:bg-yellow-400 dark:text-yellow-950 dark:hover:bg-yellow-500' : ''}`}
                       onClick={() => setOperation(op)}
                     >
                       <Icon className="h-4 w-4 shrink-0" />

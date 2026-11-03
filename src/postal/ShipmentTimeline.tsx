@@ -10,6 +10,7 @@ import {
   Wallet,
   History,
   ShieldCheck,
+  CalendarClock,
 } from 'lucide-react'
 import type { PostalEvent, PostalState } from './domain'
 
@@ -19,6 +20,7 @@ const icons: Record<string, typeof Circle> = {
   dispatch: Truck,
   arrive: Warehouse,
   out_for_delivery: Truck,
+  postpone_delivery: CalendarClock,
   deliver: CheckCircle2,
   merchant_account_updated: Wallet,
   cod_recorded: Wallet,
