@@ -11529,6 +11529,8 @@
     "codAmount": "COD Amount (IQD)",
     "codAmountHint": "This is the amount owed to the merchant. The delivery fee is shown and collected separately.",
     "shipmentSize": "Shipment Size",
+    "shipmentLabelSize": "Shipment Size",
+    "recipientTotalAmount": "Recipient's Total Amount with Delivery Fee",
     "tariffZone": "Delivery Area",
     "shipmentSizes": {
       "carton": "Carton",

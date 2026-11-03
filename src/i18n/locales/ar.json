@@ -11202,6 +11202,8 @@
     "codAmount": "مبلغ الدفع عند الاستلام (د.ع)",
     "codAmountHint": "هذا هو المبلغ المستحق للتاجر. تظهر أجرة التوصيل وتُحصّل بشكل منفصل.",
     "shipmentSize": "حجم الشحنة",
+    "shipmentLabelSize": "حجم الشحنة",
+    "recipientTotalAmount": "إجمالي المبلغ على المستلم مع أجرة التوصيل",
     "tariffZone": "منطقة التوصيل",
     "shipmentSizes": {
       "carton": "كرتون",

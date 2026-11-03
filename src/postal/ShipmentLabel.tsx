@@ -8,6 +8,7 @@ import {
   shipmentQr,
   type PostalShipment,
 } from './domain'
+import { useFitPostalLabel } from './useFitPostalLabel'
 
 export function ShipmentQr({
   qrId,
@@ -37,19 +38,21 @@ function LabelRow({
   children,
   prominent = false,
   compact = false,
+  large = false,
 }: {
   label: string
   children: ReactNode
   prominent?: boolean
   compact?: boolean
+  large?: boolean
 }) {
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '32% minmax(0, 1fr)',
+        gridTemplateColumns: large ? '46% minmax(0, 1fr)' : '32% minmax(0, 1fr)',
         borderBottom: '1px solid #000',
-        minHeight: compact ? '4mm' : '5mm',
+        minHeight: large ? (compact ? '8mm' : '10mm') : compact ? '4mm' : '5mm',
         breakInside: 'avoid',
       }}
     >
@@ -57,9 +60,9 @@ function LabelRow({
         style={{
           display: 'flex',
           alignItems: 'center',
-          padding: compact ? '0.15mm 1mm' : '0.35mm 1.5mm',
+          padding: large ? '0.7mm 1.5mm' : compact ? '0.15mm 1mm' : '0.35mm 1.5mm',
           borderInlineEnd: '1px solid #000',
-          fontSize: compact ? (prominent ? 8 : 7) : (prominent ? 10.5 : 9.5),
+          fontSize: large ? (compact ? 9 : 10.5) : compact ? (prominent ? 8 : 7) : (prominent ? 10.5 : 9.5),
           fontWeight: 700,
           lineHeight: 1.25,
         }}
@@ -72,9 +75,9 @@ function LabelRow({
           alignItems: 'center',
           justifyContent: 'center',
           minWidth: 0,
-          padding: compact ? '0.15mm 1mm' : '0.35mm 1.5mm',
+          padding: large ? '0.7mm 1.5mm' : compact ? '0.15mm 1mm' : '0.35mm 1.5mm',
           textAlign: 'center',
-          fontSize: compact ? (prominent ? 8 : 7) : (prominent ? 13.5 : 10.5),
+          fontSize: large ? (compact ? 12 : 18) : compact ? (prominent ? 8 : 7) : (prominent ? 13.5 : 10.5),
           fontWeight: 700,
           lineHeight: 1.3,
           overflowWrap: 'anywhere',
@@ -90,7 +93,7 @@ function LabelSectionTitle({ children }: { children: ReactNode }) {
   return (
     <h3
       style={{
-        margin: '1.2mm 0 0.6mm',
+        margin: '0.2mm 0 0.2mm',
         textAlign: 'center',
         fontSize: 12,
         fontWeight: 700,
@@ -113,6 +116,7 @@ export function ShipmentLabel({
   note?: string
 }) {
   const { t, i18n } = useTranslation()
+  const { labelRef, fitTransform } = useFitPostalLabel()
   const formattedId = formatPostalShipmentId(shipment)
   const createdAt = new Date(shipment.created_at)
   const createdDate = Number.isNaN(createdAt.getTime())
@@ -121,13 +125,16 @@ export function ShipmentLabel({
 
   return (
     <div
+      ref={labelRef}
       data-testid="postal-label"
       dir={i18n.dir()}
       style={{
         width: '100mm',
         minHeight: '100mm',
         boxSizing: 'border-box',
-        padding: '2mm',
+        padding: '0.5mm 2mm 2mm',
+        transform: fitTransform,
+        transformOrigin: 'top left',
         border: '1px solid #000',
         borderRadius: '2mm',
         background: '#fff',
@@ -176,7 +183,7 @@ export function ShipmentLabel({
 
       <div
         style={{
-          margin: '0.2mm 0 0.8mm',
+          margin: '0.2mm 0 0.1mm',
           textAlign: 'center',
           fontSize: 13,
           fontWeight: 800,
@@ -235,7 +242,7 @@ export function ShipmentLabel({
         style={{ border: '1px solid #000' }}
       >
         {shipment.shipment_size && (
-          <LabelRow label={t('postal.shipmentSize')}>
+          <LabelRow label={t('postal.shipmentLabelSize')}>
             <span>
               {t(
                 postalShipmentSizeTranslationKey(
@@ -265,17 +272,23 @@ export function ShipmentLabel({
         {shipment.delivery_fee !== null &&
           shipment.delivery_fee !== undefined && (
             <>
-              <LabelRow label={t('postal.totalAtDelivery')} prominent>
+              <LabelRow label={t('postal.codAmount')} prominent>
                 <bdi dir="ltr">
-                  {(shipment.cod_amount + shipment.delivery_fee).toLocaleString(
-                    i18n.language,
-                  )}{' '}
+                  {shipment.cod_amount.toLocaleString(i18n.language)}{' '}
                   {t('postal.iqd')}
                 </bdi>
               </LabelRow>
               <LabelRow label={t('postal.deliveryFee')}>
                 <bdi dir="ltr">
                   {shipment.delivery_fee.toLocaleString(i18n.language)}{' '}
+                  {t('postal.iqd')}
+                </bdi>
+              </LabelRow>
+              <LabelRow label={t('postal.recipientTotalAmount')} prominent large>
+                <bdi dir="ltr">
+                  {(shipment.cod_amount + shipment.delivery_fee).toLocaleString(
+                    i18n.language,
+                  )}{' '}
                   {t('postal.iqd')}
                 </bdi>
               </LabelRow>

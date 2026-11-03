@@ -1,25 +1,28 @@
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ShipmentQr } from './ShipmentLabel'
+import { useFitPostalLabel } from './useFitPostalLabel'
 
 function EmptyLabelRow({
   label,
   children,
   prominent = false,
   compact = false,
+  large = false,
 }: {
   label: string
   children: ReactNode
   prominent?: boolean
   compact?: boolean
+  large?: boolean
 }) {
   return (
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: '32% minmax(0, 1fr)',
+        gridTemplateColumns: large ? '46% minmax(0, 1fr)' : '32% minmax(0, 1fr)',
         borderBottom: '1px solid #000',
-        minHeight: compact ? '4mm' : '5mm',
+        minHeight: large ? (compact ? '8mm' : '10mm') : compact ? '4mm' : '5mm',
         breakInside: 'avoid',
       }}
     >
@@ -27,9 +30,9 @@ function EmptyLabelRow({
         style={{
           display: 'flex',
           alignItems: 'center',
-          padding: compact ? '0.15mm 1mm' : '0.35mm 1.5mm',
+          padding: large ? '0.7mm 1.5mm' : compact ? '0.15mm 1mm' : '0.35mm 1.5mm',
           borderInlineEnd: '1px solid #000',
-          fontSize: compact ? (prominent ? 8 : 7) : (prominent ? 10.5 : 9.5),
+          fontSize: large ? (compact ? 9 : 10.5) : compact ? (prominent ? 8 : 7) : (prominent ? 10.5 : 9.5),
           fontWeight: 700,
           lineHeight: 1.25,
         }}
@@ -42,9 +45,9 @@ function EmptyLabelRow({
           alignItems: 'center',
           justifyContent: 'center',
           minWidth: 0,
-          padding: compact ? '0.15mm 1mm' : '0.35mm 1.5mm',
+          padding: large ? '0.7mm 1.5mm' : compact ? '0.15mm 1mm' : '0.35mm 1.5mm',
           textAlign: 'center',
-          fontSize: compact ? (prominent ? 8 : 7) : (prominent ? 13.5 : 10.5),
+          fontSize: large ? (compact ? 12 : 18) : compact ? (prominent ? 8 : 7) : (prominent ? 13.5 : 10.5),
           fontWeight: 700,
           lineHeight: 1.3,
           overflowWrap: 'anywhere',
@@ -60,7 +63,7 @@ function EmptyLabelSectionTitle({ children }: { children: ReactNode }) {
   return (
     <h3
       style={{
-        margin: '1.2mm 0 0.6mm',
+        margin: '0.2mm 0 0.2mm',
         textAlign: 'center',
         fontSize: 12,
         fontWeight: 700,
@@ -82,17 +85,18 @@ export function EmptyShipmentLabel({
   small?: boolean
 }) {
   const { t, i18n } = useTranslation()
+  const { labelRef, fitTransform } = useFitPostalLabel(small ? 58 : 100)
   const empty = ''
 
   if (small) {
-    const row = (label: string, prominent = false) => (
+    const row = (label: string, prominent = false, large = false) => (
       <div
         style={{
           display: 'grid',
           gridTemplateColumns: '45% minmax(0, 1fr)',
-          minHeight: '3.2mm',
+          minHeight: large ? '6.4mm' : '3.2mm',
           borderBottom: '0.5px solid #000',
-          fontSize: prominent ? 6.3 : 5.7,
+          fontSize: large ? 8 : prominent ? 6.3 : 5.7,
           fontWeight: 700,
           lineHeight: 1.05,
           textAlign: 'start',
@@ -105,6 +109,7 @@ export function EmptyShipmentLabel({
 
     return (
       <div
+        ref={labelRef}
         data-testid="postal-qr-batch-small-label"
         dir={i18n.dir()}
         style={{
@@ -112,6 +117,8 @@ export function EmptyShipmentLabel({
           height: '58mm',
           boxSizing: 'border-box',
           padding: '1mm',
+          transform: fitTransform,
+          transformOrigin: 'top left',
           border: '0.5px solid #000',
           borderRadius: '1.5mm',
           background: '#fff',
@@ -134,8 +141,9 @@ export function EmptyShipmentLabel({
           {row(t('postal.primary_phone'))}
           {row(t('postal.destination'))}
           {row(t('postal.shipmentDetails'))}
-          {row(t('postal.totalAtDelivery'), true)}
+          {row(t('postal.codAmount'), true)}
           {row(t('postal.deliveryFee'))}
+          {row(t('postal.recipientTotalAmount'), true, true)}
         </div>
       </div>
     )
@@ -143,13 +151,16 @@ export function EmptyShipmentLabel({
 
   return (
     <div
+      ref={labelRef}
       data-testid="postal-qr-batch-label"
       dir={i18n.dir()}
       style={{
         width: '100mm',
         minHeight: '100mm',
         boxSizing: 'border-box',
-        padding: '2mm',
+        padding: '0.5mm 2mm 2mm',
+        transform: fitTransform,
+        transformOrigin: 'top left',
         border: '1px solid #000',
         borderRadius: '2mm',
         background: '#fff',
@@ -169,7 +180,7 @@ export function EmptyShipmentLabel({
           <ShipmentQr qrId={qrId} size={210} />
         </div>
       </header>
-      <div style={{ margin: '0.2mm 0 0.8mm', textAlign: 'center', fontSize: 13, fontWeight: 800 }}>
+      <div style={{ margin: '0.2mm 0 0.1mm', textAlign: 'center', fontSize: 13, fontWeight: 800 }}>
         {t('postal.shipmentId')}: <bdi dir="ltr" style={{ whiteSpace: 'nowrap' }}>{empty}</bdi>
       </div>
       <section aria-label={t('postal.recipient_name')} style={{ border: '1px solid #000' }}>
@@ -180,11 +191,12 @@ export function EmptyShipmentLabel({
       </section>
       <EmptyLabelSectionTitle>{t('postal.shipmentDetails')}</EmptyLabelSectionTitle>
       <section aria-label={t('postal.shipmentDetails')} style={{ border: '1px solid #000' }}>
-        <EmptyLabelRow label={t('postal.shipmentSize')} compact>{empty}</EmptyLabelRow>
+        <EmptyLabelRow label={t('postal.shipmentLabelSize')} compact>{empty}</EmptyLabelRow>
         <EmptyLabelRow label={t('postal.pieces')} compact>{empty}</EmptyLabelRow>
         <EmptyLabelRow label={t('postal.fragility')} compact>{empty}</EmptyLabelRow>
-        <EmptyLabelRow label={t('postal.totalAtDelivery')} prominent compact>{empty}</EmptyLabelRow>
+        <EmptyLabelRow label={t('postal.codAmount')} prominent compact>{empty}</EmptyLabelRow>
         <EmptyLabelRow label={t('postal.deliveryFee')} compact>{empty}</EmptyLabelRow>
+        <EmptyLabelRow label={t('postal.recipientTotalAmount')} prominent compact large>{empty}</EmptyLabelRow>
         <EmptyLabelRow label={t('postal.createdAt')} compact>{empty}</EmptyLabelRow>
         <EmptyLabelRow label={t('postal.deliveryNotes')} compact>{empty}</EmptyLabelRow>
         <EmptyLabelRow label={t('postal.notes')} compact>{empty}</EmptyLabelRow>
