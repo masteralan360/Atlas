@@ -65,6 +65,7 @@ import {
   getPostalShipmentOrganizationName,
 } from '@/local-db/postal'
 import { PostalDashboardCards } from '@/postal/PostalDashboardCards'
+import { OperationDialog } from '@/postal/OperationDialog'
 import {
   postalStates,
   locationLabel,
@@ -145,6 +146,10 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
   const [creating, setCreating] = useState(false)
   const [scanner, setScanner] = useState(false)
   const scannedId = useRef<string | null>(null)
+  const [autoScanReceiveShipment, setAutoScanReceiveShipment] = useState<
+    PostalShipment | null
+  >(null)
+  const autoScanReceiveResolveRef = useRef<(() => void) | null>(null)
   const [autoScanEnabled, setAutoScanEnabled] = useState(false)
   const autoScanEnabledRef = useRef(false)
   const [autoScanStarting, setAutoScanStarting] = useState(false)
@@ -245,19 +250,26 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
       return
     }
 
-    let organizationName: string
-    try {
-      organizationName = await getPostalShipmentOrganizationName(scope, shipment)
-    } catch {
-      toast({
-        title: t('common.error'),
-        description: t('postal.autoScan.lookupFailed'),
-        variant: 'destructive',
-      })
-      return
-    }
+    const receiveDialogPromise = shipment.state === 'draft'
+      ? new Promise<void>((resolve) => {
+          autoScanReceiveResolveRef.current = resolve
+          setAutoScanReceiveShipment(shipment)
+        })
+      : null
 
     try {
+      let organizationName: string
+      try {
+        organizationName = await getPostalShipmentOrganizationName(scope, shipment)
+      } catch {
+        toast({
+          title: t('common.error'),
+          description: t('postal.autoScan.lookupFailed'),
+          variant: 'destructive',
+        })
+        return
+      }
+
       const templates = await templatesPromise?.catch(() => []) ?? []
       const primaryTemplate = templates.find((template) => template.primary)
       const label = await buildPostalLabelPdf(
@@ -320,6 +332,8 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
               : t('postal.autoScan.printFailed'),
         variant: 'destructive',
       })
+    } finally {
+      if (receiveDialogPromise) await receiveDialogPromise
     }
   }, [])
 
@@ -377,7 +391,12 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
   }, [autoScanEnabled, autoScanPrinter])
 
   useEffect(() => {
-    if (!autoScanEnabled || autoScanPrinterDialogOpen || scanner) return
+    if (
+      !autoScanEnabled ||
+      autoScanPrinterDialogOpen ||
+      scanner ||
+      autoScanReceiveShipment
+    ) return
 
     let buffer = ''
     let startedAt = 0
@@ -453,7 +472,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
       document.removeEventListener('keydown', onKeyDown, true)
       reset()
     }
-  }, [autoScanEnabled, autoScanPrinterDialogOpen, scanner, enqueueAutoScan])
+  }, [autoScanEnabled, autoScanPrinterDialogOpen, scanner, autoScanReceiveShipment, enqueueAutoScan])
 
   const openAutoScanPrinterDialog = (resumeAfterSave: boolean) => {
     resumeAutoScanAfterPrinterSaveRef.current = resumeAfterSave
@@ -1214,6 +1233,20 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
           workspaceId={scope.workspaceId}
           selectedPrinterName={autoScanPrinter}
           onSaved={onAutoScanPrinterSaved}
+        />
+      )}
+      {autoScanReceiveShipment && (
+        <OperationDialog
+          scope={scope}
+          shipment={autoScanReceiveShipment}
+          operation="receive"
+          titleShipmentId={formatPostalShipmentId(autoScanReceiveShipment)}
+          onClose={() => {
+            setAutoScanReceiveShipment(null)
+            const resolve = autoScanReceiveResolveRef.current
+            autoScanReceiveResolveRef.current = null
+            resolve?.()
+          }}
         />
       )}
       {scanner && (

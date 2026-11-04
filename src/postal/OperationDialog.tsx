@@ -35,12 +35,14 @@ export function OperationDialog({
   shipment,
   transfer,
   operation,
+  titleShipmentId,
   onClose,
 }: {
   scope: PostalScope
   shipment: PostalShipment
   transfer?: PostalTransfer
   operation: string
+  titleShipmentId?: string
   onClose: () => void
 }) {
   const { t } = useTranslation()
@@ -144,7 +146,10 @@ export function OperationDialog({
     >
       <AppDialogContent className="max-w-xl" showCloseButton={!action.busy}>
         <AppDialogHeader>
-          <AppDialogTitle>{t(`postal.operations.${operation}`)}</AppDialogTitle>
+          <AppDialogTitle>
+            {t(`postal.operations.${operation}`)}
+            {titleShipmentId ? ` (${titleShipmentId})` : ''}
+          </AppDialogTitle>
         </AppDialogHeader>
         <AppDialogBody className="space-y-4">
           <p className="text-sm text-muted-foreground">
