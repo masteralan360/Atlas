@@ -326,7 +326,7 @@ export function Layout({ children }: LayoutProps) {
     || (
       Boolean(user?.workspaceId)
       && !isWorkspaceLoading
-      && loadedWorkspaceId === user.workspaceId
+      && loadedWorkspaceId === user?.workspaceId
       && !hasCapability('hideWorkspaceMembers')
     )
   const shouldShowSidebarWorkspaceSection =
