@@ -1298,6 +1298,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }, [isAuthenticated, user?.workspaceId])
 
     const hasFeature = (feature: ModuleFeatureKey): boolean => {
+        if (
+            feature === 'members'
+            && user?.role !== 'admin'
+            && (
+                isLoading
+                || !user?.workspaceId
+                || loadedWorkspaceId !== user.workspaceId
+                || planCapabilities.capabilities.includes('hideWorkspaceMembers')
+            )
+        ) {
+            return false
+        }
         if (feature === 'postal_service') {
             return (features.data_mode === 'cloud' || features.data_mode === 'hybrid') && planCapabilities.modules.includes('postal_service')
         }

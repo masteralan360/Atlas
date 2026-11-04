@@ -122,6 +122,7 @@ export type PlanCapabilityKey =
     | 'priceBooks'
     | 'quickOrder'
     | 'businessPartnerGroupPrivacy'
+    | 'hideWorkspaceMembers'
 
 export interface WorkspacePlanLimits {
     maxMembers: number

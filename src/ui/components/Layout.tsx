@@ -321,6 +321,17 @@ export function Layout({ children }: LayoutProps) {
     isLoading: isWorkspaceLoading,
     loadedWorkspaceId
   } = useWorkspace()
+  const canShowWorkspaceMembersInSidebar =
+    user?.role === 'admin'
+    || (
+      Boolean(user?.workspaceId)
+      && !isWorkspaceLoading
+      && loadedWorkspaceId === user.workspaceId
+      && !hasCapability('hideWorkspaceMembers')
+    )
+  const shouldShowSidebarWorkspaceSection =
+    (user?.role === 'admin' || user?.role === 'staff' || user?.role === 'viewer')
+    && (canShowWorkspaceMembersInSidebar || Boolean(user?.workspaceCode))
   const { hasPermission } = useWorkspacePermissions()
   useEffect(() => {
     if (!user?.id || !user.workspaceId || isWorkspaceLoading || loadedWorkspaceId !== user.workspaceId || isLocalMode) return
@@ -575,6 +586,11 @@ export function Layout({ children }: LayoutProps) {
     if (!user?.workspaceId) return
 
     const fetchMembers = async () => {
+      if (!canShowWorkspaceMembersInSidebar) {
+        setMembers([])
+        return
+      }
+
       if (isLocalMode) {
         const localProfiles = await db.profiles.where('workspaceId').equals(user.workspaceId).toArray()
         setMembers(localProfiles)
@@ -661,6 +677,7 @@ export function Layout({ children }: LayoutProps) {
     }
   }, [
     features.data_mode,
+    canShowWorkspaceMembersInSidebar,
     isLocalMode,
     isWorkspaceLoading,
     loadedWorkspaceId,
@@ -2497,15 +2514,15 @@ export function Layout({ children }: LayoutProps) {
               )}
 
               {/* Workspace Members Section */}
-              {(user?.role === 'admin' || user?.role === 'staff' || user?.role === 'viewer') && (
+              {shouldShowSidebarWorkspaceSection && (
                 <div className="pt-6 pb-2">
-                  {!(isSidebarMini && !mobileSidebarOpen) ? (
+                  {canShowWorkspaceMembersInSidebar && !(isSidebarMini && !mobileSidebarOpen) ? (
                     <h2 className="px-3 text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.2em] mb-4">
                       {t('auth.members')}
                     </h2>
-                  ) : (
+                  ) : canShowWorkspaceMembersInSidebar ? (
                     <div className="h-px bg-border/40 mx-2 mb-4" />
-                  )}
+                  ) : null}
 
                   {/* Workspace Code / Demo Timer */}
                   {user?.workspaceCode &&
@@ -2595,51 +2612,53 @@ export function Layout({ children }: LayoutProps) {
                       )
                     })()}
 
-                  <div
-                    className={cn(
-                      'px-3 space-y-3',
-                      isSidebarMini && !mobileSidebarOpen && 'px-0 space-y-2 flex flex-col items-center'
-                    )}
-                  >
-                    {members.map((member) => {
-                      // Use dynamic user profile for the current user to ensure immediate updates
-                      const profileUrl =
-                        member.id === user?.id && user?.profileUrl ? user.profileUrl : member.profile_url
+                  {canShowWorkspaceMembersInSidebar && (
+                    <div
+                      className={cn(
+                        'px-3 space-y-3',
+                        isSidebarMini && !mobileSidebarOpen && 'px-0 space-y-2 flex flex-col items-center'
+                      )}
+                    >
+                      {members.map((member) => {
+                        // Use dynamic user profile for the current user to ensure immediate updates
+                        const profileUrl =
+                          member.id === user?.id && user?.profileUrl ? user.profileUrl : member.profile_url
 
-                      return (
-                        <div
-                          key={member.id}
-                          className={cn(
-                            'flex items-center gap-3',
-                            isSidebarMini && !mobileSidebarOpen && 'justify-center w-full'
-                          )}
-                        >
+                        return (
                           <div
-                            className="w-7 h-7 rounded-full bg-secondary flex items-center justify-center text-xs font-medium overflow-hidden ring-2 ring-transparent hover:ring-primary/20 transition-all"
-                            title={isSidebarMini && !mobileSidebarOpen ? `${member.name} (${member.role})` : undefined}
+                            key={member.id}
+                            className={cn(
+                              'flex items-center gap-3',
+                              isSidebarMini && !mobileSidebarOpen && 'justify-center w-full'
+                            )}
                           >
-                            {profileUrl ? (
-                              <img
-                                src={platformService.convertFileSrc(profileUrl)}
-                                alt={member.name}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              member.name?.charAt(0).toUpperCase() || 'M'
+                            <div
+                              className="w-7 h-7 rounded-full bg-secondary flex items-center justify-center text-xs font-medium overflow-hidden ring-2 ring-transparent hover:ring-primary/20 transition-all"
+                              title={isSidebarMini && !mobileSidebarOpen ? `${member.name} (${member.role})` : undefined}
+                            >
+                              {profileUrl ? (
+                                <img
+                                  src={platformService.convertFileSrc(profileUrl)}
+                                  alt={member.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                member.name?.charAt(0).toUpperCase() || 'M'
+                              )}
+                            </div>
+                            {!(isSidebarMini && !mobileSidebarOpen) && (
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[13px] font-semibold truncate">{member.name}</p>
+                                <p className="text-[10px] text-muted-foreground/60 uppercase font-bold tracking-wider">
+                                  {member.role}
+                                </p>
+                              </div>
                             )}
                           </div>
-                          {!(isSidebarMini && !mobileSidebarOpen) && (
-                            <div className="flex-1 min-w-0">
-                              <p className="text-[13px] font-semibold truncate">{member.name}</p>
-                              <p className="text-[10px] text-muted-foreground/60 uppercase font-bold tracking-wider">
-                                {member.role}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
                 </>
@@ -2660,7 +2679,8 @@ export function Layout({ children }: LayoutProps) {
               >
                 {user &&
                 !isDemoWorkspace(user.workspaceCode) &&
-                user.workspaceMode === 'local' ? (
+                user.workspaceMode === 'local' &&
+                canShowWorkspaceMembersInSidebar ? (
                   <>
                     <LocalAccountSwitcher
                       isCompact={isSidebarMini && !mobileSidebarOpen}
@@ -2702,6 +2722,7 @@ export function Layout({ children }: LayoutProps) {
                 ) : user &&
                   !isDemoWorkspace(user.workspaceCode) &&
                   ['cloud', 'hybrid'].includes(user.workspaceMode) &&
+                  canShowWorkspaceMembersInSidebar &&
                   !sidebarCashierShift ? (
                   <LocalAccountSwitcher
                     isCompact={isSidebarMini && !mobileSidebarOpen}
@@ -2844,7 +2865,8 @@ export function Layout({ children }: LayoutProps) {
 
                     {user &&
                     !isDemoWorkspace(user.workspaceCode) &&
-                    ['cloud', 'hybrid'].includes(user.workspaceMode) ? (
+                    ['cloud', 'hybrid'].includes(user.workspaceMode) &&
+                    canShowWorkspaceMembersInSidebar ? (
                       <LocalAccountSwitcher
                         isCompact={isSidebarMini && !mobileSidebarOpen}
                         nameRoleOnly
