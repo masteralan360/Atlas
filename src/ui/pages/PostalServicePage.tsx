@@ -74,6 +74,7 @@ import {
   formatPostalShipmentId,
   parseShipmentQr,
   type PostalShipment,
+  type PostalState,
   type PostalBranch,
   type PostalOrganization,
   type PostalCodRecord,
@@ -113,6 +114,16 @@ import { useWorkspacePermissions } from '@/permissions'
 type PostalShipmentPageRow = PostalShipment & { organization_name?: string | null }
 type Row = PostalShipmentPageRow | PostalBranch | PostalOrganization | PostalCodRecord
 const SINGLE = ['single'] as const
+const postalStatusClasses: Record<PostalState, string> = {
+  draft: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+  received: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300',
+  in_transit: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300',
+  arrived: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300',
+  out_for_delivery: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
+  postponed: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300',
+  delivered: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+  cancelled: 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300',
+}
 
 function formatCodIqd(value: string, language: string, currency: string) {
   return `${new Intl.NumberFormat(language).format(BigInt(value))} ${currency}`
@@ -672,11 +683,14 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
         {
           id: 'status',
           header: t('postal.status'),
-          cell: ({ row }) => (
-            <span className="whitespace-nowrap rounded-full bg-primary/10 px-3 py-1 text-xs font-medium">
-              {t(`postal.states.${(row.original as PostalShipment).state}`)}
-            </span>
-          ),
+          cell: ({ row }) => {
+            const state = (row.original as PostalShipment).state
+            return (
+              <span className={`whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${postalStatusClasses[state]}`}>
+                {t(`postal.states.${state}`)}
+              </span>
+            )
+          },
         },
         {
           id: 'destination',

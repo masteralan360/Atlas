@@ -138,7 +138,9 @@ export function usePostalAction() {
                       ? 'invalidPayment'
                       : message.includes('cod_locked')
                         ? 'codLocked'
-                        : 'failed'
+                        : message.includes('amount_locked')
+                          ? 'amountLocked'
+                          : 'failed'
       toast({
         title: t('common.error'),
         description: t(postalQrErrorKey(e) ? `postal.qr.errors.${postalQrErrorKey(e)}` : `postal.errors.${key}`),

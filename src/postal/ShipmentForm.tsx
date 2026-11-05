@@ -55,7 +55,6 @@ const validationFields = {
   cod_amount: ["shipment-cod", "postal.codAmount"],
   pieces: ["shipment-pieces", "postal.pieces"],
   delivery_notes: ["shipment-notes", "postal.deliveryNotes"],
-  reason: ["shipment-reason", "postal.correctionReason"],
 } as const;
 type ValidationField = keyof typeof validationFields;
 
@@ -63,6 +62,7 @@ export function ShipmentForm({
   scope,
   source,
   editing,
+  financialAmountsLocked = false,
   generatedQrId,
   onClose,
   onSaved,
@@ -70,6 +70,7 @@ export function ShipmentForm({
   scope: PostalScope;
   source?: PostalShipment;
   editing?: boolean;
+  financialAmountsLocked?: boolean;
   generatedQrId?: string;
   onClose: () => void;
   onSaved: (shipment: PostalShipment) => void;
@@ -101,8 +102,10 @@ export function ShipmentForm({
     source ? String(Math.abs(source.cod_amount)) : "",
   );
   const initialDeliveryFeeAddon =
-    source?.delivery_fee_addon ??
-    (source?.shipment_size == null ? source?.delivery_fee ?? 0 : 0);
+    editing && source && source.state !== "draft"
+      ? source.delivery_fee ?? 0
+      : source?.delivery_fee_addon ??
+        (source?.shipment_size == null ? source?.delivery_fee ?? 0 : 0);
   const [deliveryFee, setDeliveryFee] = useState(
     initialDeliveryFeeAddon > 0 ? String(initialDeliveryFeeAddon) : "",
   );
@@ -110,8 +113,15 @@ export function ShipmentForm({
   const [pieces, setPieces] = useState(
     source?.pieces ? String(source.pieces) : "",
   );
-  const [reason, setReason] = useState("");
   const needsTariff = !editing || source?.state === "draft";
+  const showFullDeliveryFee = Boolean(
+    editing && scope.role === "admin" && source && source.state !== "draft",
+  );
+  const lateAdminEdit = Boolean(showFullDeliveryFee && !financialAmountsLocked);
+  const canEditFinancialAmounts = Boolean(
+    !financialAmountsLocked &&
+      (!editing || source?.state === "draft" || scope.role === "admin"),
+  );
   const [selectedTariff, setSelectedTariff] = useState<PostalTariffOption | null>(null);
   const tariffInitialized = useRef(false);
   const persistedTariff = source && locationCatalogQuery.data
@@ -183,17 +193,17 @@ export function ShipmentForm({
   };
   const errors: Partial<Record<ValidationField, ShipmentValidationError>> =
     shipmentValidationErrors(payload, locationCatalog, Boolean(editing));
-  if (editing && scope.role === "admin" && !reason.trim())
-    errors.reason = "required";
   const deliveryFeeAmount = deliveryFee === "" ? null : Number(deliveryFee);
   const deliveryFeeInvalid =
     deliveryFeeAmount !== null &&
     (!Number.isSafeInteger(deliveryFeeAmount) ||
       deliveryFeeAmount <= 0 ||
       deliveryFeeAmount > 999999999999 ||
-      (tariff?.fee ?? 0) + deliveryFeeAmount > 999999999999);
+      (!lateAdminEdit &&
+        (tariff?.fee ?? 0) + deliveryFeeAmount > 999999999999));
   const tariffRequirementMissing =
     needsTariff && !tariff && deliveryFee === "";
+  const deliveryFeeRequired = lateAdminEdit && deliveryFeeAmount === null;
   const invalidFields = Object.keys(validationFields).filter(
     (field) => errors[field as ValidationField],
   ) as ValidationField[];
@@ -203,6 +213,7 @@ export function ShipmentForm({
     invalidFields.length === 0 &&
     !organizationInvalid &&
     !deliveryFeeInvalid &&
+    !deliveryFeeRequired &&
     !tariffRequirementMissing;
   const showNegativePrefix = negative && amount.length > 0;
   const fieldError = (field: ValidationField) => {
@@ -265,12 +276,15 @@ export function ShipmentForm({
                     delivery_fee_addon: deliveryFeeAmount ?? 0,
                   }
                 : {}),
+              ...(lateAdminEdit && deliveryFeeAmount !== source?.delivery_fee
+                ? { delivery_fee_override: deliveryFeeAmount }
+                : {}),
               ...(requiresOrganization
                 ? { organization_id: selectedOrganization?.id }
                 : {}),
             };
             void action.run(
-              JSON.stringify(commandPayload) + reason,
+              JSON.stringify(commandPayload),
               async (request) => {
                 const shipment = await postalCommand<PostalShipment>(
                   scope,
@@ -281,7 +295,6 @@ export function ShipmentForm({
                       ? {
                           id: source?.id,
                           revision: source?.revision,
-                          reason: reason.trim(),
                         }
                       : {}),
                   },
@@ -437,7 +450,7 @@ export function ShipmentForm({
                     required
                     value={money}
                     disabled={
-                      action.busy || (!!editing && source?.state !== "draft")
+                      action.busy || !canEditFinancialAmounts
                     }
                     onChange={(e) => {
                       const digits = e.target.value.replace(/,/g, "");
@@ -449,7 +462,7 @@ export function ShipmentForm({
                   <Checkbox
                     checked={negative}
                     disabled={
-                      action.busy || (!!editing && source?.state !== "draft")
+                      action.busy || !canEditFinancialAmounts
                     }
                     onCheckedChange={setNegative}
                   />
@@ -466,7 +479,7 @@ export function ShipmentForm({
             </div>
             <div className="space-y-2">
               <Label htmlFor="shipment-delivery-fee">
-                {t("postal.deliveryFee")}
+                {t("postal.deliveryFee")}{lateAdminEdit && " *"}
               </Label>
               <Input
                 id="shipment-delivery-fee"
@@ -474,10 +487,15 @@ export function ShipmentForm({
                 placeholder="0"
                 dir="ltr"
                 value={deliveryFeeMoney}
-                disabled={action.busy || (!!editing && !needsTariff)}
-                aria-invalid={deliveryFeeInvalid}
+                required={lateAdminEdit}
+                disabled={
+                  action.busy ||
+                    (!needsTariff && !lateAdminEdit) ||
+                    (lateAdminEdit && !canEditFinancialAmounts)
+                }
+                aria-invalid={deliveryFeeInvalid || deliveryFeeRequired}
                 aria-describedby={
-                  deliveryFeeInvalid
+                  deliveryFeeInvalid || deliveryFeeRequired
                     ? "shipment-delivery-fee-error"
                     : "shipment-delivery-fee-hint"
                 }
@@ -486,19 +504,27 @@ export function ShipmentForm({
                   if (/^\d{0,12}$/.test(digits)) setDeliveryFee(digits);
                 }}
               />
-              {deliveryFeeInvalid ? (
+              {deliveryFeeInvalid || deliveryFeeRequired ? (
                 <p
                   id="shipment-delivery-fee-error"
                   className="text-sm text-destructive"
                 >
-                  {t("postal.validation.deliveryFee")}
+                  {t(
+                    deliveryFeeInvalid
+                      ? "postal.validation.deliveryFee"
+                      : "postal.validation.required",
+                  )}
                 </p>
               ) : (
                 <p
                   id="shipment-delivery-fee-hint"
                   className="text-xs text-muted-foreground"
                 >
-                  {t("postal.deliveryFeeAddonHint")}
+                  {t(
+                    showFullDeliveryFee
+                      ? "postal.deliveryFeeFullAmountHint"
+                      : "postal.deliveryFeeAddonHint",
+                  )}
                 </p>
               )}
             </div>
@@ -558,22 +584,6 @@ export function ShipmentForm({
               />
               {fieldError("delivery_notes")}
             </div>
-            {editing && scope.role === "admin" && (
-              <div className="space-y-2">
-                <Label htmlFor="shipment-reason">
-                  {t("postal.correctionReason")} *
-                </Label>
-                <Textarea
-                  id="shipment-reason"
-                  {...fieldValidation("reason")}
-                  value={reason}
-                  disabled={action.busy}
-                  required
-                  onChange={(e) => setReason(e.target.value)}
-                />
-                {fieldError("reason")}
-              </div>
-            )}
             {needsTariff && (
               <ShipmentTariffSelector
                 id="shipment-tariff"

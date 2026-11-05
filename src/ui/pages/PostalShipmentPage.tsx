@@ -695,6 +695,13 @@ export default function PostalShipmentPage({
           scope={scope}
           editing
           source={shipment}
+          financialAmountsLocked={
+            shipment.state === 'delivered' ||
+            shipment.state === 'cancelled' ||
+            summary.collected !== 0 ||
+            summary.settled !== 0 ||
+            deliveryFeeCollected !== 0
+          }
           onClose={() => setEdit(false)}
           onSaved={() => setEdit(false)}
         />
