@@ -26,14 +26,14 @@ import {
   postalAddGovernorateBranches,
   postalCommand,
   postalSaveBranch,
+  usePostalLocationCatalog,
   usePostalMembers,
   type PostalScope,
 } from '@/local-db/postal'
-import type { PostalBranch, PostalOrganization } from './domain'
+import { emptyPostalLocationCatalog, type PostalBranch, type PostalOrganization } from './domain'
 import { MembershipDialog } from './MembershipDialog'
 import { OrganizationCode } from './OrganizationCode'
 import { GovernoratePicker, PostalLoading, PostalError } from './shared'
-import iraqPostalLocations from '@/data/iraqPostalLocations.json'
 
 type BranchNameLocale = 'en' | 'ar' | 'ku'
 
@@ -48,6 +48,9 @@ export function AddAllGovernoratesDialog({
   const { toast } = useToast()
   const [locale, setLocale] = useState<BranchNameLocale | ''>('')
   const action = usePostalAction()
+  const locationCatalogQuery = usePostalLocationCatalog(scope)
+  const locationCatalog = locationCatalogQuery.data ?? emptyPostalLocationCatalog
+  const governorates = locationCatalog.governorates.filter((governorate) => governorate.isActive)
 
   return (
     <AppDialog
@@ -64,11 +67,15 @@ export function AddAllGovernoratesDialog({
           </AppDialogTitle>
           <AppDialogDescription>
             {t('postal.bulkBranchesDescription', {
-              count: iraqPostalLocations.governorates.length,
+              count: governorates.length,
             })}
           </AppDialogDescription>
         </AppDialogHeader>
         <AppDialogBody className="space-y-4">
+          {locationCatalogQuery.error && (
+            <PostalError retry={() => void locationCatalogQuery.refetch()} />
+          )}
+          {locationCatalogQuery.isPending && <PostalLoading />}
           <div className="space-y-2">
             <Label htmlFor="postal-branch-name-locale">
               {t('postal.branchNameLocale')} *
@@ -106,10 +113,10 @@ export function AddAllGovernoratesDialog({
           </Button>
           <Button
             type="button"
-            disabled={action.busy || !locale}
+            disabled={action.busy || !locale || locationCatalogQuery.isPending || governorates.length === 0}
             onClick={() => {
               if (!locale) return
-              const branches = iraqPostalLocations.governorates.map(
+              const branches = governorates.map(
                 (governorate) => ({
                   name: governorate[locale],
                   governorate: governorate.id,
@@ -158,6 +165,12 @@ export function BranchDialog({
   const [active, setActive] = useState(branch?.active ?? true)
   const [isPrimary, setIsPrimary] = useState(branch?.is_primary ?? false)
   const action = usePostalAction()
+  const locationCatalogQuery = usePostalLocationCatalog(scope)
+  const locationCatalog = locationCatalogQuery.data ?? emptyPostalLocationCatalog
+  const selectedGovernorate = locationCatalog.governorates.find((entry) => entry.id === governorate)
+  const validGovernorate = Boolean(
+    selectedGovernorate?.isActive || (branch && branch.governorate === governorate),
+  )
   const payload = {
     id: branch?.id,
     name: name.trim(),
@@ -184,7 +197,7 @@ export function BranchDialog({
           className="flex min-h-0 flex-1 flex-col"
           onSubmit={(e) => {
             e.preventDefault()
-            if (!name.trim() || !governorate) return
+            if (!name.trim() || !validGovernorate) return
             void action.run(JSON.stringify(payload), async (id) => {
               await postalSaveBranch(scope, payload, id)
               onClose()
@@ -205,9 +218,14 @@ export function BranchDialog({
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
+            {locationCatalogQuery.error && (
+              <PostalError retry={() => void locationCatalogQuery.refetch()} />
+            )}
+            {locationCatalogQuery.isPending && <PostalLoading />}
             <GovernoratePicker
               governorate={governorate}
-              disabled={action.busy}
+              catalog={locationCatalog}
+              disabled={action.busy || locationCatalogQuery.isPending || !locationCatalogQuery.data}
               onChange={setGovernorate}
             />
             <div className="space-y-2">
@@ -259,7 +277,7 @@ export function BranchDialog({
             </Button>
             <Button
               type="submit"
-              disabled={action.busy || !name.trim() || !governorate}
+              disabled={action.busy || !name.trim() || !validGovernorate}
             >
               {action.busy && <Loader2 className="me-2 h-4 w-4 animate-spin" />}
               {t('common.save')}

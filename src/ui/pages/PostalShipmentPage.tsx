@@ -54,6 +54,7 @@ import {
   usePostalEvents,
   usePostalCodHistory,
   usePostalDeliveryFeeHistory,
+  usePostalLocationCatalog,
   postalCommand,
 } from '@/local-db/postal'
 import {
@@ -61,6 +62,7 @@ import {
   formatPostalShipmentId,
   locationLabel,
   postalShipmentSizeTranslationKey,
+  emptyPostalLocationCatalog,
 } from '@/postal/domain'
 import { PostalError, PostalLoading } from '@/postal/shared'
 import {
@@ -113,6 +115,8 @@ export default function PostalShipmentPage({
 }) {
   const { t, i18n } = useTranslation()
   const scope = usePostalScope()
+  const locationCatalogQuery = usePostalLocationCatalog(scope)
+  const locationCatalog = locationCatalogQuery.data ?? emptyPostalLocationCatalog
   const { workspaceName } = useWorkspace()
   const { permissionKeys } = useWorkspacePermissions()
   const canPrint = !permissionKeys.includes('global.NOprint')
@@ -194,14 +198,14 @@ export default function PostalShipmentPage({
     preparePostalLabel(shipment, scope.workspaceId, t, {
       organizationName,
       workspaceName: workspaceName || 'Atlas',
-    }, labelSize)
+    }, labelSize, locationCatalog)
     navigate('/print-preview-editor')
   }
   const openCustomLabelPrint = (template: StoredCustomTemplateRow) => {
     preparePostalCustomLabel(shipment, scope.workspaceId, {
       organizationName,
       workspaceName: workspaceName || 'Atlas',
-    }, template, i18n.language)
+    }, template, i18n.language, locationCatalog)
     setPrint(false)
     navigate('/print-preview-editor')
   }
@@ -229,6 +233,9 @@ export default function PostalShipmentPage({
                 'postal_cod_records',
                 'postal_delivery_fee_records',
                 'postal_transfers',
+                'postal_locations',
+                'postal_governorates',
+                'postal_shipment_tariffs',
               ]}
             />
           </div>
@@ -294,7 +301,7 @@ export default function PostalShipmentPage({
                 ['backup_phone', shipment.backup_phone],
                 [
                   'governorate',
-                  locationLabel(shipment.governorate, i18n.language),
+                  locationLabel(shipment.governorate, i18n.language, undefined, locationCatalog),
                 ],
                 [
                   'area',
@@ -302,6 +309,7 @@ export default function PostalShipmentPage({
                     shipment.area,
                     i18n.language,
                     shipment.governorate,
+                    locationCatalog,
                   ),
                 ],
                 ['address', shipment.address],
@@ -312,6 +320,8 @@ export default function PostalShipmentPage({
                         shipment.governorate,
                         shipment.shipment_size,
                         shipment.delivery_fee_tariff ?? shipment.delivery_fee,
+                        shipment.tariff_zone,
+                        locationCatalog,
                       )),
                     ]]
                   : []),

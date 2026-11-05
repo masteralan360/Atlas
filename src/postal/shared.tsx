@@ -9,7 +9,7 @@ import {
   SmallDialogTitle,
   SmallDialogBody,
 } from '@/ui/components/small-dialog'
-import { locations, locationLabel } from './domain'
+import { locationLabel, type PostalLocationCatalog } from './domain'
 import { usePostalPage, type PostalScope } from '@/local-db/postal'
 import type { PostalBranch } from './domain'
 import { AppPagination } from '@/ui/components/AppPagination'
@@ -48,29 +48,63 @@ export function PostalError({ retry }: { retry: () => void }) {
 export function LocationPicker({
   governorate,
   area,
+  catalog,
   disabled,
   onChange,
 }: {
   governorate: string
   area: string
+  catalog: PostalLocationCatalog
   disabled?: boolean
   onChange: (governorate: string, area: string) => void
 }) {
   const { t, i18n } = useTranslation()
   const [picker, setPicker] = useState<'governorate' | 'area' | null>(null)
   const [search, setSearch] = useState('')
-  const options =
-    picker === 'area'
-      ? (locations.find((x) => x.id === governorate)?.areas ?? []).map((x) => ({
-          id: x[0],
-          label: locationLabel(x[0], i18n.language, governorate),
-          aliases: x.join(' '),
+  const selectedGovernorate = catalog.governorates.find((entry) => entry.id === governorate)
+  const options = picker === 'area'
+    ? (() => {
+        const current = selectedGovernorate?.areas.find((entry) => entry.id === area)
+        const available = selectedGovernorate?.areas.filter((entry) => entry.isActive) ?? []
+        const entries = current && !current.isActive
+          ? [...available, current]
+          : available
+        if (area && !current) {
+          return [
+            ...entries.map((entry) => ({
+              id: entry.id,
+              label: `${locationLabel(entry.id, i18n.language, governorate, catalog)}${entry.isActive && selectedGovernorate?.isActive ? '' : ` — ${t('postal.locationUnavailable')}`}`,
+              aliases: `${entry.en} ${entry.ar} ${entry.ku}`,
+            })),
+            { id: area, label: `${area} — ${t('postal.locationUnavailable')}`, aliases: area },
+          ]
+        }
+        return entries.map((entry) => ({
+          id: entry.id,
+          label: `${locationLabel(entry.id, i18n.language, governorate, catalog)}${entry.isActive && selectedGovernorate?.isActive ? '' : ` — ${t('postal.locationUnavailable')}`}`,
+          aliases: `${entry.en} ${entry.ar} ${entry.ku}`,
         }))
-      : locations.map((x) => ({
-          id: x.id,
-          label: locationLabel(x.id, i18n.language),
-          aliases: `${x.en} ${x.ar} ${x.ku}`,
+      })()
+    : (() => {
+        const current = catalog.governorates.find((entry) => entry.id === governorate)
+        const available = catalog.governorates.filter((entry) => entry.isActive)
+        const entries = current && !current.isActive ? [...available, current] : available
+        if (governorate && !current) {
+          return [
+            ...entries.map((entry) => ({
+              id: entry.id,
+              label: `${locationLabel(entry.id, i18n.language, undefined, catalog)}${entry.isActive ? '' : ` — ${t('postal.locationUnavailable')}`}`,
+              aliases: `${entry.en} ${entry.ar} ${entry.ku}`,
+            })),
+            { id: governorate, label: `${governorate} — ${t('postal.locationUnavailable')}`, aliases: governorate },
+          ]
+        }
+        return entries.map((entry) => ({
+          id: entry.id,
+          label: `${locationLabel(entry.id, i18n.language, undefined, catalog)}${entry.isActive ? '' : ` — ${t('postal.locationUnavailable')}`}`,
+          aliases: `${entry.en} ${entry.ar} ${entry.ku}`,
         }))
+      })()
   return (
     <>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -96,6 +130,7 @@ export function LocationPicker({
                     field === 'governorate' ? governorate : area,
                     i18n.language,
                     field === 'area' ? governorate : undefined,
+                    catalog,
                   )
                 : t('postal.select')}
             </Button>
@@ -160,20 +195,27 @@ export function LocationPicker({
 
 export function GovernoratePicker({
   governorate,
+  catalog,
   disabled,
   onChange,
 }: {
   governorate: string
+  catalog: PostalLocationCatalog
   disabled?: boolean
   onChange: (governorate: string) => void
 }) {
   const { t, i18n } = useTranslation()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
-  const options = locations.map((location) => ({
-    id: location.id,
-    label: locationLabel(location.id, i18n.language),
-    aliases: `${location.en} ${location.ar} ${location.ku}`,
+  const selectedGovernorate = catalog.governorates.find((entry) => entry.id === governorate)
+  const availableGovernorates = catalog.governorates.filter((entry) => entry.isActive)
+  const governorates = selectedGovernorate && !selectedGovernorate.isActive
+    ? [...availableGovernorates, selectedGovernorate]
+    : availableGovernorates
+  const options = governorates.map((governorateOption) => ({
+    id: governorateOption.id,
+    label: `${locationLabel(governorateOption.id, i18n.language, undefined, catalog)}${governorateOption.isActive ? '' : ` — ${t('postal.locationUnavailable')}`}`,
+    aliases: `${governorateOption.en} ${governorateOption.ar} ${governorateOption.ku}`,
   }))
 
   return (
@@ -194,7 +236,7 @@ export function GovernoratePicker({
       >
         <MapPin className="me-2 h-4 w-4 shrink-0" />
         {governorate
-          ? locationLabel(governorate, i18n.language)
+          ? `${locationLabel(governorate, i18n.language, undefined, catalog)}${selectedGovernorate?.isActive ? '' : ` — ${t('postal.locationUnavailable')}`}`
           : t('postal.select')}
       </Button>
       <SmallDialog

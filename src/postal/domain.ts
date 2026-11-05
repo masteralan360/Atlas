@@ -1,5 +1,3 @@
-import directory from "@/data/iraqPostalLocations.json";
-
 export const postalStates = [
   "draft",
   "received",
@@ -164,76 +162,187 @@ export interface ShipmentInput {
   fragile: boolean;
   delivery_notes: string;
 }
-export const locations = directory.governorates;
+export type PostalTariffProfile = "standard" | "northern";
+export interface PostalArea {
+  id: string;
+  en: string;
+  ar: string;
+  ku: string;
+  sortOrder: number;
+  isActive: boolean;
+  tariffZone: PostalTariffZone | null;
+}
+export interface PostalGovernorate {
+  id: string;
+  en: string;
+  ar: string;
+  ku: string;
+  sortOrder: number;
+  isActive: boolean;
+  tariffProfile: PostalTariffProfile;
+  areas: PostalArea[];
+}
+export interface PostalShipmentTariff {
+  profile: PostalTariffProfile;
+  size: PostalShipmentSize;
+  zone: "standard" | PostalTariffZone;
+  fee: number;
+  labelKey: string;
+  sortOrder: number;
+  isActive: boolean;
+}
+export interface PostalLocationCatalog {
+  governorates: PostalGovernorate[];
+  tariffs: PostalShipmentTariff[];
+}
+export const emptyPostalLocationCatalog: PostalLocationCatalog = {
+  governorates: [],
+  tariffs: [],
+};
 export interface PostalTariffOption {
   size: PostalShipmentSize;
   fee: number;
   zone: PostalTariffZone | null;
+  labelKey: string;
 }
-const northernGovernorates = new Set(["sulaymaniyah", "erbil", "duhok"]);
-const nonNorthernTariffLabels: Partial<
-  Record<PostalShipmentSize, Record<number, string>>
-> = {
-  carton: {
-    8000: "carton_8000",
-    12000: "carton_12000",
-    15000: "carton_15000",
-    20000: "carton_20000",
-  },
-  ship: {
-    15000: "ship_15000",
-    24000: "ship_24000",
-    35000: "ship_35000",
-    55000: "ship_55000",
-  },
-};
+export function normalizePostalLocationCatalog(
+  governorateRows: unknown,
+  areaRows: unknown,
+  tariffRows: unknown,
+): PostalLocationCatalog {
+  if (!Array.isArray(governorateRows) || !Array.isArray(areaRows) || !Array.isArray(tariffRows))
+    throw new Error("postal_invalid_result");
+
+  const governorates = governorateRows.map((value) => {
+    if (!value || typeof value !== "object") throw new Error("postal_invalid_result");
+    const row = value as Record<string, unknown>;
+    if (
+      typeof row.id !== "string" || !row.id ||
+      typeof row.label_en !== "string" || !row.label_en.trim() ||
+      typeof row.label_ar !== "string" || !row.label_ar.trim() ||
+      typeof row.label_ku !== "string" || !row.label_ku.trim() ||
+      !Number.isSafeInteger(Number(row.display_order)) || Number(row.display_order) < 0 ||
+      typeof row.is_active !== "boolean" ||
+      (row.tariff_profile !== "standard" && row.tariff_profile !== "northern")
+    ) throw new Error("postal_invalid_result");
+    return {
+      id: row.id,
+      en: row.label_en,
+      ar: row.label_ar,
+      ku: row.label_ku,
+      sortOrder: Number(row.display_order),
+      isActive: row.is_active,
+      tariffProfile: row.tariff_profile,
+      areas: [] as PostalArea[],
+    } satisfies PostalGovernorate;
+  });
+  const governoratesById = new Map(governorates.map((governorate) => [governorate.id, governorate]));
+  for (const value of areaRows) {
+    if (!value || typeof value !== "object") throw new Error("postal_invalid_result");
+    const row = value as Record<string, unknown>;
+    const governorate = typeof row.governorate === "string" ? governoratesById.get(row.governorate) : undefined;
+    if (
+      !governorate || typeof row.area !== "string" || !row.area ||
+      typeof row.label_en !== "string" || !row.label_en.trim() ||
+      typeof row.label_ar !== "string" || !row.label_ar.trim() ||
+      typeof row.label_ku !== "string" || !row.label_ku.trim() ||
+      !Number.isSafeInteger(Number(row.display_order)) || Number(row.display_order) < 0 ||
+      typeof row.is_active !== "boolean" ||
+      (row.tariff_zone !== null && row.tariff_zone !== "center" && row.tariff_zone !== "outside") ||
+      (governorate.tariffProfile === "northern" && row.tariff_zone === null) ||
+      (governorate.tariffProfile === "standard" && row.tariff_zone !== null)
+    ) throw new Error("postal_invalid_result");
+    governorate.areas.push({
+      id: row.area,
+      en: row.label_en,
+      ar: row.label_ar,
+      ku: row.label_ku,
+      sortOrder: Number(row.display_order),
+      isActive: row.is_active,
+      tariffZone: row.tariff_zone,
+    });
+  }
+  for (const governorate of governorates) {
+    governorate.areas.sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id));
+  }
+
+  const tariffs = tariffRows.map((value) => {
+    if (!value || typeof value !== "object") throw new Error("postal_invalid_result");
+    const row = value as Record<string, unknown>;
+    if (
+      (row.tariff_profile !== "standard" && row.tariff_profile !== "northern") ||
+      (row.shipment_size !== "carton" && row.shipment_size !== "ship" && row.shipment_size !== "small_package") ||
+      (row.tariff_zone !== "standard" && row.tariff_zone !== "center" && row.tariff_zone !== "outside") ||
+      !Number.isSafeInteger(Number(row.fee)) || Number(row.fee) <= 0 ||
+      typeof row.label_key !== "string" || !/^[a-z0-9_]+$/.test(row.label_key) ||
+      !Number.isSafeInteger(Number(row.display_order)) || Number(row.display_order) < 0 ||
+      typeof row.is_active !== "boolean"
+    ) throw new Error("postal_invalid_result");
+    return {
+      profile: row.tariff_profile,
+      size: row.shipment_size,
+      zone: row.tariff_zone,
+      fee: Number(row.fee),
+      labelKey: row.label_key,
+      sortOrder: Number(row.display_order),
+      isActive: row.is_active,
+    } satisfies PostalShipmentTariff;
+  });
+  governorates.sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id));
+  tariffs.sort((left, right) => left.sortOrder - right.sortOrder || left.size.localeCompare(right.size) || left.fee - right.fee);
+  return { governorates, tariffs };
+}
 export function postalShipmentSizeTranslationKey(
   governorate: string,
   size: PostalShipmentSize,
   fee: number | null | undefined,
+  zone: PostalTariffZone | null | undefined,
+  catalog: PostalLocationCatalog,
 ) {
-  const tariffLabel = fee == null || northernGovernorates.has(governorate)
-    ? undefined
-    : nonNorthernTariffLabels[size]?.[fee];
-  return `postal.shipmentSizes.${tariffLabel ?? size}`;
+  if (fee == null) return `postal.shipmentSizes.${size}`;
+  const profile = catalog.governorates.find((entry) => entry.id === governorate)?.tariffProfile;
+  const tariffZone = profile === "northern" ? zone : profile === "standard" ? "standard" : null;
+  const tariff = tariffZone
+    ? catalog.tariffs.find((entry) =>
+        entry.profile === profile && entry.size === size && entry.zone === tariffZone && entry.fee === fee,
+      )
+    : undefined;
+  return `postal.shipmentSizes.${tariff?.labelKey ?? size}`;
 }
 export function postalTariffOptions(
   governorate: string,
   area: string,
+  catalog: PostalLocationCatalog,
+  includeInactive = false,
 ): PostalTariffOption[] {
-  const destination = locations.find((location) => location.id === governorate);
-  if (!destination?.areas.some((entry) => entry[0] === area)) {
-    return [];
-  }
-  if (northernGovernorates.has(governorate)) {
-    const center = /center|centre/i.test(area);
-    return [
-      {
-        size: "small_package",
-        fee: center ? 5000 : 6000,
-        zone: center ? "center" : "outside",
-      },
-    ];
-  }
-  return [
-    { size: "carton", fee: 8000, zone: null },
-    { size: "carton", fee: 12000, zone: null },
-    { size: "carton", fee: 15000, zone: null },
-    { size: "carton", fee: 20000, zone: null },
-    { size: "ship", fee: 15000, zone: null },
-    { size: "ship", fee: 24000, zone: null },
-    { size: "ship", fee: 35000, zone: null },
-    { size: "ship", fee: 55000, zone: null },
-  ];
+  const destination = catalog.governorates.find((location) => location.id === governorate);
+  const destinationArea = destination?.areas.find((entry) => entry.id === area);
+  if (!destination || !destinationArea) return [];
+  if (!includeInactive && (!destination.isActive || !destinationArea.isActive)) return [];
+  const zone = destination.tariffProfile === "northern" ? destinationArea.tariffZone : "standard";
+  return catalog.tariffs
+    .filter((tariff) =>
+      tariff.profile === destination.tariffProfile &&
+      tariff.zone === zone &&
+      (includeInactive || tariff.isActive),
+    )
+    .map((tariff) => ({
+      size: tariff.size,
+      fee: tariff.fee,
+      zone: tariff.zone === "standard" ? null : tariff.zone,
+      labelKey: tariff.labelKey,
+    }));
 }
 export function findPostalTariff(
   governorate: string,
   area: string,
   size: PostalShipmentSize | null | undefined,
   fee: number | null | undefined,
+  catalog: PostalLocationCatalog,
+  includeInactive = false,
 ): PostalTariffOption | null {
   return (
-    postalTariffOptions(governorate, area).find(
+    postalTariffOptions(governorate, area, catalog, includeInactive).find(
       (option) => option.size === size && option.fee === fee,
     ) ?? null
   );
@@ -242,18 +351,19 @@ export function locationLabel(
   id: string,
   language: string,
   governorate?: string,
+  catalog: PostalLocationCatalog = emptyPostalLocationCatalog,
 ) {
   const lang = language.startsWith("ar")
     ? "ar"
     : language.startsWith("ku")
       ? "ku"
       : "en";
-  if (!governorate) return locations.find((x) => x.id === id)?.[lang] ?? id;
+  if (!governorate) return catalog.governorates.find((x) => x.id === id)?.[lang] ?? id;
   return (
-    locations
+    catalog.governorates
       .find((x) => x.id === governorate)
-      ?.areas.find((x) => x[0] === id)?.[
-      lang === "ar" ? 2 : lang === "ku" ? 3 : 1
+      ?.areas.find((x) => x.id === id)?.[
+      lang
     ] ?? id
   );
 }
@@ -288,7 +398,11 @@ export type ShipmentValidationError =
   | "amount"
   | "pieces"
   | "textLength";
-export function shipmentValidationErrors(input: ShipmentInput) {
+export function shipmentValidationErrors(
+  input: ShipmentInput,
+  catalog: PostalLocationCatalog,
+  allowInactiveLocation = false,
+) {
   const errors: Partial<Record<keyof ShipmentInput, ShipmentValidationError>> =
     {};
   if (!input.recipient_name.trim()) errors.recipient_name = "required";
@@ -298,10 +412,12 @@ export function shipmentValidationErrors(input: ShipmentInput) {
   else if (!isIraqiPhone(input.primary_phone)) errors.primary_phone = "phone";
   if (input.backup_phone && !isIraqiPhone(input.backup_phone))
     errors.backup_phone = "phone";
-  const governorate = locations.find((x) => x.id === input.governorate);
-  if (!governorate)
+  const governorate = catalog.governorates.find((x) => x.id === input.governorate);
+  if (!governorate || (!allowInactiveLocation && !governorate.isActive))
     errors.governorate = input.governorate ? "location" : "required";
-  if (!governorate?.areas.some((x) => x[0] === input.area)) {
+  if (
+    !governorate?.areas.some((x) => x.id === input.area && (allowInactiveLocation || x.isActive))
+  ) {
     errors.area = input.area ? "location" : "required";
   }
   if (
@@ -322,8 +438,12 @@ export function shipmentValidationErrors(input: ShipmentInput) {
   if (input.delivery_notes.length > 2000) errors.delivery_notes = "textLength";
   return errors;
 }
-export function validShipment(input: ShipmentInput) {
-  return Object.keys(shipmentValidationErrors(input)).length === 0;
+export function validShipment(
+  input: ShipmentInput,
+  catalog: PostalLocationCatalog,
+  allowInactiveLocation = false,
+) {
+  return Object.keys(shipmentValidationErrors(input, catalog, allowInactiveLocation)).length === 0;
 }
 export function copyShipment(s: PostalShipment): ShipmentInput {
   return {

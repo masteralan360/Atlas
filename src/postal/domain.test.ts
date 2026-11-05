@@ -5,7 +5,7 @@ import {
   findPostalTariff,
   internationalIraqiPhone,
   isIraqiPhone,
-  locations,
+  normalizePostalLocationCatalog,
   parseShipmentQr,
   postalTariffOptions,
   shipmentQr,
@@ -16,6 +16,45 @@ import {
 } from "./domain";
 import { getLedgerCashMovementFromPayment } from "@/lib/ledgerCashMovementEntries";
 import type { PaymentTransaction } from "@/local-db/models";
+import postalLocations from "@/data/iraqPostalLocations.json";
+
+const governorateRows = postalLocations.governorates.map((governorate, index) => ({
+  id: governorate.id,
+  label_en: governorate.en,
+  label_ar: governorate.ar,
+  label_ku: governorate.ku,
+  display_order: index + 1,
+  tariff_profile: ["erbil", "sulaymaniyah", "duhok"].includes(governorate.id) ? "northern" : "standard",
+  is_active: true,
+}));
+const areaRows = postalLocations.governorates.flatMap((governorate) => governorate.areas.map((area, index) => {
+  const isNorthern = ["erbil", "sulaymaniyah", "duhok"].includes(governorate.id);
+  return {
+    governorate: governorate.id,
+    area: area[0],
+    label_en: area[1],
+    label_ar: area[2],
+    label_ku: area[3],
+    display_order: index + 1,
+    tariff_zone: isNorthern ? (/center|centre/i.test(area[0]) ? "center" : "outside") : null,
+    is_active: true,
+  };
+}));
+const tariffRows = [
+  ["northern", "small_package", "center", 5000, "small_package"],
+  ["northern", "small_package", "outside", 6000, "small_package"],
+  ...[8000, 12000, 15000, 20000].map((fee) => ["standard", "carton", "standard", fee, `carton_${fee}`]),
+  ...[15000, 24000, 35000, 55000].map((fee) => ["standard", "ship", "standard", fee, `ship_${fee}`]),
+].map(([tariff_profile, shipment_size, tariff_zone, fee, label_key], index) => ({
+  tariff_profile,
+  shipment_size,
+  tariff_zone,
+  fee,
+  label_key,
+  display_order: index + 1,
+  is_active: true,
+}));
+const locationCatalog = normalizePostalLocationCatalog(governorateRows, areaRows, tariffRows);
 const shipment = {
   id: crypto.randomUUID(),
   qr_id: crypto.randomUUID(),
@@ -44,9 +83,9 @@ describe("Post Service domain", () => {
     expect(copy).not.toHaveProperty("qr_id");
     expect(copy).not.toHaveProperty("state");
     expect(copy.cod_amount).toBe(-25000);
-    expect(validShipment(copy)).toBe(true);
-    expect(validShipment({ ...copy, governorate: "baghdad" })).toBe(false);
-    expect(validShipment({ ...copy, pieces: 0 })).toBe(false);
+    expect(validShipment(copy, locationCatalog)).toBe(true);
+    expect(validShipment({ ...copy, governorate: "baghdad" }, locationCatalog)).toBe(false);
+    expect(validShipment({ ...copy, pieces: 0 }, locationCatalog)).toBe(false);
   });
   it("preserves empty monetary inputs and exact signed integer dinars", () => {
     expect(signedIqd("", false)).toBeNull();
@@ -58,22 +97,22 @@ describe("Post Service domain", () => {
   });
   it("identifies the exact fields that prevent shipment creation", () => {
     const input = copyShipment(shipment);
-    expect(shipmentValidationErrors(input)).toEqual({});
+    expect(shipmentValidationErrors(input, locationCatalog)).toEqual({});
     expect(
-      shipmentValidationErrors({ ...input, backup_phone: "0770" }),
+      shipmentValidationErrors({ ...input, backup_phone: "0770" }, locationCatalog),
     ).toEqual({ backup_phone: "phone" });
     expect(
       shipmentValidationErrors({
         ...input,
         primary_phone: "",
         recipient_name: " ",
-      }),
+      }, locationCatalog),
     ).toEqual({ primary_phone: "required", recipient_name: "required" });
     expect(
-      shipmentValidationErrors({ ...input, cod_amount: NaN, pieces: 0 }),
+      shipmentValidationErrors({ ...input, cod_amount: NaN, pieces: 0 }, locationCatalog),
     ).toEqual({ cod_amount: "amount", pieces: "pieces" });
     expect(
-      shipmentValidationErrors({ ...input, governorate: "baghdad" }),
+      shipmentValidationErrors({ ...input, governorate: "baghdad" }, locationCatalog),
     ).toEqual({ area: "location" });
   });
   it.each(["07501234567", "7501234567", "9647501234567", "009647501234567"])(
@@ -88,20 +127,20 @@ describe("Post Service domain", () => {
     (phone) => expect(internationalIraqiPhone(phone)).toBeNull(),
   );
   it("includes all nineteen governorates and scoped area IDs", () => {
-    expect(locations).toHaveLength(19);
-    expect(new Set(locations.map((x) => x.id)).size).toBe(19);
-    expect(locations.find((x) => x.id === "halabja")).toBeDefined();
+    expect(locationCatalog.governorates).toHaveLength(19);
+    expect(new Set(locationCatalog.governorates.map((x) => x.id)).size).toBe(19);
+    expect(locationCatalog.governorates.find((x) => x.id === "halabja")).toBeDefined();
   });
   it("offers tariffs only for a complete valid destination and preserves the existing location rules", () => {
-    expect(postalTariffOptions("", "")).toEqual([]);
-    expect(postalTariffOptions("erbil", "")).toEqual([]);
-    expect(postalTariffOptions("baghdad", "ankawa")).toEqual([]);
-    for (const governorate of locations) {
-      for (const [area] of governorate.areas) {
-        const options = postalTariffOptions(governorate.id, area);
+    expect(postalTariffOptions("", "", locationCatalog)).toEqual([]);
+    expect(postalTariffOptions("erbil", "", locationCatalog)).toEqual([]);
+    expect(postalTariffOptions("baghdad", "ankawa", locationCatalog)).toEqual([]);
+    for (const governorate of locationCatalog.governorates) {
+      for (const { id: area } of governorate.areas) {
+        const options = postalTariffOptions(governorate.id, area, locationCatalog);
         if (["erbil", "sulaymaniyah", "duhok"].includes(governorate.id)) {
           const center = /center|centre/i.test(area);
-          expect(options).toEqual([{
+          expect(options.map(({ size, fee, zone }) => ({ size, fee, zone }))).toEqual([{
             size: "small_package", fee: center ? 5000 : 6000,
             zone: center ? "center" : "outside",
           }]);
@@ -115,13 +154,13 @@ describe("Post Service domain", () => {
     }
   });
   it("matches the size and fee together when restoring or reevaluating a selection", () => {
-    expect(findPostalTariff("baghdad", "karrada", "carton", 8000)).toMatchObject({ size: "carton", fee: 8000 });
-    expect(findPostalTariff("erbil", "ankawa", "carton", 8000)).toBeNull();
-    expect(findPostalTariff("erbil", "ankawa", "small_package", 6000)).toMatchObject({ zone: "outside" });
-    expect(findPostalTariff("erbil", "erbil-centre", "small_package", 6000)).toBeNull();
-    expect(findPostalTariff("erbil", "erbil-centre", "small_package", 5000)).toMatchObject({ zone: "center" });
-    expect(findPostalTariff("baghdad", "karrada", "ship", 8000)).toBeNull();
-    expect(findPostalTariff("erbil", "ankawa", null, null)).toBeNull();
+    expect(findPostalTariff("baghdad", "karrada", "carton", 8000, locationCatalog)).toMatchObject({ size: "carton", fee: 8000 });
+    expect(findPostalTariff("erbil", "ankawa", "carton", 8000, locationCatalog)).toBeNull();
+    expect(findPostalTariff("erbil", "ankawa", "small_package", 6000, locationCatalog)).toMatchObject({ zone: "outside" });
+    expect(findPostalTariff("erbil", "erbil-centre", "small_package", 6000, locationCatalog)).toBeNull();
+    expect(findPostalTariff("erbil", "erbil-centre", "small_package", 5000, locationCatalog)).toMatchObject({ zone: "center" });
+    expect(findPostalTariff("baghdad", "karrada", "ship", 8000, locationCatalog)).toBeNull();
+    expect(findPostalTariff("erbil", "ankawa", null, null, locationCatalog)).toBeNull();
   });
   it("supports direct final-mile delivery or administrator-authorized transfers", () => {
     expect(availableOperations(shipment, undefined, "office")).toEqual([

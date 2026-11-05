@@ -59,6 +59,7 @@ import { useDateRange } from '@/context/DateRangeContext'
 import {
   usePostalPage,
   usePostalSummary,
+  usePostalLocationCatalog,
   postalSummaryTables,
   postalTables,
   resolvePostalQr,
@@ -69,6 +70,7 @@ import { OperationDialog } from '@/postal/OperationDialog'
 import {
   postalStates,
   locationLabel,
+  emptyPostalLocationCatalog,
   formatPostalShipmentId,
   parseShipmentQr,
   type PostalShipment,
@@ -119,6 +121,8 @@ function formatCodIqd(value: string, language: string, currency: string) {
 export default function PostalServicePage({ accountStatement = false, qrBatches = false }: { accountStatement?: boolean; qrBatches?: boolean }) {
   const { t, i18n } = useTranslation()
   const scope = usePostalScope()
+  const locationCatalogQuery = usePostalLocationCatalog(scope)
+  const locationCatalog = locationCatalogQuery.data ?? emptyPostalLocationCatalog
   const { user } = useAuth()
   const [, navigate] = useLocation()
   const { toast } = useToast()
@@ -135,8 +139,9 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
     language: i18n.language,
     t,
     toast,
+    locationCatalog,
   })
-  autoScanContextRef.current = { scope, workspaceName, language: i18n.language, t, toast }
+  autoScanContextRef.current = { scope, workspaceName, language: i18n.language, t, toast, locationCatalog }
   const [tab, setTab] = useState<keyof typeof postalTables>('shipments')
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
@@ -224,7 +229,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
   ) => {
     if (!canAutoPrintRef.current) return
     if (autoScanPrinterUnavailableRef.current) return
-    const { scope, workspaceName, language, t, toast } = context
+    const { scope, workspaceName, language, t, toast, locationCatalog } = context
     const qrId = parseShipmentQr(raw.trim())
     if (!qrId) {
       toast({
@@ -281,6 +286,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
         },
         language,
         primaryTemplate,
+        locationCatalog,
       )
       if (!canAutoPrintRef.current) return
       if (autoScanPrinterUnavailableRef.current) return
@@ -677,7 +683,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
           header: t('postal.destination'),
           cell: ({ row }) => {
             const s = row.original as PostalShipment
-            return `${locationLabel(s.governorate, i18n.language)} / ${locationLabel(s.area, i18n.language, s.governorate)}`
+            return `${locationLabel(s.governorate, i18n.language, undefined, locationCatalog)} / ${locationLabel(s.area, i18n.language, s.governorate, locationCatalog)}`
           },
         },
         {
@@ -946,8 +952,8 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
             tableNames={
               tab === 'shipments'
                 ? scope.role === 'admin'
-                  ? [...postalSummaryTables, 'postal_organizations']
-                  : postalSummaryTables
+                  ? [...postalSummaryTables, 'postal_organizations', 'postal_locations', 'postal_governorates', 'postal_shipment_tariffs']
+                  : [...postalSummaryTables, 'postal_locations', 'postal_governorates', 'postal_shipment_tariffs']
                 : tab === 'cod'
                   ? ['postal_cod_records', 'postal_shipments', 'postal_organizations']
                   : [postalTables[tab]]

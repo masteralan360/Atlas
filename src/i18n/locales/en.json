@@ -11530,6 +11530,7 @@
     "phoneHint": "Iraqi mobile numbers: 07xxxxxxxxx, 7xxxxxxxxx, 9647xxxxxxxxx or 009647xxxxxxxxx. Digits only.",
     "governorate": "Governorate",
     "area": "Area",
+    "locationUnavailable": "Unavailable",
     "address": "Detailed Address",
     "destination": "Destination",
     "codAmount": "COD Amount (IQD)",
@@ -11723,6 +11724,7 @@
     },
     "errors": {
       "failed": "The request could not be completed. Check your connection and permissions, then try again.",
+      "locationsUnavailable": "Postal locations are unavailable. Check your connection and try again.",
       "stale": "This shipment changed. Refresh its details and try again.",
       "invalidTransition": "This action is not available for the current shipment state or route.",
       "invalidPayment": "Check the amount, cash direction, and remaining balance.",

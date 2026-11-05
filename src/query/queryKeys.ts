@@ -40,6 +40,13 @@ export const queryKeys = {
       [...queryKeys.stockReservations.all(workspaceId), 'details', productId, storageId, page, userId ?? null, role ?? null] as const,
   },
   postal: {
+    locationCatalog: (scope: import('@/local-db/postal').PostalScope) => [
+      ...queryKeys.postal.all(scope.workspaceId),
+      'location-catalog',
+      scope.userId,
+      scope.role,
+      scope.permissionScope,
+    ] as const,
     qrBatches: (workspaceId: string) => [...queryKeys.postal.all(workspaceId), 'qr-batches'] as const,
     qrBatchPage: (input: import('@/local-db/postalQrBatches').PostalQrPageInput) => [...queryKeys.postal.qrBatches(input.workspaceId), 'page', input] as const,
     qrBatch: (scope: import('@/local-db/postal').PostalScope, id: string) => [...queryKeys.postal.qrBatches(scope.workspaceId), 'detail', scope, id] as const,

@@ -99,7 +99,7 @@ import type { BarcodeLabelData } from '@/lib/barcodeLabel'
 import { LABEL_PRINT_TEMPLATE_KEY, type LabelPrintPageSize } from '@/lib/labelPrint'
 import { EmptyShipmentLabel, EmptyShipmentQrLabel } from '@/postal/EmptyShipmentLabel'
 import { ShipmentLabel, SmallShipmentLabel } from '@/postal/ShipmentLabel'
-import type { PostalShipment } from '@/postal/domain'
+import type { PostalLocationCatalog, PostalShipment } from '@/postal/domain'
 import { ModernA4InvoiceTemplate, MODERN_A4_MOVABLE_COMPONENT_KEYS } from '@/ui/components/ModernA4InvoiceTemplate'
 import {
     ProfessionalA4InvoiceTemplate,
@@ -759,6 +759,7 @@ export type CustomTemplatePreviewOptions = {
     labelPageSizeMm?: LabelPrintPageSize
     inventoryTransferBatchData?: InventoryTransferBatchPrintData
     postalShipment?: PostalShipment
+    postalLocationCatalog?: PostalLocationCatalog
     postalOrganizationName?: string
     postalQrBatchLabel?: boolean
     postalQrId?: string
@@ -2585,13 +2586,14 @@ export function createCustomTemplatePreview(
                 }
 
                 return isSmallLabel ? (
-                    <SmallShipmentLabel shipment={shipment} workspaceName={workspaceName} />
+                    <SmallShipmentLabel shipment={shipment} workspaceName={workspaceName} locationCatalog={options.postalLocationCatalog} />
                 ) : (
                     <ShipmentLabel
                         shipment={shipment}
                         organizationName={options.postalOrganizationName || i18n.t('postal.title', { defaultValue: 'Post Service' })}
                         workspaceName={workspaceName}
                         note={fields.note || ''}
+                        locationCatalog={options.postalLocationCatalog}
                     />
                 )
             },

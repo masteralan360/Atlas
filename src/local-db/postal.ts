@@ -29,6 +29,8 @@ import {
   type PostalTransfer,
   type PostalCodRecord,
   type PostalDeliveryFeeRecord,
+  normalizePostalLocationCatalog,
+  type PostalLocationCatalog,
 } from '@/postal/domain'
 
 export const postalTables = {
@@ -72,6 +74,75 @@ export interface PostalSummaryInput extends PostalScope {
   status?: string
   start?: string
   end?: string
+}
+
+function postalLocationCatalogCacheId(scope: PostalScope) {
+  return `${scope.workspaceId}:${scope.userId}:${scope.role}:${scope.permissionScope}:postal_locations:postal-location-catalog`
+}
+
+async function readCachedPostalLocationCatalog(scope: PostalScope) {
+  const cached = await db.table('postal_cache').get(postalLocationCatalogCacheId(scope)) as
+    | { data?: { catalog?: unknown } }
+    | undefined
+  const value = cached?.data?.catalog
+  if (!value || typeof value !== 'object') return null
+  const catalog = value as Partial<PostalLocationCatalog>
+  return Array.isArray(catalog.governorates) && Array.isArray(catalog.tariffs)
+    ? catalog as PostalLocationCatalog
+    : null
+}
+
+export function usePostalLocationCatalog(scope: PostalScope, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.postal.locationCatalog(scope),
+    enabled: enabled && Boolean(scope.workspaceId && scope.userId),
+    staleTime: 5 * 60_000,
+    queryFn: async ({ signal }): Promise<PostalLocationCatalog> => {
+      try {
+        const result = await tracked(
+          scope,
+          ['postal_locations', 'postal_governorates', 'postal_shipment_tariffs'],
+          signal,
+          async () => {
+            const [governorates, areas, tariffs] = await Promise.all([
+              supabase.from('postal_governorates')
+                .select('id, label_en, label_ar, label_ku, display_order, tariff_profile, is_active')
+                .order('display_order', { ascending: true })
+                .abortSignal(signal),
+              supabase.from('postal_locations')
+                .select('governorate, area, label_en, label_ar, label_ku, display_order, is_active, tariff_zone')
+                .order('governorate', { ascending: true })
+                .order('display_order', { ascending: true })
+                .abortSignal(signal),
+              supabase.from('postal_shipment_tariffs')
+                .select('tariff_profile, shipment_size, tariff_zone, fee, label_key, display_order, is_active')
+                .order('display_order', { ascending: true })
+                .abortSignal(signal),
+            ])
+            const error = governorates.error ?? areas.error ?? tariffs.error
+            if (error) return { data: null, error }
+            const catalog = normalizePostalLocationCatalog(
+              governorates.data,
+              areas.data,
+              tariffs.data,
+            )
+            return { data: { id: 'postal-location-catalog', catalog }, error: null }
+          },
+          (result, table) => table === 'postal_locations'
+            ? result.catalog.governorates.reduce((count, governorate) => count + governorate.areas.length, 0)
+            : table === 'postal_governorates'
+              ? result.catalog.governorates.length
+              : result.catalog.tariffs.length,
+        )
+        return result.catalog
+      } catch (error) {
+        if (signal.aborted) throw error
+        const cached = await readCachedPostalLocationCatalog(scope)
+        if (cached) return cached
+        throw error
+      }
+    },
+  })
 }
 
 export async function tracked<T>(

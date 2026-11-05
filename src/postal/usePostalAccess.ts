@@ -56,6 +56,17 @@ export function usePostalScope(): PostalScope {
         refresh,
       )
     }
+    for (const table of [
+      'postal_governorates',
+      'postal_locations',
+      'postal_shipment_tariffs',
+    ]) {
+      channel.on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table },
+        refresh,
+      )
+    }
     channel.on(
       'postgres_changes',
       {

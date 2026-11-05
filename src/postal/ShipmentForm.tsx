@@ -1,5 +1,5 @@
 import { usePostalAction } from "./usePostalAccess";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   PackagePlus,
@@ -34,8 +34,13 @@ import {
   type PostalShipment,
   type PostalOrganization,
   type PostalTariffOption,
+  emptyPostalLocationCatalog,
 } from "./domain";
-import { postalCommand, type PostalScope } from "@/local-db/postal";
+import {
+  postalCommand,
+  usePostalLocationCatalog,
+  type PostalScope,
+} from "@/local-db/postal";
 import { LocationPicker } from "./shared";
 import { OrganizationAutoCompleteInput } from "./OrganizationAutoCompleteInput";
 import { ShipmentTariffSelector } from "./ShipmentTariffSelector";
@@ -70,6 +75,8 @@ export function ShipmentForm({
   onSaved: (shipment: PostalShipment) => void;
 }) {
   const { t } = useTranslation();
+  const locationCatalogQuery = usePostalLocationCatalog(scope);
+  const locationCatalog = locationCatalogQuery.data ?? emptyPostalLocationCatalog;
   const requiresOrganization = !editing && scope.role !== "merchant";
   const [organizationQuery, setOrganizationQuery] = useState("");
   const [selectedOrganization, setSelectedOrganization] =
@@ -105,26 +112,64 @@ export function ShipmentForm({
   );
   const [reason, setReason] = useState("");
   const needsTariff = !editing || source?.state === "draft";
-  const [selectedTariff, setSelectedTariff] = useState<PostalTariffOption | null>(
-    () => {
-      if (!source) return null;
-      return (
-        findPostalTariff(
+  const [selectedTariff, setSelectedTariff] = useState<PostalTariffOption | null>(null);
+  const tariffInitialized = useRef(false);
+  const persistedTariff = source && locationCatalogQuery.data
+    ? findPostalTariff(
+        source.governorate,
+        source.area,
+        source.shipment_size,
+        source.delivery_fee_tariff ?? source.delivery_fee,
+        locationCatalogQuery.data,
+        true,
+      )
+    : null;
+  const isOriginalDestination = Boolean(
+    source && form.governorate === source.governorate && form.area === source.area,
+  );
+  useEffect(() => {
+    if (!locationCatalogQuery.data || tariffInitialized.current) return;
+    tariffInitialized.current = true;
+    if (!source) return;
+    setSelectedTariff(
+      findPostalTariff(
+        source.governorate,
+        source.area,
+        source.shipment_size,
+        source.delivery_fee_tariff ?? source.delivery_fee,
+        locationCatalogQuery.data,
+        true,
+      ) ??
+        postalTariffOptions(
           source.governorate,
           source.area,
-          source.shipment_size,
-          source.delivery_fee_tariff ?? source.delivery_fee,
-        ) ??
-        postalTariffOptions(source.governorate, source.area).find(
-          (option) => option.size === source.shipment_size,
-        ) ??
-        null
-      );
-    },
-  );
+          locationCatalogQuery.data,
+        ).find((option) => option.size === source.shipment_size) ??
+        null,
+    );
+  }, [editing, locationCatalogQuery.data, source]);
   const tariff = findPostalTariff(
-    form.governorate, form.area, selectedTariff?.size, selectedTariff?.fee,
+    form.governorate,
+    form.area,
+    selectedTariff?.size,
+    selectedTariff?.fee,
+    locationCatalog,
+  ) ?? (
+    isOriginalDestination && persistedTariff &&
+      selectedTariff?.size === persistedTariff.size &&
+      selectedTariff?.fee === persistedTariff.fee
+      ? persistedTariff
+      : null
   );
+  const shipmentTariffOptions = postalTariffOptions(
+    form.governorate,
+    form.area,
+    locationCatalog,
+  );
+  if (
+    isOriginalDestination && persistedTariff &&
+    !shipmentTariffOptions.some((option) => option.size === persistedTariff.size && option.fee === persistedTariff.fee)
+  ) shipmentTariffOptions.push(persistedTariff);
   const [touched, setTouched] = useState<
     Partial<Record<ValidationField, boolean>>
   >({});
@@ -137,7 +182,7 @@ export function ShipmentForm({
     pieces: pieces ? Number(pieces) : null,
   };
   const errors: Partial<Record<ValidationField, ShipmentValidationError>> =
-    shipmentValidationErrors(payload);
+    shipmentValidationErrors(payload, locationCatalog, Boolean(editing));
   if (editing && scope.role === "admin" && !reason.trim())
     errors.reason = "required";
   const deliveryFeeAmount = deliveryFee === "" ? null : Number(deliveryFee);
@@ -154,6 +199,7 @@ export function ShipmentForm({
   ) as ValidationField[];
   const organizationInvalid = requiresOrganization && !selectedOrganization;
   const valid =
+    Boolean(locationCatalogQuery.data) &&
     invalidFields.length === 0 &&
     !organizationInvalid &&
     !deliveryFeeInvalid &&
@@ -247,6 +293,17 @@ export function ShipmentForm({
           }}
         >
           <AppDialogBody className="space-y-5">
+            {locationCatalogQuery.isPending && (
+              <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {t("common.loading")}
+              </p>
+            )}
+            {locationCatalogQuery.error && !locationCatalogQuery.data && (
+              <p className="text-sm text-destructive" role="alert">
+                {t("postal.errors.locationsUnavailable")}
+              </p>
+            )}
             {generatedQrId && !editing && <p className="break-all rounded-lg border bg-muted/30 p-3 text-sm">
               {t('postal.qr.pendingClaim')} <bdi dir="ltr" className="font-mono">{generatedQrId}</bdi>
             </p>}
@@ -330,11 +387,19 @@ export function ShipmentForm({
             <LocationPicker
               governorate={form.governorate}
               area={form.area}
-              disabled={action.busy}
+              catalog={locationCatalog}
+              disabled={action.busy || locationCatalogQuery.isPending || !locationCatalogQuery.data}
               onChange={(governorate, area) => {
                 setForm((f) => ({ ...f, governorate, area }));
                 setSelectedTariff((current) =>
-                  findPostalTariff(governorate, area, current?.size, current?.fee),
+                  findPostalTariff(
+                    governorate,
+                    area,
+                    current?.size,
+                    current?.fee,
+                    locationCatalog,
+                    Boolean(source && governorate === source.governorate && area === source.area),
+                  ),
                 );
               }}
             />
@@ -512,10 +577,9 @@ export function ShipmentForm({
             {needsTariff && (
               <ShipmentTariffSelector
                 id="shipment-tariff"
-                governorate={form.governorate}
-                options={postalTariffOptions(form.governorate, form.area)}
+                options={shipmentTariffOptions}
                 value={tariff}
-                disabled={action.busy}
+                disabled={action.busy || !locationCatalogQuery.data}
                 required={false}
                 allowDeselect
                 onChange={setSelectedTariff}

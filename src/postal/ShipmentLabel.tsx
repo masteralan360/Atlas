@@ -6,7 +6,9 @@ import {
   locationLabel,
   postalShipmentSizeTranslationKey,
   shipmentQr,
+  emptyPostalLocationCatalog,
   type PostalShipment,
+  type PostalLocationCatalog,
 } from './domain'
 import { useFitPostalLabel } from './useFitPostalLabel'
 
@@ -109,13 +111,16 @@ export function ShipmentLabel({
   organizationName,
   workspaceName,
   note = '',
+  locationCatalog,
 }: {
   shipment: PostalShipment
   organizationName: string
   workspaceName: string
   note?: string
+  locationCatalog?: PostalLocationCatalog
 }) {
   const { t, i18n } = useTranslation()
+  const catalog = locationCatalog ?? emptyPostalLocationCatalog
   const { labelRef, fitTransform } = useFitPostalLabel()
   const formattedId = formatPostalShipmentId(shipment)
   const createdAt = new Date(shipment.created_at)
@@ -220,11 +225,12 @@ export function ShipmentLabel({
         <LabelRow label={t('postal.destination')}>
           <div>
             <div>
-              {locationLabel(shipment.governorate, i18n.language)} /{' '}
+              {locationLabel(shipment.governorate, i18n.language, undefined, catalog)} /{' '}
               {locationLabel(
                 shipment.area,
                 i18n.language,
                 shipment.governorate,
+                catalog,
               )}
             </div>
             {shipment.address && (
@@ -249,6 +255,8 @@ export function ShipmentLabel({
                   shipment.governorate,
                   shipment.shipment_size,
                   shipment.delivery_fee_tariff ?? shipment.delivery_fee,
+                  shipment.tariff_zone,
+                  catalog,
                 ),
               )}
               {shipment.pieces !== null && (
@@ -332,16 +340,20 @@ export function ShipmentLabel({
 export function SmallShipmentLabel({
   shipment,
   workspaceName,
+  locationCatalog,
 }: {
   shipment: PostalShipment
   workspaceName: string
+  locationCatalog?: PostalLocationCatalog
 }) {
   const { t, i18n } = useTranslation()
+  const catalog = locationCatalog ?? emptyPostalLocationCatalog
   const formattedId = formatPostalShipmentId(shipment)
-  const location = `${locationLabel(shipment.governorate, i18n.language)} / ${locationLabel(
+  const location = `${locationLabel(shipment.governorate, i18n.language, undefined, catalog)} / ${locationLabel(
     shipment.area,
     i18n.language,
     shipment.governorate,
+    catalog,
   )}`
   const shipmentSize = shipment.shipment_size
     ? t(
@@ -349,6 +361,8 @@ export function SmallShipmentLabel({
           shipment.governorate,
           shipment.shipment_size,
           shipment.delivery_fee_tariff ?? shipment.delivery_fee,
+          shipment.tariff_zone,
+          catalog,
         ),
       )
     : null

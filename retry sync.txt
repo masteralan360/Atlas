@@ -1,7 +1,3 @@
-Always Erbil branch
-
-Postpond Post service
-
 PWA Lang install
 
 Save usage mode

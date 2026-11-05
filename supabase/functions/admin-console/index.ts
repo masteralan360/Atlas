@@ -286,6 +286,48 @@ type AdjustBillingOperationRequest = {
     administratorName?: string
 }
 
+type ListPostalLocationCatalogRequest = {
+    action: 'listPostalLocationCatalog'
+    passkey?: string
+}
+
+type SavePostalGovernorateRequest = {
+    action: 'savePostalGovernorate'
+    passkey?: string
+    id?: string
+    labelEn?: string
+    labelAr?: string
+    labelKu?: string
+    displayOrder?: number
+    tariffProfile?: 'standard' | 'northern'
+    isActive?: boolean
+}
+
+type SavePostalAreaRequest = {
+    action: 'savePostalArea'
+    passkey?: string
+    governorate?: string
+    area?: string
+    labelEn?: string
+    labelAr?: string
+    labelKu?: string
+    displayOrder?: number
+    tariffZone?: 'center' | 'outside' | null
+    isActive?: boolean
+}
+
+type SavePostalTariffRequest = {
+    action: 'savePostalTariff'
+    passkey?: string
+    tariffProfile?: 'standard' | 'northern'
+    shipmentSize?: 'carton' | 'ship' | 'small_package'
+    tariffZone?: 'standard' | 'center' | 'outside'
+    fee?: number
+    labelKey?: string
+    displayOrder?: number
+    isActive?: boolean
+}
+
 type AdminConsoleRequest =
     | VerifyRequest
     | VerifyStorefrontPromoAdminRequest
@@ -324,6 +366,10 @@ type AdminConsoleRequest =
     | GetBillingOperationRequest
     | CreateBillingOperationRequest
     | AdjustBillingOperationRequest
+    | ListPostalLocationCatalogRequest
+    | SavePostalGovernorateRequest
+    | SavePostalAreaRequest
+    | SavePostalTariffRequest
 
 type WorkspaceUsageStatusRow = {
     has_limits?: boolean | null
@@ -2073,6 +2119,189 @@ async function adjustBillingOperation(
     return jsonResponse(data)
 }
 
+const POSTAL_LOCATION_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const POSTAL_TARIFF_LABEL_KEYS = new Set([
+    'carton_8000', 'carton_12000', 'carton_15000', 'carton_20000',
+    'ship_15000', 'ship_24000', 'ship_35000', 'ship_55000', 'small_package'
+])
+
+function validPostalLabels(body: { labelEn?: string; labelAr?: string; labelKu?: string }) {
+    const labelEn = body.labelEn?.trim() ?? ''
+    const labelAr = body.labelAr?.trim() ?? ''
+    const labelKu = body.labelKu?.trim() ?? ''
+    return labelEn.length > 0 && labelEn.length <= 160
+        && labelAr.length > 0 && labelAr.length <= 160
+        && labelKu.length > 0 && labelKu.length <= 160
+        ? { label_en: labelEn, label_ar: labelAr, label_ku: labelKu }
+        : null
+}
+
+function validPostalDisplayOrder(value: number | undefined) {
+    return Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= 1_000_000
+}
+
+async function listPostalLocationCatalog(adminClient: ReturnType<typeof createAdminClient>) {
+    const [governorates, areas, tariffs] = await Promise.all([
+        adminClient.from('postal_governorates')
+            .select('id, label_en, label_ar, label_ku, display_order, tariff_profile, is_active')
+            .order('display_order', { ascending: true }),
+        adminClient.from('postal_locations')
+            .select('governorate, area, label_en, label_ar, label_ku, display_order, tariff_zone, is_active')
+            .order('governorate', { ascending: true })
+            .order('display_order', { ascending: true }),
+        adminClient.from('postal_shipment_tariffs')
+            .select('tariff_profile, shipment_size, tariff_zone, fee, label_key, display_order, is_active')
+            .order('display_order', { ascending: true })
+            .order('fee', { ascending: true })
+    ])
+    const error = governorates.error ?? areas.error ?? tariffs.error
+    if (error) return errorResponse(error.message, 500)
+    return jsonResponse({
+        governorates: governorates.data ?? [],
+        areas: areas.data ?? [],
+        tariffs: tariffs.data ?? []
+    })
+}
+
+async function auditPostalCatalogChange(
+    adminClient: ReturnType<typeof createAdminClient>,
+    req: Request,
+    action: 'save_governorate' | 'save_area' | 'save_tariff',
+    entityId: string,
+    before: unknown,
+    after: unknown
+) {
+    const { user } = await getAuthenticatedUser(req)
+    const { error } = await adminClient.from('postal_location_admin_audit').insert({
+        id: crypto.randomUUID(),
+        actor_id: user?.id ?? null,
+        action,
+        entity_id: entityId,
+        before_data: before,
+        after_data: after
+    })
+    if (error) throw error
+}
+
+async function savePostalGovernorate(
+    adminClient: ReturnType<typeof createAdminClient>,
+    req: Request,
+    body: SavePostalGovernorateRequest
+) {
+    const id = body.id?.trim() ?? ''
+    const labels = validPostalLabels(body)
+    if (!POSTAL_LOCATION_ID_PATTERN.test(id) || !labels || !validPostalDisplayOrder(body.displayOrder)
+        || (body.tariffProfile !== 'standard' && body.tariffProfile !== 'northern')
+        || typeof body.isActive !== 'boolean') {
+        return errorResponse('Postal governorate details are invalid', 400, { code: 'postal_invalid_governorate' })
+    }
+    const { data: before, error: readError } = await adminClient.from('postal_governorates')
+        .select('*').eq('id', id).maybeSingle()
+    if (readError) return errorResponse(readError.message, 500)
+    if (before && before.tariff_profile !== body.tariffProfile) {
+        return errorResponse('The tariff profile cannot be changed after a governorate is created', 409, { code: 'postal_tariff_profile_locked' })
+    }
+    const { data, error } = await adminClient.from('postal_governorates').upsert({
+        id,
+        ...labels,
+        display_order: Number(body.displayOrder),
+        tariff_profile: body.tariffProfile,
+        is_active: body.isActive
+    }, { onConflict: 'id' }).select('*').single()
+    if (error) return errorResponse(error.message, 400)
+    await auditPostalCatalogChange(adminClient, req, 'save_governorate', id, before, data)
+    return jsonResponse(data)
+}
+
+async function savePostalArea(
+    adminClient: ReturnType<typeof createAdminClient>,
+    req: Request,
+    body: SavePostalAreaRequest
+) {
+    const governorateId = body.governorate?.trim() ?? ''
+    const areaId = body.area?.trim() ?? ''
+    const labels = validPostalLabels(body)
+    if (!POSTAL_LOCATION_ID_PATTERN.test(governorateId) || !POSTAL_LOCATION_ID_PATTERN.test(areaId)
+        || !labels || !validPostalDisplayOrder(body.displayOrder) || typeof body.isActive !== 'boolean') {
+        return errorResponse('Postal area details are invalid', 400, { code: 'postal_invalid_area' })
+    }
+    const { data: governorate, error: governorateError } = await adminClient.from('postal_governorates')
+        .select('tariff_profile').eq('id', governorateId).maybeSingle()
+    if (governorateError) return errorResponse(governorateError.message, 500)
+    if (!governorate) return errorResponse('Select an existing governorate', 400, { code: 'postal_invalid_governorate' })
+    const tariffZone: 'center' | 'outside' | null = governorate.tariff_profile === 'northern'
+        ? body.tariffZone as 'center' | 'outside'
+        : null
+    if ((governorate.tariff_profile === 'northern' && tariffZone !== 'center' && tariffZone !== 'outside')
+        || (governorate.tariff_profile === 'standard' && body.tariffZone !== null && body.tariffZone !== undefined)) {
+        return errorResponse('Postal area tariff zone does not match its governorate', 400, { code: 'postal_invalid_tariff_zone' })
+    }
+    const { data: before, error: readError } = await adminClient.from('postal_locations')
+        .select('*').eq('governorate', governorateId).eq('area', areaId).maybeSingle()
+    if (readError) return errorResponse(readError.message, 500)
+    if (before && (before.tariff_zone ?? null) !== tariffZone) {
+        return errorResponse('An area tariff zone cannot be changed after it is created', 409, { code: 'postal_tariff_zone_locked' })
+    }
+    const { data, error } = await adminClient.from('postal_locations').upsert({
+        governorate: governorateId,
+        area: areaId,
+        ...labels,
+        display_order: Number(body.displayOrder),
+        tariff_zone: tariffZone,
+        is_active: body.isActive
+    }, { onConflict: 'governorate,area' }).select('*').single()
+    if (error) return errorResponse(error.message, 400)
+    await auditPostalCatalogChange(adminClient, req, 'save_area', `${governorateId}:${areaId}`, before, data)
+    return jsonResponse(data)
+}
+
+async function savePostalTariff(
+    adminClient: ReturnType<typeof createAdminClient>,
+    req: Request,
+    body: SavePostalTariffRequest
+) {
+    const profile = body.tariffProfile
+    const size = body.shipmentSize
+    const zone = body.tariffZone
+    const fee = typeof body.fee === 'number' ? body.fee : Number.NaN
+    const labelKey = body.labelKey?.trim() ?? ''
+    const isValidRate = Number.isSafeInteger(fee) && Number(fee) > 0 && Number(fee) <= 999_999_999_999
+    const expectedZone = profile === 'northern' ? zone === 'center' || zone === 'outside' : zone === 'standard'
+    const expectedSize = profile === 'northern' ? size === 'small_package' : size === 'carton' || size === 'ship'
+    const expectedLabelPrefix = size === 'carton' ? labelKey.startsWith('carton_')
+        : size === 'ship' ? labelKey.startsWith('ship_')
+            : labelKey === 'small_package'
+    if ((profile !== 'standard' && profile !== 'northern')
+        || (size !== 'carton' && size !== 'ship' && size !== 'small_package')
+        || !expectedZone || !expectedSize || !isValidRate
+        || !POSTAL_TARIFF_LABEL_KEYS.has(labelKey) || !expectedLabelPrefix
+        || !validPostalDisplayOrder(body.displayOrder) || typeof body.isActive !== 'boolean') {
+        return errorResponse('Postal tariff details are invalid', 400, { code: 'postal_invalid_tariff' })
+    }
+    const normalizedZone = profile === 'northern' ? zone as 'center' | 'outside' : 'standard'
+    const displayOrder = Number(body.displayOrder)
+    const row = {
+        tariff_profile: profile,
+        shipment_size: size,
+        tariff_zone: normalizedZone,
+        fee,
+        label_key: labelKey,
+        display_order: displayOrder,
+        is_active: body.isActive
+    }
+    const { data: before, error: readError } = await adminClient.from('postal_shipment_tariffs')
+        .select('*').eq('tariff_profile', profile).eq('shipment_size', size)
+        .eq('tariff_zone', normalizedZone).eq('fee', fee).maybeSingle()
+    if (readError) return errorResponse(readError.message, 500)
+    const { data, error } = await adminClient.from('postal_shipment_tariffs').upsert(row, {
+        onConflict: 'tariff_profile,shipment_size,tariff_zone,fee'
+    }).select('*').single()
+    if (error) return errorResponse(error.message, 400)
+    const entityId = `${profile}:${size}:${normalizedZone}:${fee}`
+    await auditPostalCatalogChange(adminClient, req, 'save_tariff', entityId, before, data)
+    return jsonResponse(data)
+}
+
 Deno.serve(async (req) => {
     console.log('admin-console invoked:', req.method, req.url)
 
@@ -2157,6 +2386,22 @@ Deno.serve(async (req) => {
         const access = await requireValidPasskey(adminClient, body.passkey)
         if (!access.ok) {
             return access.response
+        }
+
+        if (body.action === 'listPostalLocationCatalog') {
+            return await listPostalLocationCatalog(adminClient)
+        }
+
+        if (body.action === 'savePostalGovernorate') {
+            return await savePostalGovernorate(adminClient, req, body)
+        }
+
+        if (body.action === 'savePostalArea') {
+            return await savePostalArea(adminClient, req, body)
+        }
+
+        if (body.action === 'savePostalTariff') {
+            return await savePostalTariff(adminClient, req, body)
         }
 
         if (body.action === 'listUsers') {

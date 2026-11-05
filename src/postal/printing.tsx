@@ -16,7 +16,12 @@ import { generateTemplatePdf } from '@/services/pdfGenerator'
 import { printPdfBlob } from '@/services/pdfPrintService'
 import { EmptyShipmentLabel, EmptyShipmentQrLabel } from './EmptyShipmentLabel'
 import { ShipmentLabel, SmallShipmentLabel } from './ShipmentLabel'
-import { formatPostalShipmentId, type PostalShipment } from './domain'
+import {
+  emptyPostalLocationCatalog,
+  formatPostalShipmentId,
+  type PostalLocationCatalog,
+  type PostalShipment,
+} from './domain'
 
 export type PostalShipmentLabelSize = 'standard' | 'small'
 export type PostalQrBatchLabelSize = 'standard' | 'small-qr'
@@ -146,6 +151,7 @@ export function preparePostalLabel(
   t: TFunction,
   sender: { organizationName: string; workspaceName: string },
   labelSize: PostalShipmentLabelSize = 'standard',
+  locationCatalog: PostalLocationCatalog = emptyPostalLocationCatalog,
 ) {
   const isSmallLabel = labelSize === 'small'
   const pageSizeMm = isSmallLabel
@@ -171,6 +177,7 @@ export function preparePostalLabel(
           <SmallShipmentLabel
             shipment={shipment}
             workspaceName={sender.workspaceName}
+            locationCatalog={locationCatalog}
           />
         ) : (
           <ShipmentLabel
@@ -178,6 +185,7 @@ export function preparePostalLabel(
             organizationName={sender.organizationName}
             workspaceName={sender.workspaceName}
             note={fields.note}
+            locationCatalog={locationCatalog}
           />
         ),
       buildPdf: (element) =>
@@ -198,6 +206,7 @@ export async function buildPostalLabelPdf(
   sender: { organizationName: string; workspaceName: string },
   printLang: string,
   template?: StoredCustomTemplateRow,
+  locationCatalog: PostalLocationCatalog = emptyPostalLocationCatalog,
 ): Promise<Blob> {
   if (template) {
     const target = getCustomTemplateTarget(template.module_type_key)
@@ -220,6 +229,7 @@ export async function buildPostalLabelPdf(
         postalOrganizationName: sender.organizationName,
         printLang,
         labelPageSizeMm: target.page,
+        postalLocationCatalog: locationCatalog,
       },
       effectiveId: formatPostalShipmentId(shipment),
       fieldMode: 'layoutOverrides',
@@ -232,6 +242,7 @@ export async function buildPostalLabelPdf(
         shipment={shipment}
         organizationName={sender.organizationName}
         workspaceName={sender.workspaceName}
+        locationCatalog={locationCatalog}
       />
     ),
     format: 'label',
@@ -246,6 +257,7 @@ export function preparePostalCustomLabel(
   sender: { organizationName: string; workspaceName: string },
   template: StoredCustomTemplateRow,
   printLang: string,
+  locationCatalog: PostalLocationCatalog = emptyPostalLocationCatalog,
 ) {
   const target = getCustomTemplateTarget(template.module_type_key)
   const layout = readCustomTemplateLayout(template)
@@ -260,6 +272,7 @@ export function preparePostalCustomLabel(
     postalShipment: shipment,
     postalOrganizationName: sender.organizationName,
     printLang,
+    postalLocationCatalog: locationCatalog,
   }
 
   setPrintPreviewEditorSource({

@@ -16,6 +16,7 @@ import {
 import {
   postalCommand,
   usePrimaryPostalBranch,
+  usePostalLocationCatalog,
   type PostalScope,
 } from '@/local-db/postal'
 /* Driver selection is temporarily disabled together with its field below.
@@ -26,7 +27,12 @@ import { useWorkspace } from '@/workspace'
 import { useWorkspacePermissions } from '@/permissions'
 */
 import type { PostalShipment, PostalBranch, PostalTransfer } from './domain'
-import { findPostalTariff, postalTariffOptions } from './domain'
+import {
+  emptyPostalLocationCatalog,
+  findPostalTariff,
+  postalTariffOptions,
+  type PostalTariffOption,
+} from './domain'
 import { BranchPicker } from './shared'
 import { ShipmentTariffSelector } from './ShipmentTariffSelector'
 
@@ -46,6 +52,8 @@ export function OperationDialog({
   onClose: () => void
 }) {
   const { t } = useTranslation()
+  const locationCatalogQuery = usePostalLocationCatalog(scope)
+  const locationCatalog = locationCatalogQuery.data ?? emptyPostalLocationCatalog
   const needsBranch =
     operation === 'receive' ||
     operation === 'authorize_transfer' ||
@@ -55,6 +63,22 @@ export function OperationDialog({
   const [branch, setBranch] = useState<PostalBranch | null>(null)
   const branchWasManuallySelected = useRef(false)
   const primaryBranch = usePrimaryPostalBranch(scope, needsBranch)
+  const [selectedTariff, setSelectedTariff] = useState<PostalTariffOption | null>(null)
+  const tariffInitialized = useRef(false)
+  useEffect(() => {
+    if (!locationCatalogQuery.data || tariffInitialized.current) return
+    tariffInitialized.current = true
+    setSelectedTariff(
+      findPostalTariff(
+        shipment.governorate,
+        shipment.area,
+        shipment.shipment_size,
+        shipment.delivery_fee_tariff ?? shipment.delivery_fee,
+        locationCatalogQuery.data,
+        true,
+      ),
+    )
+  }, [locationCatalogQuery.data, shipment])
   useEffect(() => {
     if (
       !needsBranch ||
@@ -98,20 +122,35 @@ export function OperationDialog({
     hasPermission('agents.access')
   */
   const action = usePostalAction()
-  const tariffs =
-    operation === 'receive'
-      ? postalTariffOptions(shipment.governorate, shipment.area)
-      : []
-  const [selectedTariff, setSelectedTariff] = useState(() =>
-    findPostalTariff(
-      shipment.governorate,
-      shipment.area,
-      shipment.shipment_size,
-      shipment.delivery_fee_tariff ?? shipment.delivery_fee,
-    ),
-  )
+  const persistedTariff = locationCatalogQuery.data
+    ? findPostalTariff(
+        shipment.governorate,
+        shipment.area,
+        shipment.shipment_size,
+        shipment.delivery_fee_tariff ?? shipment.delivery_fee,
+        locationCatalogQuery.data,
+        true,
+      )
+    : null
+  const tariffs = operation === 'receive'
+    ? postalTariffOptions(shipment.governorate, shipment.area, locationCatalog)
+    : []
+  if (
+    operation === 'receive' && persistedTariff &&
+    !tariffs.some((option) => option.size === persistedTariff.size && option.fee === persistedTariff.fee)
+  ) tariffs.push(persistedTariff)
   const tariff = findPostalTariff(
-    shipment.governorate, shipment.area, selectedTariff?.size, selectedTariff?.fee,
+    shipment.governorate,
+    shipment.area,
+    selectedTariff?.size,
+    selectedTariff?.fee,
+    locationCatalog,
+  ) ?? (
+    persistedTariff &&
+      selectedTariff?.size === persistedTariff.size &&
+      selectedTariff?.fee === persistedTariff.fee
+      ? persistedTariff
+      : null
   )
   const validBranch =
     !!branch?.active &&
@@ -155,6 +194,17 @@ export function OperationDialog({
           <p className="text-sm text-muted-foreground">
             {t('postal.operationHint')}
           </p>
+          {operation === 'receive' && locationCatalogQuery.isPending && (
+            <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {t('common.loading')}
+            </p>
+          )}
+          {operation === 'receive' && locationCatalogQuery.error && !locationCatalogQuery.data && (
+            <p className="text-sm text-destructive" role="alert">
+              {t('postal.errors.locationsUnavailable')}
+            </p>
+          )}
           {needsBranch && (
             <BranchPicker
               scope={scope}
@@ -170,13 +220,12 @@ export function OperationDialog({
           {operation === 'receive' && (
             <ShipmentTariffSelector
               id="receive-shipment-tariff"
-              governorate={shipment.governorate}
               options={tariffs}
               value={tariff}
               reviewing
               required={false}
               allowDeselect
-              disabled={action.busy}
+              disabled={action.busy || !locationCatalogQuery.data}
               onChange={setSelectedTariff}
             />
           )}
