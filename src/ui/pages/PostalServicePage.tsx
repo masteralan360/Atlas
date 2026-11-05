@@ -63,7 +63,7 @@ import {
   postalSummaryTables,
   postalTables,
   resolvePostalQr,
-  getPostalShipmentOrganizationName,
+  getPostalOrganization,
 } from '@/local-db/postal'
 import { PostalDashboardCards } from '@/postal/PostalDashboardCards'
 import { OperationDialog } from '@/postal/OperationDialog'
@@ -274,9 +274,9 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
       : null
 
     try {
-      let organizationName: string
+      let organization: { name: string; phone: string | null }
       try {
-        organizationName = await getPostalShipmentOrganizationName(scope, shipment)
+        organization = await getPostalOrganization(scope, shipment.organization_id)
       } catch {
         toast({
           title: t('common.error'),
@@ -292,7 +292,8 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
         shipment,
         scope.workspaceId,
         {
-          organizationName,
+          organizationName: organization.name,
+          organizationPhoneNumber: organization.phone ?? '',
           workspaceName: workspaceName || 'Atlas',
         },
         language,

@@ -67,6 +67,7 @@ describe('workspace account creation form contract', () => {
                 type: 'postalMerchant',
                 organizationMode: '',
                 organizationValue: '',
+                organizationPhone: '',
             }),
         ).toBeNull()
         expect(
@@ -74,6 +75,7 @@ describe('workspace account creation form contract', () => {
                 type: 'postalMerchant',
                 organizationMode: 'join',
                 organizationValue: '',
+                organizationPhone: '',
             }),
         ).toBeNull()
         expect(
@@ -81,6 +83,7 @@ describe('workspace account creation form contract', () => {
                 type: 'postalMerchant',
                 organizationMode: 'join',
                 organizationValue: 'invalid',
+                organizationPhone: '',
             }),
         ).toBeNull()
         expect(
@@ -88,6 +91,7 @@ describe('workspace account creation form contract', () => {
                 type: 'postalMerchant',
                 organizationMode: 'create',
                 organizationValue: ' ',
+                organizationPhone: '07501234567',
             }),
         ).toBeNull()
         expect(
@@ -95,6 +99,7 @@ describe('workspace account creation form contract', () => {
                 type: 'postalMerchant',
                 organizationMode: 'create',
                 organizationValue: 'A'.repeat(121),
+                organizationPhone: '07501234567',
             }),
         ).toBeNull()
         expect(
@@ -102,6 +107,7 @@ describe('workspace account creation form contract', () => {
                 type: 'postalMerchant',
                 organizationMode: 'join',
                 organizationValue: ' abcd-2345 ',
+                organizationPhone: '',
             })?.merchant,
         ).toEqual({ mode: 'join', code: 'ABCD2345' })
         expect(
@@ -109,7 +115,16 @@ describe('workspace account creation form contract', () => {
                 type: 'postalMerchant',
                 organizationMode: 'create',
                 organizationValue: ' My Organization ',
+                organizationPhone: ' 07501234567 ',
             })?.merchant,
-        ).toEqual({ mode: 'create', name: 'My Organization' })
+        ).toEqual({ mode: 'create', name: 'My Organization', phone: '07501234567' })
+        expect(
+            buildWorkspaceAccountCreationRequest(validForm, {
+                type: 'postalMerchant',
+                organizationMode: 'create',
+                organizationValue: 'My Organization',
+                organizationPhone: ' ',
+            }),
+        ).toBeNull()
     })
 })

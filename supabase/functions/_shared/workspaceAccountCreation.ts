@@ -2,7 +2,7 @@ export interface CreateWorkspaceAccountInput {
     email: string
     name: string
     password: string
-    merchant?: { mode: 'join'; code: string } | { mode: 'create'; name: string }
+    merchant?: { mode: 'join'; code: string } | { mode: 'create'; name: string; phone: string }
     coach?: { agentTypeId: string }
 }
 
@@ -53,8 +53,20 @@ export function parseCreateWorkspaceAccountInput(body: unknown): CreateWorkspace
             const code = enrollment.code.trim().replace(/-/g, '').toUpperCase()
             if (!/^[A-Z0-9]{8}$/.test(code)) return null
             merchant = { mode: 'join', code }
-        } else if (enrollment.mode === 'create' && typeof enrollment.name === 'string' && enrollment.name.trim().length > 0 && enrollment.name.trim().length <= 120) {
-            merchant = { mode: 'create', name: enrollment.name.trim() }
+        } else if (
+            enrollment.mode === 'create'
+            && typeof enrollment.name === 'string'
+            && enrollment.name.trim().length > 0
+            && enrollment.name.trim().length <= 120
+            && typeof enrollment.phone === 'string'
+            && enrollment.phone.trim().length > 0
+            && enrollment.phone.trim().length <= 32
+        ) {
+            merchant = {
+                mode: 'create',
+                name: enrollment.name.trim(),
+                phone: enrollment.phone.trim()
+            }
         } else return null
     }
     if (values.coach !== undefined) {

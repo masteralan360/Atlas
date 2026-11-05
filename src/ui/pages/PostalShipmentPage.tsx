@@ -151,7 +151,7 @@ export default function PostalShipmentPage({
   if (detail.isPending) return <PostalLoading />
   if (detail.error || !detail.data)
     return <PostalError retry={() => void detail.refetch()} />
-  const { shipment, transfer, summary, organizationName } = detail.data
+  const { shipment, transfer, summary, organizationName, organizationPhoneNumber } = detail.data
   const cod = codHistory.data?.pages.flat() ?? []
   const deliveryFeeRecords = deliveryFeeHistory.data?.pages.flat() ?? []
   const operations = availableOperations(shipment, transfer, scope.role)
@@ -197,6 +197,7 @@ export default function PostalShipmentPage({
     setPrint(false)
     preparePostalLabel(shipment, scope.workspaceId, t, {
       organizationName,
+      organizationPhoneNumber,
       workspaceName: workspaceName || 'Atlas',
     }, labelSize, locationCatalog)
     navigate('/print-preview-editor')
@@ -204,6 +205,7 @@ export default function PostalShipmentPage({
   const openCustomLabelPrint = (template: StoredCustomTemplateRow) => {
     preparePostalCustomLabel(shipment, scope.workspaceId, {
       organizationName,
+      organizationPhoneNumber,
       workspaceName: workspaceName || 'Atlas',
     }, template, i18n.language, locationCatalog)
     setPrint(false)

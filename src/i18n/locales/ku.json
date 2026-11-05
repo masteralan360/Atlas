@@ -11180,6 +11180,7 @@
       "cod": { "title": "باڵانسی پارە لە کاتی وەرگرتن", "description": "بڕی ماوە لەسەر بارە گەیەندراوەکان" }
     },
     "merchant": "بازرگان",
+    "merchantPhoneNumber": "ژمارەی تەلەفۆنی بازرگان",
     "merchantPermission": "دروستکردن و بەدواداچوونی بارەکانی بازرگان.",
     "officeEmployee": "فەرمانبەری ئۆفیس",
     "officePermission": "وەرگرتنی بار و جێبەجێکردنی گواستنەوەی ڕێگەپێدراو.",
@@ -11239,6 +11240,7 @@
     "customLabelTemplateDescription": "دیزاینی تایبەت · {{width}} × {{height}} ملم",
     "qrHint": "ئەم QRە بە بارەکەوە دەمێنێتەوە. خوێندنەوەی پێویستی بە مۆڵەت هەیە.",
     "primary_phone": "ژمارەی مۆبایلی سەرەکی",
+    "recipientPhoneNumber": "ژمارەی مۆبایلی وەرگر",
     "backup_phone": "ژمارەی مۆبایلی جێگرەوە",
     "recipient_name": "ناوی وەرگر",
     "phoneHint": "ژمارەی مۆبایلی عێراقی: 07xxxxxxxxx یان 7xxxxxxxxx یان 9647xxxxxxxxx یان 009647xxxxxxxxx. تەنها ژمارە.",
@@ -11338,6 +11340,7 @@
     "inactive": "ناچالاک",
     "organizations": "ڕێکخراوەکانی بازرگانان",
     "organizationName": "ناوی ڕێکخراو",
+    "organizationPhoneNumber": "ژمارەی تەلەفۆنی ڕێکخراو",
     "organizationCode": "کۆدی ڕێکخراو",
     "organizationPath": "ئەندامێتی ڕێکخراو",
     "joinOrganization": "پەیوەستبوون بە ڕێکخراو",
@@ -11449,6 +11452,7 @@
       "amountLocked": "بڕی پارە لە کاتی وەرگرتن یان کرێی گەیاندن دوای تەواوبوونی گەیاندن یان تۆمارکردنی پارەدان ناگۆڕدرێت.",
       "qrUnavailable": "ئەم QRە نادروستە یان بارەکە بۆ هەژمارەکەت بەردەست نییە.",
       "invalidOrganization": "لەو بۆشایی کارەدا ڕێکخراوێکی دروست هەڵبژێرە.",
+      "organizationPhone": "ژمارەیەکی دروستی تەلەفۆنی ڕێکخراو بنووسە.",
       "duplicateBranchName": "لقێک بە هەمان ناو پێشتر لەم بۆشایی کارەدا هەیە.",
       "invalidBranchGovernorate": "پارێزگایەکی دروست هەڵبژێرە.",
       "organization": "کۆدی ڕێکخراوێکی دروستی ئەم بۆشایی کارە بنووسە."

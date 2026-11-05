@@ -41,6 +41,7 @@ export function preparePostalQrBatchLabel(
   t: TFunction,
   workspaceName: string,
   labelSize: PostalQrBatchLabelSize = 'standard',
+  organizationPhoneNumber = '',
 ) {
   if (!qrIds.length) throw new Error('The QR batch has no printable labels.')
 
@@ -51,7 +52,7 @@ export function preparePostalQrBatchLabel(
   const title = t(isQrOnlyLabel ? 'postal.smallShipmentQrLabel' : 'postal.emptyShipmentLabel')
   const render = (qrId: string) => isQrOnlyLabel
     ? <EmptyShipmentQrLabel qrId={qrId} />
-    : <EmptyShipmentLabel qrId={qrId} workspaceName={workspaceName} />
+    : <EmptyShipmentLabel qrId={qrId} workspaceName={workspaceName} organizationPhoneNumber={organizationPhoneNumber} />
   const templatePreview: TemplatePreview = {
     page: pageSizeMm,
     bulkPageIds: qrIds,
@@ -83,6 +84,7 @@ export function preparePostalQrBatchCustomLabel(
   workspaceName: string,
   template: StoredCustomTemplateRow,
   printLang: string,
+  organizationPhoneNumber = '',
 ) {
   if (!qrIds.length) throw new Error('The QR batch has no printable labels.')
   const target = getCustomTemplateTarget(template.module_type_key)
@@ -104,6 +106,7 @@ export function preparePostalQrBatchCustomLabel(
     postalQrId: qrIds[0],
     postalQrIds: qrIds,
     postalOrganizationName: '',
+    postalOrganizationPhoneNumber: organizationPhoneNumber,
     printLang,
   }
 
@@ -149,7 +152,7 @@ export function preparePostalLabel(
   shipment: PostalShipment,
   workspaceId: string,
   t: TFunction,
-  sender: { organizationName: string; workspaceName: string },
+  sender: { organizationName: string; organizationPhoneNumber?: string; workspaceName: string },
   labelSize: PostalShipmentLabelSize = 'standard',
   locationCatalog: PostalLocationCatalog = emptyPostalLocationCatalog,
 ) {
@@ -183,6 +186,7 @@ export function preparePostalLabel(
           <ShipmentLabel
             shipment={shipment}
             organizationName={sender.organizationName}
+            organizationPhoneNumber={sender.organizationPhoneNumber}
             workspaceName={sender.workspaceName}
             note={fields.note}
             locationCatalog={locationCatalog}
@@ -203,7 +207,7 @@ export function preparePostalLabel(
 export async function buildPostalLabelPdf(
   shipment: PostalShipment,
   workspaceId: string,
-  sender: { organizationName: string; workspaceName: string },
+  sender: { organizationName: string; organizationPhoneNumber?: string; workspaceName: string },
   printLang: string,
   template?: StoredCustomTemplateRow,
   locationCatalog: PostalLocationCatalog = emptyPostalLocationCatalog,
@@ -227,6 +231,7 @@ export async function buildPostalLabelPdf(
         workspaceName: sender.workspaceName,
         postalShipment: shipment,
         postalOrganizationName: sender.organizationName,
+        postalOrganizationPhoneNumber: sender.organizationPhoneNumber,
         printLang,
         labelPageSizeMm: target.page,
         postalLocationCatalog: locationCatalog,
@@ -241,6 +246,7 @@ export async function buildPostalLabelPdf(
       <ShipmentLabel
         shipment={shipment}
         organizationName={sender.organizationName}
+        organizationPhoneNumber={sender.organizationPhoneNumber}
         workspaceName={sender.workspaceName}
         locationCatalog={locationCatalog}
       />
@@ -254,7 +260,7 @@ export async function buildPostalLabelPdf(
 export function preparePostalCustomLabel(
   shipment: PostalShipment,
   workspaceId: string,
-  sender: { organizationName: string; workspaceName: string },
+  sender: { organizationName: string; organizationPhoneNumber?: string; workspaceName: string },
   template: StoredCustomTemplateRow,
   printLang: string,
   locationCatalog: PostalLocationCatalog = emptyPostalLocationCatalog,
@@ -271,6 +277,7 @@ export function preparePostalCustomLabel(
     workspaceName: sender.workspaceName,
     postalShipment: shipment,
     postalOrganizationName: sender.organizationName,
+    postalOrganizationPhoneNumber: sender.organizationPhoneNumber,
     printLang,
     postalLocationCatalog: locationCatalog,
   }

@@ -28,10 +28,12 @@ export function CreateOrganizationDialog({
 }) {
   const { t } = useTranslation()
   const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
   const [createdOrganization, setCreatedOrganization] =
     useState<PostalOrganization | null>(null)
   const action = usePostalAction()
   const normalizedName = normalizePostalOrganizationName(name)
+  const normalizedPhone = phone.trim()
 
   const close = () => {
     if (!action.busy) onClose()
@@ -39,17 +41,26 @@ export function CreateOrganizationDialog({
 
   const createOrganization = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!normalizedName || createdOrganization || action.busy) return
+    if (
+      !normalizedName ||
+      !normalizedPhone ||
+      normalizedPhone.length > 32 ||
+      createdOrganization ||
+      action.busy
+    ) return
 
-    void action.run(normalizedName, async (requestId) => {
-      const organization = await postalCommand<PostalOrganization>(
-        scope,
-        'create_organization',
-        { name: normalizedName },
-        requestId,
-      )
-      setCreatedOrganization(organization)
-    })
+    void action.run(
+      JSON.stringify({ name: normalizedName, phone: normalizedPhone }),
+      async (requestId) => {
+        const organization = await postalCommand<PostalOrganization>(
+          scope,
+          'create_organization',
+          { name: normalizedName, phone: normalizedPhone },
+          requestId,
+        )
+        setCreatedOrganization(organization)
+      },
+    )
   }
 
   if (scope.role !== 'admin') return null
@@ -84,18 +95,36 @@ export function CreateOrganizationDialog({
                 <OrganizationCode code={createdOrganization.code} />
               </>
             ) : (
-              <div className="space-y-2">
-                <Label htmlFor="postal-create-organization-name">
-                  {t('postal.organizationName')} *
-                </Label>
-                <Input
-                  id="postal-create-organization-name"
-                  value={name}
-                  maxLength={120}
-                  required
-                  disabled={action.busy}
-                  onChange={(event) => setName(event.target.value)}
-                />
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="postal-create-organization-name">
+                    {t('postal.organizationName')} *
+                  </Label>
+                  <Input
+                    id="postal-create-organization-name"
+                    value={name}
+                    maxLength={120}
+                    required
+                    disabled={action.busy}
+                    onChange={(event) => setName(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="postal-create-organization-phone">
+                    {t('postal.organizationPhoneNumber')} *
+                  </Label>
+                  <Input
+                    id="postal-create-organization-phone"
+                    type="tel"
+                    autoComplete="tel"
+                    dir="ltr"
+                    value={phone}
+                    maxLength={32}
+                    required
+                    disabled={action.busy}
+                    onChange={(event) => setPhone(event.target.value)}
+                  />
+                </div>
               </div>
             )}
           </AppDialogBody>
@@ -116,7 +145,12 @@ export function CreateOrganizationDialog({
                 </Button>
                 <Button
                   type="submit"
-                  disabled={action.busy || !normalizedName}
+                  disabled={
+                    action.busy ||
+                    !normalizedName ||
+                    !normalizedPhone ||
+                    normalizedPhone.length > 32
+                  }
                 >
                   {action.busy && (
                     <Loader2 className="me-2 h-4 w-4 animate-spin" />

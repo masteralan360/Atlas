@@ -109,12 +109,14 @@ function LabelSectionTitle({ children }: { children: ReactNode }) {
 export function ShipmentLabel({
   shipment,
   organizationName,
+  organizationPhoneNumber = '',
   workspaceName,
   note = '',
   locationCatalog,
 }: {
   shipment: PostalShipment
   organizationName: string
+  organizationPhoneNumber?: string
   workspaceName: string
   note?: string
   locationCatalog?: PostalLocationCatalog
@@ -207,10 +209,15 @@ export function ShipmentLabel({
         <LabelRow label={t('postal.merchant')}>
           {organizationName}
         </LabelRow>
+        <LabelRow label={t('postal.merchantPhoneNumber')}>
+          <bdi dir="ltr" style={{ whiteSpace: 'nowrap' }}>
+            {organizationPhoneNumber}
+          </bdi>
+        </LabelRow>
         <LabelRow label={t('postal.recipient_name')} prominent>
           {shipment.recipient_name}
         </LabelRow>
-        <LabelRow label={t('postal.primary_phone')}>
+        <LabelRow label={t('postal.recipientPhoneNumber')}>
           <div>
             <bdi dir="ltr" style={{ whiteSpace: 'nowrap' }}>
               {shipment.primary_phone}

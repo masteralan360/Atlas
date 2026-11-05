@@ -78,10 +78,12 @@ function EmptyLabelSectionTitle({ children }: { children: ReactNode }) {
 export function EmptyShipmentLabel({
   qrId,
   workspaceName,
+  organizationPhoneNumber = '',
   small = false,
 }: {
   qrId: string
   workspaceName: string
+  organizationPhoneNumber?: string
   small?: boolean
 }) {
   const { t, i18n } = useTranslation()
@@ -185,8 +187,11 @@ export function EmptyShipmentLabel({
       </div>
       <section aria-label={t('postal.recipient_name')} style={{ border: '1px solid #000' }}>
         <EmptyLabelRow label={t('postal.merchant')} compact>{empty}</EmptyLabelRow>
+        <EmptyLabelRow label={t('postal.merchantPhoneNumber')} compact>
+          <bdi dir="ltr" style={{ whiteSpace: 'nowrap' }}>{organizationPhoneNumber}</bdi>
+        </EmptyLabelRow>
         <EmptyLabelRow label={t('postal.recipient_name')} prominent compact>{empty}</EmptyLabelRow>
-        <EmptyLabelRow label={t('postal.primary_phone')} compact>{empty}</EmptyLabelRow>
+        <EmptyLabelRow label={t('postal.recipientPhoneNumber')} compact>{empty}</EmptyLabelRow>
         <EmptyLabelRow label={t('postal.destination')} compact>{empty}</EmptyLabelRow>
       </section>
       <EmptyLabelSectionTitle>{t('postal.shipmentDetails')}</EmptyLabelSectionTitle>

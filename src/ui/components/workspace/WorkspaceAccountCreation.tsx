@@ -114,6 +114,7 @@ export function WorkspaceAccountCreation({
         'join' | 'create' | ''
     >('')
     const [organizationValue, setOrganizationValue] = useState('')
+    const [organizationPhone, setOrganizationPhone] = useState('')
     const organizationCodeInputRef = useRef<HTMLInputElement>(null)
 
     const workspaceId = user?.workspaceId ?? ''
@@ -137,7 +138,12 @@ export function WorkspaceAccountCreation({
         coachAccount
             ? { type: 'coach', agentTypeId: coach?.agentTypeId ?? '' }
             : merchantAccount
-                ? { type: 'postalMerchant', organizationMode, organizationValue }
+                ? {
+                      type: 'postalMerchant',
+                      organizationMode,
+                      organizationValue,
+                      organizationPhone,
+                  }
                 : { type: 'staff' },
     )
     const hasInput = Boolean(name || email || password || confirmPassword)
@@ -152,6 +158,7 @@ export function WorkspaceAccountCreation({
         setSubmitAttempted(false)
         setOrganizationMode('')
         setOrganizationValue('')
+        setOrganizationPhone('')
         onReset?.()
     }
 
@@ -365,6 +372,9 @@ export function WorkspaceAccountCreation({
                                                             setOrganizationValue(
                                                                 '',
                                                             )
+                                                            setOrganizationPhone(
+                                                                '',
+                                                            )
                                                         }
                                                     }}
                                                 >
@@ -414,6 +424,31 @@ export function WorkspaceAccountCreation({
                                                         ? 9
                                                         : 120
                                                 }
+                                                required
+                                            />
+                                        </div>
+                                    )}
+                                    {organizationMode === 'create' && (
+                                        <div className="space-y-2">
+                                            <Label htmlFor="postal-organization-phone">
+                                                {t(
+                                                    'postal.organizationPhoneNumber',
+                                                )}{' '}
+                                                *
+                                            </Label>
+                                            <Input
+                                                id="postal-organization-phone"
+                                                type="tel"
+                                                autoComplete="tel"
+                                                dir="ltr"
+                                                value={organizationPhone}
+                                                onChange={(event) =>
+                                                    setOrganizationPhone(
+                                                        event.target.value,
+                                                    )
+                                                }
+                                                disabled={isCreating}
+                                                maxLength={32}
                                                 required
                                             />
                                         </div>

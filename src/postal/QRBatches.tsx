@@ -15,7 +15,7 @@ import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationState'
 import { useDateRange } from '@/context/DateRangeContext'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
-import { postalCommand, type PostalScope } from '@/local-db/postal'
+import { getPostalOrganization, postalCommand, type PostalScope } from '@/local-db/postal'
 import { fetchPostalGeneratedQrsForBatch, postalQrTables, usePostalQrBatches, usePostalQrBatch, usePostalGeneratedQrs, type PostalQrBatch, type PostalGeneratedQr } from '@/local-db/postalQrBatches'
 import { usePostalAction } from './usePostalAccess'
 import { OrganizationAutoCompleteInput } from './OrganizationAutoCompleteInput'
@@ -27,6 +27,7 @@ import { loadPostalQrBatchLabelTemplates } from '@/lib/postalShipmentLabelTempla
 import {
   getCustomTemplateTarget,
   getStoredCustomTemplateLabel,
+  POSTAL_EMPTY_SHIPMENT_LABEL_TEMPLATE_KEY,
   POSTAL_EMPTY_SHIPMENT_LABEL_NATIVE_KEY,
   readCustomTemplateLayout,
   type StoredCustomTemplateRow,
@@ -240,23 +241,50 @@ export function QRBatchDetail({ scope, batchId }: { scope: PostalScope; batchId:
     template?: StoredCustomTemplateRow,
     nativeTemplateKey?: string,
   ) => {
-    try {
-      if (template) {
-        preparePostalQrBatchCustomLabel(printQrIds, scope.workspaceId, workspaceName || 'Atlas', template, i18n.language)
-      } else {
-        const size: PostalQrBatchLabelSize = nativeTemplateKey === 'postal-small-shipment-qr-label' ? 'small-qr' : 'standard'
-        preparePostalQrBatchLabel(printQrIds, scope.workspaceId, t, workspaceName || 'Atlas', size)
+    void (async () => {
+      setPreparingPrint(true)
+      try {
+        const isStandardEmptyLabel = template
+          ? template.module_type_key === POSTAL_EMPTY_SHIPMENT_LABEL_TEMPLATE_KEY
+          : nativeTemplateKey === POSTAL_EMPTY_SHIPMENT_LABEL_NATIVE_KEY
+        const organizationId = batch.data?.organization_id
+        const organization = isStandardEmptyLabel && organizationId
+          ? await getPostalOrganization(scope, organizationId)
+          : null
+        const organizationPhoneNumber = organization?.phone ?? ''
+        if (template) {
+          preparePostalQrBatchCustomLabel(
+            printQrIds,
+            scope.workspaceId,
+            workspaceName || 'Atlas',
+            template,
+            i18n.language,
+            organizationPhoneNumber,
+          )
+        } else {
+          const size: PostalQrBatchLabelSize = nativeTemplateKey === 'postal-small-shipment-qr-label' ? 'small-qr' : 'standard'
+          preparePostalQrBatchLabel(
+            printQrIds,
+            scope.workspaceId,
+            t,
+            workspaceName || 'Atlas',
+            size,
+            organizationPhoneNumber,
+          )
+        }
+        setPrint(false)
+        navigate('/print-preview-editor')
+      } catch {
+        setPrint(false)
+        toast({
+          title: t('common.error', { defaultValue: 'Error' }),
+          description: t('postal.qr.printLoadError'),
+          variant: 'destructive',
+        })
+      } finally {
+        setPreparingPrint(false)
       }
-      setPrint(false)
-      navigate('/print-preview-editor')
-    } catch {
-      setPrint(false)
-      toast({
-        title: t('common.error', { defaultValue: 'Error' }),
-        description: t('postal.qr.printLoadError'),
-        variant: 'destructive',
-      })
-    }
+    })()
   }
   const closePrintSelection = () => {
     printAbortRef.current?.abort()

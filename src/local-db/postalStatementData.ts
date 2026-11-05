@@ -73,6 +73,7 @@ export function normalizePostalOrganization(value: unknown, workspaceId: string)
   if (row.workspace_id !== workspaceId) throw invalid()
   return {
     id: text(row.id), workspace_id: workspaceId, name: text(row.name),
+    phone: nullableText(row.phone ?? null),
     code: text(row.code),
     leader_id: row.leader_id === null ? null : text(row.leader_id),
   }

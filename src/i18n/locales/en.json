@@ -11466,6 +11466,7 @@
       "cod": { "title": "COD Balance", "description": "Remaining COD on delivered shipments" }
     },
     "merchant": "Merchant",
+    "merchantPhoneNumber": "Merchant's Phone Number",
     "merchantPermission": "Create and track your merchant shipments.",
     "officeEmployee": "Office Employee",
     "officePermission": "Receive shipments and execute authorized transfers.",
@@ -11525,6 +11526,7 @@
     "customLabelTemplateDescription": "Custom layout · {{width}} × {{height}} mm",
     "qrHint": "This QR stays with this shipment. Scanning requires authorized access.",
     "primary_phone": "Primary Phone Number",
+    "recipientPhoneNumber": "Recipient Phone Number",
     "backup_phone": "Backup Phone Number",
     "recipient_name": "Recipient Name",
     "phoneHint": "Iraqi mobile numbers: 07xxxxxxxxx, 7xxxxxxxxx, 9647xxxxxxxxx or 009647xxxxxxxxx. Digits only.",
@@ -11624,6 +11626,7 @@
     "inactive": "Inactive",
     "organizations": "Merchant Organizations",
     "organizationName": "Organization Name",
+    "organizationPhoneNumber": "Organization Phone Number",
     "organizationCode": "Organization Code",
     "organizationPath": "Organization Membership",
     "joinOrganization": "Join Organization",
@@ -11735,6 +11738,7 @@
       "amountLocked": "The COD amount or delivery fee cannot change after delivery is completed or a payment is recorded.",
       "qrUnavailable": "This QR is invalid or the shipment is unavailable to your account.",
       "invalidOrganization": "Select a valid organization from this workspace.",
+      "organizationPhone": "Enter a valid organization phone number.",
       "duplicateBranchName": "A branch with the same name already exists in this workspace.",
       "invalidBranchGovernorate": "Select a valid governorate.",
       "organization": "Enter a valid organization code from this workspace."

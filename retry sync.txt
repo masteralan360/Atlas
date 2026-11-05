@@ -1,8 +1,14 @@
+Org Phone Number and display on Label
+
+Module-Route Based Maintenence Overlay with AGENTS.md instructions
+
+All Dialogs Must have side instructions
+
+Allow Stopping the Reciept to R2
+
 PWA Lang install
 
 Save usage mode
-
-Beauty procedures multiple selection
 
 Orders filter out returned sales total
 

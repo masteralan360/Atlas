@@ -30,8 +30,9 @@ describe('workspace account creation server contract', () => {
         expect(parseCreateWorkspaceAccountInput({ ...base, merchant: {} })).toBeNull()
         expect(parseCreateWorkspaceAccountInput({ ...base, merchant: { mode: 'join', code: 'invalid' } })).toBeNull()
         expect(parseCreateWorkspaceAccountInput({ ...base, merchant: { mode: 'create', name: '  ' } })).toBeNull()
+        expect(parseCreateWorkspaceAccountInput({ ...base, merchant: { mode: 'create', name: 'Shop', phone: ' ' } })).toBeNull()
         expect(parseCreateWorkspaceAccountInput({ ...base, merchant: { mode: 'join', code: 'abcd-2345', workspace_id: 'forged' } })?.merchant).toEqual({ mode: 'join', code: 'ABCD2345' })
-        expect(parseCreateWorkspaceAccountInput({ ...base, merchant: { mode: 'create', name: ' Shop ' } })?.merchant).toEqual({ mode: 'create', name: 'Shop' })
+        expect(parseCreateWorkspaceAccountInput({ ...base, merchant: { mode: 'create', name: ' Shop ', phone: ' 07501234567 ' } })?.merchant).toEqual({ mode: 'create', name: 'Shop', phone: '07501234567' })
     })
 
     it('requires an admin and an active Cloud or Hybrid workspace', () => {

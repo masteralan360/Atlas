@@ -761,6 +761,7 @@ export type CustomTemplatePreviewOptions = {
     postalShipment?: PostalShipment
     postalLocationCatalog?: PostalLocationCatalog
     postalOrganizationName?: string
+    postalOrganizationPhoneNumber?: string
     postalQrBatchLabel?: boolean
     postalQrId?: string
     postalQrIds?: string[]
@@ -2577,6 +2578,7 @@ export function createCustomTemplatePreview(
                         <EmptyShipmentLabel
                             qrId={options.postalQrId || effectiveId || shipment.qr_id}
                             workspaceName={workspaceName}
+                            organizationPhoneNumber={options.postalOrganizationPhoneNumber}
                         />
                     )
                 }
@@ -2591,6 +2593,7 @@ export function createCustomTemplatePreview(
                     <ShipmentLabel
                         shipment={shipment}
                         organizationName={options.postalOrganizationName || i18n.t('postal.title', { defaultValue: 'Post Service' })}
+                        organizationPhoneNumber={options.postalOrganizationPhoneNumber}
                         workspaceName={workspaceName}
                         note={fields.note || ''}
                         locationCatalog={options.postalLocationCatalog}

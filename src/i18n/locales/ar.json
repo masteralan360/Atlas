@@ -11139,6 +11139,7 @@
       "cod": { "title": "رصيد الدفع عند الاستلام", "description": "المبلغ المتبقي على الشحنات المسلّمة" }
     },
     "merchant": "تاجر",
+    "merchantPhoneNumber": "رقم هاتف التاجر",
     "merchantPermission": "إنشاء شحنات التاجر وتتبعها.",
     "officeEmployee": "موظف المكتب",
     "officePermission": "استلام الشحنات وتنفيذ التحويلات المصرح بها.",
@@ -11198,6 +11199,7 @@
     "customLabelTemplateDescription": "تصميم مخصص · {{width}} × {{height}} مم",
     "qrHint": "يبقى هذا الرمز مرتبطاً بالشحنة. تتطلب قراءته صلاحية الوصول.",
     "primary_phone": "رقم الهاتف الأساسي",
+    "recipientPhoneNumber": "رقم هاتف المستلم",
     "backup_phone": "رقم الهاتف الاحتياطي",
     "recipient_name": "اسم المستلم",
     "phoneHint": "أرقام موبايل عراقية: 07xxxxxxxxx أو 7xxxxxxxxx أو 9647xxxxxxxxx أو 009647xxxxxxxxx. أرقام فقط.",
@@ -11297,6 +11299,7 @@
     "inactive": "غير نشط",
     "organizations": "مؤسسات التجار",
     "organizationName": "اسم المؤسسة",
+    "organizationPhoneNumber": "رقم هاتف المؤسسة",
     "organizationCode": "رمز المؤسسة",
     "organizationPath": "عضوية المؤسسة",
     "joinOrganization": "الانضمام إلى مؤسسة",
@@ -11408,6 +11411,7 @@
       "amountLocked": "لا يمكن تغيير مبلغ الدفع عند الاستلام أو أجرة التوصيل بعد إتمام التوصيل أو تسجيل دفعة.",
       "qrUnavailable": "الرمز غير صالح أو أن الشحنة غير متاحة لحسابك.",
       "invalidOrganization": "اختر مؤسسة صالحة من مساحة العمل هذه.",
+      "organizationPhone": "أدخل رقم هاتف صالحاً للمؤسسة.",
       "duplicateBranchName": "يوجد بالفعل فرع بالاسم نفسه في مساحة العمل هذه.",
       "invalidBranchGovernorate": "اختر محافظة صالحة.",
       "organization": "أدخل رمز مؤسسة صالحاً من مساحة العمل هذه."

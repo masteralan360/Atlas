@@ -81,6 +81,7 @@ export interface PostalOrganization {
   id: string;
   workspace_id: string;
   name: string;
+  phone: string | null;
   code: string;
   leader_id: string | null;
 }

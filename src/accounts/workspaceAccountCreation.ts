@@ -11,7 +11,9 @@ export interface WorkspaceAccountCreationRequest {
     name: string
     email: string
     password: string
-    merchant?: { mode: 'join'; code: string } | { mode: 'create'; name: string }
+    merchant?:
+        | { mode: 'join'; code: string }
+        | { mode: 'create'; name: string; phone: string }
     coach?: { agentTypeId: string }
 }
 
@@ -21,6 +23,7 @@ export type WorkspaceAccountCreationContext =
           type: 'postalMerchant'
           organizationMode: 'join' | 'create' | ''
           organizationValue: string
+          organizationPhone: string
       }
     | { type: 'coach'; agentTypeId: string }
 
@@ -75,9 +78,12 @@ export function buildWorkspaceAccountCreationRequest(
             if (!/^[A-Z0-9]{8}$/.test(code)) return null
             request.merchant = { mode: 'join', code }
         } else if (context.organizationMode === 'create') {
-            const name = normalizePostalOrganizationName(context.organizationValue)
-            if (!name) return null
-            request.merchant = { mode: 'create', name }
+            const name = normalizePostalOrganizationName(
+                context.organizationValue,
+            )
+            const phone = context.organizationPhone.trim()
+            if (!name || phone.length < 1 || phone.length > 32) return null
+            request.merchant = { mode: 'create', name, phone }
         } else {
             return null
         }
@@ -93,6 +99,8 @@ export function getWorkspaceAccountCreationErrorKey(code: string | undefined) {
     switch (code) {
         case 'invalid_organization':
             return 'postal.errors.organization'
+        case 'invalid_organization_phone':
+            return 'postal.errors.organizationPhone'
         case 'duplicate_email':
             return 'workspaceAccountCreation.errors.duplicateEmail'
         case 'member_limit_reached':

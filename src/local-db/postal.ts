@@ -23,6 +23,7 @@ import {
   parsePostalShipmentId,
   postalStates,
   type PostalShipment,
+  type PostalOrganization,
   type PostalBranch,
   type PostalRole,
   type PostalEvent,
@@ -549,14 +550,14 @@ export function usePostalDetail(scope: PostalScope, shipmentId: string) {
         () => 1,
       )
       const [organization, transfers, summary] = await Promise.all([
-        tracked<{ id: string; name: string }>(
+        tracked<{ id: string; name: string; phone: string | null }>(
           scope,
           'postal_organizations',
           signal,
           () =>
             supabase
               .from('postal_organizations')
-              .select('id,name')
+              .select('id,name,phone')
               .eq('workspace_id', scope.workspaceId)
               .eq('id', shipment.organization_id)
               .abortSignal(signal)
@@ -597,6 +598,7 @@ export function usePostalDetail(scope: PostalScope, shipmentId: string) {
       return {
         shipment: normalizeShipment(shipment as PostalShipment),
         organizationName: organization.name,
+        organizationPhoneNumber: organization.phone ?? '',
         transfer: transfers[0],
         summary: {
           collected: Number(summary.collected),
@@ -759,24 +761,24 @@ export async function resolvePostalQr(scope: PostalScope, raw: string) {
   return normalizeShipment(data)
 }
 
-export async function getPostalShipmentOrganizationName(
+export async function getPostalOrganization(
   scope: PostalScope,
-  shipment: Pick<PostalShipment, 'organization_id'>,
-): Promise<string> {
-  const organization = await tracked<{ id: string; name: string }>(
+  organizationId: string,
+): Promise<Pick<PostalOrganization, 'name' | 'phone'>> {
+  const organization = await tracked<Pick<PostalOrganization, 'id' | 'name' | 'phone'>>(
     scope,
     'postal_organizations',
     undefined,
     () =>
       supabase
         .from('postal_organizations')
-        .select('id,name')
+        .select('id,name,phone')
         .eq('workspace_id', scope.workspaceId)
-        .eq('id', shipment.organization_id)
+        .eq('id', organizationId)
         .single(),
     () => 1,
   )
-  return organization.name
+  return { name: organization.name, phone: organization.phone }
 }
 
 export async function searchPostalDrivers(

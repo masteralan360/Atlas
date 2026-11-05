@@ -32,6 +32,9 @@ function response(code: string, status = 400) {
 
 function getCreationFailureCode(error: { message?: string; status?: number }) {
     const message = error.message?.toLowerCase() ?? ''
+    if (message.includes('postal_invalid_organization_phone')) {
+        return 'invalid_organization_phone'
+    }
     if (message.includes('member limit')) return 'member_limit_reached'
     if (
         message.includes('already registered')

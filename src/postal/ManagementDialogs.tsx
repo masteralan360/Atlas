@@ -299,6 +299,7 @@ export function OrganizationDialog({
 }) {
   const { t } = useTranslation()
   const [name, setName] = useState(organization.name)
+  const [phone, setPhone] = useState(organization.phone ?? '')
   const [leader, setLeader] = useState(organization.leader_id ?? '')
   const [movingMember, setMovingMember] = useState('')
   const members = usePostalMembers(scope, organization.id)
@@ -307,6 +308,7 @@ export function OrganizationDialog({
   const payload = {
     id: organization.id,
     name: name.trim(),
+    phone: phone.trim(),
     leader_id: leader || null,
   }
   if (movingMember)
@@ -336,16 +338,35 @@ export function OrganizationDialog({
         </AppDialogHeader>
         <AppDialogBody className="space-y-4">
           <OrganizationCode code={organization.code} />
-          <Label htmlFor="postal-org-name">
-            {t('postal.organizationName')} *
-          </Label>
-          <Input
-            id="postal-org-name"
-            value={name}
-            maxLength={120}
-            disabled={action.busy}
-            onChange={(e) => setName(e.target.value)}
-          />
+          <div className="space-y-2">
+            <Label htmlFor="postal-org-name">
+              {t('postal.organizationName')} *
+            </Label>
+            <Input
+              id="postal-org-name"
+              value={name}
+              maxLength={120}
+              required
+              disabled={action.busy}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="postal-org-phone">
+              {t('postal.organizationPhoneNumber')} *
+            </Label>
+            <Input
+              id="postal-org-phone"
+              type="tel"
+              autoComplete="tel"
+              dir="ltr"
+              value={phone}
+              maxLength={32}
+              required
+              disabled={action.busy}
+              onChange={(e) => setPhone(e.target.value)}
+            />
+          </div>
           {members.isLoading ? (
             <PostalLoading />
           ) : members.error ? (
@@ -410,6 +431,8 @@ export function OrganizationDialog({
             disabled={
               action.busy ||
               !name.trim() ||
+              !phone.trim() ||
+              phone.trim().length > 32 ||
               members.isLoading ||
               Boolean(members.error) ||
               (choices.length > 0 &&
