@@ -91,6 +91,8 @@ html[lang] pre {
   /* Default variables (fallback) */
   :root {
     --radius: 0.625rem;
+    --atlas-insight-gradient-from: #166534;
+    --atlas-insight-gradient-to: #0f3f2d;
     --titlebar-height: 0px;
     --safe-area-top: 0px;
     --safe-area-bottom: 0px;
@@ -159,6 +161,8 @@ html[lang] pre {
      ========================================= */
   .theme-modern {
     --radius: 1rem;
+    --atlas-insight-gradient-from: hsl(243 75% 38%);
+    --atlas-insight-gradient-to: hsl(243 75% 24%);
   }
 
   .theme-modern.light {
@@ -210,6 +214,8 @@ html[lang] pre {
      ========================================= */
   .theme-legacy {
     --radius: 0.5rem;
+    --atlas-insight-gradient-from: hsl(221 83% 38%);
+    --atlas-insight-gradient-to: hsl(221 83% 24%);
   }
 
   .theme-legacy.light {
@@ -261,6 +267,8 @@ html[lang] pre {
      ========================================= */
   .theme-primary {
     --radius: 0.5rem;
+    --atlas-insight-gradient-from: hsl(0 0% 32%);
+    --atlas-insight-gradient-to: hsl(0 0% 17%);
   }
 
   .theme-primary.light {
@@ -811,6 +819,8 @@ html[lang] pre {
 .theme-emerald {
   /* Match the Modern Premium theme's rounded component edges. */
   --radius: 1rem;
+  --atlas-insight-gradient-from: #166534;
+  --atlas-insight-gradient-to: #0f3f2d;
 }
 
 .theme-emerald.light {
@@ -865,6 +875,8 @@ html[lang] pre {
      ========================================= */
 .theme-gold {
   --radius: 0.75rem;
+  --atlas-insight-gradient-from: hsl(43 85% 29%);
+  --atlas-insight-gradient-to: hsl(43 85% 16%);
 }
 
 .theme-gold.light {
@@ -928,6 +940,14 @@ html[lang] pre {
 }
 
 /* Specific styling for the Snapshot container */
+.atlas-insight-surface {
+  background-image: linear-gradient(
+    180deg,
+    var(--atlas-insight-gradient-from, #166534),
+    var(--atlas-insight-gradient-to, #0f3f2d)
+  );
+}
+
 .snapshot-box {
   @apply rounded-xl border border-primary/20 bg-primary/5 p-4;
 }
@@ -941,6 +961,8 @@ html[lang] pre {
      ========================================= */
 .theme-neo-orange {
   --radius: 0px;
+  --atlas-insight-gradient-from: hsl(24 100% 34%);
+  --atlas-insight-gradient-to: hsl(24 100% 18%);
   /* Sharp corners are key to this look */
 }
 

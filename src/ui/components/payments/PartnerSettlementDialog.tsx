@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowDownLeft, ArrowUpRight, ClipboardCheck, Link2, Loader2 } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, CircleAlert, CircleDollarSign, ClipboardCheck, Link2, Loader2 } from 'lucide-react'
 
 import {
     getPartnerSettlementBalance,
@@ -325,7 +325,26 @@ export function PartnerSettlementDialog({
 
     return (
         <>
-        <Dialog open={open} onOpenChange={onOpenChange}>
+        <Dialog
+            open={open}
+            onOpenChange={onOpenChange}
+            showInsight
+            insightContent={<PartnerSettlementInsight />}
+            insightPreview={(
+                <PartnerSettlementOutcomePreview
+                    partnerName={partner?.partnerName ?? null}
+                    direction={direction}
+                    balance={balance}
+                    amounts={amountEntries}
+                    hasEnteredAmount={hasEnteredAmount}
+                    paidAtIsValid={!!selectedPaidAt}
+                    balanceLoading={balanceLoading}
+                    hasBalanceError={!!balanceError}
+                    paymentAccountName={paymentAccount?.name ?? null}
+                    iqdDisplayPreference={features.iqd_display_preference}
+                />
+            )}
+        >
             <DialogContent
                 layout="structured"
                 className="max-w-2xl"
@@ -665,5 +684,133 @@ export function PartnerSettlementDialog({
             />
         ) : null}
         </>
+    )
+}
+
+type SettlementPreviewAmount = {
+    currency: string
+    total: number
+    amount: number
+    valid: boolean
+}
+
+function PartnerSettlementInsight() {
+    const { t } = useTranslation()
+
+    return (
+        <div className="space-y-3">
+            <div className="flex items-center gap-2">
+                <CircleDollarSign className="h-5 w-5 shrink-0 text-white/90" aria-hidden="true" />
+                <h3 className="text-lg font-semibold">{t('partnerSettlement.insightTitle')}</h3>
+            </div>
+            <p className="text-sm leading-relaxed text-white/85">
+                {t('partnerSettlement.insightDescription')}
+            </p>
+        </div>
+    )
+}
+
+function PartnerSettlementOutcomePreview({
+    partnerName,
+    direction,
+    balance,
+    amounts,
+    hasEnteredAmount,
+    paidAtIsValid,
+    balanceLoading,
+    hasBalanceError,
+    paymentAccountName,
+    iqdDisplayPreference
+}: {
+    partnerName: string | null
+    direction: PaymentTransactionDirection | null
+    balance: PartnerSettlementBalance | null
+    amounts: SettlementPreviewAmount[]
+    hasEnteredAmount: boolean
+    paidAtIsValid: boolean
+    balanceLoading: boolean
+    hasBalanceError: boolean
+    paymentAccountName: string | null
+    iqdDisplayPreference: 'IQD' | 'د.ع'
+}) {
+    const { t } = useTranslation()
+
+    if (!partnerName || !direction) {
+        return <PartnerSettlementPreviewStatus>{t('partnerSettlement.previewIncomplete')}</PartnerSettlementPreviewStatus>
+    }
+
+    if (balanceLoading) {
+        return (
+            <div className="flex items-start gap-2 leading-relaxed text-white/90">
+                <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
+                <p>{t('partnerSettlement.previewLoading')}</p>
+            </div>
+        )
+    }
+
+    if (hasBalanceError) {
+        return <PartnerSettlementPreviewStatus>{t('partnerSettlement.previewLoadError')}</PartnerSettlementPreviewStatus>
+    }
+
+    if (!balance || balance.total <= AMOUNT_EPSILON || balance.items === 0) {
+        return <PartnerSettlementPreviewStatus>{t('partnerSettlement.previewNoBalance')}</PartnerSettlementPreviewStatus>
+    }
+
+    if (!paidAtIsValid || !hasEnteredAmount || amounts.length === 0 || amounts.some((amount) => !amount.valid)) {
+        return <PartnerSettlementPreviewStatus>{t('partnerSettlement.previewIncomplete')}</PartnerSettlementPreviewStatus>
+    }
+
+    const amountText = amounts
+        .filter((amount) => amount.amount > AMOUNT_EPSILON)
+        .map((amount) => formatCurrency(amount.amount, amount.currency, iqdDisplayPreference))
+        .join(' • ')
+    const remainingGroups = balance.groups
+        .map((group) => {
+            const amount = amounts.find((entry) => entry.currency === group.currency)?.amount ?? 0
+            return { currency: group.currency, amount: Math.max(group.total - amount, 0) }
+        })
+        .filter((group) => group.amount > AMOUNT_EPSILON)
+    const isFullSettlement = remainingGroups.length === 0
+    const remainingText = remainingGroups
+        .map((group) => formatCurrency(group.amount, group.currency, iqdDisplayPreference))
+        .join(' • ')
+    const outcomeKey = isFullSettlement
+        ? direction === 'incoming'
+            ? 'partnerSettlement.previewCollectFull'
+            : 'partnerSettlement.previewPayFull'
+        : direction === 'incoming'
+            ? 'partnerSettlement.previewCollectPartial'
+            : 'partnerSettlement.previewPayPartial'
+
+    return (
+        <div className="space-y-2 leading-relaxed text-white/95">
+            <p>
+                {t(outcomeKey, {
+                    amount: amountText,
+                    partner: partnerName,
+                    count: balance.items,
+                    remaining: remainingText
+                })}
+            </p>
+            {paymentAccountName ? (
+                <p className="text-white/80">
+                    {t(direction === 'incoming'
+                        ? 'partnerSettlement.previewAccountIncoming'
+                        : 'partnerSettlement.previewAccountOutgoing', {
+                        account: paymentAccountName,
+                        amount: amountText
+                    })}
+                </p>
+            ) : null}
+        </div>
+    )
+}
+
+function PartnerSettlementPreviewStatus({ children }: { children: string }) {
+    return (
+        <div className="flex items-start gap-2 leading-relaxed text-white/90">
+            <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-white/80" aria-hidden="true" />
+            <p>{children}</p>
+        </div>
     )
 }

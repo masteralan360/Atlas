@@ -1,6 +1,6 @@
 import * as React from "react"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { ListTodo, X } from "lucide-react"
+import { Eye, EyeOff, ListTodo, X } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { cn } from "@/lib/utils"
 import { ScrollIndicator } from "./ScrollIndicator"
@@ -22,26 +22,153 @@ type PendingChangesContextValue = {
 const PendingChangesContext = React.createContext<PendingChangesContextValue | null>(null)
 const DialogOpenContext = React.createContext(false)
 
-type DialogRootProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root>
+type DialogInsightProps = {
+    /** Show the optional dialog insight panel on desktop viewports (1024px and wider). Defaults to false. */
+    showInsight?: boolean
+    /** CSS background color for the insight panel. Defaults to the Add Product Discount green gradient. */
+    insightColor?: React.CSSProperties["backgroundColor"]
+    /** Module-owned content rendered inside the insight panel. */
+    insightContent?: React.ReactNode
+    /** Plain-language save outcome from the module, automatically wrapped in the localized Preview card. */
+    insightPreview?: React.ReactNode
+    /** Optional classes for module-specific panel styling. */
+    insightPanelClassName?: string
+}
 
-const Dialog = ({ open, defaultOpen = false, onOpenChange, ...props }: DialogRootProps) => {
+type DialogInsightContextValue = {
+    /** The module requested insight and the viewport is large enough to show it. */
+    isAvailable: boolean
+    /** Insight is currently visible after applying the shared user preference. */
+    showInsight: boolean
+    toggleVisibility: () => void
+} &
+    Pick<DialogInsightProps, "insightColor" | "insightContent" | "insightPreview" | "insightPanelClassName">
+
+const DialogInsightContext = React.createContext<DialogInsightContextValue>({
+    isAvailable: false,
+    showInsight: false,
+    toggleVisibility: () => undefined,
+})
+const DESKTOP_INSIGHT_MEDIA_QUERY = "(min-width: 1024px)"
+const INSIGHT_VISIBILITY_STORAGE_KEY = "showInsight"
+const insightPreferenceSubscribers = new Set<() => void>()
+let inMemoryInsightPreference: boolean | undefined
+
+const readInsightPreference = () => {
+    if (typeof window === "undefined") return true
+    try {
+        const storedPreference = window.localStorage.getItem(INSIGHT_VISIBILITY_STORAGE_KEY)
+        if (storedPreference !== null) return storedPreference !== "false"
+    } catch { /* Fall back to this session if local storage is unavailable. */ }
+    return inMemoryInsightPreference ?? true
+}
+
+const subscribeToInsightPreference = (subscriber: () => void) => {
+    insightPreferenceSubscribers.add(subscriber)
+    const handleStorage = (event: StorageEvent) => {
+        if (event.key !== INSIGHT_VISIBILITY_STORAGE_KEY && event.key !== null) return
+        inMemoryInsightPreference = event.newValue === null
+            ? undefined
+            : event.newValue !== "false"
+        subscriber()
+    }
+    window.addEventListener("storage", handleStorage)
+
+    return () => {
+        insightPreferenceSubscribers.delete(subscriber)
+        window.removeEventListener("storage", handleStorage)
+    }
+}
+
+const writeInsightPreference = (showInsight: boolean) => {
+    inMemoryInsightPreference = showInsight
+    try {
+        window.localStorage.setItem(INSIGHT_VISIBILITY_STORAGE_KEY, String(showInsight))
+    } catch {
+        // Keep the in-memory preference working when storage is unavailable.
+    }
+    insightPreferenceSubscribers.forEach(subscriber => subscriber())
+}
+
+const useDesktopInsightAvailability = (requested: boolean) => {
+    const [isDesktop, setIsDesktop] = React.useState(() => (
+        requested
+        && typeof window !== "undefined"
+        && typeof window.matchMedia === "function"
+        && window.matchMedia(DESKTOP_INSIGHT_MEDIA_QUERY).matches
+    ))
+
+    React.useEffect(() => {
+        if (!requested || typeof window === "undefined" || typeof window.matchMedia !== "function") {
+            setIsDesktop(false)
+            return
+        }
+
+        const mediaQuery = window.matchMedia(DESKTOP_INSIGHT_MEDIA_QUERY)
+        const updateAvailability = () => setIsDesktop(mediaQuery.matches)
+        updateAvailability()
+        mediaQuery.addEventListener("change", updateAvailability)
+
+        return () => mediaQuery.removeEventListener("change", updateAvailability)
+    }, [requested])
+
+    return isDesktop
+}
+
+type DialogRootProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root> & DialogInsightProps
+
+const Dialog = ({
+    open,
+    defaultOpen = false,
+    onOpenChange,
+    showInsight = false,
+    insightColor,
+    insightContent,
+    insightPreview,
+    insightPanelClassName,
+    ...props
+}: DialogRootProps) => {
     const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen)
     const isOpen = open ?? uncontrolledOpen
+    const isDesktopInsightViewport = useDesktopInsightAvailability(showInsight)
+    const insightPreference = React.useSyncExternalStore(
+        subscribeToInsightPreference,
+        readInsightPreference,
+        () => true
+    )
+    const isInsightAvailable = showInsight && isDesktopInsightViewport
+    const showDesktopInsight = isInsightAvailable && insightPreference
+
+    const toggleInsightVisibility = React.useCallback(() => {
+        writeInsightPreference(!readInsightPreference())
+    }, [])
 
     const handleOpenChange = React.useCallback((nextOpen: boolean) => {
         if (open === undefined) setUncontrolledOpen(nextOpen)
         onOpenChange?.(nextOpen)
     }, [onOpenChange, open])
 
+    const insightConfig = React.useMemo(() => ({
+        isAvailable: isInsightAvailable,
+        showInsight: showDesktopInsight,
+        toggleVisibility: toggleInsightVisibility,
+        insightColor,
+        insightContent,
+        insightPreview,
+        insightPanelClassName,
+    }), [insightColor, insightContent, insightPanelClassName, insightPreview, showDesktopInsight, isInsightAvailable, toggleInsightVisibility])
+
     return (
-        <DialogOpenContext.Provider value={isOpen}>
-            <DialogPrimitive.Root
-                {...props}
-                open={open}
-                defaultOpen={defaultOpen}
-                onOpenChange={handleOpenChange}
-            />
-        </DialogOpenContext.Provider>
+        <DialogInsightContext.Provider value={insightConfig}>
+            <DialogOpenContext.Provider value={isOpen}>
+                <DialogPrimitive.Root
+                    {...props}
+                    open={open}
+                    defaultOpen={defaultOpen}
+                    onOpenChange={handleOpenChange}
+                />
+            </DialogOpenContext.Provider>
+        </DialogInsightContext.Provider>
     )
 }
 
@@ -66,15 +193,41 @@ const DialogOverlay = React.forwardRef<
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
+type DialogInsightPreviewProps = React.HTMLAttributes<HTMLElement> & {
+    children: React.ReactNode
+}
+
+const DialogInsightPreview = ({ className, children, ...props }: DialogInsightPreviewProps) => {
+    const { t } = useTranslation()
+    const titleId = React.useId()
+
+    return (
+        <section aria-labelledby={titleId} className={cn("mt-4 space-y-2", className)} {...props}>
+            <h3 id={titleId} className="text-xs uppercase tracking-[0.2em] text-emerald-100/80">
+                {t("common.dialogInsightPreview")}
+            </h3>
+            <div className="rounded-2xl bg-white/10 p-4 text-lg font-semibold text-white">
+                {children}
+            </div>
+        </section>
+    )
+}
+
 const DialogContent = React.forwardRef<
     React.ElementRef<typeof DialogPrimitive.Content>,
     DialogContentProps
 >(({ className, children, showCloseButton = true, layout = "default", overlayClassName, mobileFullscreen = true, ...props }, ref) => {
     const dialogOpen = React.useContext(DialogOpenContext)
+    const insight = React.useContext(DialogInsightContext)
+    const hasInsightBody = React.Children.toArray(insight.insightContent).length > 0
+    const hasInsightPreview = React.Children.toArray(insight.insightPreview).length > 0
+    const hasInsightContent = hasInsightBody || hasInsightPreview
     const { t, i18n } = useTranslation()
     const [contentNode, setContentNode] = React.useState<HTMLDivElement | null>(null)
     const [scroller, setScroller] = React.useState<HTMLDivElement | null>(null)
     const [pendingCount, setPendingCount] = React.useState(0)
+    const insightPanelRef = React.useRef<HTMLElement | null>(null)
+    const insightToggleRef = React.useRef<HTMLButtonElement | null>(null)
     const contentRef = React.useCallback((node: HTMLDivElement | null) => {
         setContentNode(node)
         if (typeof ref === "function") ref(node)
@@ -86,6 +239,18 @@ const DialogContent = React.forwardRef<
     }), [pendingCount])
 
     React.useLayoutEffect(() => {
+        const panel = insightPanelRef.current
+        if (!panel) return
+
+        const focusWasInsidePanel = panel.contains(document.activeElement)
+        panel.inert = !insight.showInsight
+        if (!insight.showInsight && focusWasInsidePanel) {
+            const focusTarget = insightToggleRef.current ?? contentNode
+            focusTarget?.focus({ preventScroll: true })
+        }
+    }, [contentNode, insight.showInsight])
+
+    React.useLayoutEffect(() => {
         const content = contentNode
         if (content) {
             // Prefer an explicitly marked body so structured dialogs can keep
@@ -93,6 +258,12 @@ const DialogContent = React.forwardRef<
             const markedScroller = content.querySelector<HTMLDivElement>("[data-dialog-scroll-area]")
             if (markedScroller) {
                 setScroller(markedScroller)
+                return
+            }
+
+            const insightMain = content.querySelector<HTMLDivElement>("[data-dialog-insight-main]")
+            if (insightMain && window.getComputedStyle(insightMain).overflowY === "auto") {
+                setScroller(insightMain)
                 return
             }
 
@@ -281,18 +452,81 @@ const DialogContent = React.forwardRef<
                         "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
                         layout === "structured" && "top-[calc(50%+var(--titlebar-height)/2+var(--safe-area-top)/2)] flex max-h-[calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-0.75rem)] w-[calc(100vw-0.75rem)] max-w-3xl flex-col overflow-hidden rounded-[1.25rem] border-border/60 p-0 sm:w-full sm:max-h-[min(calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-2rem),820px)] sm:rounded-[1.75rem]",
                         className,
+                        insight.isAvailable && "flex max-h-[calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-2rem)] w-[calc(100vw-0.75rem)] flex-col overflow-hidden p-0 transition-[max-width] duration-200 ease-in-out sm:w-[calc(100vw-2rem)] sm:max-h-[min(calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height)-var(--safe-area-top)-var(--safe-area-bottom)-2rem),920px)]",
+                        insight.isAvailable && (insight.showInsight ? "max-w-5xl" : "max-w-3xl"),
                         mobileFullscreen && "max-sm:!left-0 max-sm:!right-0 max-sm:!top-[var(--titlebar-height)] max-sm:!bottom-0 max-sm:!h-[calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height))] max-sm:!max-h-[calc(var(--atlas-dialog-viewport-height)-var(--titlebar-height))] max-sm:!w-screen max-sm:!max-w-none max-sm:!translate-x-0 max-sm:!translate-y-0 max-sm:!rounded-none max-sm:!border-0",
                         mobileFullscreen && (layout === "structured" ? "max-sm:!overflow-hidden" : "max-sm:!overflow-y-auto")
                     )}
                     {...props}
                 >
-                    {children}
+                    {insight.isAvailable ? (
+                        <div className={cn(
+                            "grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-0 transition-[grid-template-columns] duration-200 ease-in-out",
+                            insight.showInsight
+                                ? "lg:grid-cols-[minmax(0,1fr)_20rem]"
+                                : "lg:grid-cols-[minmax(0,1fr)_0fr]"
+                        )}>
+                            <div className={cn(
+                                "min-h-0 min-w-0",
+                                layout === "structured" ? "flex flex-col" : "flex-1 overflow-y-auto"
+                            )} data-dialog-insight-main="">
+                                {children}
+                            </div>
+                            <aside
+                                ref={insightPanelRef}
+                                aria-hidden={!insight.showInsight || !hasInsightContent}
+                                aria-label={insight.showInsight && hasInsightContent ? t("common.dialogInsights") : undefined}
+                                className={cn(
+                                    "min-h-0 min-w-0 overflow-hidden transition-[opacity,transform] duration-200 ease-in-out lg:rounded-e-[inherit]",
+                                    insight.showInsight ? "translate-x-0 opacity-100" : "pointer-events-none translate-x-2 opacity-0",
+                                    insight.insightColor
+                                        ? "bg-none"
+                                        : "atlas-insight-surface text-white",
+                                    insight.insightPanelClassName
+                                )}
+                                style={insight.insightColor ? { backgroundColor: insight.insightColor } : undefined}
+                            >
+                                <div className="h-full w-80 overflow-y-auto p-4 sm:p-6 lg:pe-14">
+                                    {insight.showInsight && hasInsightBody ? (
+                                        <div
+                                            data-dialog-insight-content
+                                            className="space-y-4 font-medium [&_h3]:text-2xl [&_h3]:font-semibold [&_h3]:leading-tight [&_h3]:tracking-tight [&_p]:text-sm [&_p]:leading-relaxed [&_p]:text-emerald-100/85"
+                                        >
+                                            {insight.insightContent}
+                                        </div>
+                                    ) : null}
+                                    {insight.showInsight && hasInsightPreview ? (
+                                        <DialogInsightPreview className={hasInsightBody ? undefined : "mt-0"}>
+                                            {insight.insightPreview}
+                                        </DialogInsightPreview>
+                                    ) : null}
+                                </div>
+                            </aside>
+                        </div>
+                    ) : children}
                     {layout === "default" && scroller && <ScrollIndicator containerRef={{ current: scroller }} />}
                     {showCloseButton ? (
                         <DialogPrimitive.Close className="absolute right-4 top-[calc(1rem+var(--safe-area-top))] rtl:right-auto rtl:left-4 rounded-lg bg-destructive/10 p-1.5 text-destructive opacity-80 ring-offset-background transition-all hover:bg-destructive hover:text-destructive-foreground hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground z-[70]">
                             <X className="h-4 w-4" />
                             <span className="sr-only">Close</span>
                         </DialogPrimitive.Close>
+                    ) : null}
+                    {insight.isAvailable ? (
+                        <button
+                            ref={insightToggleRef}
+                            type="button"
+                            aria-label={insight.showInsight ? t("common.hideDialogInsights") : t("common.showDialogInsights")}
+                            aria-pressed={insight.showInsight}
+                            title={insight.showInsight ? t("common.hideDialogInsights") : t("common.showDialogInsights")}
+                            onClick={insight.toggleVisibility}
+                            className={cn(
+                                "absolute top-[calc(1rem+var(--safe-area-top))] z-[70] rounded-lg bg-muted/70 p-1.5 text-muted-foreground opacity-90 ring-offset-background transition-all hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+                                showCloseButton ? "right-14 rtl:right-auto rtl:left-14" : "right-4 rtl:right-auto rtl:left-4"
+                            )}
+                        >
+                            {insight.showInsight ? <EyeOff aria-hidden="true" className="h-4 w-4" /> : <Eye aria-hidden="true" className="h-4 w-4" />}
+                            <span className="sr-only">{insight.showInsight ? t("common.hideDialogInsights") : t("common.showDialogInsights")}</span>
+                        </button>
                     ) : null}
                 </DialogPrimitive.Content>
             </PendingChangesContext.Provider>
@@ -453,6 +687,7 @@ export {
     DialogTitle,
     DialogDescription,
     AppDialog,
+    DialogInsightPreview,
     AppDialogContent,
     AppDialogHeader,
     AppDialogBody,

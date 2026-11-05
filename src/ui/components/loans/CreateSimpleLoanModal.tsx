@@ -9,18 +9,19 @@ import { buildOrderExchangeRatesSnapshot } from '@/lib/orderCurrency'
 import { getLoanCounterpartyNameLabel, getLoanDirectionLabel } from '@/lib/loanPresentation'
 import { getLoanLinkedPartyTypeLabel, type LoanPartySelection } from '@/lib/loanParties'
 import { formatLocalDateTimeValue, formatLocalDateValue, formatNumericInput, parseFormattedNumber, parseLocalDateTimeValue, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
+import { roundOrderValue } from '@/lib/orderPrecision'
 import { Input } from '@/ui/components/input'
 import {
   Button,
   CurrencySelector,
   DateTimePicker,
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
   Label,
   Select,
   SelectContent,
@@ -36,6 +37,7 @@ import { SaveBorrowerAsPartnerDialog, usePendingSavePartnerPrompt } from './Save
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import type { BusinessPartner } from '@/local-db'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
+import { SimpleLoanDialogInsight, SimpleLoanSavePreview } from './SimpleLoanDialogInsight'
 
 interface CreateSimpleLoanModalProps {
     isOpen: boolean
@@ -97,8 +99,10 @@ export function CreateSimpleLoanModal({
     }, [selectedCurrency])
 
     const selectedCreatedAt = parseLocalDateTimeValue(createdAt)
-    const canSubmit = borrowerName.trim()
-        && parseFormattedNumber(principalAmount || '0') > 0
+    const normalizedPrincipalAmount = roundOrderValue(parseFormattedNumber(principalAmount || '0'))
+    const selectedDueDate = parseLocalDateValue(dueDate) ?? null
+    const canSubmit = borrowerName.trim().length > 0
+        && normalizedPrincipalAmount > 0
         && !!selectedCreatedAt
 
     const counterpartyNameLabel = useMemo(
@@ -138,12 +142,12 @@ export function CreateSimpleLoanModal({
                 borrowerPhone: borrowerPhone.trim(),
                 borrowerAddress: borrowerAddress.trim(),
                 borrowerNationalId: '',
-                principalAmount: parseFormattedNumber(principalAmount || '0'),
+                principalAmount: normalizedPrincipalAmount,
                 settlementCurrency: selectedCurrency,
                 exchangeRateSnapshot,
                 installmentCount: 1,
                 installmentFrequency: 'monthly',
-                firstDueDate: dueDate,
+                firstDueDate: selectedDueDate ? formatLocalDateValue(selectedDueDate) : null,
                 createdAt: selectedCreatedAt.toISOString(),
                 notes: notes.trim() || undefined,
                 createdBy: user?.id,
@@ -185,19 +189,42 @@ export function CreateSimpleLoanModal({
     }
 
     return (
-        <Dialog open={isOpen} onOpenChange={(open) => {
-            if (!isSaving) onOpenChange(open)
-        }}>
-            <DialogContent layout="structured" className="max-w-3xl">
-                <DialogHeader layout="structured">
-                    <DialogTitle>{t('loans.createSimpleLoan', { defaultValue: 'Create Simple Loan' })}</DialogTitle>
-                    <DialogDescription>
+        <AppDialog
+            open={isOpen}
+            onOpenChange={(open) => {
+                if (!isSaving) onOpenChange(open)
+            }}
+            showInsight
+            insightContent={<SimpleLoanDialogInsight />}
+            insightPreview={(
+                <SimpleLoanSavePreview
+                    canSubmit={Boolean(canSubmit)}
+                    counterpartyName={borrowerName.trim()}
+                    direction={direction}
+                    principalAmount={normalizedPrincipalAmount}
+                    currency={selectedCurrency}
+                    iqdDisplayPreference={features.iqd_display_preference}
+                    createdAt={selectedCreatedAt ?? null}
+                    dueDate={selectedDueDate}
+                    paymentAccountName={paymentAccount?.name ?? null}
+                />
+            )}
+        >
+            <AppDialogContent
+                className="max-w-3xl"
+                showCloseButton={!isSaving}
+                onEscapeKeyDown={(event) => { if (isSaving) event.preventDefault() }}
+                onPointerDownOutside={(event) => { if (isSaving) event.preventDefault() }}
+            >
+                <AppDialogHeader>
+                    <AppDialogTitle>{t('loans.createSimpleLoan', { defaultValue: 'Create Simple Loan' })}</AppDialogTitle>
+                    <AppDialogDescription>
                         {t('loans.simpleLoanDescription', { defaultValue: 'Add a manual lending or borrowing entry and optionally link it to a business partner.' })}
-                    </DialogDescription>
-                </DialogHeader>
+                    </AppDialogDescription>
+                </AppDialogHeader>
 
                 <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
-                    <DialogBody className="py-5">
+                    <AppDialogBody className="py-5">
                         <div className="grid gap-5">
 
                             <div className="grid gap-2">
@@ -291,7 +318,7 @@ export function CreateSimpleLoanModal({
                                     <CurrencySelector
                                         value={selectedCurrency}
                                         onChange={(value) => setSelectedCurrency(value)}
-                                        label={t('loans.currencyHint', { defaultValue: 'Settlement Currency' })}
+                                        label={`${t('loans.currencyHint', { defaultValue: 'Settlement Currency' })} *`}
                                         iqdDisplayPreference={features.iqd_display_preference}
                                         allowedCurrencies={Array.from(new Set([settlementCurrency, ...features.allowed_currencies])) as CurrencyCode[]}
                                     />
@@ -310,7 +337,7 @@ export function CreateSimpleLoanModal({
                                         />
                                     </div>
                                     <div className="grid gap-2">
-                                        <Label>{t('loans.createdAt', { defaultValue: 'Created At' })}</Label>
+                                        <Label>{t('loans.createdAt', { defaultValue: 'Created At' })} <span className="text-destructive">*</span></Label>
                                         <DateTimePicker
                                             id="simple-loan-created-at"
                                             date={selectedCreatedAt}
@@ -343,18 +370,18 @@ export function CreateSimpleLoanModal({
                                 <Textarea rows={3} value={notes} onChange={e => setNotes(e.target.value)} />
                             </div>
                         </div>
-                    </DialogBody>
+                    </AppDialogBody>
 
-                    <DialogFooter layout="structured">
+                    <AppDialogFooter>
                         <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)} disabled={isSaving}>
                             {t('common.cancel') || 'Cancel'}
                         </Button>
                         <Button type="submit" className="w-full sm:w-auto" disabled={!canSubmit || isSaving}>
                             {t('common.create') || 'Create'}
                         </Button>
-                    </DialogFooter>
+                    </AppDialogFooter>
                 </form>
-            </DialogContent>
+            </AppDialogContent>
 
             <LoanPartyPickerDialog
                 isOpen={isPartyPickerOpen}
@@ -376,6 +403,6 @@ export function CreateSimpleLoanModal({
                     if (loanId) onCreated?.(loanId)
                 }}
             />
-        </Dialog>
+        </AppDialog>
     )
 }

@@ -15,6 +15,7 @@ export {
     DialogTitle,
     DialogDescription,
     AppDialog,
+    DialogInsightPreview,
     AppDialogContent,
     AppDialogHeader,
     AppDialogBody,

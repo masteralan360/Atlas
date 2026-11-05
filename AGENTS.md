@@ -125,6 +125,30 @@ When a workflow explicitly uses `MultipleModalLayout`, only its last active pane
 
 Before finishing a modal, compare it with `src/ui/components/crm/BusinessPartnerFormDialog.tsx` and verify it at a narrow mobile width as well as desktop.
 
+### Optional dialog insight panel
+
+Use the shared dialog insight panel only when the user explicitly requests it for a specific dialog. Do not add it proactively.
+
+Enable it on the `Dialog` or `AppDialog` root with `showInsight`. The panel is desktop-only: it appears at viewport widths of 1024px and wider. Below 1024px, the shared dialog turns the effective setting off and uses its normal layout. Keep required fields, actions, and essential instructions in the main dialog content.
+
+```tsx
+<AppDialog
+  showInsight
+  insightContent={<ProductInsight productId={productId} />}
+  insightPreview={<ProductSavePreview form={form} />}
+>
+  <AppDialogContent>{/* Main dialog content */}</AppDialogContent>
+</AppDialog>
+```
+
+`showInsight` defaults to `false`. Without a custom `insightColor`, the panel uses the `atlas-insight-surface` gradient. Its colors follow the selected theme style, independent of light/dark mode; the emerald style retains the Add Product Discount green gradient (`#166534` to `#0f3f2d`). Shared insight content uses 24px semibold headings and emerald-tinted, 14px body copy; preview content defaults to 18px semibold text to match the Add Product Discount hierarchy. `insightColor`, `insightContent`, `insightPreview`, and `insightPanelClassName` are optional. `insightPreview` is rendered in the shared preview card with a localized “Preview” heading in English, Kurdish, and Arabic. Use the exported `DialogInsightPreview` component when composing a custom insight body that needs the same card.
+
+The shared dialog owns the header visibility toggle for every opted-in desktop dialog. Do not add module-specific insight toggles. The user's visibility preference is shared across opted-in dialogs and stored in local storage as `showInsight`; the panel closes when the preference is `false`. Resizing below the desktop breakpoint hides the panel without changing the saved preference.
+
+Keep insight data fetching and business logic in the module or its hooks. The preview must describe in plain language the exact outcome the current dialog values will produce on save. Derive it from the same values, normalization, permissions, and calculations used by the save path, and update it reactively as those values change. Keep the preview concise: use a short, continuous paragraph of a few lines (typically two or three sentences), and include only the primary result and material effects. Avoid field-by-field checklists, secondary details, and repeating information already clear in the form or insight copy. The shared dialog provides the preview card and heading only; it must not implement module-specific preview calculations. Supply dynamic content as a React component, localize its text in all three locales, and show appropriate loading, error, or incomplete-form states instead of stale or approximate results.
+
+When adding or changing an integration, cover the disabled state, desktop breakpoint behavior, customized insight content, and the preview heading/content in tests. Do not modify the shared dialog component just to customize an individual module.
+
 ## Small Dialogs
 Use the `src/ui/components/ui/small-dialog.tsx` component for dialogs that are normally used for showing information, such as the selected items details or list of items, Or dialogs that have one or two minimal UI Control Inputs.
 

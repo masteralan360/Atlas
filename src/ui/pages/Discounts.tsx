@@ -1188,7 +1188,7 @@ export function Discounts() {
                                     )}
                                 </div>
 
-                                <Card className="rounded-3xl border-0 bg-[linear-gradient(180deg,#166534,#0f3f2d)] text-white shadow-xl">
+                                <Card className="atlas-insight-surface rounded-3xl border-0 text-white shadow-xl">
                                     <CardHeader className="space-y-3 p-6">
                                         <CardTitle className="text-2xl">{t('discounts.insightTitle')}</CardTitle>
                                         <CardDescription className="text-emerald-100/85">
@@ -1325,7 +1325,7 @@ export function Discounts() {
                                     )}
                                 </div>
 
-                                <Card className="rounded-3xl border-0 bg-[linear-gradient(180deg,#166534,#0f3f2d)] text-white shadow-xl">
+                                <Card className="atlas-insight-surface rounded-3xl border-0 text-white shadow-xl">
                                     <CardHeader className="space-y-3 p-6">
                                         <CardTitle className="text-2xl">{t('discounts.insightTitle')}</CardTitle>
                                         <CardDescription className="text-emerald-100/85">
@@ -1631,7 +1631,7 @@ export function Discounts() {
                             </DialogFooter>
                         </div>
 
-                        <div className="hidden min-h-0 overflow-y-auto rounded-b-3xl bg-[linear-gradient(180deg,#166534,#0f3f2d)] p-6 text-white lg:block lg:rounded-b-none lg:rounded-r-3xl">
+                        <div className="atlas-insight-surface hidden min-h-0 overflow-y-auto rounded-b-3xl p-6 text-white lg:block lg:rounded-b-none lg:rounded-r-3xl">
                             <div className="space-y-4">
                                 <h3 className="text-2xl font-semibold">{t('discounts.insightTitle')}</h3>
                                 <p className="text-sm text-emerald-100/85">

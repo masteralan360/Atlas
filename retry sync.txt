@@ -1,8 +1,6 @@
-Org Phone Number and display on Label
+Add unknown quick-button to the recipient name in create shipment
 
 Module-Route Based Maintenence Overlay with AGENTS.md instructions
-
-All Dialogs Must have side instructions
 
 Allow Stopping the Reciept to R2
 
