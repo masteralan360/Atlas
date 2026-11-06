@@ -1184,9 +1184,17 @@
   "notifications": {
     "tabs": {
       "all": "All",
+      "unread": "Unread",
+      "archived": "Archived",
       "workspace": "Workspace",
       "user": "User"
     },
+    "unread": "unread",
+    "allCaughtUp": "You are all caught up",
+    "markAllRead": "Mark all read",
+    "loading": "Loading notifications…",
+    "loadFailed": "Could not load notifications. Please try again.",
+    "updateFailed": "Could not update notifications. Please try again.",
     "newNotification": "You have a new notification",
     "newNotificationTitle": "New Notification"
   },

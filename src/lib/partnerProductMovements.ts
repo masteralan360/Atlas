@@ -3,7 +3,13 @@ import type {
   Product, PurchaseOrder, Sale, SaleItem, SaleProductExchange, SaleReturn, SaleReturnItem,
   SalesOrder, SalesOrderAgentAssignment
 } from '@/local-db/models'
-import { getOrderLineFulfilledQuantity, getOrderLineInventoryQuantity } from '@/lib/orderLineItems'
+import {
+  getOrderLineFulfilledQuantity,
+  getOrderLineFreeBonusInventoryQuantity,
+  getOrderLineInventoryQuantity,
+  getOrderLinePaidInventoryQuantity,
+  getOrderLineUnitFactor
+} from '@/lib/orderLineItems'
 import { roundQuantity } from '@/lib/quantity'
 import { sumTrackedCommissionEntriesByCurrency, type PartnerAccountStatementPeriod } from '@/lib/partnerAccountStatement'
 import { getCommissionEntryMode } from '@/local-db/commissionMode'
@@ -129,8 +135,13 @@ export function buildPartnerProductMovements(data: PartnerProductMovementsData, 
   const orderById = new Map(salesOrders.map(order => [order.id, order]))
   for (const order of salesOrders) {
     for (const item of order.items) {
-      const fulfilled = getOrderLineFulfilledQuantity(item, order.status === 'completed')
-      const paid = Math.min(fulfilled, positive(item.quantity))
+      // Fulfillment and inventory quantities are stored in canonical stock units,
+      // while the statement labels quantities with the order line's selected unit.
+      const fulfilledInventory = getOrderLineFulfilledQuantity(item, order.status === 'completed')
+      const unitFactor = getOrderLineUnitFactor(item)
+      const paidInventory = getOrderLinePaidInventoryQuantity(item)
+      const paidFulfilledInventory = Math.min(fulfilledInventory, paidInventory)
+      const paid = roundQuantity(paidFulfilledInventory / unitFactor)
       const base: PartnerProductMovement = {
         id: `so:${order.id}:${item.id}`, date: orderDate(order, 'sales_order'), productId: item.productId,
         item: item.productName, unit: item.unit || null, quantity: paid, direction: 'sold', kind: 'sale', note: item.note || null,
@@ -138,7 +149,11 @@ export function buildPartnerProductMovements(data: PartnerProductMovementsData, 
         references: [{ label: order.orderNumber, path: `/orders/${order.id}` }]
       }
       addWithCommission(base, snapshotsForLine(order.id, item.id))
-      const bonus = roundQuantity(fulfilled - paid)
+      const fulfilledBonusInventory = Math.min(
+        getOrderLineFreeBonusInventoryQuantity(item),
+        Math.max(0, fulfilledInventory - paidFulfilledInventory)
+      )
+      const bonus = roundQuantity(fulfilledBonusInventory / unitFactor)
       if (bonus > 0) add({ ...base, id: `${base.id}:bonus`, kind: 'bonus', quantity: bonus })
     }
   }

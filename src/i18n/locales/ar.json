@@ -1184,9 +1184,17 @@
   "notifications": {
     "tabs": {
       "all": "الكل",
+      "unread": "غير المقروءة",
+      "archived": "الأرشيف",
       "workspace": "مساحة العمل",
       "user": "المستخدم"
     },
+    "unread": "غير مقروء",
+    "allCaughtUp": "لقد قرأت جميع الإشعارات",
+    "markAllRead": "تحديد الكل كمقروء",
+    "loading": "جارٍ تحميل الإشعارات…",
+    "loadFailed": "تعذر تحميل الإشعارات. حاول مرة أخرى.",
+    "updateFailed": "تعذر تحديث الإشعارات. حاول مرة أخرى.",
     "newNotification": "لديك إشعار جديد",
     "newNotificationTitle": "إشعار جديد"
   },

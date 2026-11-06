@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowDownLeft, ArrowUpRight, type LucideIcon } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
@@ -6,13 +6,7 @@ import { getProductUnitLabel } from '@/lib/productUnitPresentation'
 import type { InventoryTransferBatchDetails } from '@/local-db'
 import { platformService } from '@/services/platformService'
 
-const DEFAULT_FIRST_PAGE_ROWS = 22
-const DEFAULT_CONTINUATION_PAGE_ROWS = 29
 const PRODUCT_ROW_HEIGHT_MM = 8.8
-const PAGE_HEIGHT_MM = 297
-const PAGE_PADDING_MM = 9
-const TABLE_TOP_GAP_MM = 3.2
-const FOOTER_RESERVE_MM = 10
 
 export function areTransferBatchWorkspacesSame(data: Pick<InventoryTransferBatchDetails, 'batch'>) {
   const sourceId = data.batch.sourceWorkspaceId
@@ -26,23 +20,6 @@ export function areTransferBatchWorkspacesSame(data: Pick<InventoryTransferBatch
 
 export interface InventoryTransferBatchPrintData extends InventoryTransferBatchDetails {
   printedAt: string
-}
-
-function chunkProducts(
-  products: InventoryTransferBatchPrintData['products'],
-  firstPageRows: number,
-  continuationPageRows: number,
-) {
-  if (products.length === 0) return [{ products: [], startIndex: 0 }]
-  const chunks: { products: InventoryTransferBatchPrintData['products']; startIndex: number }[] = []
-  let startIndex = 0
-  while (startIndex < products.length) {
-    const pageIndex = chunks.length
-    const pageSize = pageIndex === 0 ? firstPageRows : continuationPageRows
-    chunks.push({ products: products.slice(startIndex, startIndex + pageSize), startIndex })
-    startIndex += pageSize
-  }
-  return chunks
 }
 
 export function getInventoryTransferBatchPrintTokenValues(
@@ -99,18 +76,8 @@ export function InventoryTransferBatchPrintTemplate({
   destinationIsBranch?: boolean
 }) {
   const { t, i18n } = useTranslation()
-  const firstPageRef = useRef<HTMLElement | null>(null)
-  const firstPageTableRef = useRef<HTMLTableElement | null>(null)
-  const [rowCapacities, setRowCapacities] = useState({
-    firstPageRows: DEFAULT_FIRST_PAGE_ROWS,
-    continuationPageRows: DEFAULT_CONTINUATION_PAGE_ROWS,
-  })
   const language = printLang || i18n.language
   const direction = language.startsWith('ar') || language.startsWith('ku') ? 'rtl' : 'ltr'
-  const pages = useMemo(
-    () => chunkProducts(data.products, rowCapacities.firstPageRows, rowCapacities.continuationPageRows),
-    [data.products, rowCapacities],
-  )
   const number = useMemo(() => new Intl.NumberFormat(language, { maximumFractionDigits: 6 }), [language])
   const sameWorkspace = areTransferBatchWorkspacesSame(data)
   const companyName = workspaceName?.trim() || t('businessPartners.ourBusiness', { defaultValue: 'Our business' })
@@ -122,69 +89,6 @@ export function InventoryTransferBatchPrintTemplate({
   const destinationNameLabel = destinationIsBranch
     ? label('toBranch', 'To Branch')
     : label('toWorkspace', 'To Workspace')
-
-  useLayoutEffect(() => {
-    const page = firstPageRef.current
-    const table = firstPageTableRef.current
-    if (!page || !table) return
-
-    let disposed = false
-    const printRoot = page.closest<HTMLElement>('[data-inventory-transfer-batch-print]')
-    const productRows = Array.from(
-      printRoot?.querySelectorAll<HTMLElement>('[data-inventory-transfer-product-row]') || [],
-    )
-    const measureCapacities = () => {
-      if (disposed) return
-      const pageRect = page.getBoundingClientRect()
-      if (pageRect.width <= 0) return
-
-      const mmPerPixel = 210 / pageRect.width
-      const tableRect = table.getBoundingClientRect()
-      const tableTopMm = (tableRect.top - pageRect.top) * mmPerPixel
-      const tableHeaderMm = (table.tHead?.getBoundingClientRect().height || 0) * mmPerPixel
-      const productRowMm = productRows.reduce(
-        (maximum, row) => Math.max(maximum, row.getBoundingClientRect().height * mmPerPixel),
-        PRODUCT_ROW_HEIGHT_MM,
-      )
-      if (productRowMm <= 0) return
-
-      const printableBottomMm = PAGE_HEIGHT_MM - PAGE_PADDING_MM
-      const firstPageRows = Math.max(1, Math.floor(
-        (printableBottomMm - tableTopMm - tableHeaderMm - FOOTER_RESERVE_MM) / productRowMm,
-      ))
-      const continuationTableTopMm = PAGE_PADDING_MM + TABLE_TOP_GAP_MM
-      const continuationPageRows = Math.max(1, Math.floor(
-        (printableBottomMm - continuationTableTopMm - tableHeaderMm - FOOTER_RESERVE_MM) / productRowMm,
-      ))
-
-      setRowCapacities((current) => current.firstPageRows === firstPageRows
-        && current.continuationPageRows === continuationPageRows
-        ? current
-        : { firstPageRows, continuationPageRows })
-    }
-
-    measureCapacities()
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measureCapacities)
-    const observedElements = [
-      page.querySelector('header'),
-      page.querySelector('[data-inventory-transfer-metadata]'),
-      page.querySelector('[data-inventory-transfer-locations]'),
-      table.tHead,
-      ...productRows,
-      page.querySelector('img'),
-    ]
-    observedElements.forEach((element) => {
-      if (element) observer?.observe(element)
-    })
-    window.addEventListener('resize', measureCapacities)
-    if (document.fonts?.ready) void document.fonts.ready.then(measureCapacities)
-
-    return () => {
-      disposed = true
-      observer?.disconnect()
-      window.removeEventListener('resize', measureCapacities)
-    }
-  }, [data, logoUrl, printLang, rowCapacities.firstPageRows, rowCapacities.continuationPageRows, workspaceDescription, workspaceName])
 
   return (
     <div
@@ -204,16 +108,7 @@ export function InventoryTransferBatchPrintTemplate({
         [data-inventory-transfer-batch-print] [data-pdf-keep-together] { break-inside: avoid; page-break-inside: avoid; }
         [data-inventory-transfer-batch-print] thead { display: table-header-group; }
       }`}</style>
-      {pages.map(({ products, startIndex }, pageIndex) => (
-        <section
-          key={`transfer-print-page-${pageIndex}`}
-          ref={pageIndex === 0 ? firstPageRef : undefined}
-          className="box-border bg-white px-[9mm] py-[9mm]"
-          style={{ minHeight: '297mm' }}
-          data-pdf-page-chunk
-        >
-          {pageIndex === 0 && (
-            <>
+      <section className="box-border bg-white px-[9mm] py-[9mm]" style={{ minHeight: '297mm' }}>
               <header className="grid grid-cols-[1fr_1.6fr] gap-5 border-b-2 border-slate-800 pb-4" data-pdf-keep-together>
                 <div className="flex min-h-[27mm] items-center justify-center border-e border-slate-300 pe-4">
                   {logoSrc ? <img src={logoSrc} alt="" className="max-h-[25mm] max-w-[58mm] object-contain" /> : (
@@ -279,14 +174,11 @@ export function InventoryTransferBatchPrintTemplate({
                   </>
                 ) : null}
               </div>
-            </>
-          )}
 
           <div className="mt-3">
             <table
-              ref={pageIndex === 0 ? firstPageTableRef : undefined}
               className="w-full table-fixed border-collapse text-[9px]"
-              data-pdf-page-chunk
+              data-order-items-paginated
             >
               <thead>
                 <tr className="bg-slate-800 text-white">
@@ -299,20 +191,17 @@ export function InventoryTransferBatchPrintTemplate({
                 </tr>
               </thead>
               <tbody>
-                {products.length > 0 ? (
-                  <>
-                    {products.map((product, index) => {
+                {data.products.length > 0 ? (
+                  data.products.map((product, index) => {
                       const allocations = product.batchAllocations.map((allocation) => allocation.batchNumber).filter(Boolean)
                       return (
                         <tr
-                          key={product.transactionId || product.productId}
+                          key={`${product.transactionId || product.productId}:${index}`}
                           className={index % 2 ? 'bg-slate-50' : 'bg-white'}
-                          data-inventory-transfer-product-row
-                          data-product-index={startIndex + index}
                           data-pdf-keep-together
                           style={{ height: `${PRODUCT_ROW_HEIGHT_MM}mm` }}
                         >
-                          <td className="border border-slate-300 px-1.5 py-1.5 text-center">{startIndex + index + 1}</td>
+                          <td className="border border-slate-300 px-1.5 py-1.5 text-center">{index + 1}</td>
                           <td className="border border-slate-300 px-1.5 py-1.5 font-semibold">{product.productName || '—'}</td>
                           <td className="border border-slate-300 px-1.5 py-1.5">{product.sku || '—'}</td>
                           <td className="border border-slate-300 px-1.5 py-1.5 text-end font-bold">{number.format(product.quantity)}</td>
@@ -320,22 +209,18 @@ export function InventoryTransferBatchPrintTemplate({
                           <td className="border border-slate-300 px-1.5 py-1.5">{allocations.join(', ') || '—'}</td>
                         </tr>
                       )
-                    })}
-                  </>
+                    })
                 ) : (
                   <tr><td className="border border-slate-300 px-2 py-4 text-center text-slate-500" colSpan={6}>{label('noProducts', 'No products were returned for this batch.')}</td></tr>
                 )}
               </tbody>
             </table>
           </div>
-          {pageIndex === pages.length - 1 ? (
-            <footer className="mt-5 flex justify-between border-t border-slate-300 pt-2 text-[8px] text-slate-500">
-              <span>{data.batch.transferNumber}</span>
-              <span>{label('printedAt', 'Printed')} · {formatDateTime(data.printedAt)}</span>
-            </footer>
-          ) : null}
-        </section>
-      ))}
+          <footer className="mt-5 flex justify-between border-t border-slate-300 pt-2 text-[8px] text-slate-500" data-pdf-keep-together>
+            <span>{data.batch.transferNumber}</span>
+            <span>{label('printedAt', 'Printed')} · {formatDateTime(data.printedAt)}</span>
+          </footer>
+      </section>
     </div>
   )
 }

@@ -1,17 +1,22 @@
-import { forwardRef, useCallback, useEffect, useMemo, useRef, useState, type ComponentPropsWithoutRef } from 'react'
+import { forwardRef, useCallback, useEffect, useMemo, useState, type ComponentPropsWithoutRef } from 'react'
 import { Archive, Bell, CheckCheck, ExternalLink, Inbox, Info, Loader2, Package, Settings, ShieldAlert } from 'lucide-react'
 import { useLocation } from 'wouter'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/auth'
+import { usePaginationBounds, usePaginationPageMap } from '@/hooks/usePaginationState'
 import { useTranslation } from 'react-i18next'
 import { toast } from '@/ui/components/use-toast'
 import { connectionManager } from '@/lib/connectionManager'
 import { localizeNotification, type NotificationLocalizationResult } from '@/lib/notificationLocalization'
 import { cn } from '@/lib/utils'
 import { isMobile, isTauri } from '@/lib/platform'
+import { queryKeys } from '@/query/queryKeys'
+import { useNotificationInboxPage, type NotificationInboxTab } from '@/local-db/notificationInbox'
 import { useTheme } from './theme-provider'
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'
 import { Button } from './button'
 import { Tabs, TabsList, TabsTrigger } from './tabs'
+import { AppPagination } from './AppPagination'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './dialog'
 import { Label } from './label'
 import { Switch } from './switch'
@@ -21,7 +26,6 @@ import {
     setWorkspaceNotificationTypeDisabled,
 } from '@/services/notificationSettings'
 import {
-    listNotificationInbox,
     markAllNotificationInboxRead,
     markNotificationInboxArchived,
     markNotificationInboxRead,
@@ -33,9 +37,33 @@ import {
 let trackedInboxKey = ''
 let hasPrimedInbox = false
 const seenInboxNotificationIds = new Set<string>()
+const MAX_SEEN_INBOX_NOTIFICATION_IDS = 500
+const NOTIFICATION_PAGE_SIZE_OPTIONS = [5, 10, 20, 50]
+const NOTIFICATION_PAGE_SIZE_STORAGE_KEY = 'notification_inbox_page_size'
+const INITIAL_NOTIFICATION_PAGES: Record<NotificationInboxTab, number> = {
+    all: 1,
+    unread: 1,
+    archived: 1,
+}
 
-type NotificationTab = 'all' | 'unread' | 'archived'
 type NotificationAction = { label: string; url: string }
+
+function readNotificationPageSize() {
+    try {
+        const storedPageSize = Number(window.localStorage.getItem(NOTIFICATION_PAGE_SIZE_STORAGE_KEY))
+        return NOTIFICATION_PAGE_SIZE_OPTIONS.includes(storedPageSize) ? storedPageSize : 10
+    } catch {
+        return 10
+    }
+}
+
+function persistNotificationPageSize(pageSize: number) {
+    try {
+        window.localStorage.setItem(NOTIFICATION_PAGE_SIZE_STORAGE_KEY, String(pageSize))
+    } catch {
+        // The in-memory preference still applies when storage is unavailable.
+    }
+}
 
 type BellButtonProps = ComponentPropsWithoutRef<'button'> & {
     unreadCount: number
@@ -50,7 +78,16 @@ function syncInboxTracker(nextKey: string) {
 }
 
 function rememberInboxNotifications(items: NotificationInboxRecord[]) {
-    for (const item of items) seenInboxNotificationIds.add(item.id)
+    for (const item of items) rememberInboxNotification(item.id)
+}
+
+function rememberInboxNotification(notificationId: string) {
+    seenInboxNotificationIds.add(notificationId)
+    while (seenInboxNotificationIds.size > MAX_SEEN_INBOX_NOTIFICATION_IDS) {
+        const oldestId = seenInboxNotificationIds.values().next().value
+        if (!oldestId) break
+        seenInboxNotificationIds.delete(oldestId)
+    }
 }
 
 function playNotificationSound() {
@@ -88,11 +125,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown) {
     return typeof value === 'string' ? value.trim() : ''
-}
-
-function mergeNotification(items: NotificationInboxRecord[], nextItem: NotificationInboxRecord) {
-    const remaining = items.filter((item) => item.id !== nextItem.id)
-    return [nextItem, ...remaining].sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
 }
 
 function formatNotificationTime(timestamp: string, locale: string) {
@@ -171,28 +203,100 @@ export function NotificationCenter() {
     const { t, i18n } = useTranslation()
     const { style } = useTheme()
     const [, setLocation] = useLocation()
+    const queryClient = useQueryClient()
     const [open, setOpen] = useState(false)
-    const [tab, setTab] = useState<NotificationTab>('all')
-    const [items, setItems] = useState<NotificationInboxRecord[]>([])
-    const [isSyncing, setIsSyncing] = useState(false)
-    const [syncError, setSyncError] = useState<string | null>(null)
+    const [tab, setTab] = useState<NotificationInboxTab>('all')
     const [settingsOpen, setSettingsOpen] = useState(false)
     const [disabledTypes, setDisabledTypes] = useState<Set<WorkspaceNotificationType>>(() => new Set())
     const [settingsLoading, setSettingsLoading] = useState(false)
     const [settingsError, setSettingsError] = useState<string | null>(null)
     const [settingsSavingType, setSettingsSavingType] = useState<WorkspaceNotificationType | null>(null)
-    const refreshRequestRef = useRef(0)
+    const [inboxCounts, setInboxCounts] = useState({
+        trackerKey: '',
+        activeCount: 0,
+        unreadCount: 0,
+        archivedCount: 0,
+    })
+    const [initialPageSize] = useState(readNotificationPageSize)
     const isLocalMode = user?.workspaceMode === 'local' || user?.workspaceMode === 'demo'
     const isAdmin = user?.role === 'admin'
     const trackerKey = isLocalMode ? '' : `${user?.id ?? ''}:${user?.workspaceId ?? ''}`
+    const pagination = usePaginationPageMap({
+        initialPages: INITIAL_NOTIFICATION_PAGES,
+        initialPageSize,
+        resetOn: [trackerKey],
+        onPageSizeChange: persistNotificationPageSize,
+    })
+    const currentPage = pagination.pages[tab] ?? 1
+    const pageQuery = useNotificationInboxPage({
+        workspaceId: user?.workspaceId ?? '',
+        userId: user?.id ?? '',
+        tab,
+        page: currentPage,
+        pageSize: pagination.pageSize,
+    }, Boolean(user?.id && user?.workspaceId && !isLocalMode))
+    const activeCount = inboxCounts.trackerKey === trackerKey ? inboxCounts.activeCount : 0
+    const unreadCount = inboxCounts.trackerKey === trackerKey ? inboxCounts.unreadCount : 0
+    const archivedCount = inboxCounts.trackerKey === trackerKey ? inboxCounts.archivedCount : 0
+    const selectedTabCount = tab === 'unread' ? unreadCount : tab === 'archived' ? archivedCount : activeCount
+    const setAllPage = useCallback((page: number | ((currentPage: number) => number)) => {
+        pagination.setPage('all', page)
+    }, [pagination.setPage])
+    const setUnreadPage = useCallback((page: number | ((currentPage: number) => number)) => {
+        pagination.setPage('unread', page)
+    }, [pagination.setPage])
+    const setArchivedPage = useCallback((page: number | ((currentPage: number) => number)) => {
+        pagination.setPage('archived', page)
+    }, [pagination.setPage])
+    const allPageBounds = usePaginationBounds({
+        currentPage: pagination.pages.all,
+        setCurrentPage: setAllPage,
+        totalCount: tab === 'all' ? pageQuery.data?.totalCount ?? activeCount : activeCount,
+        pageSize: pagination.pageSize,
+        isLoading: tab !== 'all' || pageQuery.isFetching || pageQuery.isPending,
+        error: tab === 'all' ? pageQuery.error : null,
+    })
+    const unreadPageBounds = usePaginationBounds({
+        currentPage: pagination.pages.unread,
+        setCurrentPage: setUnreadPage,
+        totalCount: tab === 'unread' ? pageQuery.data?.totalCount ?? unreadCount : unreadCount,
+        pageSize: pagination.pageSize,
+        isLoading: tab !== 'unread' || pageQuery.isFetching || pageQuery.isPending,
+        error: tab === 'unread' ? pageQuery.error : null,
+    })
+    const archivedPageBounds = usePaginationBounds({
+        currentPage: pagination.pages.archived,
+        setCurrentPage: setArchivedPage,
+        totalCount: tab === 'archived' ? pageQuery.data?.totalCount ?? archivedCount : archivedCount,
+        pageSize: pagination.pageSize,
+        isLoading: tab !== 'archived' || pageQuery.isFetching || pageQuery.isPending,
+        error: tab === 'archived' ? pageQuery.error : null,
+    })
+    const paginationBounds = tab === 'unread' ? unreadPageBounds : tab === 'archived' ? archivedPageBounds : allPageBounds
+    const setCurrentPage = tab === 'unread' ? setUnreadPage : tab === 'archived' ? setArchivedPage : setAllPage
+    const isPageClamping = currentPage !== paginationBounds.currentPage
+    const visibleItems = isPageClamping ? [] : (pageQuery.data?.items ?? [])
+    const isSyncing = pageQuery.isFetching
+    const syncError = pageQuery.isError ? t('notifications.loadFailed', { defaultValue: 'Could not load notifications. Please try again.' }) : null
+
+    const invalidateInbox = useCallback(() => queryClient.invalidateQueries({
+        queryKey: queryKeys.notificationInbox.all(user?.workspaceId, user?.id),
+    }), [queryClient, user?.id, user?.workspaceId])
 
     useEffect(() => {
         syncInboxTracker(trackerKey)
-        if (!trackerKey) {
-            setItems([])
-            setSyncError(null)
-        }
+        setInboxCounts({ trackerKey, activeCount: 0, unreadCount: 0, archivedCount: 0 })
     }, [trackerKey])
+
+    useEffect(() => {
+        if (!pageQuery.data || !trackerKey) return
+        setInboxCounts({
+            trackerKey,
+            activeCount: pageQuery.data.activeCount,
+            unreadCount: pageQuery.data.unreadCount,
+            archivedCount: pageQuery.data.archivedCount,
+        })
+    }, [pageQuery.data, trackerKey])
 
     const showNotificationToast = useCallback((count: number) => {
         playNotificationSound()
@@ -223,43 +327,22 @@ export function NotificationCenter() {
     const announceNewNotifications = useCallback((nextItems: NotificationInboxRecord[]) => {
         const freshItems = nextItems.filter((item) => !item.archived_at && !item.read_at && !seenInboxNotificationIds.has(item.id))
         if (freshItems.length === 0) return
-        for (const item of freshItems) seenInboxNotificationIds.add(item.id)
+        for (const item of freshItems) rememberInboxNotification(item.id)
         showNotificationToast(freshItems.length)
         void sendDesktopNotification(freshItems[0])
     }, [sendDesktopNotification, showNotificationToast])
 
-    const applyInboxSnapshot = useCallback((nextItems: NotificationInboxRecord[]) => {
+    useEffect(() => {
+        if (!pageQuery.data || !trackerKey) return
         syncInboxTracker(trackerKey)
-        setItems(nextItems)
-        if (!trackerKey) return
         if (!hasPrimedInbox) {
-            rememberInboxNotifications(nextItems)
+            rememberInboxNotifications(pageQuery.data.items)
             hasPrimedInbox = true
             return
         }
-        announceNewNotifications(nextItems)
-    }, [announceNewNotifications, trackerKey])
-
-    const refreshInbox = useCallback(async () => {
-        if (!user?.id || isLocalMode) {
-            setItems([])
-            setSyncError(null)
-            return
-        }
-        const requestId = ++refreshRequestRef.current
-        setIsSyncing(true)
-        const { data, error } = await listNotificationInbox(200)
-        if (requestId !== refreshRequestRef.current) return
-        if (error) {
-            console.error('[NotificationCenter] Failed to load inbox:', error)
-            setSyncError(error.message)
-            setIsSyncing(false)
-            return
-        }
-        setSyncError(null)
-        applyInboxSnapshot(data)
-        setIsSyncing(false)
-    }, [applyInboxSnapshot, isLocalMode, user?.id])
+        if (tab === 'all' && currentPage === 1) announceNewNotifications(pageQuery.data.items)
+        else rememberInboxNotifications(pageQuery.data.items)
+    }, [announceNewNotifications, currentPage, pageQuery.data, tab, trackerKey])
 
     const refreshNotificationSettings = useCallback(async () => {
         if (!isAdmin || !user?.workspaceId || isLocalMode) {
@@ -285,32 +368,28 @@ export function NotificationCenter() {
 
     useEffect(() => {
         if (!user?.id || isLocalMode) return
-        void refreshInbox()
         const unsubscribeRealtime = subscribeToNotificationInbox(user.id, (payload) => {
             if (payload.eventType === 'INSERT' && payload.new) {
                 const nextItem = normalizeNotificationInboxRow(payload.new as NotificationInboxRecord)
-                setItems((currentItems) => mergeNotification(currentItems, nextItem))
+                if (nextItem.workspace_id !== user.workspaceId) return
                 if (!hasPrimedInbox) {
-                    seenInboxNotificationIds.add(nextItem.id)
-                    return
+                    rememberInboxNotification(nextItem.id)
+                } else {
+                    announceNewNotifications([nextItem])
                 }
-                if (!nextItem.archived_at && !nextItem.read_at && !seenInboxNotificationIds.has(nextItem.id)) {
-                    seenInboxNotificationIds.add(nextItem.id)
-                    showNotificationToast(1)
-                    void sendDesktopNotification(nextItem)
-                }
+                void invalidateInbox()
                 return
             }
-            void refreshInbox()
+            void invalidateInbox()
         })
         const unsubscribeConnection = connectionManager.subscribe((event) => {
-            if (event === 'wake' || event === 'online') void refreshInbox()
+            if (event === 'wake' || event === 'online') void invalidateInbox()
         })
         return () => {
             unsubscribeRealtime()
             unsubscribeConnection()
         }
-    }, [isLocalMode, refreshInbox, sendDesktopNotification, showNotificationToast, user?.id])
+    }, [announceNewNotifications, invalidateInbox, isLocalMode, user?.id, user?.workspaceId])
 
     useEffect(() => {
         if (!settingsOpen) return
@@ -325,37 +404,46 @@ export function NotificationCenter() {
         setLocation(url)
     }, [setLocation])
 
-    const mutateNotification = useCallback((notificationId: string, patch: Partial<NotificationInboxRecord>) => {
-        setItems((currentItems) => currentItems.map((item) => item.id === notificationId ? { ...item, ...patch } : item))
-    }, [])
+    const showInboxUpdateError = useCallback(() => {
+        toast({
+            title: t('notifications.updateFailed', { defaultValue: 'Could not update notifications. Please try again.' }),
+            variant: 'destructive',
+        })
+    }, [t])
 
     const handleMarkRead = useCallback(async (item: NotificationInboxRecord, read = true) => {
-        mutateNotification(item.id, { read_at: read ? (item.read_at ?? new Date().toISOString()) : null })
-        const { error } = await markNotificationInboxRead(item.id, read)
-        if (error) {
+        const { success, error } = await markNotificationInboxRead(item.id, read)
+        if (error || !success) {
             console.error('[NotificationCenter] Failed to update read state:', error)
-            void refreshInbox()
+            showInboxUpdateError()
+            return
         }
-    }, [mutateNotification, refreshInbox])
+        await invalidateInbox()
+    }, [invalidateInbox, showInboxUpdateError])
 
     const handleArchive = useCallback(async (item: NotificationInboxRecord, archived = true) => {
-        mutateNotification(item.id, { archived_at: archived ? (item.archived_at ?? new Date().toISOString()) : null })
-        const { error } = await markNotificationInboxArchived(item.id, archived)
+        const { success, error } = await markNotificationInboxArchived(item.id, archived)
         if (error) {
             console.error('[NotificationCenter] Failed to update archive state:', error)
-            void refreshInbox()
+            showInboxUpdateError()
+            return
         }
-    }, [mutateNotification, refreshInbox])
+        if (!success) {
+            showInboxUpdateError()
+            return
+        }
+        await invalidateInbox()
+    }, [invalidateInbox, showInboxUpdateError])
 
     const handleMarkAllRead = useCallback(async () => {
-        const timestamp = new Date().toISOString()
-        setItems((currentItems) => currentItems.map((item) => item.archived_at || item.read_at ? item : { ...item, read_at: timestamp }))
         const { error } = await markAllNotificationInboxRead()
         if (error) {
             console.error('[NotificationCenter] Failed to mark all notifications as read:', error)
-            void refreshInbox()
+            showInboxUpdateError()
+            return
         }
-    }, [refreshInbox])
+        await invalidateInbox()
+    }, [invalidateInbox, showInboxUpdateError])
 
     const handleToggleNotificationType = useCallback(async (notificationType: WorkspaceNotificationType, enabled: boolean) => {
         if (!user?.workspaceId || settingsSavingType) return
@@ -387,11 +475,6 @@ export function NotificationCenter() {
         navigateToUrl(targetUrl)
     }, [handleMarkRead, navigateToUrl])
 
-    const activeItems = useMemo(() => items.filter((item) => !item.archived_at), [items])
-    const unreadItems = useMemo(() => activeItems.filter((item) => !item.read_at), [activeItems])
-    const archivedItems = useMemo(() => items.filter((item) => Boolean(item.archived_at)), [items])
-    const visibleItems = useMemo(() => tab === 'unread' ? unreadItems : tab === 'archived' ? archivedItems : activeItems, [activeItems, archivedItems, tab, unreadItems])
-    const unreadCount = unreadItems.length
     const notificationTypeOptions = useMemo(() => WORKSPACE_NOTIFICATION_TYPES.map((notificationType) => ({
         notificationType,
         label: localizeNotification({ notificationType }, i18n.language).typeLabel,
@@ -412,7 +495,7 @@ export function NotificationCenter() {
             <PopoverContent align="end" side="bottom" sideOffset={10} className="w-[440px] max-w-[calc(100vw-1rem)] border-none bg-transparent p-0 shadow-none">
                 {open ? (
                 <div className="overflow-hidden rounded-2xl border border-border bg-background shadow-2xl">
-                    <Tabs value={tab} onValueChange={(value) => setTab(value as NotificationTab)} className="flex flex-col">
+                    <Tabs value={tab} onValueChange={(value) => setTab(value as NotificationInboxTab)} className="flex flex-col">
                         <div className="border-b border-border/70 px-4 py-4">
                             <div className="flex items-start justify-between gap-3">
                                 <div className="space-y-1">
@@ -425,15 +508,25 @@ export function NotificationCenter() {
                                 </div>
                             </div>
                             <TabsList className="mt-4 grid w-full grid-cols-3 rounded-xl bg-muted/60 p-1">
-                                <TabsTrigger value="all" className="rounded-lg text-xs font-bold uppercase tracking-wide">{t('notifications.tabs.all', { defaultValue: 'All' })}<span className="ml-1.5 text-[10px] opacity-70">{activeItems.length}</span></TabsTrigger>
-                                <TabsTrigger value="unread" className="rounded-lg text-xs font-bold uppercase tracking-wide">{t('notifications.tabs.unread', { defaultValue: 'Unread' })}<span className="ml-1.5 text-[10px] opacity-70">{unreadItems.length}</span></TabsTrigger>
-                                <TabsTrigger value="archived" className="rounded-lg text-xs font-bold uppercase tracking-wide">{t('notifications.tabs.archived', { defaultValue: 'Archived' })}<span className="ml-1.5 text-[10px] opacity-70">{archivedItems.length}</span></TabsTrigger>
+                                <TabsTrigger value="all" className="rounded-lg text-xs font-bold uppercase tracking-wide">{t('notifications.tabs.all', { defaultValue: 'All' })}<span className="ml-1.5 text-[10px] opacity-70">{activeCount}</span></TabsTrigger>
+                                <TabsTrigger value="unread" className="rounded-lg text-xs font-bold uppercase tracking-wide">{t('notifications.tabs.unread', { defaultValue: 'Unread' })}<span className="ml-1.5 text-[10px] opacity-70">{unreadCount}</span></TabsTrigger>
+                                <TabsTrigger value="archived" className="rounded-lg text-xs font-bold uppercase tracking-wide">{t('notifications.tabs.archived', { defaultValue: 'Archived' })}<span className="ml-1.5 text-[10px] opacity-70">{archivedCount}</span></TabsTrigger>
                             </TabsList>
+                            {(pageQuery.data?.totalCount ?? selectedTabCount) > 0 && <AppPagination
+                                currentPage={paginationBounds.currentPage}
+                                pageCount={paginationBounds.pageCount}
+                                totalCount={pageQuery.data?.totalCount ?? selectedTabCount}
+                                pageSize={pagination.pageSize}
+                                onPageChange={setCurrentPage}
+                                onPageSizeChange={pagination.setPageSize}
+                                pageSizeOptions={NOTIFICATION_PAGE_SIZE_OPTIONS}
+                                className="mt-3"
+                            />}
                         </div>
                         <div className="max-h-[560px] overflow-y-auto p-3">
-                            {syncError && visibleItems.length === 0 && <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"><div className="font-semibold">{t('notifications.error', { defaultValue: 'Failed to load notifications' })}</div><div className="mt-1 text-xs opacity-90">{syncError}</div><Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => void refreshInbox()}>{t('common.refresh', { defaultValue: 'Refresh' })}</Button></div>}
-                            {!syncError && isSyncing && items.length === 0 && <div className="space-y-3">{[0, 1, 2].map((index) => <div key={index} className="rounded-2xl border border-border/60 p-4 animate-pulse"><div className="h-3 w-1/3 rounded bg-muted" /><div className="mt-3 h-4 w-3/4 rounded bg-muted" /><div className="mt-2 h-3 w-1/2 rounded bg-muted" /></div>)}</div>}
-                            {!isSyncing && visibleItems.length === 0 && <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 px-6 py-12 text-center"><Inbox className="h-10 w-10 text-muted-foreground/60" /><div className="mt-4 text-sm font-semibold">{tab === 'archived' ? t('notifications.emptyArchived', { defaultValue: 'No archived notifications' }) : tab === 'unread' ? t('notifications.emptyUnread', { defaultValue: 'No unread notifications' }) : t('notifications.empty', { defaultValue: 'No notifications yet' })}</div><div className="mt-1 text-xs text-muted-foreground">{tab === 'archived' ? t('notifications.emptyArchivedHint', { defaultValue: 'Archived items will stay here until you restore them.' }) : t('notifications.emptyHint', { defaultValue: 'New workspace activity will appear here.' })}</div></div>}
+                            {pageQuery.isError && visibleItems.length === 0 && <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"><div className="font-semibold">{t('notifications.error', { defaultValue: 'Failed to load notifications' })}</div><div className="mt-1 text-xs opacity-90">{syncError}</div><Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => void pageQuery.refetch()}>{t('common.refresh', { defaultValue: 'Refresh' })}</Button></div>}
+                            {(isPageClamping || ((pageQuery.isPending || pageQuery.isFetching) && !pageQuery.data)) && <div className="flex min-h-48 flex-col items-center justify-center gap-3 text-sm text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin text-primary" /><span>{t('notifications.loading', { defaultValue: 'Loading notifications…' })}</span></div>}
+                            {!pageQuery.isFetching && !pageQuery.isError && !isPageClamping && visibleItems.length === 0 && <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border/70 px-6 py-12 text-center"><Inbox className="h-10 w-10 text-muted-foreground/60" /><div className="mt-4 text-sm font-semibold">{tab === 'archived' ? t('notifications.emptyArchived', { defaultValue: 'No archived notifications' }) : tab === 'unread' ? t('notifications.emptyUnread', { defaultValue: 'No unread notifications' }) : t('notifications.empty', { defaultValue: 'No notifications yet' })}</div><div className="mt-1 text-xs text-muted-foreground">{tab === 'archived' ? t('notifications.emptyArchivedHint', { defaultValue: 'Archived items will stay here until you restore them.' }) : t('notifications.emptyHint', { defaultValue: 'New workspace activity will appear here.' })}</div></div>}
                             <div className="space-y-3">
                                 {visibleItems.map((item) => {
                                     const Icon = getNotificationIcon(item)

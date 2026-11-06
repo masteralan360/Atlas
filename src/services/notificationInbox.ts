@@ -23,7 +23,7 @@ export type NotificationInboxRecord = {
     updated_at: string
 }
 
-type NotificationInboxRow = Omit<NotificationInboxRecord, 'payload'> & {
+export type NotificationInboxRow = Omit<NotificationInboxRecord, 'payload'> & {
     payload: unknown
 }
 

@@ -3,8 +3,22 @@ import type { MarketplaceOrderPageQuery, MarketplaceOrderSummaryQuery } from '@/
 import type { StockAdjustmentPageQuery } from '@/local-db/stockAdjustments'
 import type { StockBatchGroupPageQuery } from '@/local-db/stockBatches'
 import type { Beauty3AppointmentPageQuery } from '@/local-db/beauty3Appointments'
+import type { NotificationInboxPageQuery } from '@/local-db/notificationInbox'
 
 export const queryKeys = {
+  notificationInbox: {
+    all: (workspaceId?: string, userId?: string | null) => [
+      'atlas', 'workspace', workspaceId ?? 'unscoped', 'notification-inbox', userId ?? null,
+    ] as const,
+    page: (query: NotificationInboxPageQuery) => [
+      ...queryKeys.notificationInbox.all(query.workspaceId, query.userId),
+      'page',
+      query.tab,
+      query.page,
+      query.pageSize,
+      'createdAt:desc,id:desc',
+    ] as const,
+  },
   beauty3Appointments: {
     all: (workspaceId?: string) => ['atlas', 'workspace', workspaceId ?? 'unscoped', 'beauty3-appointments'] as const,
     page: (query: Beauty3AppointmentPageQuery, viewer?: { userId?: string | null }) => [
