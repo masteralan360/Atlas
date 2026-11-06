@@ -24,6 +24,7 @@ export type PartnerProductMovementsTemplateConfiguration = {
   columnOrder: PartnerProductMovementsColumnId[]
   hiddenColumns: PartnerProductMovementsColumnId[]
   accumulateProducts: boolean
+  showReturns: boolean
 }
 
 export type PartnerProductMovementsTemplate = {
@@ -48,7 +49,8 @@ export const DEFAULT_PARTNER_PRODUCT_MOVEMENTS_TEMPLATE_CONFIGURATION: PartnerPr
   version: 1,
   columnOrder: [...PARTNER_PRODUCT_MOVEMENTS_COLUMN_IDS],
   hiddenColumns: [],
-  accumulateProducts: false
+  accumulateProducts: false,
+  showReturns: true
 }
 
 function isColumnId(value: unknown): value is PartnerProductMovementsColumnId {
@@ -92,7 +94,9 @@ export function normalizePartnerProductMovementsTemplateConfiguration(
     version: 1,
     columnOrder,
     hiddenColumns,
-    accumulateProducts: candidate.accumulateProducts === true
+    accumulateProducts: candidate.accumulateProducts === true,
+    // Existing saved templates predate this option and should keep showing returns.
+    showReturns: candidate.showReturns !== false
   }
 }
 

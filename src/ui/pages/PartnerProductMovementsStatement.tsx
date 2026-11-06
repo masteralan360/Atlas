@@ -162,8 +162,17 @@ export function PartnerProductMovementsStatement() {
             percentage: liveRefreshProgressPercent.toLocaleString(i18n.resolvedLanguage ?? i18n.language)
         })
         : ''
-    const statement = useMemo(() => statementData ? buildPartnerProductMovements(statementData, activeStatementTemplate.configuration.accumulateProducts) : null,
-        [statementData, activeStatementTemplate.configuration.accumulateProducts])
+    const statement = useMemo(() => {
+        if (!statementData) return null
+        const builtStatement = buildPartnerProductMovements(statementData, activeStatementTemplate.configuration.accumulateProducts)
+        if (activeStatementTemplate.configuration.showReturns) return builtStatement
+        const entries = builtStatement.entries.filter(entry => entry.kind !== 'return')
+        return {
+            ...builtStatement,
+            entries,
+            hasCommission: entries.some(entry => entry.commissionPerProduct !== null)
+        }
+    }, [statementData, activeStatementTemplate.configuration.accumulateProducts, activeStatementTemplate.configuration.showReturns])
     const statementColumns = getPartnerProductMovementsVisibleColumns(activeStatementTemplate.configuration, {
         showProductCommissionColumns: statement?.hasCommission === true
     })

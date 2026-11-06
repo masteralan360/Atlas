@@ -258,9 +258,9 @@ export function buildPartnerProductMovements(data: PartnerProductMovementsData, 
     : null
   const groups = new Map<string, PartnerProductMovement>()
   if (accumulate) for (const row of filtered) {
-    const key = JSON.stringify([row.productId, row.unit, row.direction, row.currency, row.commissionPerProduct, row.kind === 'bonus'])
+    const key = JSON.stringify([row.productId, row.unit, row.direction, row.currency, row.commissionPerProduct, row.kind])
     const existing = groups.get(key)
-    if (!existing) groups.set(key, { ...row, id: `group:${key}`, kind: row.kind === 'bonus' ? 'bonus' : row.direction === 'sold' ? 'sale' : 'purchase', note: null, references: [...row.references] })
+    if (!existing) groups.set(key, { ...row, id: `group:${key}`, note: null, references: [...row.references] })
     else {
       existing.quantity = roundQuantity(existing.quantity + row.quantity)
       if (existing.totalProductCommission !== null) existing.totalProductCommission = roundQuantity(existing.totalProductCommission + (row.totalProductCommission || 0))

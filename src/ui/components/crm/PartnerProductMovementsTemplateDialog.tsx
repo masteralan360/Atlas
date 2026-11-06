@@ -10,6 +10,7 @@ import {
   Loader2,
   Plus,
   Save,
+  RotateCcw,
   Settings2,
   Star,
   Trash2
@@ -396,6 +397,17 @@ export function PartnerProductMovementsTemplateDialog({
                     </div>
                     <Switch id="partner-movements-accumulate" checked={draftConfiguration.accumulateProducts}
                       onCheckedChange={(accumulateProducts) => setDraftConfiguration(current => ({ ...current, accumulateProducts }))} disabled={isProcessing} />
+                  </div>
+                  <div className="flex items-start justify-between gap-3 rounded-xl bg-muted/30 p-3">
+                    <div className="space-y-1">
+                      <label htmlFor="partner-movements-show-returns" className="flex items-center gap-2 text-sm font-medium">
+                        <RotateCcw className="h-4 w-4 text-primary" />
+                        {t('businessPartners.productMovements.showReturns')}
+                      </label>
+                      <p className="text-xs text-muted-foreground">{t('businessPartners.productMovements.showReturnsDescription')}</p>
+                    </div>
+                    <Switch id="partner-movements-show-returns" checked={draftConfiguration.showReturns}
+                      onCheckedChange={(showReturns) => setDraftConfiguration(current => ({ ...current, showReturns }))} disabled={isProcessing} />
                   </div>
                 </section>
 
