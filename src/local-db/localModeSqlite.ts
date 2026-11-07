@@ -184,6 +184,7 @@ export const LOCAL_MODE_SQLITE_TABLES = [
   "manual_entry_templates",
   "manual_entries",
   "beauty3_appointments",
+  "beauty3_clients",
   "clinical_appointments",
   "clinical_patients",
   "clinical_attachments",

@@ -132,6 +132,7 @@ import type {
   ExchangeSafeBalance,
   ExchangeSafeMovement,
   Beauty3Appointment,
+  Beauty3Client,
   ClinicalAppointment,
   ClinicalPatient,
   ClinicalAttachment,
@@ -624,6 +625,7 @@ export class AtlasDatabase extends Dexie {
   fx_safe_balances!: EntityTable<ExchangeSafeBalance, 'id'>
   fx_safe_movements!: EntityTable<ExchangeSafeMovement, 'id'>
   beauty3_appointments!: EntityTable<Beauty3Appointment, 'id'>
+  beauty3_clients!: EntityTable<Beauty3Client, 'id'>
   clinical_appointments!: EntityTable<ClinicalAppointment, 'id'>
   clinical_patients!: EntityTable<ClinicalPatient, 'id'>
   clinical_attachments!: EntityTable<ClinicalAttachment, 'id'>
@@ -3961,6 +3963,55 @@ export class AtlasDatabase extends Dexie {
         'id, workspaceId, name, age, maritalStatus, procedurePlace, procedureDate, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+procedureDate], [workspaceId+procedureType]'
     })
 
+    this.version(167).stores({
+      beauty3_appointments:
+        'id, workspaceId, clientId, name, age, maritalStatus, procedurePlace, procedureDate, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+procedureDate], [workspaceId+procedureType], [workspaceId+clientId]',
+      beauty3_clients:
+        'id, workspaceId, name, age, maritalStatus, phoneNumber, createdAt, updatedAt, isDeleted, syncStatus, [workspaceId+phoneNumber], [workspaceId+updatedAt]'
+    }).upgrade(async (tx) => {
+      const appointments = await tx.table('beauty3_appointments').toArray() as Beauty3Appointment[]
+      const profilesByIdentity = new Map<string, Beauty3Client>()
+      const sortedAppointments = [...appointments].sort((left, right) => left.id.localeCompare(right.id))
+      for (const appointment of sortedAppointments) {
+        const identityKey = `${appointment.workspaceId}\u001f${appointment.name.trim().toLocaleLowerCase()}\u001f${appointment.phoneNumber.trim().replace(/\D/g, '')}`
+        let client = profilesByIdentity.get(identityKey)
+        if (!client) {
+          client = {
+            id: appointment.id,
+            workspaceId: appointment.workspaceId,
+            name: appointment.name,
+            age: appointment.age,
+            maritalStatus: appointment.maritalStatus,
+            address: appointment.address,
+            phoneNumber: appointment.phoneNumber,
+            createdBy: appointment.createdBy ?? null,
+            createdAt: appointment.createdAt,
+            updatedAt: appointment.updatedAt,
+            version: 1,
+            isDeleted: false,
+            syncStatus: appointment.syncStatus,
+            lastSyncedAt: appointment.lastSyncedAt,
+          }
+          profilesByIdentity.set(identityKey, client)
+        } else if (appointment.updatedAt > client.updatedAt) {
+          profilesByIdentity.set(identityKey, {
+            ...client,
+            name: appointment.name,
+            age: appointment.age,
+            maritalStatus: appointment.maritalStatus,
+            address: appointment.address,
+            phoneNumber: appointment.phoneNumber,
+            createdBy: appointment.createdBy ?? client.createdBy,
+            updatedAt: appointment.updatedAt,
+          })
+        }
+        await tx.table('beauty3_appointments').update(appointment.id, { clientId: client.id })
+      }
+      if (profilesByIdentity.size > 0) {
+        await tx.table('beauty3_clients').bulkPut([...profilesByIdentity.values()])
+      }
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()
@@ -4294,6 +4345,7 @@ export class AtlasDatabase extends Dexie {
       'fx_safe_movements',
       'clinical_appointments',
       'beauty3_appointments',
+      'beauty3_clients',
       'clinical_patients',
       'clinical_attachments',
       'clinical_presets',
@@ -4490,6 +4542,7 @@ export async function clearDatabase(): Promise<void> {
       db.fx_safe_movements,
       db.clinical_appointments,
       db.beauty3_appointments,
+      db.beauty3_clients,
       db.clinical_patients,
       db.clinical_attachments,
       db.clinical_presets,
@@ -4561,6 +4614,7 @@ export async function clearDatabase(): Promise<void> {
       await db.fx_safe_movements.clear()
       await db.clinical_appointments.clear()
       await db.beauty3_appointments.clear()
+      await db.beauty3_clients.clear()
       await db.clinical_patients.clear()
       await db.clinical_attachments.clear()
       await db.clinical_presets.clear()

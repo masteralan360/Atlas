@@ -45,6 +45,13 @@ export const queryKeys = {
       sourceMode,
       viewer?.userId ?? null,
     ] as const,
+    clients: (workspaceId: string, search: string, sourceMode: 'local' | 'remote', viewerId?: string | null) => [
+      ...queryKeys.beauty3Appointments.all(workspaceId),
+      'clients',
+      search.trim().toLocaleLowerCase(),
+      sourceMode,
+      viewerId ?? null,
+    ] as const,
   },
   stockReservations: {
     all: (workspaceId?: string) => ['atlas', 'workspace', workspaceId ?? 'unscoped', 'stock-reservations'] as const,

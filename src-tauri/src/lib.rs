@@ -13,6 +13,8 @@ mod kurdishtts_website_stt;
 mod android_bluetooth_printer;
 mod auto_scan_printer;
 mod local_mode_sqlite;
+#[cfg(target_os = "windows")]
+mod windows_notifications;
 
 const SINGLE_INSTANCE_PORT: u16 = 41931;
 
@@ -61,6 +63,24 @@ fn setup_single_instance(handle: tauri::AppHandle) -> bool {
             }
             false
         }
+    }
+}
+
+#[tauri::command]
+fn show_atlas_desktop_notification(
+    app: tauri::AppHandle,
+    title: String,
+    body: String,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        return windows_notifications::show_notification(&app.config().identifier, &title, &body);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (app, title, body);
+        Err("Atlas desktop notifications are only customized on Windows".to_string())
     }
 }
 
@@ -371,6 +391,14 @@ pub fn run() {
                 std::process::exit(0);
             }
 
+            #[cfg(target_os = "windows")]
+            if let Err(error) = windows_notifications::register_identity(
+                &app.config().identifier,
+                app.config().product_name.as_deref().unwrap_or("Atlas"),
+            ) {
+                eprintln!("Failed to register Atlas notification identity: {error}");
+            }
+
             let window = app.get_webview_window("main").unwrap();
 
             #[cfg(desktop)]
@@ -400,6 +428,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             read_fcm_token,
+            show_atlas_desktop_notification,
             start_kds_stream,
             get_kds_stream_url,
             broadcast_kds_update,

@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/auth'
 import { usePaginationBounds, usePaginationPageMap } from '@/hooks/usePaginationState'
 import { useTranslation } from 'react-i18next'
+import { invoke } from '@tauri-apps/api/core'
 import { toast } from '@/ui/components/use-toast'
 import { connectionManager } from '@/lib/connectionManager'
 import { localizeNotification, type NotificationLocalizationResult } from '@/lib/notificationLocalization'
@@ -310,15 +311,20 @@ export function NotificationCenter() {
     const sendDesktopNotification = useCallback(async (item: NotificationInboxRecord) => {
         if (!isTauri() || isMobile()) return
         try {
+            const localized = localizeInboxNotification(item, i18n.language)
+            const title = localized.title || t('notifications.newNotificationTitle', { defaultValue: 'New Notification' })
+            const body = localized.body || t('notifications.newNotification', { defaultValue: 'You have a new notification' })
+
+            if (/Windows/i.test(navigator.userAgent)) {
+                await invoke('show_atlas_desktop_notification', { title, body })
+                return
+            }
+
             const { isPermissionGranted, requestPermission, sendNotification } = await import('@tauri-apps/plugin-notification')
             let permission = await isPermissionGranted()
             if (!permission) permission = (await requestPermission()) === 'granted'
             if (!permission) return
-            const localized = localizeInboxNotification(item, i18n.language)
-            sendNotification({
-                title: localized.title || t('notifications.newNotificationTitle', { defaultValue: 'New Notification' }),
-                body: localized.body || t('notifications.newNotification', { defaultValue: 'You have a new notification' }),
-            })
+            sendNotification({ title, body })
         } catch (error) {
             console.warn('[NotificationCenter] Failed to show desktop notification:', error)
         }

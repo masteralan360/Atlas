@@ -50,6 +50,7 @@ const fxTables = new Set([
 const clinicsTables = new Set([
     'clinical_appointments',
     'beauty3_appointments',
+    'beauty3_clients',
     'clinical_patients',
     'clinical_attachments',
     'clinical_presets'

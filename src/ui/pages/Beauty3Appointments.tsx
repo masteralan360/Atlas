@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -21,12 +21,14 @@ import {
   Search,
   Trash2,
   UserRound,
+  UserPlus,
   X,
 } from 'lucide-react'
 import { useAuth } from '@/auth/AuthContext'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { AutocompletePopover } from '@/ui/components/AutocompletePopover'
 import {
   AppDialog,
   AppDialogBody,
@@ -36,6 +38,7 @@ import {
   AppDialogTitle,
   AppPagination,
   Button,
+  CurrencySelector,
   DateTimePicker,
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -71,12 +74,15 @@ import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationSt
 import { queryKeys } from '@/query/queryKeys'
 import {
   BEAUTY3_APPOINTMENTS_TABLE,
+  BEAUTY3_CLIENTS_TABLE,
   BEAUTY3_APPOINTMENT_PROFIT_SOURCE_TYPE,
   deleteBeauty3Appointment,
   getBeauty3AppointmentProcedureTypes,
   getBeauty3AppointmentProfitTransactions,
+  InvalidBeauty3ClientError,
   InvalidBeauty3ProcedureTypeError,
   saveBeauty3Appointment,
+  useBeauty3ClientSearch,
   useBeauty3AppointmentProfitTransactions,
   useBeauty3AppointmentPage,
   type Beauty3AppointmentDraft,
@@ -93,6 +99,10 @@ import { formatCurrency, formatDate, formatLocalDateValue, formatNumericInput, p
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { isDemoWorkspaceMode, isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
+import {
+  beauty3ClientSelectionReducer,
+  initialBeauty3ClientSelectionState,
+} from './beauty3ClientSelection'
 import type {
   Beauty3Appointment,
   CurrencyCode,
@@ -177,6 +187,7 @@ function isBeauty3ProfitPaymentCurrent(
 function toBeauty3AppointmentDraft(appointment: Beauty3Appointment): Beauty3AppointmentDraft {
   const procedureTypes = getBeauty3AppointmentProcedureTypes(appointment)
   return {
+    clientId: appointment.clientId ?? null,
     name: appointment.name,
     age: appointment.age,
     maritalStatus: appointment.maritalStatus,
@@ -287,6 +298,7 @@ export function Beauty3Appointments() {
   }, [page.items, profitPaymentQuery.error, profitPaymentQuery.isAvailable, profitPaymentQuery.isLoading, profitPaymentQuery.transactions])
 
   const [isFormOpen, setIsFormOpen] = useState(false)
+  const [isInlineEntryOpen, setIsInlineEntryOpen] = useState(false)
   const [isProcedureManagerOpen, setIsProcedureManagerOpen] = useState(false)
   const [editingAppointment, setEditingAppointment] = useState<Beauty3Appointment | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Beauty3Appointment | null>(null)
@@ -301,10 +313,6 @@ export function Beauty3Appointments() {
   const [isPaymentSubmitting, setIsPaymentSubmitting] = useState(false)
   const paymentSubmittingRef = useRef(false)
 
-  const openCreateForm = () => {
-    setEditingAppointment(null)
-    setIsFormOpen(true)
-  }
   const openEditForm = (appointment: Beauty3Appointment) => {
     setEditingAppointment(appointment)
     setIsFormOpen(true)
@@ -344,12 +352,12 @@ export function Beauty3Appointments() {
     },
   }), [workspaceId, user?.id])
 
-  const handleSaved = async (draft: Beauty3AppointmentDraft, paymentMode: Beauty3AppointmentSavePaymentMode) => {
+  const handleSaved = async (draft: Beauty3AppointmentDraft, paymentMode: Beauty3AppointmentSavePaymentMode): Promise<boolean> => {
     try {
       if (editingAppointment) {
         if (profitPaymentQuery.isLoading || profitPaymentQuery.error || !profitPaymentQuery.isAvailable) {
           toast({ variant: 'destructive', title: t('beauty3Appointments.paymentStatusUnavailable') })
-          return
+          return false
         }
         const hasChanges = Object.keys(draft).some((key) => {
           const draftKey = key as keyof Beauty3AppointmentDraft
@@ -371,7 +379,7 @@ export function Beauty3Appointments() {
           })
           setReversalTarget(activePayment.transaction)
           setIsReversalOpen(true)
-          return
+          return false
         }
       }
 
@@ -391,23 +399,27 @@ export function Beauty3Appointments() {
                 console.warn('[Beauty3Appointments] Could not refresh after immediate payment:', refreshError)
               })
               closeForm()
+              setIsInlineEntryOpen(false)
               toast({ title: t('beauty3Appointments.appointmentAndPaymentSaved') })
+              return true
             } catch (paymentError) {
               console.error('[Beauty3Appointments] Appointment saved but immediate payment failed:', paymentError)
               await invalidateAppointments().catch((refreshError) => {
                 console.warn('[Beauty3Appointments] Could not refresh after failed immediate payment:', refreshError)
               })
               closeForm()
+              setIsInlineEntryOpen(false)
               toast({ variant: 'destructive', title: t('beauty3Appointments.appointmentSavedPaymentFailed') })
+              return true
             }
-            return
           }
 
           closeForm()
+          setIsInlineEntryOpen(false)
           setPendingProfitPaymentAppointment(result.appointment)
           setSettlementTarget(result.appointment)
           setIsSettlementOpen(true)
-          return
+          return true
         }
       }
 
@@ -417,14 +429,19 @@ export function Beauty3Appointments() {
           : t('beauty3Appointments.saved'),
       })
       closeForm()
+      setIsInlineEntryOpen(false)
+      return true
     } catch (error) {
       console.error('[Beauty3Appointments] Failed to save appointment:', error)
       toast({
         variant: 'destructive',
         title: error instanceof InvalidBeauty3ProcedureTypeError
           ? t('beauty3Appointments.procedureNoLongerAvailable')
-          : t('beauty3Appointments.saveFailed'),
+          : error instanceof InvalidBeauty3ClientError
+            ? t('beauty3Appointments.clientUnavailable')
+            : t('beauty3Appointments.saveFailed'),
       })
+      return false
     }
   }
 
@@ -700,20 +717,8 @@ export function Beauty3Appointments() {
 
   const columns = useMemo(() => [
     columnHelper.accessor('name', {
-      header: t('beauty3Appointments.name'),
+      header: t('beauty3Appointments.client'),
       cell: (info) => <span className="font-medium">{info.getValue()}</span>,
-    }),
-    columnHelper.accessor('age', {
-      header: t('beauty3Appointments.age'),
-      cell: (info) => info.getValue(),
-    }),
-    columnHelper.accessor('maritalStatus', {
-      header: t('beauty3Appointments.maritalStatus'),
-      cell: (info) => t('beauty3Appointments.' + info.getValue()),
-    }),
-    columnHelper.accessor('address', {
-      header: t('beauty3Appointments.address'),
-      cell: (info) => <span className="block max-w-48 truncate" title={info.getValue()}>{info.getValue()}</span>,
     }),
     columnHelper.accessor('phoneNumber', {
       header: t('beauty3Appointments.phoneNumber'),
@@ -866,7 +871,7 @@ export function Beauty3Appointments() {
             {t('beauty3Appointments.subtitle')}
             <ModulePageFreshness
               className="ms-2"
-              tableNames={[BEAUTY3_APPOINTMENTS_TABLE, 'clinical_presets', 'beauty3_appointment_profit_payments']}
+              tableNames={[BEAUTY3_APPOINTMENTS_TABLE, BEAUTY3_CLIENTS_TABLE, 'clinical_presets', 'beauty3_appointment_profit_payments']}
             />
           </p>
         </div>
@@ -880,9 +885,13 @@ export function Beauty3Appointments() {
             <FolderCog className="me-2 size-4" />
             {t('beauty3Appointments.addProcedure')}
           </Button>
-          <Button type="button" onClick={openCreateForm} className="shrink-0">
+          <Button
+            type="button"
+            onClick={() => setIsInlineEntryOpen((open) => !open)}
+            className="shrink-0"
+          >
             <Plus className="me-2 size-4" />
-            {t('beauty3Appointments.create')}
+            {t('beauty3Appointments.addVisit')}
           </Button>
         </div>
       </div>
@@ -921,6 +930,18 @@ export function Beauty3Appointments() {
         />
       </div>
 
+      {isInlineEntryOpen ? (
+        <Beauty3AppointmentInlineEntry
+          workspaceId={workspaceId}
+          viewerUserId={user?.id}
+          defaultCurrency={features.default_currency}
+          iqdPreference={features.iqd_display_preference}
+          onCancel={() => setIsInlineEntryOpen(false)}
+          onManageProcedures={() => setIsProcedureManagerOpen(true)}
+          onSave={(draft) => handleSaved(draft, 'dialog')}
+        />
+      ) : null}
+
       {page.isError && (
         <p role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-200">
           {t('beauty3Appointments.loadFailed')}
@@ -950,9 +971,7 @@ export function Beauty3Appointments() {
                     <div className="min-w-0">
                       <p className="truncate font-semibold">{appointment.name}</p>
                       <p className="text-sm text-muted-foreground">
-                        {t('beauty3Appointments.age')}: {appointment.age}
-                        {' · '}
-                        {t('beauty3Appointments.' + appointment.maritalStatus)}
+                        {appointment.phoneNumber}
                       </p>
                     </div>
                   </div>
@@ -983,14 +1002,6 @@ export function Beauty3Appointments() {
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                  <div className="min-w-0">
-                    <span className="text-muted-foreground">{t('beauty3Appointments.address')}</span>
-                    <p className="break-words font-medium">{appointment.address}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">{t('beauty3Appointments.phoneNumber')}</span>
-                    <p className="break-all font-medium">{appointment.phoneNumber}</p>
-                  </div>
                   <div>
                     <span className="text-muted-foreground">{t('beauty3Appointments.procedureType')}</span>
                     <p className="break-words font-medium">{formatProcedureType(appointment)}</p>
@@ -1077,7 +1088,7 @@ export function Beauty3Appointments() {
         workspaceId={workspaceId}
         defaultCurrency={features.default_currency}
         iqdPreference={features.iqd_display_preference}
-        onSaved={handleSaved}
+        onSaved={async (draft, paymentMode) => { await handleSaved(draft, paymentMode) }}
         onManageProcedures={() => setIsProcedureManagerOpen(true)}
       />
 
@@ -1135,6 +1146,396 @@ export function Beauty3Appointments() {
         description={t('beauty3Appointments.deleteDescription')}
       />
     </div>
+  )
+}
+
+function Beauty3AppointmentInlineEntry({
+  workspaceId,
+  viewerUserId,
+  defaultCurrency,
+  iqdPreference,
+  onCancel,
+  onManageProcedures,
+  onSave,
+}: {
+  workspaceId: string
+  viewerUserId?: string | null
+  defaultCurrency: CurrencyCode
+  iqdPreference: IQDDisplayPreference
+  onCancel: () => void
+  onManageProcedures: () => void
+  onSave: (draft: Beauty3AppointmentDraft) => Promise<boolean>
+}) {
+  const { t } = useTranslation()
+  const { toast } = useToast()
+  const [clientSelection, dispatchClientSelection] = useReducer(
+    beauty3ClientSelectionReducer,
+    initialBeauty3ClientSelectionState,
+  )
+  const [clientOptionsOpen, setClientOptionsOpen] = useState(false)
+  const [isNewClient, setIsNewClient] = useState(false)
+  const [name, setName] = useState('')
+  const [ageText, setAgeText] = useState('')
+  const [maritalStatus, setMaritalStatus] = useState<Beauty3Appointment['maritalStatus'] | ''>('')
+  const [address, setAddress] = useState('')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [procedureTypes, setProcedureTypes] = useState<string[]>([])
+  const [procedureTypeOtherText, setProcedureTypeOtherText] = useState('')
+  const [procedurePlace, setProcedurePlace] = useState<Beauty3Appointment['procedurePlace'] | ''>('')
+  const [procedureDate, setProcedureDate] = useState<Date | undefined>(() => new Date())
+  const [appointmentTotalText, setAppointmentTotalText] = useState('')
+  const [totalProfitText, setTotalProfitText] = useState('')
+  const [currency, setCurrency] = useState<CurrencyCode>(defaultCurrency)
+  const [isSaving, setIsSaving] = useState(false)
+  const clientQuery = useBeauty3ClientSearch({
+    workspaceId,
+    search: clientSelection.search,
+    sourceMode: isLocalWorkspaceMode(workspaceId) || isDemoWorkspaceMode(workspaceId) ? 'local' : 'remote',
+  }, viewerUserId)
+  const { search: clientSearch, selectedClient, selectedUnavailable: selectedClientUnavailable } = clientSelection
+  useEffect(() => {
+    if (clientQuery.isLoading) dispatchClientSelection({ type: 'options-loading' })
+    else if (clientQuery.error) dispatchClientSelection({ type: 'options-error' })
+    else dispatchClientSelection({ type: 'options-loaded', clients: clientQuery.clients })
+  }, [clientQuery.clients, clientQuery.error, clientQuery.isLoading])
+  const customProcedurePresets = useClinicalPresetsByCategory(
+    workspaceId,
+    BEAUTY3_PROCEDURE_PRESET_CATEGORY,
+  )
+  const customProcedures = (customProcedurePresets ?? []).filter((preset) => (
+    preset.isActive && !isBeauty3BuiltInProcedureType(preset.name)
+  ))
+  const customProcedureNames = new Set(customProcedures.map((preset) => preset.name))
+  const isOtherProcedureSelected = procedureTypes.includes(BEAUTY3_OTHER_PROCEDURE_TYPE)
+  const parsedAge = ageText.trim() === '' ? Number.NaN : Number(ageText)
+  const parsedTotal = appointmentTotalText.trim() === '' ? Number.NaN : parseFormattedNumber(appointmentTotalText)
+  const parsedProfit = totalProfitText.trim() === '' ? Number.NaN : parseFormattedNumber(totalProfitText)
+  const clientProfile = selectedClient
+    ? selectedClient
+    : isNewClient
+      ? { name, age: parsedAge, maritalStatus, address, phoneNumber }
+      : null
+  const profileIsValid = Boolean(
+    clientProfile
+    && clientProfile.name.trim()
+    && Number.isInteger(clientProfile.age)
+    && clientProfile.age >= 0
+    && (clientProfile.maritalStatus === 'single' || clientProfile.maritalStatus === 'married')
+    && clientProfile.address.trim()
+    && clientProfile.phoneNumber.trim(),
+  )
+  const procedureTypesAreValid = procedureTypes.length > 0 && procedureTypes.every((procedureType) => (
+    procedureType === BEAUTY3_OTHER_PROCEDURE_TYPE
+      ? procedureTypeOtherText.trim().length > 0
+      : isBeauty3BuiltInProcedureType(procedureType)
+        || (customProcedurePresets !== undefined && customProcedureNames.has(procedureType))
+  ))
+  const isValid = Boolean(
+    workspaceId
+    && profileIsValid
+    && !selectedClientUnavailable
+    && procedureTypesAreValid
+    && procedurePlace
+    && procedureDate
+    && Number.isFinite(parsedTotal)
+    && parsedTotal >= 0
+    && Number.isFinite(parsedProfit)
+    && parsedProfit >= 0,
+  )
+
+  const getProcedurePriceIqd = (value: string) => {
+    const savedPrice = customProcedurePresets?.find((preset) => preset.name === value)?.consultationFee
+    return savedPrice ?? getBeauty3BuiltInProcedurePriceIqd(value) ?? 0
+  }
+  const getProcedureName = (value: string) => {
+    if (value === BEAUTY3_OTHER_PROCEDURE_TYPE) return t('beauty3Appointments.procedureTypes.other')
+    const builtInProcedure = BEAUTY3_BUILT_IN_PROCEDURES.find((procedure) => procedure.value === value)
+    return builtInProcedure ? t(builtInProcedure.translationKey) : value
+  }
+  const formatProcedureOption = (value: string) => t('beauty3Appointments.procedureOptionWithPrice', {
+    name: getProcedureName(value),
+    price: formatCurrency(getProcedurePriceIqd(value), 'iqd', iqdPreference, 0),
+  })
+  const updateProcedureSelection = (value: string, checked: boolean | 'indeterminate') => {
+    const next = checked === true
+      ? procedureTypes.includes(value) ? procedureTypes : [...procedureTypes, value]
+      : procedureTypes.filter((procedureType) => procedureType !== value)
+    setProcedureTypes(next)
+    setAppointmentTotalText(formatNumericInput(String(
+      next.reduce((total, procedureType) => total + getProcedurePriceIqd(procedureType), 0),
+    )))
+    if (checked !== true && value === BEAUTY3_OTHER_PROCEDURE_TYPE) setProcedureTypeOtherText('')
+  }
+
+  const startNewClient = () => {
+    setIsNewClient(true)
+    dispatchClientSelection({ type: 'create-new', search: clientSearch })
+    setClientOptionsOpen(false)
+    setName(selectedClient ? '' : clientSearch.trim())
+    setAgeText('')
+    setMaritalStatus('')
+    setAddress('')
+    setPhoneNumber('')
+  }
+
+  const handleSave = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!isValid || !clientProfile || !procedurePlace || !procedureDate || isSaving) return
+    setIsSaving(true)
+    try {
+      const draft: Beauty3AppointmentDraft = {
+        clientId: selectedClient?.id ?? null,
+        name: clientProfile.name.trim(),
+        age: clientProfile.age,
+        maritalStatus: clientProfile.maritalStatus as Beauty3Appointment['maritalStatus'],
+        address: clientProfile.address.trim(),
+        phoneNumber: clientProfile.phoneNumber.trim(),
+        procedureTypes,
+        procedureType: procedureTypes[0] ?? null,
+        procedureTypeOther: isOtherProcedureSelected ? procedureTypeOtherText.trim() : null,
+        procedurePlace,
+        procedureDate: formatLocalDateValue(procedureDate),
+        appointmentTotal: parsedTotal,
+        totalProfit: parsedProfit,
+        currency,
+      }
+      const saved = await onSave(draft)
+      if (!saved) return
+    } catch (error) {
+      console.error('[Beauty3Appointments] Failed to add visit:', error)
+      toast({ variant: 'destructive', title: t('beauty3Appointments.saveFailed') })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSave} className="rounded-xl border border-primary/30 bg-primary/[0.03] p-4 shadow-sm sm:p-5">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            <Plus className="size-5 text-primary" />
+            {t('beauty3Appointments.addVisit')}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">{t('beauty3Appointments.inlineEntryDescription')}</p>
+        </div>
+        <Button type="button" variant="ghost" size="icon" onClick={onCancel} disabled={isSaving} aria-label={t('common.cancel')}>
+          <X className="size-4" />
+        </Button>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <div className="space-y-3 rounded-lg border bg-background p-3">
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="beauty3-inline-client">{t('beauty3Appointments.client')} *</Label>
+            {isNewClient ? (
+              <Button type="button" variant="ghost" size="sm" onClick={() => { setIsNewClient(false); setName('') }} disabled={isSaving}>
+                {t('beauty3Appointments.chooseExistingClient')}
+              </Button>
+            ) : null}
+          </div>
+          {!isNewClient ? (
+            <>
+              <AutocompletePopover
+                open={clientOptionsOpen && !selectedClient}
+                onOpenChange={setClientOptionsOpen}
+                anchor={(
+                  <div data-autocomplete-popover-anchor>
+                    <Input
+                      id="beauty3-inline-client"
+                      value={selectedClient?.name ?? clientSearch}
+                      onChange={(event) => {
+                        dispatchClientSelection({ type: 'input', value: event.target.value })
+                        setClientOptionsOpen(true)
+                      }}
+                      onFocus={() => setClientOptionsOpen(true)}
+                      placeholder={t('beauty3Appointments.searchClients')}
+                      autoComplete="off"
+                      disabled={isSaving}
+                    />
+                  </div>
+                )}
+              >
+                <div className="p-1">
+                  {clientQuery.isLoading ? (
+                    <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
+                      <Loader2 className="size-4 animate-spin" />{t('beauty3Appointments.loadingClients')}
+                    </div>
+                  ) : clientQuery.error && clientQuery.clients.length === 0 ? (
+                    <p className="px-3 py-2 text-sm text-destructive">{t('beauty3Appointments.clientsUnavailable')}</p>
+                  ) : clientQuery.clients.length > 0 ? clientQuery.clients.map((client) => (
+                    <button
+                      key={client.id}
+                      type="button"
+                      className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-start text-sm hover:bg-muted"
+                      onClick={() => {
+                        dispatchClientSelection({ type: 'select', client })
+                        setClientOptionsOpen(false)
+                      }}
+                    >
+                      <UserRound className="size-4 shrink-0 text-primary" />
+                      <span className="min-w-0 flex-1 truncate font-medium">{client.name}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">{client.phoneNumber}</span>
+                    </button>
+                  )) : (
+                    <p className="px-3 py-2 text-sm text-muted-foreground">{t('beauty3Appointments.noClientMatches')}</p>
+                  )}
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-start text-sm font-medium text-primary hover:bg-muted"
+                    onClick={startNewClient}
+                  >
+                    <UserPlus className="size-4" />{t('beauty3Appointments.createNewClient')}
+                  </button>
+                </div>
+              </AutocompletePopover>
+              {selectedClient ? (
+                <div className="grid gap-x-4 gap-y-2 rounded-md bg-muted/50 p-3 text-sm sm:grid-cols-2">
+                  <p><span className="text-muted-foreground">{t('beauty3Appointments.phoneNumber')}:</span> {selectedClient.phoneNumber}</p>
+                  <p><span className="text-muted-foreground">{t('beauty3Appointments.age')}:</span> {selectedClient.age}</p>
+                  <p><span className="text-muted-foreground">{t('beauty3Appointments.address')}:</span> {selectedClient.address}</p>
+                  <p><span className="text-muted-foreground">{t('beauty3Appointments.maritalStatus')}:</span> {t('beauty3Appointments.' + selectedClient.maritalStatus)}</p>
+                  <p className="sm:col-span-2 text-xs text-muted-foreground">{t('beauty3Appointments.clientInfoAutoFilled')}</p>
+                  {selectedClientUnavailable ? (
+                    <p role="status" className="sm:col-span-2 text-xs text-destructive">
+                      {t('beauty3Appointments.clientUnavailable')}
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <Button type="button" variant="outline" size="sm" onClick={startNewClient} disabled={isSaving}>
+                  <UserPlus className="me-2 size-4" />{t('beauty3Appointments.createNewClient')}
+                </Button>
+              )}
+            </>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="beauty3-inline-name">{t('beauty3Appointments.name')} *</Label>
+                <Input id="beauty3-inline-name" value={name} onChange={(event) => setName(event.target.value)} autoComplete="name" disabled={isSaving} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="beauty3-inline-age">{t('beauty3Appointments.age')} *</Label>
+                <Input id="beauty3-inline-age" value={ageText} onChange={(event) => setAgeText(sanitizeNumericInput(event.target.value, { allowDecimal: false }))} placeholder={t('beauty3Appointments.zeroPlaceholder')} inputMode="numeric" disabled={isSaving} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="beauty3-inline-marital">{t('beauty3Appointments.maritalStatus')} *</Label>
+                <Select value={maritalStatus} onValueChange={(value) => setMaritalStatus(value as Beauty3Appointment['maritalStatus'])} disabled={isSaving}>
+                  <SelectTrigger id="beauty3-inline-marital"><SelectValue placeholder={t('beauty3Appointments.selectMaritalStatus')} /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="single">{t('beauty3Appointments.single')}</SelectItem>
+                    <SelectItem value="married">{t('beauty3Appointments.married')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="beauty3-inline-phone">{t('beauty3Appointments.phoneNumber')} *</Label>
+                <Input id="beauty3-inline-phone" type="tel" value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} autoComplete="tel" disabled={isSaving} />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="beauty3-inline-address">{t('beauty3Appointments.address')} *</Label>
+                <Input id="beauty3-inline-address" value={address} onChange={(event) => setAddress(event.target.value)} autoComplete="street-address" disabled={isSaving} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-3 rounded-lg border bg-background p-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="beauty3-inline-date">{t('beauty3Appointments.procedureDate')} *</Label>
+              <DateTimePicker id="beauty3-inline-date" date={procedureDate} setDate={setProcedureDate} mode="date" placeholder={t('beauty3Appointments.selectDate')} disabled={isSaving} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="beauty3-inline-place">{t('beauty3Appointments.procedurePlace')} *</Label>
+              <Select value={procedurePlace} onValueChange={(value) => setProcedurePlace(value as Beauty3Appointment['procedurePlace'])} disabled={isSaving}>
+                <SelectTrigger id="beauty3-inline-place"><SelectValue placeholder={t('beauty3Appointments.selectProcedurePlace')} /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sulaymaniyah">{t('commerceOperations.cities.sulaymaniyah')}</SelectItem>
+                  <SelectItem value="erbil">{t('commerceOperations.cities.erbil')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="beauty3-inline-procedures">{t('beauty3Appointments.procedureType')} *</Label>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button id="beauty3-inline-procedures" type="button" variant="outline" className="w-full justify-between gap-2 font-normal" disabled={isSaving}>
+                  <span className="truncate">
+                    {procedureTypes.length > 0
+                      ? t('beauty3Appointments.procedureTypesSelected', { count: procedureTypes.length })
+                      : t('beauty3Appointments.procedureTypeEmpty')}
+                  </span>
+                  <ChevronDown className="size-4 shrink-0 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto">
+                {BEAUTY3_BUILT_IN_PROCEDURES.map((procedure) => (
+                  <DropdownMenuCheckboxItem
+                    key={procedure.value}
+                    checked={procedureTypes.includes(procedure.value)}
+                    disabled={isSaving}
+                    onCheckedChange={(checked) => updateProcedureSelection(procedure.value, checked)}
+                    onSelect={(event) => event.preventDefault()}
+                  >
+                    {formatProcedureOption(procedure.value)}
+                  </DropdownMenuCheckboxItem>
+                ))}
+                {customProcedures.map((procedure) => (
+                  <DropdownMenuCheckboxItem
+                    key={procedure.id}
+                    checked={procedureTypes.includes(procedure.name)}
+                    disabled={isSaving}
+                    onCheckedChange={(checked) => updateProcedureSelection(procedure.name, checked)}
+                    onSelect={(event) => event.preventDefault()}
+                  >
+                    {formatProcedureOption(procedure.name)}
+                  </DropdownMenuCheckboxItem>
+                ))}
+                <DropdownMenuCheckboxItem
+                  checked={procedureTypes.includes(BEAUTY3_OTHER_PROCEDURE_TYPE)}
+                  disabled={isSaving}
+                  onCheckedChange={(checked) => updateProcedureSelection(BEAUTY3_OTHER_PROCEDURE_TYPE, checked)}
+                  onSelect={(event) => event.preventDefault()}
+                >
+                  {t('beauty3Appointments.procedureTypes.other')}
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            {isOtherProcedureSelected ? (
+              <Input value={procedureTypeOtherText} onChange={(event) => setProcedureTypeOtherText(event.target.value)} placeholder={t('beauty3Appointments.otherProcedurePlaceholder')} disabled={isSaving} />
+            ) : null}
+            {customProcedurePresets === undefined ? <p className="text-xs text-muted-foreground">{t('beauty3Appointments.loadingProcedures')}</p> : null}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="beauty3-inline-total">{t('beauty3Appointments.appointmentTotal')} *</Label>
+              <Input id="beauty3-inline-total" value={appointmentTotalText} onChange={(event) => setAppointmentTotalText(formatNumericInput(sanitizeNumericInput(event.target.value)))} placeholder={t('beauty3Appointments.zeroPlaceholder')} inputMode="decimal" disabled={isSaving} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="beauty3-inline-profit">{t('beauty3Appointments.totalProfit')} *</Label>
+              <Input id="beauty3-inline-profit" value={totalProfitText} onChange={(event) => setTotalProfitText(formatNumericInput(sanitizeNumericInput(event.target.value)))} placeholder={t('beauty3Appointments.zeroPlaceholder')} inputMode="decimal" disabled={isSaving} />
+            </div>
+            <div className="space-y-1.5">
+              <CurrencySelector value={currency} onChange={setCurrency} label={`${t('beauty3Appointments.currency')} *`} iqdDisplayPreference={iqdPreference} disabled={isSaving} />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+            <Button type="button" variant="ghost" size="sm" onClick={onManageProcedures} disabled={isSaving}>
+              <FolderCog className="me-2 size-4" />{t('beauty3Appointments.addProcedure')}
+            </Button>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>{t('common.cancel')}</Button>
+              <Button type="submit" disabled={!isValid || isSaving}>
+                {isSaving ? <Loader2 className="me-2 size-4 animate-spin" /> : <Save className="me-2 size-4" />}
+                {isSaving ? t('beauty3Appointments.saving') : t('beauty3Appointments.saveVisit')}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </form>
   )
 }
 
@@ -1288,6 +1689,7 @@ function Beauty3AppointmentFormDialog({
     setIsSaving(true)
     setIsSavingAndRecording(paymentMode === 'immediate')
     const draft: Beauty3AppointmentDraft = {
+      clientId: appointment?.clientId ?? null,
       name: name.trim(),
       age: parsedAge,
       maritalStatus,

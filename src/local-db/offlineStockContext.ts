@@ -30,8 +30,9 @@ export function currentStockOperation(workspaceId?: string): StockOperationConte
   }
 }
 
+
 export function attachStockOperation(transaction: Transaction, context: StockOperationContext) {
-  ;(transaction as StockTransaction).atlasStockOperation = context
+  ; (transaction as StockTransaction).atlasStockOperation = context
 }
 
 /** Local execution is allowed only inside a durable Cloud/Hybrid operation. */
@@ -53,9 +54,9 @@ export const STOCK_EFFECT_TABLES = new Set([
   'payment_transactions', 'loans', 'loan_installments', 'loan_payments', 'storages',
 ])
 
-/** Keep the transaction alive only while loading a module, never around a task
- * that opens another Dexie transaction (which would deadlock).
+/** Keep an active Dexie transaction alive only while loading a module, never
+ * around a task that opens another Dexie transaction (which would deadlock).
  */
 export function awaitStockDependency<T>(module: Promise<T>): Promise<T> {
-  return currentStockOperation() ? Dexie.waitFor(module) : module
+  return Dexie.currentTransaction ? Dexie.waitFor(module) : module
 }

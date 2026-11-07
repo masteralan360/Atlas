@@ -27,6 +27,7 @@ import { db } from './database'
 import type {
   BaseEntity,
   Beauty3Appointment,
+  Beauty3Client,
   Beauty3MaritalStatus,
   Beauty3ProcedurePlace,
   CurrencyCode,
@@ -34,6 +35,7 @@ import type {
 } from './models'
 
 export const BEAUTY3_APPOINTMENTS_TABLE = 'beauty3_appointments'
+export const BEAUTY3_CLIENTS_TABLE = 'beauty3_clients'
 export const BEAUTY3_APPOINTMENT_PROFIT_SOURCE_TYPE = 'beauty3_appointment_profit' as const
 
 function normalizeRemoteBeauty3ProfitPayment(
@@ -229,6 +231,17 @@ export interface Beauty3AppointmentPage {
   totalCount: number
 }
 
+export type Beauty3ClientDraft = Pick<
+  Beauty3Client,
+  'name' | 'age' | 'maritalStatus' | 'address' | 'phoneNumber'
+>
+
+export interface Beauty3ClientSearchQuery {
+  workspaceId: string
+  search: string
+  sourceMode: 'local' | 'remote'
+}
+
 export type Beauty3AppointmentDraft = Omit<
   Beauty3Appointment,
   keyof BaseEntity | 'createdBy'
@@ -296,6 +309,7 @@ function normalizeRemoteAppointment(raw: Record<string, unknown>): Beauty3Appoin
   return {
     id: row.id,
     workspaceId: row.workspaceId,
+    clientId: typeof row.clientId === 'string' ? row.clientId : null,
     name: row.name,
     age,
     maritalStatus: maritalStatus as Beauty3MaritalStatus,
@@ -318,6 +332,270 @@ function normalizeRemoteAppointment(raw: Record<string, unknown>): Beauty3Appoin
     isDeleted: row.isDeleted === true,
     syncStatus: 'synced',
     lastSyncedAt: updatedAt,
+  }
+}
+
+function normalizeRemoteClient(raw: Record<string, unknown>): Beauty3Client {
+  const row = toCamelCase(raw)
+  const age = Number(row.age)
+  const maritalStatus = row.maritalStatus
+  if (
+    typeof row.id !== 'string'
+    || typeof row.workspaceId !== 'string'
+    || typeof row.name !== 'string'
+    || !Number.isInteger(age)
+    || !['single', 'married'].includes(String(maritalStatus))
+    || typeof row.address !== 'string'
+    || typeof row.phoneNumber !== 'string'
+  ) {
+    throw new Error('Invalid Beauty 3 client response')
+  }
+  const updatedAt = typeof row.updatedAt === 'string' ? row.updatedAt : new Date().toISOString()
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    name: row.name,
+    age,
+    maritalStatus: maritalStatus as Beauty3MaritalStatus,
+    address: row.address,
+    phoneNumber: row.phoneNumber,
+    createdBy: typeof row.createdBy === 'string' ? row.createdBy : null,
+    createdAt: typeof row.createdAt === 'string' ? row.createdAt : updatedAt,
+    updatedAt,
+    version: Number.isFinite(Number(row.version)) ? Number(row.version) : 1,
+    isDeleted: row.isDeleted === true,
+    syncStatus: 'synced',
+    lastSyncedAt: updatedAt,
+  }
+}
+
+async function cacheRemoteBeauty3ClientsByIds(
+  workspaceId: string,
+  clientIds: readonly string[],
+  signal: AbortSignal,
+) {
+  const uniqueIds = [...new Set(clientIds.filter(Boolean))]
+  if (uniqueIds.length === 0) return
+  const operationId = 'beauty3-clients-page-' + String(++hydrationSequence)
+  startWorkspaceDataHydration(workspaceId, 'supabase', BEAUTY3_CLIENTS_TABLE, operationId)
+  try {
+    const result = await runSupabaseAction('beauty3Clients.pageRelated', () => (
+      (getSupabaseClientForTable(BEAUTY3_CLIENTS_TABLE) as any)
+        .from(BEAUTY3_CLIENTS_TABLE)
+        .select('*')
+        .eq('workspace_id', workspaceId)
+        .eq('is_deleted', false)
+        .in('id', uniqueIds)
+        .abortSignal(signal)
+    ))
+    if (result.error) throw result.error
+    signal.throwIfAborted()
+    const fetchedAt = new Date().toISOString()
+    const clients: Beauty3Client[] = (result.data ?? []).map((row: Record<string, unknown>) => normalizeRemoteClient(row))
+    const cachedRows = await db.beauty3_clients.bulkGet(clients.map((item) => item.id))
+    const rowsToCache = clients.filter((item, index) => {
+      const current = cachedRows[index]
+      if (!current) return true
+      if (current.syncStatus !== 'synced' || current.version > item.version) return false
+      return current.updatedAt <= item.updatedAt
+    })
+    if (rowsToCache.length > 0) await db.beauty3_clients.bulkPut(rowsToCache)
+    updateWorkspaceDataHydrationProgress(workspaceId, 'supabase', BEAUTY3_CLIENTS_TABLE, clients.length, operationId)
+    completeWorkspaceDataHydration(workspaceId, 'supabase', BEAUTY3_CLIENTS_TABLE, fetchedAt, operationId)
+    recordWorkspaceDataFetch(workspaceId, 'supabase', fetchedAt, BEAUTY3_CLIENTS_TABLE)
+  } catch (error) {
+    if (signal.aborted) cancelWorkspaceDataHydration(workspaceId, 'supabase', BEAUTY3_CLIENTS_TABLE, operationId)
+    else failWorkspaceDataHydration(workspaceId, 'supabase', BEAUTY3_CLIENTS_TABLE, new Date().toISOString(), operationId)
+    throw error
+  }
+}
+
+function matchesClientSearch(client: Beauty3Client, search: string) {
+  const normalized = search.trim().toLocaleLowerCase()
+  return !normalized || client.name.toLocaleLowerCase().includes(normalized)
+    || client.phoneNumber.toLocaleLowerCase().includes(normalized)
+}
+
+async function fetchLocalBeauty3Clients(query: Beauty3ClientSearchQuery) {
+  if (!query.workspaceId) return [] as Beauty3Client[]
+  return db.beauty3_clients
+    .where('[workspaceId+updatedAt]')
+    .between([query.workspaceId, Dexie.minKey], [query.workspaceId, Dexie.maxKey], true, true)
+    .reverse()
+    .filter((client) => !client.isDeleted && matchesClientSearch(client, query.search))
+    .limit(25)
+    .toArray()
+}
+
+async function fetchRemoteBeauty3Clients(query: Beauty3ClientSearchQuery, signal: AbortSignal) {
+  const operationId = 'beauty3-clients-' + String(++hydrationSequence)
+  startWorkspaceDataHydration(query.workspaceId, 'supabase', BEAUTY3_CLIENTS_TABLE, operationId)
+  try {
+    const client = getSupabaseClientForTable(BEAUTY3_CLIENTS_TABLE) as any
+    const baseRequest = () => client
+      .from(BEAUTY3_CLIENTS_TABLE)
+      .select('*')
+      .eq('workspace_id', query.workspaceId)
+      .eq('is_deleted', false)
+      .order('updated_at', { ascending: false })
+      .order('id', { ascending: false })
+
+    let remoteRows: Record<string, unknown>[]
+    const search = query.search.trim().replace(/[%_\\]/g, '')
+    if (search) {
+      const [nameResult, phoneResult] = await Promise.all([
+        runSupabaseAction('beauty3Clients.searchByName', () => (
+          baseRequest().ilike('name', '%' + search + '%').limit(25).abortSignal(signal)
+        )),
+        runSupabaseAction('beauty3Clients.searchByPhone', () => (
+          baseRequest().ilike('phone_number', '%' + search + '%').limit(25).abortSignal(signal)
+        )),
+      ])
+      if (nameResult.error) throw nameResult.error
+      if (phoneResult.error) throw phoneResult.error
+      remoteRows = [...(nameResult.data ?? []), ...(phoneResult.data ?? [])]
+    } else {
+      const result = await runSupabaseAction('beauty3Clients.listRecent', () => (
+        baseRequest().limit(25).abortSignal(signal)
+      ))
+      if (result.error) throw result.error
+      remoteRows = result.data ?? []
+    }
+    signal.throwIfAborted()
+    const byId = new Map<string, Beauty3Client>()
+    for (const row of remoteRows) {
+      const normalized = normalizeRemoteClient(row)
+      byId.set(normalized.id, normalized)
+    }
+    const items = [...byId.values()]
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id))
+      .slice(0, 25)
+    const cachedRows = await db.beauty3_clients.bulkGet(items.map((item) => item.id))
+    const rowsToCache = items.filter((item, index) => {
+      const current = cachedRows[index]
+      if (!current) return true
+      if (current.syncStatus !== 'synced' || current.version > item.version) return false
+      return current.updatedAt <= item.updatedAt
+    })
+    if (rowsToCache.length > 0) await db.beauty3_clients.bulkPut(rowsToCache)
+    const fetchedAt = new Date().toISOString()
+    updateWorkspaceDataHydrationProgress(query.workspaceId, 'supabase', BEAUTY3_CLIENTS_TABLE, items.length, operationId)
+    completeWorkspaceDataHydration(query.workspaceId, 'supabase', BEAUTY3_CLIENTS_TABLE, fetchedAt, operationId)
+    recordWorkspaceDataFetch(query.workspaceId, 'supabase', fetchedAt, BEAUTY3_CLIENTS_TABLE)
+    return items
+  } catch (error) {
+    if (signal.aborted) cancelWorkspaceDataHydration(query.workspaceId, 'supabase', BEAUTY3_CLIENTS_TABLE, operationId)
+    else failWorkspaceDataHydration(query.workspaceId, 'supabase', BEAUTY3_CLIENTS_TABLE, new Date().toISOString(), operationId)
+    throw error
+  }
+}
+
+export function useBeauty3ClientSearch(
+  query: Beauty3ClientSearchQuery,
+  viewerUserId?: string | null,
+) {
+  const networkOnline = useNetworkStatus()
+  const localSource = isLocalSource(query.workspaceId)
+  const remoteQuery = useQuery({
+    queryKey: queryKeys.beauty3Appointments.clients(query.workspaceId, query.search, localSource ? 'local' : 'remote', viewerUserId),
+    queryFn: ({ signal }) => fetchRemoteBeauty3Clients(query, signal),
+    enabled: Boolean(query.workspaceId) && networkOnline && !localSource,
+  })
+  const useLocalFallback = localSource || !networkOnline || remoteQuery.isError
+  const localClients = useLiveQuery(
+    () => useLocalFallback ? fetchLocalBeauty3Clients(query) : Promise.resolve([] as Beauty3Client[]),
+    [query.workspaceId, query.search, useLocalFallback],
+  )
+  return {
+    clients: useLocalFallback ? localClients ?? [] : remoteQuery.data ?? [],
+    isLoading: localSource || !networkOnline ? localClients === undefined : remoteQuery.isFetching,
+    error: remoteQuery.isError ? remoteQuery.error : null,
+  }
+}
+
+function toRemoteClientPayload(client: Beauty3Client) {
+  const { syncStatus: _syncStatus, lastSyncedAt: _lastSyncedAt, ...payload } = client
+  return toSnakeCase(payload as unknown as Record<string, unknown>)
+}
+
+async function persistBeauty3ClientRemote(client: Beauty3Client, operation: 'create' | 'update') {
+  if (isLocalSource(client.workspaceId)) return false
+  if (isOnline()) {
+    try {
+      const response = await runSupabaseAction('beauty3Clients.save', () => (
+        (getSupabaseClientForTable(BEAUTY3_CLIENTS_TABLE) as any)
+          .from(BEAUTY3_CLIENTS_TABLE)
+          .upsert(toRemoteClientPayload(client), { onConflict: 'id' })
+          .select('id')
+          .single()
+      ))
+      if (response.error) throw response.error
+      const syncedAt = new Date().toISOString()
+      await db.beauty3_clients.update(client.id, { syncStatus: 'synced', lastSyncedAt: syncedAt })
+      return false
+    } catch {
+      // Preserve the local profile and queue it through the normal sync worker.
+    }
+  }
+  await addToOfflineMutations(
+    BEAUTY3_CLIENTS_TABLE,
+    client.id,
+    operation,
+    client as unknown as Record<string, unknown>,
+    client.workspaceId,
+  )
+  return true
+}
+
+export async function saveBeauty3Client(
+  draft: Beauty3ClientDraft,
+  workspaceId: string,
+  createdBy?: string | null,
+  clientId?: string | null,
+) {
+  if (!workspaceId || !draft.name.trim() || !Number.isInteger(draft.age) || draft.age < 0
+    || !['single', 'married'].includes(draft.maritalStatus) || !draft.address.trim() || !draft.phoneNumber.trim()) {
+    throw new Error('Invalid Beauty 3 client')
+  }
+  let existing = clientId ? await db.beauty3_clients.get(clientId) : undefined
+  if (clientId && (!existing || existing.workspaceId !== workspaceId || existing.isDeleted)) {
+    throw new Error('Beauty 3 client not found')
+  }
+  if (!existing) {
+    const phoneMatches = await db.beauty3_clients
+      .where('[workspaceId+phoneNumber]')
+      .equals([workspaceId, draft.phoneNumber.trim()])
+      .filter((candidate) => !candidate.isDeleted
+        && candidate.name.trim().toLocaleLowerCase() === draft.name.trim().toLocaleLowerCase())
+      .limit(5)
+      .toArray()
+    existing = phoneMatches[0]
+  }
+  const now = new Date().toISOString()
+  const localSource = isLocalSource(workspaceId)
+  const profile: Beauty3Client = {
+    ...draft,
+    name: draft.name.trim(),
+    address: draft.address.trim(),
+    phoneNumber: draft.phoneNumber.trim(),
+    id: existing?.id ?? generateId(),
+    workspaceId,
+    createdBy: existing?.createdBy ?? createdBy ?? null,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+    version: (existing?.version ?? 0) + 1,
+    isDeleted: false,
+    syncStatus: localSource ? 'synced' : 'pending',
+    lastSyncedAt: localSource ? now : null,
+  }
+  await db.beauty3_clients.put(profile)
+  try {
+    const syncPending = await persistBeauty3ClientRemote(profile, existing ? 'update' : 'create')
+    return { client: profile, syncPending }
+  } catch (error) {
+    if (existing) await db.beauty3_clients.put(existing)
+    else await db.beauty3_clients.delete(profile.id)
+    throw error
   }
 }
 
@@ -416,6 +694,17 @@ async function fetchRemoteBeauty3AppointmentPage(
       return current.updatedAt <= item.updatedAt
     })
     if (rowsToCache.length > 0) await db.beauty3_appointments.bulkPut(rowsToCache)
+
+    try {
+      await cacheRemoteBeauty3ClientsByIds(
+        query.workspaceId,
+        items.map((appointment) => appointment.clientId ?? ''),
+        signal,
+      )
+    } catch (clientError) {
+      if (signal.aborted) throw clientError
+      console.warn('[Beauty3Appointments] Could not cache client profiles for this page:', clientError)
+    }
 
     updateWorkspaceDataHydrationProgress(
       query.workspaceId,
@@ -586,6 +875,40 @@ export class InvalidBeauty3ProcedureTypeError extends Error {
   }
 }
 
+export class InvalidBeauty3ClientError extends Error {
+  constructor() {
+    super('The selected client is no longer available')
+    this.name = 'InvalidBeauty3ClientError'
+  }
+}
+
+async function getBeauty3ClientForAppointment(clientId: string, workspaceId: string) {
+  const cached = await db.beauty3_clients.get(clientId)
+  if (!cached || cached.workspaceId !== workspaceId || cached.isDeleted) {
+    throw new InvalidBeauty3ClientError()
+  }
+  if (isLocalSource(workspaceId) || !isOnline() || cached.syncStatus !== 'synced') return cached
+
+  const result = await runSupabaseAction('beauty3Clients.validateSelection', () => (
+    (getSupabaseClientForTable(BEAUTY3_CLIENTS_TABLE) as any)
+      .from(BEAUTY3_CLIENTS_TABLE)
+      .select('*')
+      .eq('id', clientId)
+      .eq('workspace_id', workspaceId)
+      .eq('is_deleted', false)
+      .maybeSingle()
+  ))
+  if (result.error) throw result.error
+  if (!result.data) throw new InvalidBeauty3ClientError()
+
+  const remote = normalizeRemoteClient(result.data as Record<string, unknown>)
+  const current = await db.beauty3_clients.get(clientId)
+  if (!current || (current.syncStatus === 'synced' && current.updatedAt <= remote.updatedAt)) {
+    await db.beauty3_clients.put(remote)
+  }
+  return current && current.syncStatus !== 'synced' ? current : remote
+}
+
 async function validateProcedureType(draft: Beauty3AppointmentDraft, workspaceId: string) {
   const procedureTypes = getBeauty3AppointmentProcedureTypes(draft)
   if (procedureTypes.length === 0) return false
@@ -637,8 +960,42 @@ export async function saveBeauty3Appointment(
   const now = new Date().toISOString()
   const localSource = isLocalSource(workspaceId)
   const procedureTypes = getBeauty3AppointmentProcedureTypes(draft)
+  const requestedClientId = draft.clientId ?? existing?.clientId ?? null
+  let client: Beauty3Client | undefined
+  let clientSyncPending = false
+  if (requestedClientId) {
+    client = await getBeauty3ClientForAppointment(requestedClientId, workspaceId)
+    if (existing) {
+      const savedClient = await saveBeauty3Client({
+        name: draft.name,
+        age: draft.age,
+        maritalStatus: draft.maritalStatus,
+        address: draft.address,
+        phoneNumber: draft.phoneNumber,
+      }, workspaceId, createdBy, client.id)
+      client = savedClient.client
+      clientSyncPending = savedClient.syncPending
+    }
+  } else {
+    const savedClient = await saveBeauty3Client({
+      name: draft.name,
+      age: draft.age,
+      maritalStatus: draft.maritalStatus,
+      address: draft.address,
+      phoneNumber: draft.phoneNumber,
+    }, workspaceId, createdBy)
+    client = savedClient.client
+    clientSyncPending = savedClient.syncPending
+  }
+  if (!client) throw new InvalidBeauty3ClientError()
   const appointment: Beauty3Appointment = {
     ...draft,
+    clientId: client.id,
+    name: client.name,
+    age: client.age,
+    maritalStatus: client.maritalStatus,
+    address: client.address,
+    phoneNumber: client.phoneNumber,
     procedureTypes,
     procedureType: procedureTypes[0] ?? draft.procedureType,
     id: existing?.id ?? generateId(),
@@ -658,7 +1015,7 @@ export async function saveBeauty3Appointment(
       appointment,
       existing ? 'update' : 'create',
     )
-    return { appointment, syncPending }
+    return { appointment, syncPending: syncPending || clientSyncPending }
   } catch (error) {
     if (existing) await db.beauty3_appointments.put(existing)
     else await db.beauty3_appointments.delete(appointment.id)

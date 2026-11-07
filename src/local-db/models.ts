@@ -1707,6 +1707,7 @@ export type Beauty3MaritalStatus = 'single' | 'married'
 export type Beauty3ProcedurePlace = 'sulaymaniyah' | 'erbil'
 
 export interface Beauty3Appointment extends BaseEntity {
+  clientId?: string | null
   name: string
   age: number
   maritalStatus: Beauty3MaritalStatus
@@ -1721,6 +1722,15 @@ export interface Beauty3Appointment extends BaseEntity {
   appointmentTotal: number
   totalProfit: number
   currency: CurrencyCode
+  createdBy?: string | null
+}
+
+export interface Beauty3Client extends BaseEntity {
+  name: string
+  age: number
+  maritalStatus: Beauty3MaritalStatus
+  address: string
+  phoneNumber: string
   createdBy?: string | null
 }
 
@@ -2834,6 +2844,7 @@ export interface SyncQueueItem {
     | 'clinical_attachments'
     | 'clinical_presets'
     | 'beauty3_appointments'
+    | 'beauty3_clients'
   entityId: string
   operation: 'create' | 'update' | 'delete'
   data: Record<string, unknown>
@@ -3078,6 +3089,7 @@ export interface OfflineMutation {
     | 'clinical_attachments'
     | 'clinical_presets'
     | 'beauty3_appointments'
+    | 'beauty3_clients'
     | 'manual_entry_templates'
     | 'manual_entries'
     | 'restaurant_table_settings'
