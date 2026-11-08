@@ -1198,7 +1198,8 @@
     "loadFailed": "Could not load notifications. Please try again.",
     "updateFailed": "Could not update notifications. Please try again.",
     "newNotification": "You have a new notification",
-    "newNotificationTitle": "New Notification"
+    "newNotificationTitle": "New Notification",
+    "searchForProduct": "Search for Product"
   },
   "workspaceFreeUsage": {
     "title": "Free usage granted",

@@ -1,6 +1,5 @@
 import { forwardRef, useCallback, useEffect, useMemo, useState, type ComponentPropsWithoutRef } from 'react'
-import { Archive, Bell, CheckCheck, ExternalLink, Inbox, Info, Loader2, Package, Settings, ShieldAlert } from 'lucide-react'
-import { useLocation } from 'wouter'
+import { Archive, Bell, CheckCheck, ExternalLink, Inbox, Info, Loader2, Package, Search, Settings, ShieldAlert } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/auth'
 import { usePaginationBounds, usePaginationPageMap } from '@/hooks/usePaginationState'
@@ -8,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import { invoke } from '@tauri-apps/api/core'
 import { toast } from '@/ui/components/use-toast'
 import { connectionManager } from '@/lib/connectionManager'
+import { useHashLocation } from '@/hooks/useHashLocation'
 import { localizeNotification, type NotificationLocalizationResult } from '@/lib/notificationLocalization'
 import { cn } from '@/lib/utils'
 import { isMobile, isTauri } from '@/lib/platform'
@@ -203,7 +203,7 @@ export function NotificationCenter() {
     const { user, isLoading } = useAuth()
     const { t, i18n } = useTranslation()
     const { style } = useTheme()
-    const [, setLocation] = useLocation()
+    const [, setLocation] = useHashLocation()
     const queryClient = useQueryClient()
     const [open, setOpen] = useState(false)
     const [tab, setTab] = useState<NotificationInboxTab>('all')
@@ -539,6 +539,12 @@ export function NotificationCenter() {
                                     const localized = localizeInboxNotification(item, i18n.language)
                                     const preview = localized.body
                                     const actions = getNotificationActions(item, localized)
+                                    const lowStockProductName = item.notification_type === 'inventory_low_stock'
+                                        ? readString(item.payload.product_name)
+                                        : ''
+                                    const productSearchUrl = lowStockProductName
+                                        ? `/products?${new URLSearchParams({ productSearch: lowStockProductName }).toString()}`
+                                        : null
                                     const timeLabel = formatNotificationTime(item.created_at, i18n.language)
                                     const typeLabel = localized.typeLabel
                                     const scopeLabel = item.scope === 'workspace'
@@ -554,6 +560,7 @@ export function NotificationCenter() {
                                                 <div className="flex flex-wrap items-center gap-2"><span className="inline-flex rounded-full border border-border/70 bg-muted/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{typeLabel}</span>{item.scope !== 'user' && <span className="inline-flex rounded-full border border-border/70 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{scopeLabel}</span>}</div>
                                                 <div className="flex flex-wrap items-center gap-2 pt-1">
                                                     {actions.map((action) => <Button key={`${item.id}-${action.url}`} type="button" variant="outline" size="sm" className="h-8 rounded-xl text-[11px] font-semibold" onClick={(event) => { event.stopPropagation(); handleOpenNotification(item, action.url) }}><ExternalLink className="h-3.5 w-3.5" />{action.label}</Button>)}
+                                                    {productSearchUrl && <Button type="button" variant="outline" size="sm" className="h-8 rounded-xl text-[11px] font-semibold" onClick={(event) => { event.stopPropagation(); handleOpenNotification(item, productSearchUrl) }}><Search className="h-3.5 w-3.5" />{t('notifications.searchForProduct', { defaultValue: 'Search for Product' })}</Button>}
                                                     {!item.read_at && <Button type="button" variant="ghost" size="sm" className="h-8 rounded-xl text-[11px] font-semibold" onClick={(event) => { event.stopPropagation(); void handleMarkRead(item, true) }}><CheckCheck className="h-3.5 w-3.5" />{t('notifications.markRead', { defaultValue: 'Mark read' })}</Button>}
                                                     <Button type="button" variant="ghost" size="sm" className="h-8 rounded-xl text-[11px] font-semibold" onClick={(event) => { event.stopPropagation(); void handleArchive(item, !item.archived_at) }}><Archive className="h-3.5 w-3.5" />{item.archived_at ? t('notifications.restore', { defaultValue: 'Restore' }) : t('notifications.archive', { defaultValue: 'Archive' })}</Button>
                                                 </div>

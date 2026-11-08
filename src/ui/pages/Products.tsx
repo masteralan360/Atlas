@@ -399,7 +399,8 @@ export function Products() {
 
     const [search, setSearch] = useState(() => {
         const hashQuery = window.location.hash.split('?')[1] ?? ''
-        return new URLSearchParams(hashQuery).get('productEditReturnSearch') ?? ''
+        const hashParams = new URLSearchParams(hashQuery)
+        return hashParams.get('productSearch') ?? hashParams.get('productEditReturnSearch') ?? ''
     })
     const deferredSearch = useDeferredValue(search)
     const [isCameraSearchScannerOpen, setIsCameraSearchScannerOpen] = useState(false)
@@ -412,14 +413,32 @@ export function Products() {
     const [collapsedPrimaryProductIds, setCollapsedPrimaryProductIds] = useState<Set<string>>(() => new Set())
 
     useEffect(() => {
-        const hash = window.location.hash
-        const queryIndex = hash.indexOf('?')
-        if (queryIndex < 0 || !new URLSearchParams(hash.slice(queryIndex + 1)).has('productEditReturnSearch')) return
-        window.history.replaceState(
-            window.history.state,
-            '',
-            `${window.location.pathname}${window.location.search}${hash.slice(0, queryIndex)}`
-        )
+        const consumeProductSearch = () => {
+            const hash = window.location.hash
+            const queryIndex = hash.indexOf('?')
+            if (queryIndex < 0) return
+
+            const params = new URLSearchParams(hash.slice(queryIndex + 1))
+            const requestedSearch = params.get('productSearch') ?? params.get('productEditReturnSearch')
+            if (requestedSearch !== null) setSearch(requestedSearch)
+
+            const hadReturnSearch = params.has('productEditReturnSearch')
+            params.delete('productSearch')
+            params.delete('productEditReturnSearch')
+            if (requestedSearch === null && !hadReturnSearch) return
+
+            const remainingQuery = params.toString()
+            const nextHash = `${hash.slice(0, queryIndex)}${remainingQuery ? `?${remainingQuery}` : ''}`
+            window.history.replaceState(
+                window.history.state,
+                '',
+                `${window.location.pathname}${window.location.search}${nextHash}`
+            )
+        }
+
+        consumeProductSearch()
+        window.addEventListener('hashchange', consumeProductSearch)
+        return () => window.removeEventListener('hashchange', consumeProductSearch)
     }, [])
     const pagination = usePaginationState({
         resetOn: [search, catalogType, filters],

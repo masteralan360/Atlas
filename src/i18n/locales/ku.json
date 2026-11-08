@@ -1198,7 +1198,8 @@
     "loadFailed": "نەتوانرا ئاگادارییەکان بار بکرێن. تکایە دووبارە هەوڵ بدەوە.",
     "updateFailed": "نەتوانرا ئاگادارییەکان نوێ بکرێنەوە. تکایە دووبارە هەوڵ بدەوە.",
     "newNotification": "ئاگادارییەکی نوێت هەیە",
-    "newNotificationTitle": "ئاگاداری نوێ"
+    "newNotificationTitle": "ئاگاداری نوێ",
+    "searchForProduct": "گەڕان بەدوای بەرهەمدا"
   },
   "workspaceFreeUsage": {
     "title": "بەکارهێنانی بەخۆڕایی بەخشرا",

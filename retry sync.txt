@@ -1,6 +1,6 @@
-Product Live Recongnition on camera
+appointment center notification trigger
 
-notification button for product out of stock must redirect to product with the search
+Product Live Recongnition on camera
 
 Module-Route Based Maintenence Overlay with AGENTS.md instructions
 

@@ -1198,7 +1198,8 @@
     "loadFailed": "تعذر تحميل الإشعارات. حاول مرة أخرى.",
     "updateFailed": "تعذر تحديث الإشعارات. حاول مرة أخرى.",
     "newNotification": "لديك إشعار جديد",
-    "newNotificationTitle": "إشعار جديد"
+    "newNotificationTitle": "إشعار جديد",
+    "searchForProduct": "ابحث عن المنتج"
   },
   "workspaceFreeUsage": {
     "title": "تم منح استخدام مجاني",
