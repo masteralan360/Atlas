@@ -14,11 +14,14 @@ import {
   BEAUTY3_PROCEDURE_PRESET_CATEGORY,
   BEAUTY3_BUILT_IN_PROCEDURES,
   getBeauty3BuiltInProcedurePriceIqd,
+  getBeauty3ProcedureDisplayNameOverride,
+  getBeauty3ProcedureFaceAreas,
   isBeauty3BuiltInProcedureType,
   isReservedBeauty3ProcedureName,
 } from '@/local-db/beauty3Procedures'
-import type { ClinicalPreset, ClinicalPresetCategory, IQDDisplayPreference } from '@/local-db/models'
+import type { Beauty3ProcedureFaceArea, ClinicalPreset, ClinicalPresetCategory, IQDDisplayPreference } from '@/local-db/models'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { Beauty3ProcedureAreaPicker } from './Beauty3ProcedureFaceMap'
 import {
   AppDialog,
   AppDialogBody,
@@ -62,34 +65,42 @@ export function Beauty3ProcedureManagerDialog({
   const [editingBuiltInProcedure, setEditingBuiltInProcedure] = useState<string | null>(null)
   const [procedureName, setProcedureName] = useState('')
   const [procedurePriceText, setProcedurePriceText] = useState('')
+  const [faceMapAreas, setFaceMapAreas] = useState<Beauty3ProcedureFaceArea[]>([])
   const [procedureToDelete, setProcedureToDelete] = useState<ClinicalPreset | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const isProcessing = isSaving || isDeleting
   const normalizedName = procedureName.trim()
+  const getBuiltInProcedureName = (procedureType: string) => {
+    const procedure = BEAUTY3_BUILT_IN_PROCEDURES.find((item) => item.value === procedureType)
+    return getBeauty3ProcedureDisplayNameOverride(procedureType, presets)
+      ?? (procedure ? t(procedure.translationKey) : procedureType)
+  }
   const parsedProcedurePrice = procedurePriceText.trim() === ''
     ? Number.NaN
     : parseFormattedNumber(procedurePriceText)
   const isProcedurePriceValid = Number.isFinite(parsedProcedurePrice) && parsedProcedurePrice >= 0
   const isEditingBuiltIn = editingBuiltInProcedure !== null
   const isEditing = editingProcedure !== null || isEditingBuiltIn
-  const isDuplicateName = Boolean(
-    normalizedName
-    && !isEditingBuiltIn
-    && (
-      isReservedBeauty3ProcedureName(normalizedName)
-      || existingProcedures.some((procedure) => (
-        procedure.id !== editingProcedure?.id
-        && procedure.name.trim().toLocaleLowerCase() === normalizedName.toLocaleLowerCase()
-      ))
-    ),
-  )
+  const normalizedNameKey = normalizedName.toLocaleLowerCase()
+  const isDuplicateName = Boolean(normalizedName && (
+    (!isEditingBuiltIn && isReservedBeauty3ProcedureName(normalizedName))
+    || existingProcedures.some((procedure) => (
+      procedure.id !== editingProcedure?.id
+      && procedure.name.trim().toLocaleLowerCase() === normalizedNameKey
+    ))
+    || BEAUTY3_BUILT_IN_PROCEDURES.some((procedure) => (
+      procedure.value !== editingBuiltInProcedure
+      && getBuiltInProcedureName(procedure.value).trim().toLocaleLowerCase() === normalizedNameKey
+    ))
+  ))
 
   const resetForm = () => {
     setEditingProcedure(null)
     setEditingBuiltInProcedure(null)
     setProcedureName('')
     setProcedurePriceText('')
+    setFaceMapAreas([])
   }
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -100,7 +111,11 @@ export function Beauty3ProcedureManagerDialog({
 
   const handleSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if ((!isEditingBuiltIn && !normalizedName) || !isProcedurePriceValid || presets === undefined || isProcessing) return
+    if (!normalizedName
+      || (isEditingBuiltIn && faceMapAreas.length === 0)
+      || !isProcedurePriceValid
+      || presets === undefined
+      || isProcessing) return
 
     if (isDuplicateName) {
       toast({
@@ -116,13 +131,19 @@ export function Beauty3ProcedureManagerDialog({
       if (editingBuiltInProcedure) {
         const existingPrice = (presets ?? []).find((preset) => preset.name === editingBuiltInProcedure)
         if (existingPrice) {
-          await updateClinicalPreset(existingPrice.id, { consultationFee: parsedProcedurePrice }, workspaceId)
+          await updateClinicalPreset(existingPrice.id, {
+            displayName: normalizedName,
+            consultationFee: parsedProcedurePrice,
+            faceMapAreas,
+          }, workspaceId)
         } else {
           const sortOrder = Math.max(-1, ...procedures.map((procedure) => procedure.sortOrder)) + 1
           await createClinicalPreset({
             category: BEAUTY3_PROCEDURE_PRESET_CATEGORY,
             name: editingBuiltInProcedure,
+            displayName: normalizedName,
             consultationFee: parsedProcedurePrice,
+            faceMapAreas,
             sortOrder,
             isActive: true,
           }, workspaceId)
@@ -132,6 +153,7 @@ export function Beauty3ProcedureManagerDialog({
         await updateClinicalPreset(editingProcedure.id, {
           name: normalizedName,
           consultationFee: parsedProcedurePrice,
+          faceMapAreas,
         }, workspaceId)
         toast({ title: t('beauty3Appointments.procedureUpdated') })
       } else {
@@ -140,6 +162,7 @@ export function Beauty3ProcedureManagerDialog({
           category: BEAUTY3_PROCEDURE_PRESET_CATEGORY as ClinicalPresetCategory,
           name: normalizedName,
           consultationFee: parsedProcedurePrice,
+          faceMapAreas,
           sortOrder,
           isActive: true,
         }, workspaceId)
@@ -164,16 +187,20 @@ export function Beauty3ProcedureManagerDialog({
     setEditingBuiltInProcedure(null)
     setProcedureName(procedure.name)
     setProcedurePriceText(formatNumericInput(String(procedure.consultationFee ?? 0)))
+    setFaceMapAreas(getBeauty3ProcedureFaceAreas(procedure.name, procedure.faceMapAreas))
   }
 
   const startEditingBuiltIn = (procedureType: string) => {
     if (isProcessing) return
     setEditingProcedure(null)
     setEditingBuiltInProcedure(procedureType)
-    setProcedureName('')
-    const savedPrice = presets?.find((preset) => preset.name === procedureType)?.consultationFee
+    const savedProcedure = presets?.find((preset) => preset.name === procedureType)
+    const builtIn = BEAUTY3_BUILT_IN_PROCEDURES.find((procedure) => procedure.value === procedureType)
+    setProcedureName(savedProcedure?.displayName?.trim() || (builtIn ? t(builtIn.translationKey) : ''))
+    const savedPrice = savedProcedure?.consultationFee
     const defaultPrice = getBeauty3BuiltInProcedurePriceIqd(procedureType) ?? 0
     setProcedurePriceText(formatNumericInput(String(savedPrice ?? defaultPrice)))
+    setFaceMapAreas(getBeauty3ProcedureFaceAreas(procedureType, savedProcedure?.faceMapAreas))
   }
 
   const handleDelete = async () => {
@@ -235,33 +262,25 @@ export function Beauty3ProcedureManagerDialog({
                   </h3>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  {editingBuiltInProcedure ? (
-                    <div className="grid gap-2">
-                      <Label>{t('beauty3Appointments.procedureName')}</Label>
-                      <p className="flex min-h-10 items-center rounded-md border bg-muted/40 px-3 text-sm font-medium">
-                        {t(BEAUTY3_BUILT_IN_PROCEDURES.find((procedure) => procedure.value === editingBuiltInProcedure)?.translationKey ?? 'beauty3Appointments.procedureTypes.other')}
+                  <div className="grid gap-2">
+                    <Label htmlFor="beauty3-procedure-name">
+                      {t('beauty3Appointments.procedureName')} <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="beauty3-procedure-name"
+                      value={procedureName}
+                      onChange={(event) => setProcedureName(event.target.value)}
+                      placeholder={t('beauty3Appointments.procedureNamePlaceholder')}
+                      disabled={isProcessing}
+                      required
+                      autoFocus={open && !editingProcedure}
+                    />
+                    {isDuplicateName ? (
+                      <p className="text-sm text-destructive" role="alert">
+                        {t('beauty3Appointments.duplicateProcedure')}
                       </p>
-                    </div>
-                  ) : (
-                    <div className="grid gap-2">
-                      <Label htmlFor="beauty3-procedure-name">
-                        {t('beauty3Appointments.procedureName')} <span className="text-destructive">*</span>
-                      </Label>
-                      <Input
-                        id="beauty3-procedure-name"
-                        value={procedureName}
-                        onChange={(event) => setProcedureName(event.target.value)}
-                        placeholder={t('beauty3Appointments.procedureNamePlaceholder')}
-                        disabled={isProcessing}
-                        autoFocus={open && !editingProcedure}
-                      />
-                      {isDuplicateName ? (
-                        <p className="text-sm text-destructive" role="alert">
-                          {t('beauty3Appointments.duplicateProcedure')}
-                        </p>
-                      ) : null}
-                    </div>
-                  )}
+                    ) : null}
+                  </div>
                   <div className="grid gap-2">
                     <Label htmlFor="beauty3-procedure-price">
                       {t('beauty3Appointments.procedurePrice')} <span className="text-destructive">*</span>
@@ -282,6 +301,13 @@ export function Beauty3ProcedureManagerDialog({
                 </div>
               </section>
 
+              <Beauty3ProcedureAreaPicker
+                selectedAreas={faceMapAreas}
+                onChange={setFaceMapAreas}
+                disabled={isProcessing}
+                required={isEditingBuiltIn}
+              />
+
               <section className="space-y-3">
                 <div className="flex items-center gap-2">
                   <Tags className="size-4 text-muted-foreground" />
@@ -299,7 +325,7 @@ export function Beauty3ProcedureManagerDialog({
                         <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                           <Tags className="size-4" />
                         </div>
-                        <span className="min-w-0 flex-1 truncate font-medium">{t(procedure.translationKey)}</span>
+                        <span className="min-w-0 flex-1 truncate font-medium">{getBuiltInProcedureName(procedure.value)}</span>
                         <span className="shrink-0 text-sm text-muted-foreground">
                           {formatCurrency(price, 'iqd', iqdPreference, 0)}
                         </span>
@@ -396,7 +422,7 @@ export function Beauty3ProcedureManagerDialog({
               </Button>
               <Button
                 type="submit"
-                disabled={(!isEditingBuiltIn && !normalizedName) || !isProcedurePriceValid || presets === undefined || isDuplicateName || isProcessing}
+                disabled={!normalizedName || (isEditingBuiltIn && faceMapAreas.length === 0) || !isProcedurePriceValid || presets === undefined || isDuplicateName || isProcessing}
               >
                 {isSaving ? <Loader2 className="me-2 size-4 animate-spin" /> : <Plus className="me-2 size-4" />}
                 {isSaving

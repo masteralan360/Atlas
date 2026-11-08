@@ -6,6 +6,7 @@ import { useOptionalWorkspacePermissions } from "./workspacePermissionsState";
 
 export interface ViewOwnRecordScope {
   isRestricted: boolean;
+  isCoachOwnOnly?: boolean;
   userId: string | undefined;
 }
 
@@ -16,21 +17,29 @@ export interface ViewOwnRecordScope {
  */
 export function useViewOwnRecordScope(
   permission: Extract<WorkspacePermissionKey, `${string}.view_own`>,
+  orderType?: "sales" | "purchase",
 ): ViewOwnRecordScope {
   const auth = useOptionalAuth();
   const permissions = useOptionalWorkspacePermissions();
   const userId = auth?.user?.id;
   const userRole = auth?.user?.role;
+  const isCoachOwnOnly = Boolean(
+    permission === "orders.view_own"
+      && orderType === "sales"
+      && userRole === "staff"
+      && permissions?.permissionKeys.includes("coach"),
+  );
 
   return useMemo(
     () => ({
       isRestricted: Boolean(
         userId
           && userRole !== "admin"
-          && permissions?.permissionKeys.includes(permission),
+          && (permissions?.permissionKeys.includes(permission) || isCoachOwnOnly),
       ),
+      isCoachOwnOnly,
       userId,
     }),
-    [permission, permissions?.permissionKeys, userId, userRole],
+    [isCoachOwnOnly, permission, permissions?.permissionKeys, userId, userRole],
   );
 }

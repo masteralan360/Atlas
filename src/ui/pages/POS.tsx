@@ -168,7 +168,6 @@ import {
   HeldSalesModal,
   type HeldSale,
   StorageSelector,
-  CrossStorageWarningModal,
 } from '@/ui/components'
 import { BarcodeScannerModal } from '@/ui/components/pos/BarcodeScannerModal'
 import { CameraBarcodeScannerModal } from '@/ui/components/pos/CameraBarcodeScannerModal'
@@ -616,7 +615,7 @@ export function POS() {
     })
     const catalogProducts = useProducts(user?.workspaceId, {
         syncBarcodeCache: false,
-        enabled: isServicesStorage || cart.some((item) => item.storageId === SERVICES_VIRTUAL_STORAGE_ID)
+        enabled: requiresWorkspaceProductLookup || isServicesStorage || cart.some((item) => item.storageId === SERVICES_VIRTUAL_STORAGE_ID)
     })
     const productAccessStorageId = requiresWorkspaceProductLookup
         ? undefined
@@ -643,10 +642,6 @@ export function POS() {
         storageId: !isActivitiesStorage && !isServicesStorage ? selectedStorageId || undefined : undefined,
         syncRemote: false
     })
-    const [crossStorageWarning, setCrossStorageWarning] = useState<{
-        product: PosCatalogProduct;
-        foundStorageName: string;
-    } | null>(null)
     const [search, setSearch] = useState('')
     const isActivitiesCart = cart.some((item) => item.storageId === ACTIVITIES_STORAGE_ID)
     const isActivitiesCheckout = cart.length > 0 ? isActivitiesCart : isActivitiesStorage
@@ -850,6 +845,15 @@ export function POS() {
         () => filterSelectableProducts(products),
         [filterSelectableProducts, products]
     )
+    const inventoryProductsById = useMemo(() => {
+        const grouped = new Map<string, (typeof selectableInventoryProducts)[number][]>()
+        for (const product of selectableInventoryProducts) {
+            const rows = grouped.get(product.id) ?? []
+            rows.push(product)
+            grouped.set(product.id, rows)
+        }
+        return grouped
+    }, [selectableInventoryProducts])
     const serviceProducts = useMemo<PosCatalogProduct[]>(() => {
         if (!hasFeature('services')) return []
         return filterSelectableProducts(catalogProducts.filter(isService)).map((service) => ({
@@ -864,6 +868,10 @@ export function POS() {
     const scannableProducts = useMemo(
         () => getPosBarcodeLookupProducts(selectableInventoryProducts, serviceProducts, isServicesStorage),
         [isServicesStorage, selectableInventoryProducts, serviceProducts]
+    )
+    const catalogScannableProducts = useMemo(
+        () => filterSelectableProducts(catalogProducts.filter((product) => !isService(product))),
+        [catalogProducts, filterSelectableProducts]
     )
     const sellableProducts: PosCatalogProduct[] = isActivitiesStorage
         ? activityProducts
@@ -1523,6 +1531,57 @@ export function POS() {
         return map
     }, [productBarcodes, productUoms, scannableProducts])
 
+    const catalogBarcodeMap = useMemo(() => {
+        const map = new Map<string, string>()
+        const catalogProductIds = new Set(catalogScannableProducts.map((product) => product.id))
+
+        for (const barcodeRow of productBarcodes) {
+            if (catalogProductIds.has(barcodeRow.productId)) {
+                addBarcodeLookupCode(map, barcodeRow.barcode, barcodeRow.productId, barcodeRow.isPrimary)
+            }
+        }
+        for (const product of catalogScannableProducts) {
+            addBarcodeLookupCode(map, product.barcode, product.id)
+            for (const barcode of product.barcodes ?? []) {
+                addBarcodeLookupCode(map, barcode, product.id)
+            }
+        }
+        for (const uom of productUoms) {
+            if (!uom.isActive || uom.isDeleted || !catalogProductIds.has(uom.productId)) continue
+            addBarcodeLookupCode(map, uom.barcode, uom.productId, true)
+            addBarcodeLookupCode(map, uom.sku, uom.productId, true)
+        }
+        return map
+    }, [catalogScannableProducts, productBarcodes, productUoms])
+
+    const findCatalogProductByScanCode = useCallback((scannedValue: string) => {
+        if (isServicesStorage || isActivitiesStorage) return undefined
+        return findPosBarcodeCandidates(scannedValue, catalogScannableProducts, catalogBarcodeMap)[0]
+    }, [catalogBarcodeMap, catalogScannableProducts, isActivitiesStorage, isServicesStorage])
+
+    const findAccessibleAlternateStock = useCallback((productId: string, currentStorageId?: string | null) => {
+        const alternate = (inventoryProductsById.get(productId) ?? [])
+            .map((product) => ({
+                product,
+                quantity: getStockSourceAvailability(product).inventoryQuantity
+            }))
+            .filter(({ product, quantity }) => (
+                product.storageId !== currentStorageId
+                && storageAccess.canAccessStorage(product.storageId)
+                && Number.isFinite(quantity)
+                && quantity > 0.000001
+            ))
+            .sort((left, right) => right.quantity - left.quantity)[0]
+        if (!alternate) return undefined
+
+        const storage = storages.find((candidate) => (
+            candidate.id === alternate.product.storageId
+            && storageAccess.canAccessStorage(candidate.id)
+        ))
+        if (!storage) return undefined
+        return { quantity: alternate.quantity, storageName: storage.name }
+    }, [getStockSourceAvailability, inventoryProductsById, storageAccess, storages])
+
     const barcodeUomMap = useMemo(() => {
         const map = new Map<string, string>()
         for (const uom of productUoms) {
@@ -1545,6 +1604,7 @@ export function POS() {
 
     const knownScannerCodeIndex = useMemo(() => {
         const codes: string[] = []
+        const catalogProductIds = new Set(catalogScannableProducts.map((product) => product.id))
 
         for (const barcodeRow of productBarcodes) {
             if (scannableProducts.some((product) => product.id === barcodeRow.productId)) {
@@ -1560,8 +1620,18 @@ export function POS() {
             if (uom.isActive && !uom.isDeleted) codes.push(uom.sku ?? '', uom.barcode ?? '')
         }
 
+        for (const barcodeRow of productBarcodes) {
+            if (catalogProductIds.has(barcodeRow.productId)) {
+                codes.push(barcodeRow.barcode)
+            }
+        }
+        for (const product of catalogScannableProducts) {
+            codes.push(product.sku, product.barcode ?? '')
+            codes.push(...(product.barcodes ?? []))
+        }
+
         return createBarcodeScannerCodeIndex(codes)
-    }, [productBarcodes, productUoms, scannableProducts])
+    }, [catalogScannableProducts, productBarcodes, productUoms, scannableProducts])
 
     const canImmediatelySubmitDeviceScan = useCallback((value: string) => {
         // Treat a recognized, unambiguous code as the end of a scan. If a code
@@ -2153,6 +2223,26 @@ export function POS() {
         })
     }, [resolveDiscountForPrice, selectedPriceBookId])
 
+    const toastInsufficientStock = useCallback((product: Pick<PosCatalogProduct, 'id' | 'name'>, storageId?: string | null) => {
+        const resolvedStorageId = storageId || selectedStorageId
+        const storageName = storages.find((storage) => storage.id === resolvedStorageId)?.name
+            || t('pos.unknownStorage', { defaultValue: 'Unknown storage' })
+        const alternateStock = findAccessibleAlternateStock(product.id, resolvedStorageId)
+        toast({
+            variant: 'destructive',
+            title: t('messages.error'),
+            description: alternateStock
+                ? t('pos.insufficientStockWithAlternate', {
+                    productName: product.name,
+                    storageName,
+                    availableQuantity: new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }).format(alternateStock.quantity),
+                    alternateStorageName: alternateStock.storageName
+                })
+                : t('pos.insufficientStock', { productName: product.name, storageName })
+        })
+        hapticTrigger('error')
+    }, [findAccessibleAlternateStock, hapticTrigger, i18n.language, selectedStorageId, storages, t, toast])
+
     const addSelectedUnitToCart = useCallback((
         product: PosCatalogProduct,
         unitSelection?: PosUnitSelection,
@@ -2200,7 +2290,10 @@ export function POS() {
             .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
             .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
         if (!isInfiniteActivity && !isNonInventoryService
-            && committedInventoryQuantity + sellingFactor > product.inventoryQuantity + 0.000001) return false
+            && committedInventoryQuantity + sellingFactor > product.inventoryQuantity + 0.000001) {
+            toastInsufficientStock(product, product.storageId)
+            return false
+        }
         if (stockSource && !isInfiniteActivity && !isNonInventoryService
             && sellingFactor > availableSourceQuantity + 0.000001) {
             toast({
@@ -2321,7 +2414,7 @@ export function POS() {
         })
         hapticTrigger('selection')
         return true
-    }, [canSelectProduct, cart, currencyConversionEnabled, features, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, getProductForStockSource, getStockSourceAvailability, t, toast, hapticTrigger])
+    }, [canSelectProduct, cart, currencyConversionEnabled, features, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, getProductForStockSource, getStockSourceAvailability, t, toast, toastInsufficientStock, hapticTrigger])
 
     const addFreeOnlyProductToCart = useCallback((product: PosCatalogProduct) => {
         if (!canUseOrderFreeBonus || !quickOrderEnabled || isActivitiesStorage || product.isInfiniteActivity) return false
@@ -2412,6 +2505,14 @@ export function POS() {
     const addToCart = useCallback((product: PosCatalogProduct, stockSource?: PosStockSourceSelection | null) => {
         const options = !product.isInfiniteActivity && !isService(product) ? getProductUomOptions(product) : []
         if (options.length > 1) {
+            const committedInventoryQuantity = cart
+                .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
+                .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
+            const availableQuantity = Math.max(0, product.inventoryQuantity - committedInventoryQuantity)
+            if (!options.some((option) => option.coefficient <= availableQuantity + 0.000001)) {
+                toastInsufficientStock(product, product.storageId)
+                return false
+            }
             setUnitSelectionProduct(product)
             setUnitSelectionStockSource(stockSource ?? null)
             return false
@@ -2421,7 +2522,7 @@ export function POS() {
             options[0] ? buildPosUnitSelection(product, options[0], stockSource) : undefined,
             stockSource
         )
-    }, [addSelectedUnitToCart, buildPosUnitSelection, getProductUomOptions])
+    }, [addSelectedUnitToCart, buildPosUnitSelection, cart, getProductUomOptions, toastInsufficientStock])
 
     const selectCatalogProduct = useCallback((product: PosCatalogProduct) => {
         if (product.hasBatches && !product.isInfiniteActivity && !isService(product)) {
@@ -2887,31 +2988,36 @@ export function POS() {
         const candidates = findPosBarcodeCandidates(normalizedInput, scannableProducts, barcodeMap)
 
         const exactMatch = candidates.find(p => p.storageId === selectedStorageId)
-        const otherMatch = candidates.find(p => p.storageId !== selectedStorageId)
+        const otherMatch = candidates.find(p => p.storageId !== selectedStorageId && p.inventoryQuantity > 0.000001)
 
         if (exactMatch) {
-            addScannedProduct(exactMatch, normalizedInput)
+            const added = addScannedProduct(exactMatch, normalizedInput)
             setSkuInput('')
             setIsSkuModalOpen(false)
-            toast({
-                title: t('messages.success'),
-                description: `${exactMatch.name} ${t('common.added')}`,
-                duration: 2000,
-            })
+            if (added) {
+                toast({
+                    title: t('messages.success'),
+                    description: `${exactMatch.name} ${t('common.added')}`,
+                    duration: 2000,
+                })
+            }
         } else if (otherMatch) {
-            // Found in another storage
-            const storageName = storages.find(s => s.id === otherMatch.storageId)?.name || 'Unknown'
-            setCrossStorageWarning({ product: otherMatch, foundStorageName: storageName })
+            toastInsufficientStock(otherMatch, selectedStorageId)
             setSkuInput('')
             setIsSkuModalOpen(false)
         } else {
-            toast({
-                variant: 'destructive',
-                title: t('messages.error'),
-                description: `${t('pos.skuNotFound')}: ${normalizedInput}`,
-                duration: 2000,
-            })
-            hapticTrigger('error')
+            const outOfStockProduct = candidates[0] ?? findCatalogProductByScanCode(normalizedInput)
+            if (outOfStockProduct) {
+                toastInsufficientStock(outOfStockProduct, selectedStorageId)
+            } else {
+                toast({
+                    variant: 'destructive',
+                    title: t('messages.error'),
+                    description: `${t('pos.skuNotFound')}: ${normalizedInput}`,
+                    duration: 2000,
+                })
+                hapticTrigger('error')
+            }
         }
     }
 
@@ -2934,28 +3040,34 @@ export function POS() {
         const candidates = findPosBarcodeCandidates(text, scannableProducts, barcodeMap)
 
         const exactMatch = candidates.find(p => p.storageId === selectedStorageId)
-        const otherMatch = candidates.find(p => p.storageId !== selectedStorageId)
+        const otherMatch = candidates.find(p => p.storageId !== selectedStorageId && p.inventoryQuantity > 0.000001)
 
         if (exactMatch) {
-            addScannedProduct(exactMatch, text)
-            toast({
-                title: t('messages.success'),
-                description: `${exactMatch.name} ${t('common.added')}`,
-                duration: 2000,
-            })
+            const added = addScannedProduct(exactMatch, text)
+            if (added) {
+                toast({
+                    title: t('messages.success'),
+                    description: `${exactMatch.name} ${t('common.added')}`,
+                    duration: 2000,
+                })
+            }
         } else if (otherMatch) {
-            const storageName = storages.find(s => s.id === otherMatch.storageId)?.name || 'Unknown'
-            setCrossStorageWarning({ product: otherMatch, foundStorageName: storageName })
+            toastInsufficientStock(otherMatch, selectedStorageId)
         } else {
-            toast({
-                variant: 'destructive',
-                title: t('messages.error'),
-                description: `${t('pos.skuNotFound')}: ${text}`,
-                duration: 2000,
-            })
-            hapticTrigger('error')
+            const outOfStockProduct = candidates[0] ?? findCatalogProductByScanCode(text)
+            if (outOfStockProduct) {
+                toastInsufficientStock(outOfStockProduct, selectedStorageId)
+            } else {
+                toast({
+                    variant: 'destructive',
+                    title: t('messages.error'),
+                    description: `${t('pos.skuNotFound')}: ${text}`,
+                    duration: 2000,
+                })
+                hapticTrigger('error')
+            }
         }
-    }, [isCameraScannerAutoEnabled, isDeviceScannerAutoEnabled, scanDelay, barcodeMap, scannableProducts, addScannedProduct, t, toast, selectedStorageId, storages, hapticTrigger])
+    }, [isCameraScannerAutoEnabled, isDeviceScannerAutoEnabled, scanDelay, barcodeMap, scannableProducts, addScannedProduct, findCatalogProductByScanCode, t, toast, toastInsufficientStock, selectedStorageId, hapticTrigger])
 
     const handleCameraScannerProductScan = useCallback((scannedValue: string) => {
         const normalized = normalizeBarcodeScannerText(scannedValue)
@@ -2963,21 +3075,24 @@ export function POS() {
 
         const candidates = findPosBarcodeCandidates(normalized, scannableProducts, barcodeMap)
         const exactMatch = candidates.find((product) => product.storageId === selectedStorageId)
-        const otherMatch = candidates.find((product) => product.storageId !== selectedStorageId)
+        const otherMatch = candidates.find((product) => product.storageId !== selectedStorageId && product.inventoryQuantity > 0.000001)
 
         if (!exactMatch) {
             if (otherMatch) {
-                const storageName = storages.find((storage) => storage.id === otherMatch.storageId)?.name
-                    || t('pos.unknownStorage', { defaultValue: 'Unknown storage' })
-                setCrossStorageWarning({ product: otherMatch, foundStorageName: storageName })
+                toastInsufficientStock(otherMatch, selectedStorageId)
             } else {
-                toast({
-                    variant: 'destructive',
-                    title: t('messages.error'),
-                    description: `${t('pos.skuNotFound')}: ${normalized}`,
-                    duration: 2000
-                })
-                hapticTrigger('error')
+                const outOfStockProduct = candidates[0] ?? findCatalogProductByScanCode(normalized)
+                if (outOfStockProduct) {
+                    toastInsufficientStock(outOfStockProduct, selectedStorageId)
+                } else {
+                    toast({
+                        variant: 'destructive',
+                        title: t('messages.error'),
+                        description: `${t('pos.skuNotFound')}: ${normalized}`,
+                        duration: 2000
+                    })
+                    hapticTrigger('error')
+                }
             }
             return false
         }
@@ -2986,6 +3101,16 @@ export function POS() {
         const options = !isInfiniteActivity && !isService(exactMatch)
             ? getProductUomOptions(exactMatch)
             : []
+        if (options.length > 1) {
+            const committedInventoryQuantity = cart
+                .filter((item) => item.product_id === exactMatch.id && item.storageId === exactMatch.storageId)
+                .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
+            const availableQuantity = Math.max(0, exactMatch.inventoryQuantity - committedInventoryQuantity)
+            if (!options.some((option) => option.coefficient <= availableQuantity + 0.000001)) {
+                toastInsufficientStock(exactMatch, exactMatch.storageId)
+                return false
+            }
+        }
         const uomId = barcodeUomMap.get(normalized) ?? barcodeUomMap.get(normalized.toLowerCase())
         const scannedUom = uomId ? options.find((row) => row.id === uomId) : undefined
 
@@ -3016,7 +3141,7 @@ export function POS() {
             exactMatch,
             options[0] ? buildPosUnitSelection(exactMatch, options[0]) : undefined
         ))
-    }, [addSelectedUnitToCart, barcodeMap, barcodeUomMap, buildPosUnitSelection, getProductUomOptions, hapticTrigger, scannableProducts, selectedStorageId, storages, t, toast])
+    }, [addSelectedUnitToCart, barcodeMap, barcodeUomMap, buildPosUnitSelection, cart, findCatalogProductByScanCode, getProductUomOptions, hapticTrigger, scannableProducts, selectedStorageId, t, toast, toastInsufficientStock])
 
     useEffect(() => {
         const clearDeviceScanTimeout = () => {
@@ -6111,19 +6236,6 @@ export function POS() {
                 onComplete={() => setPosLoanSavePartnerData(null)}
             />
 
-            <CrossStorageWarningModal
-                isOpen={!!crossStorageWarning}
-                onOpenChange={(open: boolean) => !open && setCrossStorageWarning(null)}
-                productName={crossStorageWarning?.product.name || ''}
-                currentStorageName={posStorages.find(s => s.id === selectedStorageId)?.name || 'Current'}
-                foundInStorageName={crossStorageWarning?.foundStorageName || 'Unknown'}
-                onConfirm={() => {
-                    if (crossStorageWarning) {
-                        selectCatalogProduct(crossStorageWarning.product)
-                        setCrossStorageWarning(null)
-                    }
-                }}
-            />
             </div>
         </div>
     )

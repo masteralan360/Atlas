@@ -2,7 +2,7 @@ import appI18n from '@/i18n/config'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/local-db/database'
 import { discardOfflineStockCount, type OfflineStockOperation } from '@/local-db/offlineStockOperations'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
     AppDialog,
     AppDialogBody,
@@ -19,12 +19,12 @@ import {
 } from '@/ui/components/dialog'
 import { Button } from '@/ui/components/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/ui/components/table'
-import { Loader2, CheckCircle2, AlertTriangle, ListTodo, RotateCcw } from 'lucide-react'
+import { Loader2, CheckCircle2, AlertTriangle, ListTodo, RotateCcw, Trash2 } from 'lucide-react'
 import { useAuth } from '@/auth/AuthContext'
 import { useToast } from '@/ui/components/use-toast'
 import { usePendingSyncMutations } from '@/local-db/hooks'
+import { discardAndRestoreOfflineMutations } from '@/local-db/offlineMutationRecovery'
 import { retrySyncIntegrityMutations } from '@/local-db/offlineMutations'
-import { canRecoverOfflineMutation, discardAndRestoreOfflineMutation, type OfflineMutationRecoveryFailure } from '@/local-db/offlineMutationRecovery'
 import type { OfflineMutation } from '@/local-db/models'
 import {
     getCapitalPoolConflictFromSyncError,
@@ -37,8 +37,9 @@ import { runManagedFullSync } from '@/sync/syncCoordinator'
 import { LAST_SYNC_KEY } from '@/sync/constants'
 import { connectionManager } from '@/lib/connectionManager'
 import { cn } from '@/lib/utils'
-import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { queryClient } from '@/query/queryClient'
+import { useWorkspace } from '@/workspace/WorkspaceContext'
 
 interface ManualSyncModalProps {
     open: boolean
@@ -118,10 +119,18 @@ function getFieldStatusClassName(status: RemoteMutationFieldInspection['status']
 export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentClassName }: ManualSyncModalProps) {
     const { t, i18n } = useTranslation()
     const { user } = useAuth()
-    const { isLocalMode } = useWorkspace()
+    const { refreshFeatures } = useWorkspace()
     const { toast } = useToast()
     const pendingMutations = usePendingSyncMutations()
     const pendingCount = pendingMutations.length
+    const clearableMutationCount = useLiveQuery(async () => {
+        if (!user?.workspaceId) return 0
+        return db.offline_mutations
+            .where('workspaceId')
+            .equals(user.workspaceId)
+            .filter(mutation => mutation.status === 'pending' || mutation.status === 'syncing' || mutation.status === 'failed')
+            .count()
+    }, [user?.workspaceId]) ?? 0
     const [isOnline, setIsOnline] = useState(() => connectionManager.getState().isOnline)
 
     const stockRetryLock = useRef(false)
@@ -129,7 +138,10 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
     const [status, setStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle')
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
     const [mutationToDiscard, setMutationToDiscard] = useState<OfflineMutation | null>(null)
+    const [mutationToClearWithoutRestore, setMutationToClearWithoutRestore] = useState<OfflineMutation | null>(null)
     const [isDiscarding, setIsDiscarding] = useState(false)
+    const [isDiscardAllConfirmOpen, setIsDiscardAllConfirmOpen] = useState(false)
+    const [isClearQueueConfirmOpen, setIsClearQueueConfirmOpen] = useState(false)
     const [selectedMutation, setSelectedMutation] = useState<OfflineMutation | null>(null)
 
     const selectedStockOperation = selectedMutation?.entityType === 'stock_operations' ? selectedMutation.payload as unknown as OfflineStockOperation : null
@@ -138,12 +150,6 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
         return db.products.bulkGet(ids)
     }, [selectedMutation?.id])
     const stockProductNames = new Map(selectedStockProducts?.filter(row => !!row).map(row => [row!.id, row!.name]))
-    const selectedMutationCanRecover = useMemo(() => (
-        !isLocalMode
-        && isOnline
-        && canRecoverOfflineMutation(selectedMutation)
-    ), [isLocalMode, isOnline, selectedMutation])
-
     const selectedMutationFields = selectedMutation
         ? inspectRemoteMutationPayload(selectedMutation.entityType, selectedMutation.payload, selectedMutation.error)
         : []
@@ -234,54 +240,148 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
         }
     }
 
-    function getRecoveryFailureMessage(reason: OfflineMutationRecoveryFailure) {
-        return t(`sync.recovery.errors.${reason}`)
-    }
-
     async function handleDiscard() {
-        if (mutationToDiscard?.entityType === 'stock_operations') {
-            if (isDiscarding) return
-            setIsDiscarding(true)
-            try {
-                await discardOfflineStockCount(mutationToDiscard.id)
-                setMutationToDiscard(null)
-                setSelectedMutation(null)
-                toast({ title: t('inventory.offline.discarded') })
-            } catch (error) {
-                toast({ title: t('common.error'), description: error instanceof Error ? error.message : t('inventory.offline.rejected'), variant: 'destructive' })
-            } finally { setIsDiscarding(false) }
-            return
-        }
-        if (!user || !mutationToDiscard || isDiscarding) return
+        if (!mutationToDiscard || !user?.workspaceId || isDiscarding) return
 
         setIsDiscarding(true)
         try {
-            const result = await discardAndRestoreOfflineMutation(
+            const result = await discardAndRestoreOfflineMutations(
                 user.workspaceId,
-                mutationToDiscard.id,
+                [mutationToDiscard],
                 user.id
             )
-
-            if (result.status === 'discarded') {
-                toast({
-                    title: t('sync.recovery.successTitle'),
-                    description: t(`sync.recovery.successDescription.${result.action}`),
-                    variant: 'default'
-                })
-                setSelectedMutation(null)
-                setMutationToDiscard(null)
-                return
+            if (result.status !== 'discarded') throw new Error(result.reason)
+            const refreshTasks: Promise<unknown>[] = [
+                queryClient.invalidateQueries({ queryKey: ['atlas', 'workspace', user.workspaceId] })
+            ]
+            if (mutationToDiscard.entityType === 'workspaces' || mutationToDiscard.entityType === 'workspace_branches') {
+                refreshTasks.push(refreshFeatures())
             }
-
+            await Promise.all(refreshTasks)
+            setSelectedMutation(null)
+            setMutationToDiscard(null)
+            onSyncComplete?.()
             toast({
-                title: t('sync.recovery.failureTitle'),
-                description: getRecoveryFailureMessage(result.reason),
-                variant: 'destructive'
+                title: t('sync.recovery.discardQueueSuccessTitle'),
+                description: t('sync.recovery.discardQueueSuccessDescription'),
+                variant: 'default'
             })
         } catch (_error: unknown) {
             toast({
                 title: t('sync.recovery.failureTitle'),
-                description: t('sync.recovery.errors.remote_request_failed'),
+                description: t('sync.recovery.discardRestoreError'),
+                variant: 'destructive'
+            })
+        } finally {
+            setIsDiscarding(false)
+        }
+    }
+
+    async function handleDiscardAll() {
+        if (pendingCount === 0 || !user?.workspaceId || isDiscarding) return
+
+        setIsDiscarding(true)
+        const mutationsToDiscard = [...pendingMutations]
+
+        try {
+            const result = await discardAndRestoreOfflineMutations(
+                user.workspaceId,
+                mutationsToDiscard,
+                user.id
+            )
+            if (result.status !== 'discarded') throw new Error(result.reason)
+            const refreshTasks: Promise<unknown>[] = [
+                queryClient.invalidateQueries({ queryKey: ['atlas', 'workspace', user.workspaceId] })
+            ]
+            if (mutationsToDiscard.some(mutation => (
+                mutation.entityType === 'workspaces' || mutation.entityType === 'workspace_branches'
+            ))) {
+                refreshTasks.push(refreshFeatures())
+            }
+            await Promise.all(refreshTasks)
+            setIsDiscardAllConfirmOpen(false)
+            setStatus('idle')
+            setErrorMessage(null)
+            onSyncComplete?.()
+            toast({
+                title: t('sync.recovery.discardAllSuccessTitle'),
+                description: t('sync.recovery.discardAllSuccessDescription', { count: result.count }),
+                variant: 'default'
+            })
+        } catch (_error: unknown) {
+            toast({
+                title: t('sync.recovery.failureTitle'),
+                description: t('sync.recovery.discardRestoreError'),
+                variant: 'destructive'
+            })
+        } finally {
+            setIsDiscarding(false)
+        }
+    }
+
+    async function handleClearSyncWithoutRestore(mutation: OfflineMutation) {
+        if (isDiscarding || !user?.workspaceId || mutation.workspaceId !== user.workspaceId) return
+
+        setIsDiscarding(true)
+        try {
+            await db.offline_mutations.delete(mutation.id)
+            setSelectedMutation(null)
+            setMutationToDiscard(null)
+            setMutationToClearWithoutRestore(null)
+            setStatus('idle')
+            setErrorMessage(null)
+            onSyncComplete?.()
+            toast({
+                title: t('sync.recovery.clearSyncSuccessTitle'),
+                description: t('sync.recovery.clearSyncSuccessDescription'),
+                variant: 'default'
+            })
+        } catch (_error: unknown) {
+            toast({
+                title: t('sync.recovery.failureTitle'),
+                description: t('sync.recovery.clearQueueError'),
+                variant: 'destructive'
+            })
+        } finally {
+            setIsDiscarding(false)
+        }
+    }
+
+    async function handleClearQueueWithoutRestore() {
+        if (!user?.workspaceId || isDiscarding) return
+
+        setIsDiscarding(true)
+        try {
+            const queuedRows = await db.offline_mutations
+                .where('workspaceId')
+                .equals(user.workspaceId)
+                .filter(mutation => mutation.status === 'pending' || mutation.status === 'syncing' || mutation.status === 'failed')
+                .toArray()
+            const queuedIds = queuedRows.map(mutation => mutation.id)
+            if (queuedIds.length === 0) {
+                setIsClearQueueConfirmOpen(false)
+                return
+            }
+
+            await db.transaction('rw', db.offline_mutations, async () => {
+                await db.offline_mutations.bulkDelete(queuedIds)
+            })
+            setSelectedMutation(null)
+            setMutationToDiscard(null)
+            setIsDiscardAllConfirmOpen(false)
+            setIsClearQueueConfirmOpen(false)
+            setStatus('idle')
+            setErrorMessage(null)
+            onSyncComplete?.()
+            toast({
+                title: t('sync.recovery.clearQueueSuccessTitle'),
+                description: t('sync.recovery.clearQueueSuccessDescription', { count: queuedIds.length }),
+                variant: 'default'
+            })
+        } catch (_error: unknown) {
+            toast({
+                title: t('sync.recovery.failureTitle'),
+                description: t('sync.recovery.clearQueueError'),
                 variant: 'destructive'
             })
         } finally {
@@ -398,8 +498,8 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                         )}
                     </div>
 
-                    <DialogFooter className="sm:justify-between flex-row gap-2">
-                        <div className="flex gap-2">
+                    <DialogFooter className="sm:justify-between flex-col sm:flex-row gap-2">
+                        <div className="flex flex-col sm:flex-row gap-2">
                             <Button
                                 variant="ghost"
                                 onClick={() => handleOpenChange(false)}
@@ -407,6 +507,30 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                             >
                                 {status === 'success' ? t('common.close', 'Close') : t('common.cancel', 'Cancel')}
                             </Button>
+                            {status !== 'success' && (
+                                <>
+                                    <Button
+                                        type="button"
+                                        variant="destructive"
+                                        onClick={() => setIsDiscardAllConfirmOpen(true)}
+                                        disabled={pendingCount === 0 || isSyncing || isDiscarding}
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                        {t('sync.recovery.discardAllAction')}
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="border-destructive/50 text-destructive hover:bg-destructive/10"
+                                        onClick={() => setIsClearQueueConfirmOpen(true)}
+                                        disabled={clearableMutationCount === 0 || isDiscarding}
+                                        title={t('sync.recovery.clearQueueWithoutRestoreDescription')}
+                                    >
+                                        <Trash2 className="h-4 w-4" />
+                                        {t('sync.recovery.clearQueueWithoutRestoreAction')}
+                                    </Button>
+                                </>
+                            )}
                         </div>
                         {status !== 'success' && (firstPartnerAccessChangedMutation ? (
                             <Button
@@ -436,18 +560,59 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                 }}
                 onConfirm={() => void handleDiscard()}
                 isLoading={isDiscarding}
-                confirmLabel={mutationToDiscard?.entityType === 'stock_operations' ? t('inventory.offline.discardCount') : isBusinessPartnerAccessChangedError(mutationToDiscard?.error)
-                    ? t('sync.recovery.accessRevokedAction')
-                    : t('sync.recovery.action')}
-                title={mutationToDiscard?.entityType === 'stock_operations' ? t('inventory.offline.discardCount') : isBusinessPartnerAccessChangedError(mutationToDiscard?.error)
-                    ? t('sync.recovery.accessRevokedConfirmTitle')
-                    : t('sync.recovery.confirmTitle')}
-                description={mutationToDiscard?.entityType === 'stock_operations' ? t('inventory.offline.discardDescription') : isBusinessPartnerAccessChangedError(mutationToDiscard?.error)
-                    ? t('sync.recovery.accessRevokedConfirmDescription')
-                    : t('sync.recovery.confirmDescription', {
-                        entity: mutationToDiscard ? getEntityLabel(mutationToDiscard.entityType) : ''
-                    })}
+                confirmLabel={t('sync.recovery.discardAction')}
+                title={t('sync.recovery.discardQueueConfirmTitle')}
+                description={t('sync.recovery.discardQueueConfirmDescription', {
+                    entity: mutationToDiscard ? getEntityLabel(mutationToDiscard.entityType) : ''
+                })}
                 itemName={mutationToDiscard ? getEntityLabel(mutationToDiscard.entityType) : ''}
+                contentClassName={cn(contentClassName, 'z-[10030]')}
+                overlayClassName="z-[10025]"
+            />
+
+            <DeleteConfirmationModal
+                isOpen={mutationToClearWithoutRestore !== null}
+                onClose={() => {
+                    if (!isDiscarding) setMutationToClearWithoutRestore(null)
+                }}
+                onConfirm={() => mutationToClearWithoutRestore && void handleClearSyncWithoutRestore(mutationToClearWithoutRestore)}
+                isLoading={isDiscarding}
+                confirmLabel={t('sync.recovery.clearSyncWithoutRestoreAction')}
+                title={t('sync.recovery.clearSyncConfirmTitle')}
+                description={t('sync.recovery.clearSyncConfirmDescription', {
+                    entity: mutationToClearWithoutRestore ? getEntityLabel(mutationToClearWithoutRestore.entityType) : ''
+                })}
+                itemName={mutationToClearWithoutRestore ? getEntityLabel(mutationToClearWithoutRestore.entityType) : ''}
+                contentClassName={cn(contentClassName, 'z-[10030]')}
+                overlayClassName="z-[10025]"
+            />
+
+            <DeleteConfirmationModal
+                isOpen={isClearQueueConfirmOpen}
+                onClose={() => {
+                    if (!isDiscarding) setIsClearQueueConfirmOpen(false)
+                }}
+                onConfirm={() => void handleClearQueueWithoutRestore()}
+                isLoading={isDiscarding}
+                confirmLabel={t('sync.recovery.clearQueueWithoutRestoreAction')}
+                title={t('sync.recovery.clearQueueConfirmTitle')}
+                description={t('sync.recovery.clearQueueConfirmDescription', { count: clearableMutationCount })}
+                itemName={t('sync.queueItems', { count: clearableMutationCount })}
+                contentClassName={cn(contentClassName, 'z-[10030]')}
+                overlayClassName="z-[10025]"
+            />
+
+            <DeleteConfirmationModal
+                isOpen={isDiscardAllConfirmOpen}
+                onClose={() => {
+                    if (!isDiscarding) setIsDiscardAllConfirmOpen(false)
+                }}
+                onConfirm={() => void handleDiscardAll()}
+                isLoading={isDiscarding}
+                confirmLabel={t('sync.recovery.discardAllConfirmAction')}
+                title={t('sync.recovery.discardAllConfirmTitle')}
+                description={t('sync.recovery.discardAllConfirmDescription', { count: pendingCount })}
+                itemName={t('sync.queueItems', { count: pendingCount })}
                 contentClassName={cn(contentClassName, 'z-[10030]')}
                 overlayClassName="z-[10025]"
             />
@@ -540,11 +705,27 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                         <Button variant="ghost" onClick={() => setSelectedMutation(null)} disabled={isDiscarding || isSyncing}>
                             {t('common.close', 'Close')}
                         </Button>
-                        {selectedStockOperation?.count && selectedMutation?.status === 'failed' && (
-                            <Button variant="destructive" disabled={isSyncing || isDiscarding || !isOnline || selectedStockOperation.actorId !== user?.id}
-                                onClick={() => setMutationToDiscard(selectedMutation)}>
-                                <RotateCcw className="h-4 w-4" />{t('inventory.offline.discardCount')}
-                            </Button>
+                        {selectedMutation && (
+                            <>
+                                <Button
+                                    variant="destructive"
+                                    onClick={() => setMutationToDiscard(selectedMutation)}
+                                    disabled={isDiscarding || isSyncing}
+                                >
+                                    {isDiscarding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                                    {t('sync.recovery.discardAction')}
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    className="border-destructive/50 text-destructive hover:bg-destructive/10"
+                                    onClick={() => setMutationToClearWithoutRestore(selectedMutation)}
+                                    disabled={isDiscarding}
+                                    title={t('sync.recovery.clearSyncWithoutRestoreDescription')}
+                                >
+                                    {isDiscarding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                                    {t('sync.recovery.clearSyncWithoutRestoreAction')}
+                                </Button>
+                            </>
                         )}
                         {selectedStockOperation ? (
                             <Button disabled={isSyncing || isDiscarding || !isOnline || selectedStockOperation.actorId !== user?.id || selectedMutation?.status === 'syncing'} onClick={async () => {
@@ -563,28 +744,7 @@ export function ManualSyncModal({ open, onOpenChange, onSyncComplete, contentCla
                                 {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
                                 {t('inventory.offline.retry')}
                             </Button>
-                        ) : selectedMutationCanRecover ? (
-                            <Button
-                                variant="destructive"
-                                onClick={() => {
-                                    if (selectedMutation) setMutationToDiscard(selectedMutation)
-                                }}
-                                disabled={isDiscarding}
-                            >
-                                {isDiscarding ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-                                {selectedPartnerAccessChanged
-                                    ? t('sync.accessChanged.discardAction')
-                                    : t('sync.recovery.action')}
-                            </Button>
-                        ) : (
-                            <p className="text-xs text-muted-foreground">
-                                {isLocalMode
-                                    ? t('sync.recovery.unavailableLocal')
-                                    : !isOnline
-                                        ? t('sync.recovery.unavailableOffline')
-                                        : t('sync.recovery.unavailable')}
-                            </p>
-                        )}
+                        ) : null}
                     </AppDialogFooter>
                 </AppDialogContent>
             </AppDialog>

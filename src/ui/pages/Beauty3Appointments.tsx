@@ -38,7 +38,6 @@ import {
   AppDialogTitle,
   AppPagination,
   Button,
-  CurrencySelector,
   DateTimePicker,
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -61,6 +60,7 @@ import {
 } from '@/ui/components'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { Beauty3ProcedureManagerDialog } from '@/ui/components/clinical/Beauty3ProcedureManagerDialog'
+import { Beauty3ProcedureFaceMap, type Beauty3FaceMapProcedure } from '@/ui/components/clinical/Beauty3ProcedureFaceMap'
 import { PaymentReversalDialog, type PaymentReversalDialogInput } from '@/ui/components/payments/PaymentReversalDialog'
 import { SettlementDialog } from '@/ui/components/payments/SettlementDialog'
 import {
@@ -93,6 +93,8 @@ import {
   BEAUTY3_OTHER_PROCEDURE_TYPE,
   BEAUTY3_PROCEDURE_PRESET_CATEGORY,
   getBeauty3BuiltInProcedurePriceIqd,
+  getBeauty3ProcedureDisplayNameOverride,
+  getBeauty3ProcedureFaceAreas,
   isBeauty3BuiltInProcedureType,
 } from '@/local-db/beauty3Procedures'
 import { formatCurrency, formatDate, formatLocalDateValue, formatNumericInput, parseFormattedNumber, parseLocalDateValue, sanitizeNumericInput } from '@/lib/utils'
@@ -218,6 +220,10 @@ export function Beauty3Appointments() {
   const queryClient = useQueryClient()
   const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
   const workspaceId = user?.workspaceId ?? ''
+  const procedurePresets = useClinicalPresetsByCategory(
+    workspaceId,
+    BEAUTY3_PROCEDURE_PRESET_CATEGORY,
+  )
   const [search, setSearch] = useState('')
   const [pageSize] = useState(getSavedPageSize)
   const savePageSize = useCallback((nextPageSize: number) => {
@@ -705,15 +711,20 @@ export function Beauty3Appointments() {
     if (procedureTypes.length === 0) return '—'
 
     return procedureTypes.map((procedureType) => {
-      if (procedureType === BEAUTY3_OTHER_PROCEDURE_TYPE) {
-        return appointment.procedureTypeOther || t('beauty3Appointments.procedureTypes.other')
-      }
       const builtInProcedure = BEAUTY3_BUILT_IN_PROCEDURES.find(
         (procedure) => procedure.value === procedureType,
       )
-      return builtInProcedure ? t(builtInProcedure.translationKey) : procedureType
+      const displayName = getBeauty3ProcedureDisplayNameOverride(procedureType, procedurePresets)
+      if (procedureType === BEAUTY3_OTHER_PROCEDURE_TYPE) {
+        return appointment.procedureTypeOther
+          || displayName
+          || t('beauty3Appointments.procedureTypes.other')
+      }
+      return builtInProcedure
+        ? displayName ?? t(builtInProcedure.translationKey)
+        : procedureType
     }).join(', ')
-  }, [t])
+  }, [procedurePresets, t])
 
   const columns = useMemo(() => [
     columnHelper.accessor('name', {
@@ -883,7 +894,7 @@ export function Beauty3Appointments() {
             className="shrink-0"
           >
             <FolderCog className="me-2 size-4" />
-            {t('beauty3Appointments.addProcedure')}
+            {t('beauty3Appointments.manageProcedure')}
           </Button>
           <Button
             type="button"
@@ -1185,7 +1196,6 @@ function Beauty3AppointmentInlineEntry({
   const [procedureDate, setProcedureDate] = useState<Date | undefined>(() => new Date())
   const [appointmentTotalText, setAppointmentTotalText] = useState('')
   const [totalProfitText, setTotalProfitText] = useState('')
-  const [currency, setCurrency] = useState<CurrencyCode>(defaultCurrency)
   const [isSaving, setIsSaving] = useState(false)
   const clientQuery = useBeauty3ClientSearch({
     workspaceId,
@@ -1248,10 +1258,27 @@ function Beauty3AppointmentInlineEntry({
     return savedPrice ?? getBeauty3BuiltInProcedurePriceIqd(value) ?? 0
   }
   const getProcedureName = (value: string) => {
-    if (value === BEAUTY3_OTHER_PROCEDURE_TYPE) return t('beauty3Appointments.procedureTypes.other')
     const builtInProcedure = BEAUTY3_BUILT_IN_PROCEDURES.find((procedure) => procedure.value === value)
-    return builtInProcedure ? t(builtInProcedure.translationKey) : value
+    const displayName = getBeauty3ProcedureDisplayNameOverride(value, customProcedurePresets)
+    return builtInProcedure
+      ? displayName ?? t(builtInProcedure.translationKey)
+      : value
   }
+  const faceMapProcedures: Beauty3FaceMapProcedure[] = procedureTypes.map((value) => {
+    const builtInIndex = BEAUTY3_BUILT_IN_PROCEDURES.findIndex((procedure) => procedure.value === value)
+    const customIndex = procedureTypes
+      .filter((procedureType) => !isBeauty3BuiltInProcedureType(procedureType))
+      .indexOf(value)
+    const savedProcedure = customProcedurePresets?.find((preset) => preset.name === value)
+    return {
+      value,
+      label: getProcedureName(value),
+      number: builtInIndex >= 0
+        ? builtInIndex + 1
+        : BEAUTY3_BUILT_IN_PROCEDURES.length + customIndex + 1,
+      areas: getBeauty3ProcedureFaceAreas(value, savedProcedure?.faceMapAreas),
+    }
+  })
   const formatProcedureOption = (value: string) => t('beauty3Appointments.procedureOptionWithPrice', {
     name: getProcedureName(value),
     price: formatCurrency(getProcedurePriceIqd(value), 'iqd', iqdPreference, 0),
@@ -1297,7 +1324,7 @@ function Beauty3AppointmentInlineEntry({
         procedureDate: formatLocalDateValue(procedureDate),
         appointmentTotal: parsedTotal,
         totalProfit: parsedProfit,
-        currency,
+        currency: defaultCurrency,
       }
       const saved = await onSave(draft)
       if (!saved) return
@@ -1461,10 +1488,10 @@ function Beauty3AppointmentInlineEntry({
             <Label htmlFor="beauty3-inline-procedures">{t('beauty3Appointments.procedureType')} *</Label>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button id="beauty3-inline-procedures" type="button" variant="outline" className="w-full justify-between gap-2 font-normal" disabled={isSaving}>
-                  <span className="truncate">
+                <Button id="beauty3-inline-procedures" type="button" variant="outline" className="h-auto min-h-10 w-full justify-between gap-2 whitespace-normal font-normal" disabled={isSaving}>
+                  <span className="min-w-0 flex-1 break-words text-start">
                     {procedureTypes.length > 0
-                      ? t('beauty3Appointments.procedureTypesSelected', { count: procedureTypes.length })
+                      ? procedureTypes.map(getProcedureName).join(', ')
                       : t('beauty3Appointments.procedureTypeEmpty')}
                   </span>
                   <ChevronDown className="size-4 shrink-0 opacity-50" />
@@ -1508,7 +1535,8 @@ function Beauty3AppointmentInlineEntry({
             ) : null}
             {customProcedurePresets === undefined ? <p className="text-xs text-muted-foreground">{t('beauty3Appointments.loadingProcedures')}</p> : null}
           </div>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <Beauty3ProcedureFaceMap procedures={faceMapProcedures} />
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="beauty3-inline-total">{t('beauty3Appointments.appointmentTotal')} *</Label>
               <Input id="beauty3-inline-total" value={appointmentTotalText} onChange={(event) => setAppointmentTotalText(formatNumericInput(sanitizeNumericInput(event.target.value)))} placeholder={t('beauty3Appointments.zeroPlaceholder')} inputMode="decimal" disabled={isSaving} />
@@ -1517,13 +1545,10 @@ function Beauty3AppointmentInlineEntry({
               <Label htmlFor="beauty3-inline-profit">{t('beauty3Appointments.totalProfit')} *</Label>
               <Input id="beauty3-inline-profit" value={totalProfitText} onChange={(event) => setTotalProfitText(formatNumericInput(sanitizeNumericInput(event.target.value)))} placeholder={t('beauty3Appointments.zeroPlaceholder')} inputMode="decimal" disabled={isSaving} />
             </div>
-            <div className="space-y-1.5">
-              <CurrencySelector value={currency} onChange={setCurrency} label={`${t('beauty3Appointments.currency')} *`} iqdDisplayPreference={iqdPreference} disabled={isSaving} />
-            </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
             <Button type="button" variant="ghost" size="sm" onClick={onManageProcedures} disabled={isSaving}>
-              <FolderCog className="me-2 size-4" />{t('beauty3Appointments.addProcedure')}
+              <FolderCog className="me-2 size-4" />{t('beauty3Appointments.manageProcedure')}
             </Button>
             <div className="flex items-center gap-2">
               <Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>{t('common.cancel')}</Button>
@@ -1607,9 +1632,11 @@ function Beauty3AppointmentFormDialog({
   }
 
   const getProcedureName = (value: string) => {
-    if (value === BEAUTY3_OTHER_PROCEDURE_TYPE) return t('beauty3Appointments.procedureTypes.other')
     const builtInProcedure = BEAUTY3_BUILT_IN_PROCEDURES.find((procedure) => procedure.value === value)
-    return builtInProcedure ? t(builtInProcedure.translationKey) : value
+    const displayName = getBeauty3ProcedureDisplayNameOverride(value, customProcedurePresets)
+    return builtInProcedure
+      ? displayName ?? t(builtInProcedure.translationKey)
+      : value
   }
 
   const formatProcedureOption = (value: string) => {
@@ -1793,13 +1820,13 @@ function Beauty3AppointmentFormDialog({
                       id="beauty3-procedure-type"
                       type="button"
                       variant="outline"
-                      className="w-full justify-between gap-2 font-normal"
+                      className="h-auto min-h-10 w-full justify-between gap-2 whitespace-normal font-normal"
                       title={procedureTypes.map(formatProcedureOption).join(', ')}
                       disabled={isSaving}
                     >
-                      <span className="truncate">
+                      <span className="min-w-0 flex-1 break-words text-start">
                         {procedureTypes.length > 0
-                          ? t('beauty3Appointments.procedureTypesSelected', { count: procedureTypes.length })
+                          ? procedureTypes.map(getProcedureName).join(', ')
                           : t('beauty3Appointments.procedureTypeEmpty')}
                       </span>
                       <ChevronDown className="size-4 shrink-0 opacity-50" />
@@ -1889,7 +1916,7 @@ function Beauty3AppointmentFormDialog({
                   disabled={isSaving}
                 >
                   <Plus className="me-1 size-3.5" />
-                  {t('beauty3Appointments.addProcedure')}
+                  {t('beauty3Appointments.manageProcedure')}
                 </Button>
               </div>
               {isOtherProcedureSelected ? (

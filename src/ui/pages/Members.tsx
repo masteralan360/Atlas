@@ -378,6 +378,16 @@ export function Members() {
             return
         }
 
+        const coachPermissionKeys = permissionsByUserId.get(member.id)
+        if (
+            !shouldGrant
+            && member.role === 'staff'
+            && coachPermissionKeys?.has('coach')
+            && (permissionKey === 'orders.saleOrdersAccess' || permissionKey === 'orders.view_own')
+        ) {
+            return
+        }
+
         const mutationKey = `${member.id}:${permissionKey}`
         setPermissionMutationKey(mutationKey)
         setError(null)
@@ -449,6 +459,12 @@ export function Members() {
             return
         }
 
+        const coachOwnViewPermissionRequired = member.role === 'staff'
+            && permissionsByUserId.get(member.id)?.has('coach')
+        const viewOwnKeysToRevoke = VIEW_OWN_RECORD_PERMISSION_KEYS.filter((permissionKey) => (
+            !(coachOwnViewPermissionRequired && permissionKey === 'orders.view_own')
+        ))
+
         const mutationKey = `${member.id}:global.view_own`
         setPermissionMutationKey(mutationKey)
         setError(null)
@@ -476,7 +492,7 @@ export function Members() {
                         return
                     }
 
-                    for (const permissionKey of VIEW_OWN_RECORD_PERMISSION_KEYS) {
+                    for (const permissionKey of viewOwnKeysToRevoke) {
                         await db.workspace_permissions
                             .where('[workspaceId+userUuid+key]')
                             .equals([user.workspaceId, member.id, permissionKey])
@@ -505,7 +521,7 @@ export function Members() {
                         .delete()
                         .eq('workspace_id', user.workspaceId)
                         .eq('user_uuid', member.id)
-                        .in('key', [...VIEW_OWN_RECORD_PERMISSION_KEYS])
+                        .in('key', [...viewOwnKeysToRevoke])
                 )
 
                 if (error) throw normalizeSupabaseActionError(error)
@@ -545,9 +561,15 @@ export function Members() {
             : new Set<WorkspacePermissionKey>()
     ), [permissionMember, permissionsByUserId])
 
+    const selectedMemberIsCoach = permissionMember?.role === 'staff'
+        && selectedMemberPermissionKeys.has('coach')
     const globalViewOwnState = useMemo(
-        () => getViewOwnRecordPermissionState(selectedMemberPermissionKeys),
-        [selectedMemberPermissionKeys]
+        () => {
+            const effectiveKeys = new Set(selectedMemberPermissionKeys)
+            if (selectedMemberIsCoach) effectiveKeys.add('orders.view_own')
+            return getViewOwnRecordPermissionState(effectiveKeys)
+        },
+        [selectedMemberIsCoach, selectedMemberPermissionKeys]
     )
 
     const modulesBySection = useMemo(() => {
@@ -1182,6 +1204,11 @@ export function Members() {
                             )}
                             {permissionMember && selectedModulePermissions.map((permission) => {
                                 const PermissionIcon = permission.icon
+                                const coachRequiredPermission = selectedMemberIsCoach
+                                    && (permission.key === 'orders.saleOrdersAccess' || permission.key === 'orders.view_own')
+                                const coachRequiredDescriptionKey = permission.key === 'orders.saleOrdersAccess'
+                                    ? 'members.permissions.coachSaleOrdersAccessRequired'
+                                    : 'members.permissions.coachSaleOrdersViewOwnRequired'
                                 return (
                                     <div key={permission.key} className="rounded-lg border border-border/60 bg-background/60 p-4">
                                         <div className="flex items-start justify-between gap-4">
@@ -1193,7 +1220,9 @@ export function Members() {
                                                         <ShieldCheck className="h-4 w-4 text-primary" />
                                                     )}
                                                     <p className="font-medium">
-                                                        {permission.key.endsWith('.access')
+                                                        {coachRequiredPermission && permission.key === 'orders.view_own'
+                                                            ? t('members.permissions.coachSaleOrdersViewOwn')
+                                                            : permission.key.endsWith('.access')
                                                             ? t(`members.permissions.modules.${permission.module}`, {
                                                                 defaultValue: PERMISSION_MODULE_DEFAULT_LABELS[permission.module] ?? permission.defaultLabel
                                                             })
@@ -1201,14 +1230,16 @@ export function Members() {
                                                     </p>
                                                 </div>
                                                 <p className="mt-1 text-sm text-muted-foreground">
-                                                    {t(permission.descriptionKey, {
-                                                        defaultValue: permission.defaultDescription
-                                                    })}
+                                                    {coachRequiredPermission
+                                                        ? t(coachRequiredDescriptionKey)
+                                                        : t(permission.descriptionKey, {
+                                                            defaultValue: permission.defaultDescription
+                                                        })}
                                                 </p>
                                             </div>
                                             <Switch
-                                                checked={permission.key === 'global.NOprint' ? !selectedMemberPermissionKeys.has(permission.key) : selectedMemberPermissionKeys.has(permission.key)}
-                                                disabled={permissionMutationKey === `${permissionMember.id}:${permission.key}` || permissionsLoading || (permission.module === 'postService' && (permissionMember.role !== 'staff' || selectedMemberPermissionKeys.has('postService.merchant')))}
+                                                checked={coachRequiredPermission || (permission.key === 'global.NOprint' ? !selectedMemberPermissionKeys.has(permission.key) : selectedMemberPermissionKeys.has(permission.key))}
+                                                disabled={coachRequiredPermission || permissionMutationKey === `${permissionMember.id}:${permission.key}` || permissionsLoading || (permission.module === 'postService' && (permissionMember.role !== 'staff' || selectedMemberPermissionKeys.has('postService.merchant')))}
                                                 onCheckedChange={(value) => {
                                                     const shouldGrant = permission.key === 'global.NOprint' ? !value : value
                                                     handlePermissionToggle(permissionMember, permission.key, shouldGrant)

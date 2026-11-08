@@ -17,6 +17,8 @@ interface ProtectedRouteProps {
     requiredCapability?: PlanCapabilityKey
     requiredPermission?: WorkspacePermissionKey
     requiredAnyPermission?: WorkspacePermissionKey[]
+    denyStaffCoach?: boolean
+    allowCoachOrdersFeature?: boolean
 }
 
 export function ProtectedRoute({
@@ -28,11 +30,13 @@ export function ProtectedRoute({
     requiredAnyFeature,
     requiredCapability,
     requiredPermission,
-    requiredAnyPermission
+    requiredAnyPermission,
+    denyStaffCoach = false,
+    allowCoachOrdersFeature = false
 }: ProtectedRouteProps) {
     const { isAuthenticated, isLoading, hasRole, isKicked, user } = useAuth()
     const { hasFeature, hasCapability, features, isLoading: featuresLoading, isLocked, paygSummary } = useWorkspace()
-    const { hasPermission, isLoading: permissionsLoading } = useWorkspacePermissions()
+    const { hasPermission, permissionKeys, isLoading: permissionsLoading } = useWorkspacePermissions()
     const [location] = useLocation()
     if (isLoading) {
         return (
@@ -109,9 +113,26 @@ export function ProtectedRoute({
         )
     }
 
+    if (
+        denyStaffCoach
+        && user?.role === 'staff'
+        && hasPermission('coach')
+        && !permissionKeys.includes('orders.saleOrdersAccess')
+    ) {
+        return <Redirect to="/orders/sales" />
+    }
+
     // Check if required feature is enabled
     // 1. Check Workspace Level
-    const lacksRequiredFeature = Boolean(requiredFeature && !hasFeature(requiredFeature))
+    const coachOrdersFeatureOverride = allowCoachOrdersFeature
+        && requiredFeature === 'orders'
+        && user?.role === 'staff'
+        && hasPermission('coach')
+    const lacksRequiredFeature = Boolean(
+        requiredFeature
+        && !hasFeature(requiredFeature)
+        && !coachOrdersFeatureOverride
+    )
     const lacksAnyRequiredFeature = Boolean(requiredAnyFeature?.length && !requiredAnyFeature.some((feature) => hasFeature(feature)))
 
     if (lacksRequiredFeature || lacksAnyRequiredFeature || (requiredCapability && !hasCapability(requiredCapability))) {

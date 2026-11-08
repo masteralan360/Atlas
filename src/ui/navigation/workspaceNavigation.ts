@@ -238,7 +238,7 @@ export function buildWorkspaceNavigation({
             },
           ]
           : []),
-        ...(hasFeature("orders") && (canAccessPermission("orders.saleOrdersAccess") || (canAccessSuppliers && canAccessPermission("orders.purchaseOrdersAccess")))
+        ...((hasFeature("orders") || isCoachStaff) && (canAccessPermission("orders.saleOrdersAccess") || (canAccessSuppliers && canAccessPermission("orders.purchaseOrdersAccess")))
           ? [
             {
               name: t("nav.orders", { defaultValue: "Orders" }),

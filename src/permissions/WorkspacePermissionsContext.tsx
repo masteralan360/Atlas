@@ -47,7 +47,8 @@ export function WorkspacePermissionsProvider({
   const postalEnabled = hasFeature('postal_service');
 
   const refreshPermissions = useCallback(async () => {
-    if (!isAuthenticated || !workspaceId || !userId || (!permissionsEnabled && !postalEnabled)) {
+    const shouldLoadPermissions = permissionsEnabled || postalEnabled || userRole === "staff";
+    if (!isAuthenticated || !workspaceId || !userId || !shouldLoadPermissions) {
       setPermissionKeys([]);
       setIsLoading(false);
       return;
@@ -141,7 +142,7 @@ export function WorkspacePermissionsProvider({
       !isAuthenticated ||
       !workspaceId ||
       !userId ||
-      (!permissionsEnabled && !postalEnabled) ||
+      (!permissionsEnabled && !postalEnabled && userRole !== "staff") ||
       userRole === "admin"
     ) {
       return;

@@ -16,7 +16,7 @@ import { useTranslation } from 'react-i18next'
 import { Redirect } from 'wouter'
 
 import { useAuth } from '@/auth/AuthContext'
-import { COACH_DATA_FRESHNESS_TABLES, useCoachData, useCoachDirectory } from '@/local-db/coachData'
+import { COACH_DATA_PAGE_FRESHNESS_TABLES, useCoachData, useCoachDirectory } from '@/local-db/coachData'
 import type { CoachDataSnapshot } from '@/local-db/coachData'
 import { useWorkspacePermissions } from '@/permissions'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
@@ -26,6 +26,7 @@ import { Label } from '@/ui/components/label'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/components/select'
 import { formatCurrency } from '@/lib/utils'
+import { CoachRecentIntake } from '@/ui/components/commerce/CoachRecentIntake'
 
 function formatCycleMonth(monthStart: string) {
   const date = new Date(`${monthStart}T12:00:00`)
@@ -69,6 +70,7 @@ export function CoachData() {
     enabled: canAccessAsAdmin && !isLocalMode && Boolean(selectedCoachUserId),
   })
   const dataQuery = canAccessAsCoach ? ownQuery : selectedCoachQuery
+  const viewedCoachUserId = canAccessAsCoach ? user?.id : selectedCoachUserId
 
   if (isWorkspaceLoading || arePermissionsLoading) {
     return (
@@ -135,7 +137,7 @@ export function CoachData() {
         </Card>
       ) : null}
 
-      {!isLocalMode ? <ModulePageFreshness tableNames={COACH_DATA_FRESHNESS_TABLES} /> : null}
+      {!isLocalMode ? <ModulePageFreshness tableNames={COACH_DATA_PAGE_FRESHNESS_TABLES} /> : null}
 
       {isLocalMode ? (
         <InfoCard icon={UsersRound} text={t('commerceOperations.coachData.localUnavailable')} />
@@ -164,7 +166,19 @@ export function CoachData() {
         <InfoCard icon={UserRound} text={t('commerceOperations.coachData.noLinkedCoach')} />
       ) : null}
 
-      {dataQuery.data?.coach ? <CoachSnapshotView snapshot={dataQuery.data} /> : null}
+      {dataQuery.data?.coach ? (
+        <>
+          <CoachSnapshotView snapshot={dataQuery.data} />
+          {user?.workspaceId && user.id && viewedCoachUserId ? (
+            <CoachRecentIntake
+              workspaceId={user.workspaceId}
+              viewerId={user.id}
+              coachUserId={viewedCoachUserId}
+              canOpenOrder={canAccessAsCoach || (canAccessAsAdmin && hasFeature('orders'))}
+            />
+          ) : null}
+        </>
+      ) : null}
     </div>
   )
 }

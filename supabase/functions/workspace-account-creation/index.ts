@@ -260,6 +260,18 @@ Deno.serve(async (req) => {
                     module: 'coach'
                 })
                 if (permissionError) throw permissionError
+
+                // The coach profile is the Commerce Operations record used by
+                // the commission program's shared coach eligibility rule.
+                const { error: coachProfileError } = await admin.from('commerce_operations_records').insert({
+                    workspace_id: workspaceId,
+                    record_type: 'coach_profile',
+                    title: request.name,
+                    related_partner_id: partnerId,
+                    payload: {},
+                    created_by: user.id
+                })
+                if (coachProfileError) throw coachProfileError
             } catch (coachSetupError) {
                 console.error('[workspace-account-creation] Coach account setup failed:', coachSetupError)
                 if (agentCreated) {

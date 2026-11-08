@@ -2,6 +2,7 @@ import { usePostalAction } from "./usePostalAccess";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  CircleHelp,
   PackagePlus,
   Loader2,
   ShieldCheck,
@@ -237,6 +238,23 @@ export function ShipmentForm({
   });
   const set = (key: keyof ShipmentInput, value: string | boolean) =>
     setForm((f) => ({ ...f, [key]: value }));
+  const unknownRecipientButton = (
+    className: string,
+    iconClassName = "h-4 w-4",
+  ) => (
+    <Button
+      type="button"
+      variant="outline"
+      size="icon"
+      className={`h-7 w-7 ${className}`}
+      aria-label={t("postal.fillUnknownRecipient")}
+      title={t("postal.fillUnknownRecipient")}
+      disabled={action.busy}
+      onClick={() => set("recipient_name", t("postal.unknownRecipient"))}
+    >
+      <CircleHelp className={iconClassName} aria-hidden="true" />
+    </Button>
+  );
   const money = amount ? Number(amount).toLocaleString("en-US") : "";
   const deliveryFeeMoney = deliveryFee
     ? Number(deliveryFee).toLocaleString("en-US")
@@ -374,25 +392,47 @@ export function ShipmentForm({
                   }
                   key={key}
                 >
-                  <Label htmlFor={`shipment-${key}`}>
-                    {t(`postal.${key}`)}
-                    {key !== "backup_phone" && " *"}
-                  </Label>
-                  <Input
-                    id={`shipment-${key}`}
-                    {...fieldValidation(key)}
-                    required={key !== "backup_phone"}
-                    value={form[key]}
-                    maxLength={key === "recipient_name" ? 160 : 15}
-                    inputMode={key === "recipient_name" ? "text" : "tel"}
-                    dir={key === "recipient_name" ? undefined : "ltr"}
-                    disabled={action.busy}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (key === "recipient_name" || /^\d*$/.test(v))
-                        set(key, v);
-                    }}
-                  />
+                  <div className="flex w-fit items-center gap-2">
+                    <Label htmlFor={`shipment-${key}`}>
+                      {t(`postal.${key}`)}
+                      {key !== "backup_phone" && " *"}
+                    </Label>
+                    {key === "recipient_name" && !editing &&
+                      unknownRecipientButton("hidden sm:inline-flex")}
+                  </div>
+                  <div
+                    className={
+                      key === "recipient_name" && !editing
+                        ? "flex items-center gap-2"
+                        : undefined
+                    }
+                  >
+                    <Input
+                      id={`shipment-${key}`}
+                      {...fieldValidation(key)}
+                      required={key !== "backup_phone"}
+                      value={form[key]}
+                      maxLength={key === "recipient_name" ? 160 : 15}
+                      inputMode={key === "recipient_name" ? "text" : "tel"}
+                      dir={key === "recipient_name" ? undefined : "ltr"}
+                      disabled={action.busy}
+                      className={
+                        key === "recipient_name" && !editing
+                          ? "min-w-0 flex-1"
+                          : undefined
+                      }
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (key === "recipient_name" || /^\d*$/.test(v))
+                          set(key, v);
+                      }}
+                    />
+                    {key === "recipient_name" && !editing &&
+                      unknownRecipientButton(
+                        "h-11 w-11 shrink-0 sm:hidden",
+                        "h-5 w-5",
+                      )}
+                  </div>
                   {fieldError(key)}
                 </div>
               ))}

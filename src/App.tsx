@@ -1868,6 +1868,7 @@ function App() {
                           allowedRoles={["admin", "staff", "viewer"]}
                           requiredFeature="orders"
                           requiredPermission="orders.saleOrdersAccess"
+                          denyStaffCoach
                         >
                           <Layout>
                             <Orders />
@@ -1890,6 +1891,7 @@ function App() {
                           allowedRoles={["admin", "staff"]}
                           requiredFeature="orders"
                           requiredPermission="orders.saleOrdersAccess"
+                          denyStaffCoach
                         >
                           <Layout>
                             <Orders />
@@ -1912,6 +1914,7 @@ function App() {
                           allowedRoles={["admin", "staff", "viewer"]}
                           requiredFeature="orders"
                           requiredAnyPermission={["orders.saleOrdersAccess", "orders.purchaseOrdersAccess"]}
+                          allowCoachOrdersFeature
                         >
                           <Layout>
                             <Orders />
@@ -1923,6 +1926,7 @@ function App() {
                           allowedRoles={["admin", "staff", "viewer"]}
                           requiredFeature="orders"
                           requiredPermission="orders.saleOrdersAccess"
+                          allowCoachOrdersFeature
                         >
                           <Layout>
                             <Orders />
@@ -1945,6 +1949,7 @@ function App() {
                           allowedRoles={["admin", "staff", "viewer"]}
                           requiredFeature="orders"
                           requiredAnyPermission={["orders.saleOrdersAccess", "orders.purchaseOrdersAccess"]}
+                          allowCoachOrdersFeature
                         >
                           <Layout>
                             <Orders />

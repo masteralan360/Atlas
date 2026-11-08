@@ -57,12 +57,13 @@ type ProgramDraft = {
   name: string
   description: string
   isActive: boolean
+  autoAssignNewAgents: boolean
   tiers: TierDraft[]
   agentIds: string[]
 }
 
 function freshProgramDraft(): ProgramDraft {
-  return { name: '', description: '', isActive: true, tiers: [{ name: '', minimumSales: '0' }], agentIds: [] }
+  return { name: '', description: '', isActive: true, autoAssignNewAgents: false, tiers: [{ name: '', minimumSales: '0' }], agentIds: [] }
 }
 
 function readSavedPageSize() {
@@ -159,6 +160,7 @@ export function TieredPerformanceCommissionPanel({
         name: draft.name.trim(),
         description: draft.description,
         isActive: draft.isActive,
+        autoAssignNewAgents: draft.autoAssignNewAgents,
         tiers: draft.tiers.map((tier, index) => ({
           ...(tier.id ? { id: tier.id } : {}),
           name: tier.name.trim(),
@@ -171,8 +173,12 @@ export function TieredPerformanceCommissionPanel({
       toast({ title: t('salesAgentCommissions.tiered.programSaved') })
       setEditorOpen(false)
       setEditingProgram(null)
-    } catch {
-      toast({ title: t('common.error'), description: t('salesAgentCommissions.tiered.saveFailed'), variant: 'destructive' })
+    } catch (error) {
+      const message = String((error as { message?: unknown } | null)?.message ?? '')
+      const description = message.includes('tiered_commission_auto_assign_program_exists')
+        ? t('salesAgentCommissions.tiered.autoAssignProgramExists')
+        : t('salesAgentCommissions.tiered.saveFailed')
+      toast({ title: t('common.error'), description, variant: 'destructive' })
     } finally {
       setIsSavingProgram(false)
     }
@@ -448,6 +454,7 @@ function ProgramEditorDialog({
       name: existing.name,
       description: existing.description || '',
       isActive: existing.isActive,
+      autoAssignNewAgents: existing.autoAssignNewAgents,
       tiers: existing.tiers.map((tier) => ({ id: tier.id, name: tier.name, minimumSales: String(tier.minimumSales) })),
       agentIds: existing.agentIds ?? [],
     } : freshProgramDraft())
@@ -508,6 +515,19 @@ function ProgramEditorDialog({
 
               <section className="space-y-3">
                 <div><h3 className="flex items-center gap-2 font-semibold"><UsersRound className="h-4 w-4 text-primary" />{t('salesAgentCommissions.tiered.assignAgents')}</h3><p className="text-xs text-muted-foreground">{t('salesAgentCommissions.tiered.assignAgentsHint')}</p></div>
+                <label htmlFor="tiered-program-auto-assign-agents" className="flex cursor-pointer items-start gap-3 rounded-lg border p-3">
+                  <Checkbox
+                    id="tiered-program-auto-assign-agents"
+                    checked={draft.autoAssignNewAgents}
+                    onCheckedChange={(checked) => setDraft((current) => ({ ...current, autoAssignNewAgents: checked === true }))}
+                    disabled={saving}
+                    className="mt-0.5"
+                  />
+                  <span className="space-y-1">
+                    <span className="block text-sm font-medium">{t('salesAgentCommissions.tiered.autoAssignNewAgents')}</span>
+                    <span className="block text-xs text-muted-foreground">{t('salesAgentCommissions.tiered.autoAssignNewAgentsHint')}</span>
+                  </span>
+                </label>
                 {eligibleAgents.length ? <div className="grid max-h-52 gap-2 overflow-y-auto rounded-xl border p-3 sm:grid-cols-2">{eligibleAgents.map((agent) => {
                   const isAssigned = draft.agentIds.includes(agent.id)
                   return <label key={agent.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-muted/50"><Checkbox checked={isAssigned} onCheckedChange={(checked) => setDraft((current) => ({ ...current, agentIds: checked ? [...new Set([...current.agentIds, agent.id])] : current.agentIds.filter((id) => id !== agent.id) }))} disabled={saving || (!agent.isEligible && !isAssigned)} /><span className="min-w-0 flex-1 truncate">{agent.name}</span>{!agent.isEligible ? <Badge variant="secondary">{t('salesAgentCommissions.tiered.unavailableAgent')}</Badge> : null}</label>

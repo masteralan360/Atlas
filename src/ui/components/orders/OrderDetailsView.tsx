@@ -497,6 +497,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         || null
 
     const { permissionKeys, hasPermission } = useWorkspacePermissions()
+    const isCoachStaff = user?.role === 'staff' && permissionKeys.includes('coach')
     const salesAgentCommissionsEnabled = hasFeature('sales_agent_commissions')
     const isTrackedCommission = salesOrder?.commissionMode === 'tracked'
     const canAssignSalesAgents = salesAgentCommissionsEnabled
@@ -507,8 +508,10 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         && hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.viewOwn')
     const canViewTieredCommissionOrder = salesAgentCommissionsEnabled
         && commerceOperationsEnabled
-        && hasPermission('commerceOperations.access')
-        && (canViewAllAgentCommissions || canViewOwnAgentCommissions)
+        && (isCoachStaff || (
+            hasPermission('commerceOperations.access')
+            && (canViewAllAgentCommissions || canViewOwnAgentCommissions)
+        ))
     const isEligibleTieredCommerceOrder = Boolean(
         salesOrder
         && salesOrder.status === 'completed'
@@ -521,7 +524,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         workspaceId,
         orderId: salesOrder?.id,
         userId: user?.id,
-        permissionScope: canViewAllAgentCommissions ? 'view-all' : canViewOwnAgentCommissions ? 'view-own' : 'none',
+        permissionScope: isCoachStaff ? 'view-own' : canViewAllAgentCommissions ? 'view-all' : canViewOwnAgentCommissions ? 'view-own' : 'none',
         sourceMode: isLocalMode ? 'local' : 'remote',
         enabled: canViewTieredCommissionOrder && isEligibleTieredCommerceOrder && isOnline,
     })
@@ -563,11 +566,14 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         quantity: item.quantity,
         convertedUnitPrice: item.convertedUnitPrice
     })) || [], [salesOrder])
-    const canManage = user?.role === 'admin' || user?.role === 'staff'
+    const canManage = user?.role === 'admin'
+        || (user?.role === 'staff' && !(resolved?.kind === 'sales'
+            && hasPermission('coach')
+            && !permissionKeys.includes('orders.saleOrdersAccess')))
     const canManageOrder = canManage && hasOrderStorageWriteAccess
     const canDelete = user?.role === 'admin'
     const canApproveOrderRequests = user?.role === 'admin'
-    const canViewProfit = !hideCosts
+    const canViewProfit = !hideCosts && !isCoachStaff
     const canReturnCurrentSalesOrder = resolved?.kind === 'sales'
         && !resolved.order.isArchived
         && resolved.order.status === 'completed'

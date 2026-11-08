@@ -291,7 +291,11 @@ export function CommerceOperations() {
   const orderMap = useMemo(() => new Map(salesOrders.map((order) => [order.id, order])), [salesOrders])
   const socialOrders = orderDetailRecords.filter((record) => record.payload.channel === 'social')
   const wholesaleOrders = orderDetailRecords.filter((record) => record.payload.channel === 'wholesale')
-  const canCreateOrders = hasFeature('orders') && hasFeature('products') && hasFeature('crm') && hasPermission('orders.saleOrdersAccess')
+  const canCreateOrders = hasFeature('orders') && hasFeature('products') && hasFeature('crm')
+    && hasPermission('orders.saleOrdersAccess')
+    && !(user?.role === 'staff'
+      && permissionKeys.includes('coach')
+      && !permissionKeys.includes('orders.saleOrdersAccess'))
   const tieredCommissionPermissionScope = hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.viewAll')
     ? 'view-all'
     : hasEffectiveSalesAgentCommissionPermission(user?.role, permissionKeys, 'salesAgentCommissions.viewOwn')
@@ -605,6 +609,7 @@ function CoachAccountCreation({ workspaceId, t }: {
       await Promise.allSettled([
         fetchTableFromSupabase('agents', db.agents, workspaceId),
         fetchTableFromSupabase('business_partners', db.business_partners, workspaceId),
+        fetchTableFromSupabase('commerce_operations_records', db.commerce_operations_records, workspaceId),
       ])
     } catch (error) {
       console.error('[CommerceOperations] Failed to refresh coach account data:', error)

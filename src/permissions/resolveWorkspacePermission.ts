@@ -5,6 +5,7 @@ import { isSupportedWorkspacePermissionKey, WORKSPACE_PERMISSION_DEFINITIONS, ty
 export function resolveWorkspacePermission(role: UserRole | undefined, enabled: boolean, keys: ReadonlySet<WorkspacePermissionKey>, permission: WorkspacePermissionKey | 'global.print') {
     if (permission.startsWith('postService.')) return role === 'admin' || (role === 'staff' && keys.has(permission as WorkspacePermissionKey))
     if (permission === 'global.hideCosts') return role !== 'admin' && enabled && keys.has(permission)
+    if (permission === 'orders.saleOrdersAccess' && role === 'staff' && keys.has('coach')) return true
     // Global printing is enabled by default; the workspace permission stores
     // only the explicit opt-out as `global.NOprint`.
     if (permission === 'global.print') return !keys.has('global.NOprint')

@@ -666,7 +666,10 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         tryRates
     }), [exchangeData, eurRates, tryRates])
 
-    const canManageOrders = user?.role === 'admin' || user?.role === 'staff'
+    const canManageOrders = user?.role === 'admin'
+        || (user?.role === 'staff' && !(activeTab === 'sales'
+            && permissionKeys.includes('coach')
+            && !permissionKeys.includes('orders.saleOrdersAccess')))
     const canDeleteOrders = user?.role === 'admin'
     const canApproveOrderRequests = user?.role === 'admin'
     const availableSalesProductIdsByStorage = useMemo(() => {

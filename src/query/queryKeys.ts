@@ -254,26 +254,46 @@ export const queryKeys = {
   orders: {
     all: (workspaceId: string | undefined, orderType: OrdersListPageQuery['orderType']) =>
       ['atlas', 'workspace', workspaceId ?? 'unscoped', 'orders', orderType] as const,
-    page: (query: OrdersListPageQuery, viewer?: { isRestricted?: boolean; userId?: string }) => {
+    page: (query: OrdersListPageQuery, viewer?: { isRestricted?: boolean; isCoachOwnOnly?: boolean; userId?: string }) => {
       const { refreshToken: _refreshToken, ...dataQuery } = query
       return [
         ...queryKeys.orders.all(query.workspaceId, query.orderType),
         'page',
         dataQuery,
         viewer?.isRestricted ?? false,
+        viewer?.isCoachOwnOnly ?? false,
         viewer?.userId ?? null,
       ] as const
     },
-    commissionPreview: (query: OrdersListPageQuery, viewer?: { isRestricted?: boolean; userId?: string }) => {
+    commissionPreview: (query: OrdersListPageQuery, viewer?: { isRestricted?: boolean; isCoachOwnOnly?: boolean; userId?: string }) => {
       const { refreshToken: _refreshToken, ...dataQuery } = query
       return [
         ...queryKeys.orders.all(query.workspaceId, query.orderType),
         'commission-preview',
         dataQuery,
         viewer?.isRestricted ?? false,
+        viewer?.isCoachOwnOnly ?? false,
         viewer?.userId ?? null,
       ] as const
     },
+    coachRecentIntake: (query: {
+      workspaceId: string
+      viewerId: string
+      coachUserId: string
+      page: number
+      pageSize: number
+      createdFrom?: string
+      createdBefore?: string
+    }) => [
+      ...queryKeys.orders.all(query.workspaceId, 'sales'),
+      'coach-recent-intake',
+      query.viewerId,
+      query.coachUserId,
+      query.page,
+      query.pageSize,
+      query.createdFrom ?? null,
+      query.createdBefore ?? null,
+    ] as const,
   },
   ecommerce: {
     all: (workspaceId: string | undefined) =>

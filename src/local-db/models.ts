@@ -1700,6 +1700,22 @@ export type ClinicalPatientType = 'new' | 'existing'
 
 export type ClinicalPresetCategory = 'reason_for_visit' | 'appointment_type' | 'registry_type' | 'beauty3_procedure'
 
+export type Beauty3ProcedureFaceArea =
+  | 'forehead'
+  | 'glabella'
+  | 'left_temple'
+  | 'right_temple'
+  | 'left_under_eye'
+  | 'right_under_eye'
+  | 'left_cheek'
+  | 'right_cheek'
+  | 'nose'
+  | 'lips'
+  | 'chin'
+  | 'left_jawline'
+  | 'right_jawline'
+  | 'neck'
+
 export type ClinicalRegistryType = 'medical' | 'beauty' | 'beauty2' | 'beauty3'
 export type UserSelectableClinicalRegistryType = ClinicalRegistryType
 
@@ -1737,9 +1753,11 @@ export interface Beauty3Client extends BaseEntity {
 export interface ClinicalPreset extends BaseEntity {
   category: ClinicalPresetCategory
   name: string
+  displayName?: string | null
   consultationFee: number
   sortOrder: number
   isActive: boolean
+  faceMapAreas?: Beauty3ProcedureFaceArea[] | null
   createdBy?: string | null
 }
 

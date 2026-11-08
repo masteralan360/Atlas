@@ -2473,7 +2473,7 @@ async function resolveSalesAccountAgentCounterparty(
 
 export function useSalesOrders(workspaceId: string | undefined, startDate?: string, endDate?: string, enabled = true) {
     const online = useNetworkStatus()
-    const viewOwnScope = useViewOwnRecordScope('orders.view_own')
+    const viewOwnScope = useViewOwnRecordScope('orders.view_own', 'sales')
     const permissions = useOptionalWorkspacePermissions()
     const { features, activeWorkspace } = useWorkspace()
     const agentSalesAccountsFeatureEnabled = Boolean(
@@ -2493,9 +2493,9 @@ export function useSalesOrders(workspaceId: string | undefined, startDate?: stri
             const assignedOrderIds = await getSalesOrderIdsAssignedToLinkedFieldAgent(
                 workspaceId,
                 viewOwnScope.userId,
-                viewOwnScope.isRestricted ? assignedOrderAccess : 'none'
+                viewOwnScope.isRestricted && !viewOwnScope.isCoachOwnOnly ? assignedOrderAccess : 'none'
             )
-            const linkedSalesAccountAgentIds = viewOwnScope.isRestricted
+            const linkedSalesAccountAgentIds = viewOwnScope.isRestricted && !viewOwnScope.isCoachOwnOnly
                 ? await getLinkedSalesAccountAgentIdsForOwnOrders(
                     workspaceId,
                     viewOwnScope.userId,
@@ -2515,8 +2515,10 @@ export function useSalesOrders(workspaceId: string | undefined, startDate?: stri
                 && (
                     !viewOwnScope.isRestricted
                     || order.createdBy === viewOwnScope.userId
-                    || assignedOrderIds.has(order.id)
-                    || Boolean(order.salesAccountAgentId && linkedSalesAccountAgentIds.has(order.salesAccountAgentId))
+                    || (!viewOwnScope.isCoachOwnOnly && (
+                        assignedOrderIds.has(order.id)
+                        || Boolean(order.salesAccountAgentId && linkedSalesAccountAgentIds.has(order.salesAccountAgentId))
+                    ))
                 )
             )).toArray()
             const [accessiblePartnerIds, accessibleCustomerIds] = await Promise.all([
@@ -2531,16 +2533,18 @@ export function useSalesOrders(workspaceId: string | undefined, startDate?: stri
                     'customer'
                 )
             ])
-            const serviceAuthorizedRows = await filterSalesOrdersByServiceAccess(rows, serviceAccess.ids)
+            const serviceAuthorizedRows = viewOwnScope.isCoachOwnOnly
+                ? rows
+                : await filterSalesOrdersByServiceAccess(rows, serviceAccess.ids)
             return serviceAuthorizedRows
-                .filter((order) => order.businessPartnerId
+                .filter((order) => viewOwnScope.isCoachOwnOnly || (order.businessPartnerId
                     ? accessiblePartnerIds.has(order.businessPartnerId)
-                    : !order.customerId || accessibleCustomerIds.has(order.customerId))
+                    : !order.customerId || accessibleCustomerIds.has(order.customerId)))
                 .map((order) => redactSalesOrderForStorageAccess(order, storageAccess))
                 .filter((order): order is SalesOrder => !!order)
                 .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
         },
-        [workspaceId, startDate, endDate, enabled, serviceAccess.ids, serviceAccess.isReady, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess, agentSalesAccountsFeatureEnabled]
+        [workspaceId, startDate, endDate, enabled, serviceAccess.ids, serviceAccess.isReady, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.isCoachOwnOnly, viewOwnScope.userId, assignedOrderAccess, agentSalesAccountsFeatureEnabled]
     )
 
     useEffect(() => {
@@ -2550,13 +2554,13 @@ export function useSalesOrders(workspaceId: string | undefined, startDate?: stri
                 fetchTableFromSupabase('sales_order_agent_assignments', db.sales_order_agent_assignments, workspaceId)
             }
         }
-    }, [enabled, online, workspaceId, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess, agentSalesAccountsFeatureEnabled])
+    }, [enabled, online, workspaceId, viewOwnScope.isRestricted, viewOwnScope.isCoachOwnOnly, viewOwnScope.userId, assignedOrderAccess, agentSalesAccountsFeatureEnabled])
 
     return useLiveCollection(orders, Boolean(workspaceId) && enabled && orders === undefined)
 }
 
 export function useArchivedSalesOrders(workspaceId: string | undefined, enabled = true) {
-    const viewOwnScope = useViewOwnRecordScope('orders.view_own')
+    const viewOwnScope = useViewOwnRecordScope('orders.view_own', 'sales')
     const permissions = useOptionalWorkspacePermissions()
     const { features, activeWorkspace } = useWorkspace()
     const agentSalesAccountsFeatureEnabled = Boolean(
@@ -2576,9 +2580,9 @@ export function useArchivedSalesOrders(workspaceId: string | undefined, enabled 
             const assignedOrderIds = await getSalesOrderIdsAssignedToLinkedFieldAgent(
                 workspaceId,
                 viewOwnScope.userId,
-                viewOwnScope.isRestricted ? assignedOrderAccess : 'none'
+                viewOwnScope.isRestricted && !viewOwnScope.isCoachOwnOnly ? assignedOrderAccess : 'none'
             )
-            const linkedSalesAccountAgentIds = viewOwnScope.isRestricted
+            const linkedSalesAccountAgentIds = viewOwnScope.isRestricted && !viewOwnScope.isCoachOwnOnly
                 ? await getLinkedSalesAccountAgentIdsForOwnOrders(
                     workspaceId,
                     viewOwnScope.userId,
@@ -2591,8 +2595,10 @@ export function useArchivedSalesOrders(workspaceId: string | undefined, enabled 
                 && (
                     !viewOwnScope.isRestricted
                     || order.createdBy === viewOwnScope.userId
-                    || assignedOrderIds.has(order.id)
-                    || Boolean(order.salesAccountAgentId && linkedSalesAccountAgentIds.has(order.salesAccountAgentId))
+                    || (!viewOwnScope.isCoachOwnOnly && (
+                        assignedOrderIds.has(order.id)
+                        || Boolean(order.salesAccountAgentId && linkedSalesAccountAgentIds.has(order.salesAccountAgentId))
+                    ))
                 )
             )).toArray()
             const [accessiblePartnerIds, accessibleCustomerIds] = await Promise.all([
@@ -2607,16 +2613,18 @@ export function useArchivedSalesOrders(workspaceId: string | undefined, enabled 
                     'customer'
                 )
             ])
-            const serviceAuthorizedRows = await filterSalesOrdersByServiceAccess(rows, serviceAccess.ids)
+            const serviceAuthorizedRows = viewOwnScope.isCoachOwnOnly
+                ? rows
+                : await filterSalesOrdersByServiceAccess(rows, serviceAccess.ids)
             return serviceAuthorizedRows
-                .filter((order) => order.businessPartnerId
+                .filter((order) => viewOwnScope.isCoachOwnOnly || (order.businessPartnerId
                     ? accessiblePartnerIds.has(order.businessPartnerId)
-                    : !order.customerId || accessibleCustomerIds.has(order.customerId))
+                    : !order.customerId || accessibleCustomerIds.has(order.customerId)))
                 .map((order) => redactSalesOrderForStorageAccess(order, storageAccess))
                 .filter((order): order is SalesOrder => !!order)
                 .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
         },
-        [workspaceId, enabled, serviceAccess.ids, serviceAccess.isReady, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, assignedOrderAccess, agentSalesAccountsFeatureEnabled]
+        [workspaceId, enabled, serviceAccess.ids, serviceAccess.isReady, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.isCoachOwnOnly, viewOwnScope.userId, assignedOrderAccess, agentSalesAccountsFeatureEnabled]
     )
 
     return orders ?? []
@@ -2772,7 +2780,7 @@ async function canReadSalesOrderServices(
 }
 
 export function useSalesOrderLookup(orderId: string | undefined, refreshKey = 0): OrderRecordLookup<SalesOrder> {
-    const viewOwnScope = useViewOwnRecordScope('orders.view_own')
+    const viewOwnScope = useViewOwnRecordScope('orders.view_own', 'sales')
     const permissions = useOptionalWorkspacePermissions()
     const { features, activeWorkspace } = useWorkspace()
     const permissionKeys = permissions?.permissionKeys
@@ -2794,17 +2802,20 @@ export function useSalesOrderLookup(orderId: string | undefined, refreshKey = 0)
             if (!order) return { status: 'not-found' }
             trace?.setEntityId(order.id)
             trace?.setWorkspaceMode(getWorkspaceDataMode(order.workspaceId))
-            if (!await canReadSalesOrderServices(order, serviceAccess.ids)) return { status: 'not-found' }
+            if (!viewOwnScope.isCoachOwnOnly && !await canReadSalesOrderServices(order, serviceAccess.ids)) {
+                return { status: 'not-found' }
+            }
 
-            const visible = order.businessPartnerId
+            const visible = viewOwnScope.isCoachOwnOnly || (order.businessPartnerId
                 ? await canAccessBusinessPartnerInLocalCache(order.workspaceId, order.businessPartnerId, 'customer')
-                : await canAccessBusinessPartnerFacetInLocalCache(order.workspaceId, order.customerId, 'customer')
+                : await canAccessBusinessPartnerFacetInLocalCache(order.workspaceId, order.customerId, 'customer'))
             if (!visible) return { status: 'not-found' }
 
             if (!viewOwnScope.isRestricted || order.createdBy === viewOwnScope.userId) {
                 const redactedOrder = redactSalesOrderForStorageAccess(order, storageAccess)
                 return redactedOrder ? { status: 'found', order: redactedOrder } : { status: 'not-found' }
             }
+            if (viewOwnScope.isCoachOwnOnly) return { status: 'not-found' }
 
             const linkedSalesAccountAgentIds = await getLinkedSalesAccountAgentIdsForOwnOrders(
                 order.workspaceId,
@@ -2837,7 +2848,7 @@ export function useSalesOrderLookup(orderId: string | undefined, refreshKey = 0)
             console.error('[Orders] Failed to resolve sales order from the local cache:', error)
             return { status: 'error' }
         }
-    }, [orderId, refreshKey, serviceAccess.ids, serviceAccess.isReady, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.userId, permissionKeys, features.agent_sales_accounts, activeWorkspace?.id])
+    }, [orderId, refreshKey, serviceAccess.ids, serviceAccess.isReady, storageAccess.signature, viewOwnScope.isRestricted, viewOwnScope.isCoachOwnOnly, viewOwnScope.userId, permissionKeys, features.agent_sales_accounts, activeWorkspace?.id])
 
     return lookup ?? { status: 'loading' }
 }

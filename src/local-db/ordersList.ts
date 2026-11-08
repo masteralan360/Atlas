@@ -98,7 +98,7 @@ const EMPTY_ORDERS_PAGE: OrdersListPage = {
 type OrderListAccess = ReturnType<typeof useStorageAccess>
 type LocalOrdersListContext = {
   storageAccess: OrderListAccess
-  viewOwn: { isRestricted: boolean; userId?: string }
+  viewOwn: { isRestricted: boolean; isCoachOwnOnly?: boolean; userId?: string }
   permissionKeys?: readonly string[]
   agentSalesAccountsFeatureEnabled?: boolean
 }
@@ -187,7 +187,7 @@ async function getCreatorIdsMatchingSearch(workspaceId: string, search: string) 
 async function readLocalOrdersListPage(
   query: OrdersListPageQuery,
   access: OrderListAccess,
-  viewOwn: { isRestricted: boolean; userId?: string },
+  viewOwn: LocalOrdersListContext['viewOwn'],
   permissionKeys: readonly string[] = [],
   commissionPreview?: OrdersProductCommissionPreviewContext,
   agentSalesAccountsFeatureEnabled?: boolean,
@@ -210,6 +210,7 @@ async function readLocalOrdersListPage(
   const search = query.search?.trim().toLocaleLowerCase() || ''
   const searchCreatorUserIds = await getCreatorIdsMatchingSearch(workspaceId, search)
   const assignedOrderAccess = isSales && viewOwn.isRestricted
+    && !viewOwn.isCoachOwnOnly
     ? getCommissionAssignedOrderAccess(workspaceId, permissionKeys)
     : 'none'
   const canViewAllSalesOrders = assignedOrderAccess === 'all'
@@ -223,7 +224,7 @@ async function readLocalOrdersListPage(
   const searchCommerceOrderIds = isSales && includeCommerceAttribution && search
     ? await findCommerceOrderIdsMatchingSearch(workspaceId, search)
     : new Set<string>()
-  const linkedSalesAccountAgentIds = isSales && viewOwn.isRestricted
+  const linkedSalesAccountAgentIds = isSales && viewOwn.isRestricted && !viewOwn.isCoachOwnOnly
     ? await getLinkedSalesAccountAgentIdsForOwnOrders(
       workspaceId,
       viewOwn.userId,
@@ -268,11 +269,13 @@ async function readLocalOrdersListPage(
   const isInViewOwnScope = (order: SalesOrder | PurchaseOrder) => (
     !viewOwn.isRestricted
     || order.createdBy === viewOwn.userId
-    || (isSales && canViewAllSalesOrders)
-    || (isSales && assignedOrderIds.has(order.id))
-    || (isSales && Boolean(
-      (order as SalesOrder).salesAccountAgentId
-      && linkedSalesAccountAgentIds.has((order as SalesOrder).salesAccountAgentId as string)
+    || (!viewOwn.isCoachOwnOnly && (
+      (isSales && canViewAllSalesOrders)
+      || (isSales && assignedOrderIds.has(order.id))
+      || (isSales && Boolean(
+        (order as SalesOrder).salesAccountAgentId
+        && linkedSalesAccountAgentIds.has((order as SalesOrder).salesAccountAgentId as string)
+      ))
     ))
   )
   const getVisibleMatchingOrder = (rawOrder: SalesOrder | PurchaseOrder) => {
@@ -318,8 +321,8 @@ async function readLocalOrdersListPage(
 
     const businessPartnerId = order.businessPartnerId
     const facetId = isSales ? (order as SalesOrder).customerId : (order as PurchaseOrder).supplierId
-    if (businessPartnerId && !accessiblePartners.has(businessPartnerId)) return
-    if (!businessPartnerId && facetId && !accessibleFacets.has(facetId)) return
+    if (!viewOwn.isCoachOwnOnly && businessPartnerId && !accessiblePartners.has(businessPartnerId)) return
+    if (!viewOwn.isCoachOwnOnly && !businessPartnerId && facetId && !accessibleFacets.has(facetId)) return
 
     if (isSales && commissionPreview) commissionOrderIds.push(order.id)
 
@@ -643,7 +646,7 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
     [commissionSummaryQueryKey]
   )
   const storageAccess = useStorageAccess(workspaceId)
-  const viewOwn = useViewOwnRecordScope('orders.view_own')
+  const viewOwn = useViewOwnRecordScope('orders.view_own', query.orderType)
   const permissions = useOptionalWorkspacePermissions()
   const agentSalesAccountsFeatureEnabled = Boolean(
     activeWorkspace?.id === workspaceId && features.agent_sales_accounts
@@ -661,7 +664,7 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
         agentSalesAccountsFeatureEnabled,
         request.includeCommerceAttribution === true
       ),
-    [request, storageAccess.signature, viewOwn.isRestricted, viewOwn.userId, permissions?.permissionKeys, usesRemote, agentSalesAccountsFeatureEnabled],
+    [request, storageAccess.signature, viewOwn.isRestricted, viewOwn.isCoachOwnOnly, viewOwn.userId, permissions?.permissionKeys, usesRemote, agentSalesAccountsFeatureEnabled],
     EMPTY_ORDERS_PAGE
   )
   const localCommissionPreview = useLiveQuery(
@@ -680,6 +683,7 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
       commissionSummaryQueryKey,
       storageAccess.signature,
       viewOwn.isRestricted,
+      viewOwn.isCoachOwnOnly,
       viewOwn.userId,
       permissions?.permissionKeys,
       usesRemote,

@@ -1,16 +1,10 @@
-Add unknown quick-button to the recipient name in create shipment
-
-in POS, scanning an out of stock product must tell
+Product Live Recongnition on camera
 
 notification button for product out of stock must redirect to product with the search
 
 Module-Route Based Maintenence Overlay with AGENTS.md instructions
 
 Allow Stopping the Reciept to R2
-
-PWA Lang install
-
-Save usage mode
 
 Orders filter out returned sales total
 

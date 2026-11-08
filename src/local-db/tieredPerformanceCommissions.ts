@@ -13,6 +13,9 @@ import {
 } from '@/workspace/workspaceDataFreshness'
 
 export const TIERED_COMMISSION_FRESHNESS_TABLES = [
+  'agents',
+  'business_partners',
+  'commerce_operations_records',
   'tiered_commission_programs',
   'tiered_commission_tiers',
   'tiered_commission_assignments',
@@ -37,6 +40,7 @@ export type TieredCommissionProgram = {
   name: string
   description: string | null
   isActive: boolean
+  autoAssignNewAgents: boolean
   tiers: TieredCommissionTier[]
   agentIds?: string[]
 }
@@ -443,6 +447,7 @@ export async function saveTieredCommissionProgram(workspaceId: string, payload: 
   name: string
   description: string
   isActive: boolean
+  autoAssignNewAgents: boolean
   tiers: Array<{ id?: string; name: string; position: number; minimumSales: number }>
   agentIds: string[]
 }) {
