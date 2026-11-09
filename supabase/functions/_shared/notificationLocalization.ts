@@ -121,6 +121,47 @@ export function localizeNotification(input: NotificationLocalizationInput, reque
   const fallbackBody = readString(input.body)
   const fallbackActionLabel = readString(input.actionLabel) || (language === 'ar' ? '\u0641\u062a\u062d' : language === 'ku' ? '\u06a9\u0631\u062f\u0646\u06d5\u0648\u06d5' : 'Open')
 
+  if (notificationType === 'beauty3_appointment_reminder') {
+    const procedureDate = formatDate(readString(payload.procedure_date), language)
+
+    if (language === 'ar') {
+      return {
+        language,
+        title: '\u062a\u0630\u0643\u064a\u0631 \u0628\u0645\u0648\u0639\u062f \u0642\u0627\u062f\u0645',
+        body: procedureDate
+          ? `\u0645\u0648\u0639\u062f\u0643 \u0641\u064a \u0627\u0644\u0633\u0644\u064a\u0645\u0627\u0646\u064a\u0629 \u0628\u0639\u062f 3 \u0623\u064a\u0627\u0645. \u0645\u0648\u0639\u062f \u0627\u0644\u0625\u062c\u0631\u0627\u0621 \u0627\u0644\u062e\u0627\u0635 \u0628\u0643 \u0647\u0648 ${procedureDate}.`
+          : fallbackBody,
+        actionLabel: '\u0641\u062a\u062d \u0627\u0644\u0645\u0648\u0627\u0639\u064a\u062f',
+        actionUrl,
+        typeLabel: '\u0645\u0648\u0627\u0639\u064a\u062f \u0645\u0631\u0643\u0632 \u0627\u0644\u062a\u062c\u0645\u064a\u0644 ٣',
+      }
+    }
+
+    if (language === 'ku') {
+      return {
+        language,
+        title: '\u0628\u06cc\u0631\u062e\u0633\u062a\u0646\u06d5\u0648\u06d5\u06cc \u0646\u06c6\u0631\u06d5\u06cc \u062f\u0627\u0647\u0627\u062a\u0648\u0648',
+        body: procedureDate
+          ? `\u0646\u06c6\u0631\u06d5\u06a9\u06d5\u062a \u0644\u06d5 \u0633\u0644\u06ce\u0645\u0627\u0646\u06cc \u062f\u0648\u0627\u06cc 3 \u0695\u06c6\u0698 \u062f\u06ce\u062a. \u067e\u0631\u06c6\u0633\u06d5\u06a9\u06d5\u062a \u0644\u06d5 ${procedureDate} \u062f\u0627\u0646\u0631\u0627\u0648\u06d5.`
+          : fallbackBody,
+        actionLabel: '\u06a9\u0631\u062f\u0646\u06d5\u0648\u06d5\u06cc \u0646\u06c6\u0631\u06d5\u06a9\u0627\u0646',
+        actionUrl,
+        typeLabel: '\u0646\u06c6\u0631\u06d5\u06a9\u0627\u0646\u06cc \u0646\u0627\u0648\u06d5\u0646\u062f\u06cc \u062c\u0648\u0627\u0646\u06a9\u0627\u0631\u06cc ٣',
+      }
+    }
+
+    return {
+      language,
+      title: 'Upcoming Appointment Reminder',
+      body: procedureDate
+        ? `Your appointment in Sulaymaniyah is coming up in 3 days. Your procedure is scheduled for ${procedureDate}.`
+        : fallbackBody,
+      actionLabel: 'Open appointments',
+      actionUrl,
+      typeLabel: 'Beauty Center 3 Appointments',
+    }
+  }
+
   if (notificationType === 'commerce_order_created') {
     const orderSequence = readString(payload.order_sequence)
     const buyerName = readString(payload.buyer_name)

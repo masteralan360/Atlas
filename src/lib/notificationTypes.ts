@@ -7,6 +7,7 @@ export const WORKSPACE_NOTIFICATION_TYPES = [
     'expense_item_overdue',
     'payroll_overdue',
     'inventory_low_stock',
+    'beauty3_appointment_reminder',
     'garden_job_assigned',
     'garden_job_rescheduled',
     'garden_job_completed',
