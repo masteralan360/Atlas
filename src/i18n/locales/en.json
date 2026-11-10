@@ -1233,6 +1233,10 @@
     "onlineTitle": "Back online",
     "onlineDescription": "You are connected to the internet. You can now sync your changes."
   },
+  "moduleMaintenance": {
+    "title": "{{module}} is temporarily unavailable",
+    "description": "This module is temporarily unavailable due to maintenance. Please try again later."
+  },
   "common": {
     "and": "and",
     "loading": "Loading...",

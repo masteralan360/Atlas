@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useLocation } from 'wouter'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/auth/AuthContext'
+import { isSupabaseConfigured, supabase } from '@/auth/supabase'
 import { db } from '@/local-db/database'
 import {
   completeCashierShiftOccurrence,
@@ -48,10 +49,11 @@ import { ThemeAwareLogo } from './ThemeAwareLogo'
 import { LocalAccountSwitcher } from './LocalAccountSwitcher'
 import { DeploymentRefreshVersion } from './DeploymentRefreshVersion'
 import { ModuleLockerOverlay } from './module-locker/ModuleLockerOverlay'
+import { ModuleMaintenanceOverlay } from './module-maintenance/ModuleMaintenanceOverlay'
 import { ModuleLockerPasskeyDialog, type ModuleLockerPasskeyAction } from './module-locker/ModuleLockerPasskeyDialog'
 import { LoadingGlowLine } from './GlowLine'
 import { ModulePageFreshnessLoadingProvider } from './ModulePageFreshness'
-import { buildWorkspaceNavigation, type WorkspaceNavigationGroup, type WorkspaceNavigationItem } from '@/ui/navigation/workspaceNavigation'
+import { buildWorkspaceNavigation, flattenWorkspaceNavigation, type WorkspaceNavigationGroup, type WorkspaceNavigationItem } from '@/ui/navigation/workspaceNavigation'
 import {
   isNavigationRailEnabled,
   NAVIGATION_RAIL_CORNER_RADIUS,
@@ -167,7 +169,6 @@ import {
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
 
 import { useTranslation } from 'react-i18next'
-import { supabase, isSupabaseConfigured } from '@/auth/supabase'
 import { isMobile, isDesktop } from '@/lib/platform'
 import { MARKETPLACE_ORDER_REFRESH_EVENT } from '@/services/marketplaceOrderRealtime'
 import { connectionManager } from '@/lib/connectionManager'
@@ -176,6 +177,12 @@ import { useTheme } from './theme-provider'
 
 interface LayoutProps {
   children: ReactNode
+}
+
+interface ModuleMaintenanceSetting {
+  module_name: string
+  route_path: string
+  maintenance_mode: boolean
 }
 
 type SidebarCashierShiftStatus = 'available' | 'active'
@@ -305,6 +312,7 @@ function isSidebarRouteActive(location: string, href: string) {
 
 export function Layout({ children }: LayoutProps) {
   const [location, setLocation] = useLocation()
+  const [moduleMaintenanceSettings, setModuleMaintenanceSettings] = useState<ModuleMaintenanceSetting[]>([])
   const { isEnabled: isNavigationRailPreferenceEnabled } = useNavigationRailDisplay()
   const { user, signOut, session } = useAuth()
   const clinicalRegistryType = useClinicalRegistryType(user?.workspaceId)
@@ -356,6 +364,46 @@ export function Layout({ children }: LayoutProps) {
     () => (user?.workspaceId ? getModuleLockerSnapshot(user.workspaceId) : undefined),
     [user?.workspaceId]
   )
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setModuleMaintenanceSettings([])
+      return
+    }
+
+    let isActive = true
+    const pathname = location.replace(/[?#].*$/, '').replace(/\/+$/, '') || '/'
+    const routeSegments = pathname.split('/').filter(Boolean)
+    const routePaths = routeSegments.map((_, index) => `/${routeSegments.slice(0, index + 1).join('/')}`)
+
+    if (routePaths.length === 0) {
+      setModuleMaintenanceSettings([])
+      return
+    }
+
+    const refreshMaintenanceSettings = async () => {
+      const { data, error } = await supabase
+        .from('app_module_maintenance')
+        .select('module_name, route_path, maintenance_mode')
+        .eq('maintenance_mode', true)
+        .in('route_path', routePaths)
+
+      if (isActive && !error && data) {
+        setModuleMaintenanceSettings(data)
+      }
+    }
+
+    void refreshMaintenanceSettings()
+    const interval = window.setInterval(() => {
+      if (!document.hidden) void refreshMaintenanceSettings()
+    }, 30_000)
+    window.addEventListener('focus', refreshMaintenanceSettings)
+
+    return () => {
+      isActive = false
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refreshMaintenanceSettings)
+    }
+  }, [location])
   const [moduleLockerDialog, setModuleLockerDialog] = useState<{
     action: ModuleLockerPasskeyAction
     moduleHref: string
@@ -1049,6 +1097,26 @@ export function Layout({ children }: LayoutProps) {
   const activeModuleLock = getModuleLockerLockForPath(moduleLockerSnapshot?.locks ?? [], location)
   const isModuleLockerLoading = Boolean(user?.workspaceId && moduleLockerSnapshot === undefined)
   const isModuleLockerEnabled = Boolean(moduleLockerSnapshot?.settings)
+  const activeModuleMaintenance = useMemo(() => {
+    const pathname = location.replace(/\/+$/, '') || '/'
+    const matchingSettings = moduleMaintenanceSettings.filter(({ route_path }) => {
+      const routePath = route_path.replace(/\/+$/, '') || '/'
+      return routePath !== '/'
+        && (pathname === routePath || pathname.startsWith(`${routePath}/`))
+    })
+    matchingSettings.sort((left, right) => right.route_path.length - left.route_path.length)
+    return matchingSettings[0] ?? null
+  }, [location, moduleMaintenanceSettings])
+  const activeModuleMaintenanceName = useMemo(() => {
+    if (!activeModuleMaintenance) return null
+
+    const navigationLabel = flattenWorkspaceNavigation(navigation)
+      .find((item) => item.href === activeModuleMaintenance.route_path)?.name
+
+    if (navigationLabel) return navigationLabel
+    if (activeModuleMaintenance.route_path === '/notebook') return t('notebook.label')
+    return activeModuleMaintenance.module_name
+  }, [activeModuleMaintenance, navigation, t])
 
   const openModuleLockerDialog = (action: ModuleLockerPasskeyAction, moduleHref: string, moduleName: string) => {
     if (!isModuleLockerEnabled || !moduleLockerActor) return
@@ -3796,8 +3864,16 @@ export function Layout({ children }: LayoutProps) {
                 lock={activeModuleLock}
                 onUnlock={(lock) => openModuleLockerDialog('unlock', lock.moduleHref, lock.moduleName)}
               />
+              {activeModuleMaintenance && (
+                <ModuleMaintenanceOverlay
+                  containerRef={pageContentRef}
+                  moduleName={activeModuleMaintenanceName ?? activeModuleMaintenance.module_name}
+                />
+              )}
             </main>
-            {!activeModuleLock && !isModuleLockerLoading && <PageFind contentRef={pageContentRef} />}
+            {!activeModuleLock && !isModuleLockerLoading && !activeModuleMaintenance && (
+              <PageFind contentRef={pageContentRef} />
+            )}
           </div>
             )}
           </ModulePageFreshnessLoadingProvider>

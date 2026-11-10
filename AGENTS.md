@@ -56,6 +56,12 @@ When adding a module, the user must specify whether it should be included in one
 No new module should be accessible without one of these access rules being explicitly configured.
 Any new module that reads remote data must use scoped `ModulePageFreshness` with its own table names, and report start, page progress, completion, cancellation, and failure through `workspaceDataFreshness`; never show “Up to date” from an unrelated table’s load.
 
+## Module Maintenance Registration
+
+- Register every new module with a parent route in Supabase `app_module_maintenance`, using its actual module name and parent route.
+- Set `maintenance_mode` to `false` by default. Child routes are covered by the parent route and do not need separate entries.
+- Ensure new modules are covered by the shared maintenance overlay.
+
 ## Payment transactions
 
 Every incoming or outgoing payment MUST be recorded through `payment_transactions` and mirrored in the ledger. Do not update payment balances or ledger entries directly without the corresponding payment transaction.
