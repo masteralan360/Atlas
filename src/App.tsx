@@ -149,6 +149,9 @@ const Settings = lazy(() =>
 const Logs = lazy(() =>
   import("@/ui/pages/Logs").then((m) => ({ default: m.Logs })),
 );
+const Beauty3AppointmentReminders = lazy(() =>
+  import("@/ui/pages/Beauty3AppointmentReminders").then((m) => ({ default: m.Beauty3AppointmentReminders })),
+);
 const MutationQueue = lazy(() =>
   import("@/ui/pages/MutationQueue").then((m) => ({ default: m.MutationQueue })),
 );
@@ -2163,6 +2166,28 @@ function App() {
                         >
                           <Layout>
                             <ClinicalAppointments />
+                          </Layout>
+                        </ProtectedRoute>
+                      </Route>
+                      <Route path="/clinical-appointments/appointment-reminders/:notificationId">
+                        <ProtectedRoute
+                          allowedRoles={["admin", "staff", "viewer"]}
+                          requiredFeature="clinical_appointments"
+                          requiredPermission="clinicalAppointments.access"
+                        >
+                          <Layout>
+                            <Beauty3AppointmentReminders />
+                          </Layout>
+                        </ProtectedRoute>
+                      </Route>
+                      <Route path="/clinical-appointments/appointment-reminders">
+                        <ProtectedRoute
+                          allowedRoles={["admin", "staff", "viewer"]}
+                          requiredFeature="clinical_appointments"
+                          requiredPermission="clinicalAppointments.access"
+                        >
+                          <Layout>
+                            <Beauty3AppointmentReminders />
                           </Layout>
                         </ProtectedRoute>
                       </Route>

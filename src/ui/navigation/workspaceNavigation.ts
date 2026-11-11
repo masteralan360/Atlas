@@ -5,6 +5,7 @@ import {
   Leaf,
   Plane,
   BarChart3,
+  BellRing,
   Boxes,
   Building2,
   BriefcaseBusiness,
@@ -474,6 +475,14 @@ export function buildWorkspaceNavigation({
                   icon: ListChecks,
                 },
               ]
+            : clinicalRegistryType === "beauty3"
+              ? [
+                  {
+                    name: t("beauty3AppointmentReminders.title", { defaultValue: "Appointment Reminders" }),
+                    href: "/clinical-appointments/appointment-reminders",
+                    icon: BellRing,
+                  },
+                ]
             : undefined,
         },
       ]

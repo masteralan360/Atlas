@@ -41,7 +41,7 @@ function isNullableString(value: unknown) {
   return value == null || typeof value === 'string'
 }
 
-function normalizePageItem(value: unknown): NotificationInboxRecord | null {
+export function normalizeNotificationInboxPageItem(value: unknown): NotificationInboxRecord | null {
   if (!isRecord(value)) return null
   const requiredStrings = [
     'id', 'workspace_id', 'user_id', 'notification_type', 'scope', 'priority', 'title', 'created_at', 'updated_at',
@@ -86,7 +86,7 @@ export async function fetchNotificationInboxPage(
   const response = (data ?? {}) as NotificationInboxPageResponse
   return {
     items: Array.isArray(response.items)
-      ? response.items.map(normalizePageItem).filter((item): item is NotificationInboxRecord => item !== null)
+      ? response.items.map(normalizeNotificationInboxPageItem).filter((item): item is NotificationInboxRecord => item !== null)
       : [],
     totalCount: readCount(response.totalCount),
     activeCount: readCount(response.activeCount),

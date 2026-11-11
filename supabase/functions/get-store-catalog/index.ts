@@ -66,11 +66,17 @@ type MappedProduct = {
     addedAt: number
 }
 
-function buildStorePayload(workspace: WorkspaceRow, description: string | null, logoUrl: string | null, contacts: ContactRow[]) {
+function buildStorePayload(
+    workspace: WorkspaceRow,
+    storefrontSlug: string,
+    description: string | null,
+    logoUrl: string | null,
+    contacts: ContactRow[]
+) {
     return {
         workspace_id: workspace.id,
         name: workspace.name,
-        slug: workspace.store_slug,
+        slug: storefrontSlug,
         description,
         logo_url: logoUrl,
         currency: workspace.default_currency ?? 'iqd',
@@ -194,7 +200,7 @@ Deno.serve(async (req) => {
         const logoUrl = resolvePublicAssetUrl(resolved.workspace.logo_url)
             ?? (await listMarketplaceAssetUrls([`${resolved.workspace.id}/workspace-logos/`, `${resolved.workspace.id}/workspaces/`], 1))[0]
             ?? null
-        const store = buildStorePayload(resolved.workspace, resolved.description, logoUrl, storeContacts)
+        const store = buildStorePayload(resolved.workspace, slug, resolved.description, logoUrl, storeContacts)
         const emptyPayload = { store, categories: [], products: [], total_products: 0, has_more: false, next_cursor: null }
         if (!includeProducts) {
             return jsonResponse(emptyPayload, { headers: { 'Cache-Control': 'public, max-age=30, s-maxage=120' } })

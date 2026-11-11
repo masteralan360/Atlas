@@ -4,6 +4,10 @@ import type { StockAdjustmentPageQuery } from '@/local-db/stockAdjustments'
 import type { StockBatchGroupPageQuery } from '@/local-db/stockBatches'
 import type { Beauty3AppointmentPageQuery } from '@/local-db/beauty3Appointments'
 import type { NotificationInboxPageQuery } from '@/local-db/notificationInbox'
+import type {
+  Beauty3AppointmentReminderNotificationQuery,
+  Beauty3AppointmentReminderPageQuery,
+} from '@/local-db/beauty3AppointmentReminders'
 
 export const queryKeys = {
   notificationInbox: {
@@ -17,6 +21,21 @@ export const queryKeys = {
       query.page,
       query.pageSize,
       'createdAt:desc,id:desc',
+    ] as const,
+    reminderPage: (query: Beauty3AppointmentReminderPageQuery) => [
+      ...queryKeys.notificationInbox.all(query.workspaceId, query.userId),
+      'beauty3-appointment-reminders',
+      query.startAt ?? null,
+      query.endBefore ?? null,
+      query.page,
+      query.pageSize,
+      'createdAt:desc,id:desc',
+    ] as const,
+    reminderNotification: (query: Beauty3AppointmentReminderNotificationQuery) => [
+      ...queryKeys.notificationInbox.all(query.workspaceId, query.userId),
+      'beauty3-appointment-reminders',
+      'notification',
+      query.notificationId,
     ] as const,
   },
   beauty3Appointments: {

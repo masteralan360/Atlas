@@ -153,6 +153,13 @@ function localizeInboxNotification(item: NotificationInboxRecord, language: stri
 }
 
 function getNotificationActions(item: NotificationInboxRecord, localized: NotificationLocalizationResult): NotificationAction[] {
+    if (item.notification_type === 'beauty3_appointment_reminder') {
+        return [{
+            label: localized.actionLabel,
+            url: `/clinical-appointments/appointment-reminders/${encodeURIComponent(item.id)}`,
+        }]
+    }
+
     const payloadActions = item.payload.actions
     const actions: NotificationAction[] = []
     if (Array.isArray(payloadActions)) {
@@ -475,7 +482,10 @@ export function NotificationCenter() {
 
     const handleOpenNotification = useCallback((item: NotificationInboxRecord, actionUrl?: string) => {
         if (!item.read_at) void handleMarkRead(item, true)
-        const targetUrl = actionUrl || readString(item.action_url) || readString(item.payload.route)
+        const reminderUrl = item.notification_type === 'beauty3_appointment_reminder'
+            ? `/clinical-appointments/appointment-reminders/${encodeURIComponent(item.id)}`
+            : ''
+        const targetUrl = actionUrl || reminderUrl || readString(item.action_url) || readString(item.payload.route)
         if (!targetUrl) return
         setOpen(false)
         navigateToUrl(targetUrl)

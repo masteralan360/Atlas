@@ -417,7 +417,8 @@ Deno.serve(async (req) => {
                 discount_type: resolvedDiscount?.discount_type ?? null,
                 discount_value: resolvedDiscount?.discount_value ?? null,
                 discount_ends_at: resolvedDiscount?.ends_at ?? null,
-                discount_source: resolvedDiscount?.source ?? null
+                discount_source: resolvedDiscount?.source ?? null,
+                price_book_id: priceOverride?.priceBookId ?? null
             }
         })
 
@@ -437,6 +438,7 @@ Deno.serve(async (req) => {
                 subtotal,
                 total: subtotal,
                 currency: orderCurrency,
+                price_book_id: priceOverride?.priceBookId ?? null,
                 request_ip_hash: requestIpHash
             })
             .select('id, order_number')

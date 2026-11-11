@@ -8754,6 +8754,33 @@
       "warning": "لا يمكن التراجع عن هذا الإجراء. سيتم تعليم المعاملة الأصلية كمعكوسة وإنشاء معاملة عكسية جديدة."
     }
   },
+  "beauty3AppointmentReminders": {
+    "title": "تذكيرات المواعيد",
+    "subtitle": "راجع جميع التذكيرات التي تلقيتها لمواعيد مركز التجميل ٣.",
+    "dateFilter": "تصفية حسب تاريخ الاستلام",
+    "receivedAt": "تاريخ الاستلام",
+    "procedureDate": "تاريخ الإجراء",
+    "notification": "الإشعار",
+    "status": "الحالة",
+    "statusValues": {
+      "unread": "غير مقروء",
+      "read": "مقروء",
+      "archived": "مؤرشف"
+    },
+    "recordCount": "{{count}} تذكيرات",
+    "viewNotification": "عرض الإشعار",
+    "sendWhatsAppReminder": "إرسال تذكير عبر واتساب",
+    "whatsappPhoneUnavailable": "رقم هاتف العميل غير متاح أو غير صالح",
+    "workspaceNameUnavailable": "اسم مساحة العمل غير متاح حالياً",
+    "whatsappGreeting": "مرحباً {{clientName}}،",
+    "whatsappGenericGreeting": "مرحباً،",
+    "whatsappReminderBody": "هذا تذكير من {{workspaceName}}. موعدك في السليمانية محدد بتاريخ {{procedureDate}}. نتطلع إلى رؤيتك!",
+    "notificationId": "معرّف الإشعار",
+    "loading": "جارٍ تحميل تذكيرات المواعيد…",
+    "loadFailed": "تعذر تحميل تذكيرات المواعيد. حاول مرة أخرى.",
+    "empty": "لم يتم العثور على تذكيرات للمواعيد",
+    "emptyHint": "ستظهر هنا التذكيرات المرسلة لمواعيد مركز التجميل ٣."
+  },
   "beauty3Appointments": {
     "title": "مواعيد مركز التجميل ٣",
     "subtitle": "احتفظ بكل الزيارات في سجل واحد وأعد استخدام بيانات العملاء المحفوظة.",

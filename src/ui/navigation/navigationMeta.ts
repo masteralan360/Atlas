@@ -337,6 +337,11 @@ export const moduleMetaByHref: Record<string, ModuleMeta> = {
     description: "Manage clinical appointments, scheduling, and patient visits.",
     badge: "Appointments",
   },
+  "/clinical-appointments/appointment-reminders": {
+    section: "clinic-service",
+    description: "Review Beauty Center 3 appointment reminder notifications received by the current user.",
+    badge: "Reminders",
+  },
   "/clinical-appointments/patients": {
     section: "clinic-service",
     description: "View and manage patient records and medical history.",

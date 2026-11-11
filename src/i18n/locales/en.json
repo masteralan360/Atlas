@@ -8985,6 +8985,33 @@
       "warning": "This action cannot be undone. The original transaction will be marked as reversed and a new reversal transaction will be created."
     }
   },
+  "beauty3AppointmentReminders": {
+    "title": "Appointment Reminders",
+    "subtitle": "Review all reminders you have received for Beauty Center 3 appointments.",
+    "dateFilter": "Filter by received date",
+    "receivedAt": "Received",
+    "procedureDate": "Procedure date",
+    "notification": "Notification",
+    "status": "Status",
+    "statusValues": {
+      "unread": "Unread",
+      "read": "Read",
+      "archived": "Archived"
+    },
+    "recordCount": "{{count}} reminders",
+    "viewNotification": "View notification",
+    "sendWhatsAppReminder": "Send WhatsApp reminder",
+    "whatsappPhoneUnavailable": "A valid client phone number is not available",
+    "workspaceNameUnavailable": "Workspace name is not available yet",
+    "whatsappGreeting": "Hello {{clientName}},",
+    "whatsappGenericGreeting": "Hello,",
+    "whatsappReminderBody": "this is a reminder from {{workspaceName}}. Your appointment in Sulaymaniyah is scheduled for {{procedureDate}}. We look forward to seeing you!",
+    "notificationId": "Notification ID",
+    "loading": "Loading appointment reminders…",
+    "loadFailed": "Could not load appointment reminders. Please try again.",
+    "empty": "No appointment reminders found",
+    "emptyHint": "Reminders sent for Beauty Center 3 appointments will appear here."
+  },
   "beauty3Appointments": {
     "title": "Beauty Center 3 Appointments",
     "subtitle": "Keep every visit in one register and reuse saved client information.",
