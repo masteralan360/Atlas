@@ -95,6 +95,7 @@ import { CreateOrganizationDialog } from '@/postal/CreateOrganizationDialog'
 import { QRBatches } from '@/postal/QRBatches'
 import { useWorkspace } from '@/workspace'
 import { AutoScanPrinterDialog } from '@/postal/AutoScanPrinterDialog'
+import { AddAreasPanel } from '@/postal/AddAreasPanel'
 import {
   getPostalAutoScanEnabled,
   getPostalAutoScanPrinter,
@@ -113,6 +114,7 @@ import { useWorkspacePermissions } from '@/permissions'
 
 type PostalShipmentPageRow = PostalShipment & { organization_name?: string | null }
 type Row = PostalShipmentPageRow | PostalBranch | PostalOrganization | PostalCodRecord
+type PostalServiceTab = keyof typeof postalTables | 'addAreas'
 const SINGLE = ['single'] as const
 const postalStatusClasses: Record<PostalState, string> = {
   draft: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
@@ -153,7 +155,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
     locationCatalog,
   })
   autoScanContextRef.current = { scope, workspaceName, language: i18n.language, t, toast, locationCatalog }
-  const [tab, setTab] = useState<keyof typeof postalTables>('shipments')
+  const [tab, setTab] = useState<PostalServiceTab>('shipments')
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [codKind, setCodKind] = useState<
@@ -611,7 +613,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
   })
   const query = usePostalPage<Row>({
     ...scope,
-    kind: tab,
+    kind: tab === 'addAreas' ? 'shipments' : tab,
     page: pagination.currentPage,
     pageSize: pagination.pageSize,
     search,
@@ -620,7 +622,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
     ...(tab === 'shipments' || tab === 'cod'
       ? { start: dates.start?.toISOString(), end: dates.end?.toISOString() }
       : {}),
-  }, !accountStatement && !qrBatches)
+  }, !accountStatement && !qrBatches && tab !== 'addAreas')
   const summary = usePostalSummary(
     {
       ...scope,
@@ -638,6 +640,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
     error: query.error,
   })
   const columns = useMemo<ColumnDef<Row>[]>(() => {
+    if (tab === 'addAreas') return []
     if (tab === 'shipments')
       return [
         {
@@ -948,6 +951,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
           { key: 'branches', icon: Building2 },
           { key: 'organizations', icon: Users },
           { key: 'qrBatches', icon: QrCode },
+          { key: 'addAreas', icon: MapPin },
         ]
       : []),
     { key: 'cod', icon: Wallet },
@@ -969,6 +973,8 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
                 ? scope.role === 'admin'
                   ? [...postalSummaryTables, 'postal_organizations', 'postal_locations', 'postal_governorates', 'postal_shipment_tariffs']
                   : [...postalSummaryTables, 'postal_locations', 'postal_governorates', 'postal_shipment_tariffs']
+              : tab === 'addAreas'
+                ? ['postal_locations', 'postal_governorates']
                 : tab === 'cod'
                   ? ['postal_cod_records', 'postal_shipments', 'postal_organizations']
                   : [postalTables[tab]]
@@ -1039,7 +1045,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
               if (key === 'qrBatches') navigate('/post-service/qr-batches')
               else if (key === 'accountStatement') navigate('/post-service/account-statement')
               else {
-                setTab(key as keyof typeof postalTables)
+                setTab(key as PostalServiceTab)
                 if (accountStatement || qrBatches) navigate('/post-service')
               }
             }}
@@ -1049,7 +1055,15 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
           </Button>
         ))}
       </div>
-      {qrBatches ? scope.role === 'admin' && <QRBatches key={JSON.stringify(scope)} scope={scope} /> : accountStatement ? canReadPostalStatement(scope) && <OrganizationAccountStatement scope={scope} /> : <div className="space-y-4 rounded-xl border bg-card p-3 sm:p-4">
+      {qrBatches ? scope.role === 'admin' && <QRBatches key={JSON.stringify(scope)} scope={scope} /> : accountStatement ? canReadPostalStatement(scope) && <OrganizationAccountStatement scope={scope} /> : tab === 'addAreas' ? (
+        <AddAreasPanel
+          scope={scope}
+          catalog={locationCatalog}
+          catalogLoading={locationCatalogQuery.isPending}
+          catalogError={locationCatalogQuery.error}
+          onRetry={() => void locationCatalogQuery.refetch()}
+        />
+      ) : <div className="space-y-4 rounded-xl border bg-card p-3 sm:p-4">
         <div className="flex flex-wrap items-center gap-3">
           {(tab === 'shipments' || tab === 'cod') && (
             <div className="relative min-w-40 flex-1">

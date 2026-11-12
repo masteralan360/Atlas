@@ -242,11 +242,15 @@ export function normalizePostalLocationCatalog(
     if (!value || typeof value !== "object") throw new Error("postal_invalid_result");
     const row = value as Record<string, unknown>;
     const governorate = typeof row.governorate === "string" ? governoratesById.get(row.governorate) : undefined;
+    const labels = {
+      en: typeof row.label_en === "string" && row.label_en.trim() ? row.label_en.trim() : null,
+      ar: typeof row.label_ar === "string" && row.label_ar.trim() ? row.label_ar.trim() : null,
+      ku: typeof row.label_ku === "string" && row.label_ku.trim() ? row.label_ku.trim() : null,
+    };
+    const fallbackLabel = labels.en ?? labels.ar ?? labels.ku;
     if (
       !governorate || typeof row.area !== "string" || !row.area ||
-      typeof row.label_en !== "string" || !row.label_en.trim() ||
-      typeof row.label_ar !== "string" || !row.label_ar.trim() ||
-      typeof row.label_ku !== "string" || !row.label_ku.trim() ||
+      !fallbackLabel ||
       !Number.isSafeInteger(Number(row.display_order)) || Number(row.display_order) < 0 ||
       typeof row.is_active !== "boolean" ||
       (row.tariff_zone !== null && row.tariff_zone !== "center" && row.tariff_zone !== "outside") ||
@@ -255,9 +259,9 @@ export function normalizePostalLocationCatalog(
     ) throw new Error("postal_invalid_result");
     governorate.areas.push({
       id: row.area,
-      en: row.label_en,
-      ar: row.label_ar,
-      ku: row.label_ku,
+      en: labels.en ?? fallbackLabel,
+      ar: labels.ar ?? fallbackLabel,
+      ku: labels.ku ?? fallbackLabel,
       sortOrder: Number(row.display_order),
       isActive: row.is_active,
       tariffZone: row.tariff_zone,
@@ -360,13 +364,10 @@ export function locationLabel(
       ? "ku"
       : "en";
   if (!governorate) return catalog.governorates.find((x) => x.id === id)?.[lang] ?? id;
-  return (
-    catalog.governorates
-      .find((x) => x.id === governorate)
-      ?.areas.find((x) => x.id === id)?.[
-      lang
-    ] ?? id
-  );
+  const area = catalog.governorates
+    .find((x) => x.id === governorate)
+    ?.areas.find((x) => x.id === id);
+  return area?.[lang] || area?.en || area?.ar || area?.ku || id;
 }
 export const isIraqiPhone = (phone: string) =>
   /^(07\d{9}|7\d{9}|9647\d{9}|009647\d{9})$/.test(phone);

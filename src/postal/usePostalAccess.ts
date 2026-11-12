@@ -124,25 +124,29 @@ export function usePostalAction() {
         ? 'stale'
         : message.includes('postal_duplicate_branch_name')
           ? 'duplicateBranchName'
-          : message.includes('postal_invalid_branch_governorate')
-            ? 'invalidBranchGovernorate'
-            : message.includes('postal_invalid_organization_phone')
-              ? 'organizationPhone'
-              : message.includes('postal_invalid_organization')
-                ? 'invalidOrganization'
-                : message.includes('invalid_tariff') || message.includes('tariff_required')
-                  ? 'invalidTariff'
-                  : message.includes('tariff_locked')
-                    ? 'tariffLocked'
-                    : message.includes('invalid_transition')
-                      ? 'invalidTransition'
-                      : message.includes('invalid_payment')
-                        ? 'invalidPayment'
-                        : message.includes('cod_locked')
-                          ? 'codLocked'
-                          : message.includes('amount_locked')
-                            ? 'amountLocked'
-                            : 'failed'
+          : message.includes('postal_area_exists')
+            ? 'duplicateArea'
+            : message.includes('postal_invalid_tariff_zone')
+              ? 'invalidAreaTariffZone'
+              : message.includes('postal_invalid_branch_governorate')
+                ? 'invalidBranchGovernorate'
+                : message.includes('postal_invalid_organization_phone')
+                  ? 'organizationPhone'
+                  : message.includes('postal_invalid_organization')
+                    ? 'invalidOrganization'
+                    : message.includes('invalid_tariff') || message.includes('tariff_required')
+                      ? 'invalidTariff'
+                      : message.includes('tariff_locked')
+                        ? 'tariffLocked'
+                        : message.includes('invalid_transition')
+                          ? 'invalidTransition'
+                          : message.includes('invalid_payment')
+                            ? 'invalidPayment'
+                            : message.includes('cod_locked')
+                              ? 'codLocked'
+                              : message.includes('amount_locked')
+                                ? 'amountLocked'
+                                : 'failed'
       toast({
         title: t('common.error'),
         description: t(postalQrErrorKey(e) ? `postal.qr.errors.${postalQrErrorKey(e)}` : `postal.errors.${key}`),

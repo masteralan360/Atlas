@@ -336,6 +336,34 @@ function normalizePostalCodActivityPage(value: unknown): PostalPage<PostalCodRec
     },
   }
 }
+function normalizePostalShipmentPage(
+  value: unknown,
+): PostalPage<PostalShipment & { organization_name: string | null }> {
+  if (!value || typeof value !== 'object')
+    throw new Error('postal_invalid_result')
+  const result = value as Record<string, unknown>
+  if (
+    !Array.isArray(result.rows) ||
+    !Number.isSafeInteger(result.total) ||
+    Number(result.total) < 0
+  ) throw new Error('postal_invalid_result')
+  const rows = result.rows.map((value) => {
+    if (!value || typeof value !== 'object')
+      throw new Error('postal_invalid_result')
+    const row = value as PostalShipment & { organization_name?: unknown }
+    if (
+      row.organization_name !== undefined &&
+      row.organization_name !== null &&
+      typeof row.organization_name !== 'string'
+    )
+      throw new Error('postal_invalid_result')
+    return {
+      ...normalizeShipment(row),
+      organization_name: typeof row.organization_name === 'string' ? row.organization_name : null,
+    }
+  })
+  return { rows, total: Number(result.total) }
+}
 export function usePostalPage<T>(input: PostalPageInput, enabled = true) {
   return useQuery({
     queryKey: queryKeys.postal.page(input),
@@ -366,53 +394,46 @@ export function usePostalPage<T>(input: PostalPageInput, enabled = true) {
           (result) => result.rows.length,
         )
       }
+      if (input.kind === 'shipments') {
+        return tracked(
+          input,
+          [table, 'postal_organizations'],
+          signal,
+          async () => {
+            const { data, error } = await supabase.rpc('postal_shipment_page', {
+              p_workspace_id: input.workspaceId,
+              p_page: input.page,
+              p_page_size: input.pageSize,
+              p_search: sanitizePostalSearch(input.search),
+              p_status: input.status ?? 'all',
+              p_start: input.start ?? null,
+              p_end: input.end ?? null,
+            }).abortSignal(signal)
+            if (error) return { data: null, error }
+            return {
+              data: normalizePostalShipmentPage(data) as PostalPage<T>,
+              error: null,
+            }
+          },
+          (result, trackedTable) => trackedTable === 'postal_organizations'
+            ? new Set(
+                (result.rows as Array<PostalShipment & { organization_name: string | null }>)
+                  .map((shipment) => shipment.organization_id),
+              ).size
+            : result.rows.length,
+        )
+      }
       return tracked(
         input,
-        input.kind === 'shipments' && input.role === 'admin'
-          ? [table, 'postal_organizations']
-          : table,
+        table,
         signal,
         async () => {
-          const selectColumns =
-            input.kind === 'shipments' && input.role === 'admin'
-              ? '*, postal_organizations(name)'
-              : '*'
           let query = supabase
             .from(table)
-            .select(selectColumns, { count: 'exact' })
+            .select('*', { count: 'exact' })
             .eq('workspace_id', input.workspaceId)
-          if (input.kind === 'shipments') {
-            query = query.is('deleted_at', null)
-            if (input.status && input.status !== 'all')
-              query = query.eq('state', input.status)
-          }
           const search = sanitizePostalSearch(input.search)
-          if (search) {
-            if (input.kind === 'shipments') {
-              const shipmentId = parsePostalShipmentId(search)
-              if (shipmentId) {
-                const yearStart = `${String(shipmentId.year).padStart(4, '0')}-01-01T00:00:00.000Z`
-                const nextYearStart = `${String(shipmentId.year + 1).padStart(4, '0')}-01-01T00:00:00.000Z`
-                query = query
-                  .eq('shipment_number', shipmentId.shipmentNumber)
-                  .gte('created_at', yearStart)
-                  .lt('created_at', nextYearStart)
-              } else {
-                const predicates = [
-                  `recipient_name.ilike.%${search}%`,
-                  `primary_phone.ilike.%${search}%`,
-                ]
-                if (/^\d+$/.test(search))
-                  predicates.push(`shipment_number.eq.${search}`)
-                query = query.or(predicates.join(','))
-              }
-            }
-            else if (
-              input.kind === 'branches' ||
-              input.kind === 'organizations'
-            )
-              query = query.ilike('name', `%${search}%`)
-          }
+          if (search) query = query.ilike('name', `%${search}%`)
           if (input.start) query = query.gte('created_at', input.start)
           if (input.end) query = query.lt('created_at', input.end)
           query =
@@ -900,4 +921,36 @@ export async function postalAddGovernorateBranches(
   )
     throw new Error('postal_invalid_result')
   return data as { count: number }
+}
+
+export interface PostalAreaCreateInput {
+  governorate: string
+  area: string
+  label_en: string | null
+  label_ar: string | null
+  label_ku: string | null
+  tariff_zone: 'center' | 'outside' | null
+}
+
+export async function postalAddArea(
+  scope: PostalScope,
+  input: PostalAreaCreateInput,
+): Promise<void> {
+  const { error } = await supabase.rpc('postal_admin_add_area', {
+    p_governorate: input.governorate,
+    p_area: input.area,
+    p_label_en: input.label_en,
+    p_label_ar: input.label_ar,
+    p_label_ku: input.label_ku,
+    p_tariff_zone: input.tariff_zone,
+  })
+  if (error) throw error
+  const catalogKey = queryKeys.postal.locationCatalog(scope)
+  await queryClient.invalidateQueries({
+    predicate: (query) =>
+      query.queryKey[0] === catalogKey[0] &&
+      query.queryKey[1] === catalogKey[1] &&
+      query.queryKey[3] === catalogKey[3] &&
+      query.queryKey[4] === catalogKey[4],
+  })
 }
