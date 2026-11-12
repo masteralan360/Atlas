@@ -40,6 +40,7 @@ export interface PostalShipment {
   revision: number;
   driver_id?: string | null;
   driver_name?: string | null;
+  is_archive?: boolean;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;

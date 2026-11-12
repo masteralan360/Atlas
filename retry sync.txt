@@ -4,8 +4,6 @@ Account Statement post service
 
 Allow Archive of shipments
 
-Addable and Shared Areas across workspaces
-
 Rawan, Hide Workspace Members, Only Jumla Price book, No edit price POS, only pending status
 Check their orders
 

@@ -52,6 +52,7 @@ export interface PostalScope {
 }
 export interface PostalPageInput extends PostalScope {
   kind: keyof typeof postalTables
+  includeArchived?: boolean
   page: number
   pageSize: number
   search: string
@@ -268,11 +269,13 @@ function normalizeShipment(row: PostalShipment): PostalShipment {
       (deliveryFeeTariff !== null || deliveryFeeAddon !== 0)) ||
     (row.shipment_size != null &&
       !['carton', 'ship', 'small_package'].includes(row.shipment_size)) ||
-    (row.tariff_zone != null && !['center', 'outside'].includes(row.tariff_zone))
+    (row.tariff_zone != null && !['center', 'outside'].includes(row.tariff_zone)) ||
+    (row.is_archive !== undefined && typeof row.is_archive !== 'boolean')
   )
     throw new Error('postal_invalid_result')
   return {
     ...row,
+    is_archive: row.is_archive === true,
     shipment_number: Number(row.shipment_number),
     cod_amount: Number(row.cod_amount),
     delivery_fee: deliveryFee,
@@ -400,15 +403,21 @@ export function usePostalPage<T>(input: PostalPageInput, enabled = true) {
           [table, 'postal_organizations'],
           signal,
           async () => {
-            const { data, error } = await supabase.rpc('postal_shipment_page', {
-              p_workspace_id: input.workspaceId,
-              p_page: input.page,
-              p_page_size: input.pageSize,
-              p_search: sanitizePostalSearch(input.search),
-              p_status: input.status ?? 'all',
-              p_start: input.start ?? null,
-              p_end: input.end ?? null,
-            }).abortSignal(signal)
+            const { data, error } = input.includeArchived
+              ? await supabase.rpc('postal_archived_shipment_page', {
+                  p_workspace_id: input.workspaceId,
+                  p_page: input.page,
+                  p_page_size: input.pageSize,
+                }).abortSignal(signal)
+              : await supabase.rpc('postal_shipment_page', {
+                  p_workspace_id: input.workspaceId,
+                  p_page: input.page,
+                  p_page_size: input.pageSize,
+                  p_search: sanitizePostalSearch(input.search),
+                  p_status: input.status ?? 'all',
+                  p_start: input.start ?? null,
+                  p_end: input.end ?? null,
+                }).abortSignal(signal)
             if (error) return { data: null, error }
             return {
               data: normalizePostalShipmentPage(data) as PostalPage<T>,
@@ -873,6 +882,30 @@ export async function postalCommand<T>(
     window.dispatchEvent(new CustomEvent('payment-transactions:changed'))
   }
   return data as T
+}
+
+export async function setPostalShipmentArchived(
+  scope: PostalScope,
+  shipmentId: string,
+  isArchive: boolean,
+  requestId: string,
+): Promise<PostalShipment> {
+  const { data, error } = await supabase.rpc('postal_set_shipment_archive', {
+    p_workspace_id: scope.workspaceId,
+    p_shipment_id: shipmentId,
+    p_is_archive: isArchive,
+    p_request_id: requestId,
+  })
+  if (error) throw error
+  if (!data || typeof data !== 'object') throw new Error('postal_invalid_result')
+  const shipment = normalizeShipment(data as PostalShipment)
+  if (shipment.id !== shipmentId || shipment.is_archive !== isArchive) {
+    throw new Error('postal_archive_conflict')
+  }
+  await queryClient.invalidateQueries({
+    queryKey: queryKeys.postal.all(scope.workspaceId),
+  })
+  return shipment
 }
 
 export async function postalSaveBranch(

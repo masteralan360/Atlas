@@ -29,8 +29,16 @@ import {
   QrCode,
   Printer,
   Star,
+  Archive,
+  RotateCcw,
 } from 'lucide-react'
 import {
+  AppDialog,
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
   Button,
   Input,
   Select,
@@ -66,6 +74,7 @@ import {
   getPostalOrganization,
 } from '@/local-db/postal'
 import { PostalDashboardCards } from '@/postal/PostalDashboardCards'
+import { ShipmentArchiveDialog } from '@/postal/ShipmentArchiveDialog'
 import { OperationDialog } from '@/postal/OperationDialog'
 import {
   postalStates,
@@ -162,6 +171,11 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
     'all' | 'collection' | 'settlement'
   >('all')
   const [creating, setCreating] = useState(false)
+  const [archivesOpen, setArchivesOpen] = useState(false)
+  const [archiveTarget, setArchiveTarget] = useState<{
+    shipment: PostalShipment
+    isArchive: boolean
+  } | null>(null)
   const [scanner, setScanner] = useState(false)
   const scannedId = useRef<string | null>(null)
   const [autoScanReceiveShipment, setAutoScanReceiveShipment] = useState<
@@ -611,6 +625,10 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
     onPageSizeChange: (size) =>
       localStorage.setItem('postal_page_size', String(size)),
   })
+  const archivePagination = usePaginationState({
+    initialPageSize: 20,
+    resetOn: [archivesOpen],
+  })
   const query = usePostalPage<Row>({
     ...scope,
     kind: tab === 'addAreas' ? 'shipments' : tab,
@@ -623,6 +641,21 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
       ? { start: dates.start?.toISOString(), end: dates.end?.toISOString() }
       : {}),
   }, !accountStatement && !qrBatches && tab !== 'addAreas')
+  const archivedShipmentsQuery = usePostalPage<PostalShipmentPageRow>({
+    ...scope,
+    kind: 'shipments',
+    includeArchived: true,
+    page: archivePagination.currentPage,
+    pageSize: archivePagination.pageSize,
+    search: '',
+    status: 'all',
+  }, archivesOpen && scope.role === 'admin')
+  const archiveBounds = usePaginationBounds({
+    ...archivePagination,
+    totalCount: archivedShipmentsQuery.data?.total,
+    isLoading: archivedShipmentsQuery.isFetching,
+    error: archivedShipmentsQuery.error,
+  })
   const summary = usePostalSummary(
     {
       ...scope,
@@ -713,20 +746,37 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
         {
           id: 'view',
           header: t('postal.view'),
-          cell: ({ row }) => (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                navigate(
-                  `/post-service/shipments/${formatPostalShipmentId(row.original as PostalShipment)}`,
-                )
-              }
-            >
-              <Eye className="me-2 h-4 w-4" />
-              {t('postal.view')}
-            </Button>
-          ),
+          cell: ({ row }) => {
+            const shipment = row.original as PostalShipment
+            return (
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    navigate(
+                      `/post-service/shipments/${formatPostalShipmentId(shipment)}`,
+                    )
+                  }
+                >
+                  <Eye className="me-2 h-4 w-4" />
+                  {t('postal.view')}
+                </Button>
+                {scope.role === 'admin' && shipment.state === 'cancelled' && !shipment.is_archive && (
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0"
+                    aria-label={t('postal.archive.archiveAction')}
+                    title={t('postal.archive.archiveAction')}
+                    onClick={() => setArchiveTarget({ shipment, isArchive: true })}
+                  >
+                    <Archive className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                )}
+              </div>
+            )
+          },
         },
       ]
     if (tab === 'branches')
@@ -928,7 +978,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
         },
       ]
     return []
-  }, [tab, t, i18n.language, navigate, scope.role])
+  }, [tab, t, i18n.language, locationCatalog, navigate, scope.role])
   const table = useReactTable({
     data: query.data?.rows ?? [],
     columns,
@@ -990,6 +1040,12 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
             <Button onClick={() => setCreating(true)}>
               <Plus className="me-2 h-4 w-4" />
               {t('postal.createShipment')}
+            </Button>
+          )}
+          {scope.role === 'admin' && tab === 'shipments' && !accountStatement && !qrBatches && (
+            <Button variant="outline" onClick={() => setArchivesOpen(true)}>
+              <Archive className="me-2 h-4 w-4" />
+              {t('postal.archive.open')}
             </Button>
           )}
           <Button
@@ -1224,6 +1280,98 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
           </div>
         )}
       </div>}
+      {scope.role === 'admin' && (
+        <AppDialog open={archivesOpen} onOpenChange={setArchivesOpen}>
+          <AppDialogContent className="max-w-4xl">
+            <AppDialogHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <AppDialogTitle className="flex items-center gap-2">
+                <Archive className="h-5 w-5 text-primary" />
+                {t('postal.archive.title')}
+              </AppDialogTitle>
+              {(archivedShipmentsQuery.data?.total ?? 0) > 0 && (
+                <AppPagination
+                  currentPage={archiveBounds.currentPage}
+                  totalCount={archivedShipmentsQuery.data?.total ?? 0}
+                  pageCount={archiveBounds.pageCount}
+                  pageSize={archivePagination.pageSize}
+                  pageSizeOptions={[20, 50, 100]}
+                  onPageChange={archivePagination.setCurrentPage}
+                  onPageSizeChange={archivePagination.setPageSize}
+                  className="w-auto"
+                />
+              )}
+            </AppDialogHeader>
+            <AppDialogBody className="space-y-3" aria-busy={archivedShipmentsQuery.isFetching}>
+              {archivedShipmentsQuery.isFetching ? (
+                <div className="flex min-h-60 items-center justify-center gap-2 text-center text-muted-foreground" aria-live="polite">
+                  <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+                  {t('postal.archive.loading')}
+                </div>
+              ) : archivedShipmentsQuery.error ? (
+                <div className="rounded-xl border border-dashed px-4 py-10 text-center text-sm text-destructive">
+                  {t('postal.archive.loadError')}
+                </div>
+              ) : !archivedShipmentsQuery.data?.rows.length ? (
+                <div className="rounded-xl border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
+                  {t('postal.archive.empty')}
+                </div>
+              ) : archivedShipmentsQuery.data.rows.map((shipment) => (
+                <div key={shipment.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/70 bg-background p-3 sm:p-4">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <bdi className="font-semibold" dir="ltr">{formatPostalShipmentId(shipment)}</bdi>
+                      <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
+                        <Archive className="h-3 w-3" aria-hidden="true" />
+                        {t('postal.archive.archivedBadge')}
+                      </span>
+                      <span className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${postalStatusClasses[shipment.state]}`}>
+                        {t(`postal.states.${shipment.state}`)}
+                      </span>
+                    </div>
+                    <div className="truncate text-sm text-muted-foreground">
+                      {shipment.recipient_name}
+                      {shipment.organization_name ? ` · ${shipment.organization_name}` : ''}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {new Date(shipment.created_at).toLocaleString(i18n.language)} · {locationLabel(shipment.governorate, i18n.language, undefined, locationCatalog)} / {locationLabel(shipment.area, i18n.language, shipment.governorate, locationCatalog)}
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="shrink-0 gap-2"
+                    onClick={() => {
+                      setArchivesOpen(false)
+                      navigate(`/post-service/shipments/${formatPostalShipmentId(shipment)}`)
+                    }}
+                  >
+                    <Eye className="h-4 w-4" />
+                    {t('postal.archive.view')}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="shrink-0 gap-2"
+                    onClick={() => setArchiveTarget({ shipment, isArchive: false })}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    {t('postal.archive.unarchiveAction')}
+                  </Button>
+                </div>
+              ))}
+            </AppDialogBody>
+            <AppDialogFooter>
+              <Button variant="outline" onClick={() => setArchivesOpen(false)}>
+                {t('common.cancel')}
+              </Button>
+            </AppDialogFooter>
+          </AppDialogContent>
+        </AppDialog>
+      )}
+      <ShipmentArchiveDialog
+        scope={scope}
+        shipment={archiveTarget?.shipment ?? null}
+        isArchive={archiveTarget?.isArchive ?? true}
+        onClose={() => setArchiveTarget(null)}
+      />
       {creating && (
         <CreateShipmentFlow
           scope={scope}

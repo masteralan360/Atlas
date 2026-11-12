@@ -11908,7 +11908,31 @@
     "replacementLeader": "Replacement Leader",
     "driver": "Driver",
     "linked": "Linked",
-    "unlink": "Unlink"
+    "unlink": "Unlink",
+    "archive": {
+      "open": "Archives",
+      "title": "Archived shipments",
+      "empty": "There are no archived shipments.",
+      "loading": "Loading archived shipments…",
+      "loadError": "Archived shipments could not be loaded. Please try again.",
+      "view": "View",
+      "archivedBadge": "Archived",
+      "archiveAction": "Archive",
+      "unarchiveAction": "Restore",
+      "archiving": "Archiving…",
+      "unarchiving": "Restoring…",
+      "archiveConfirmTitle": "Archive this shipment?",
+      "archiveConfirm": "This cancelled shipment will leave the regular list and appear in Archives. Its details and history will remain unchanged.",
+      "unarchiveConfirmTitle": "Restore this shipment?",
+      "unarchiveConfirm": "This cancelled shipment will return to the regular shipment list with its details and history unchanged.",
+      "archiveSuccess": "Shipment archived.",
+      "unarchiveSuccess": "Shipment restored to the regular list.",
+      "archiveError": "Could not archive this shipment. Refresh the data and try again.",
+      "unarchiveError": "Could not restore this shipment. Refresh the data and try again.",
+      "notFound": "This shipment could not be found. Refresh the data and try again.",
+      "notAllowed": "Only cancelled shipments can be archived.",
+      "conflict": "This shipment changed before the action completed. Refresh the data and try again."
+    }
   },
   "stockReservations": {
     "baseUnits": "base inventory units",

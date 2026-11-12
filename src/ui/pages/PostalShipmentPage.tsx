@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
+  Archive,
   Ban,
   CheckCircle2,
   ChevronDown,
@@ -23,6 +24,7 @@ import {
   Printer,
   QrCode,
   Receipt,
+  RotateCcw,
   ShieldCheck,
   Trash2,
   Truck,
@@ -74,6 +76,7 @@ import { RecipientContactFlow } from '@/postal/RecipientContactFlow'
 import { ShipmentForm } from '@/postal/ShipmentForm'
 import { CreateShipmentFlow } from '@/postal/CreateShipmentFlow'
 import { ShipmentTimeline } from '@/postal/ShipmentTimeline'
+import { ShipmentArchiveDialog } from '@/postal/ShipmentArchiveDialog'
 import { OperationDialog } from '@/postal/OperationDialog'
 import { CodPaymentDialog } from '@/postal/CodPaymentDialog'
 import { ShipmentQr } from '@/postal/ShipmentLabel'
@@ -132,6 +135,7 @@ export default function PostalShipmentPage({
   const [print, setPrint] = useState(false)
   const [qr, setQr] = useState(false)
   const [contact, setContact] = useState(false)
+  const [archiveTarget, setArchiveTarget] = useState<boolean | null>(null)
   const [operation, setOperation] = useState('')
   const [payment, setPayment] = useState<
     'collection' | 'settlement' | 'delivery_fee' | null
@@ -256,6 +260,19 @@ export default function PostalShipmentPage({
         <span className="inline-flex items-center rounded-full bg-primary/10 px-3 text-sm font-semibold">
           {t(`postal.states.${shipment.state}`)}
         </span>
+        {scope.role === 'admin' && (shipment.state === 'cancelled' || shipment.is_archive) && (
+          <Button
+            variant="outline"
+            onClick={() => setArchiveTarget(!shipment.is_archive)}
+          >
+            {shipment.is_archive ? (
+              <RotateCcw className="me-2 h-4 w-4" />
+            ) : (
+              <Archive className="me-2 h-4 w-4" />
+            )}
+            {t(`postal.archive.${shipment.is_archive ? 'unarchiveAction' : 'archiveAction'}`)}
+          </Button>
+        )}
         {canEdit && (
           <Button variant="outline" onClick={() => setEdit(true)}>
             <Pencil className="me-2 h-4 w-4" />
@@ -758,6 +775,14 @@ export default function PostalShipmentPage({
           )
         }
       />
+      {scope.role === 'admin' && (
+        <ShipmentArchiveDialog
+          scope={scope}
+          shipment={archiveTarget !== null ? shipment : null}
+          isArchive={archiveTarget ?? true}
+          onClose={() => setArchiveTarget(null)}
+        />
+      )}
       <PrintSelectionModal
         isOpen={print}
         onClose={() => setPrint(false)}
