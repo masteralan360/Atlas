@@ -3,9 +3,13 @@ import type { PostalScope } from './postal'
 
 export const postalStatementTables = [
   'postal_organizations', 'postal_shipments', 'postal_cod_records',
-  'postal_delivery_fee_records', 'payment_transactions',
+  'postal_delivery_fee_records', 'postal_events', 'payment_transactions',
 ] as const
-export type PostalStatementKind = 'all' | 'collection' | 'settlement' | 'delivery_fee'
+export const postalStatementDisplayConfig = {
+  // Off on purpose: recipient collection rows are not organization account movements.
+  showRecipientCollectionRows: false,
+} as const
+export type PostalStatementKind = 'all' | 'delivery_accrual' | 'collection' | 'settlement' | 'delivery_fee'
 export interface PostalStatementInput extends PostalScope {
   organizationId: string
   page: number
@@ -29,7 +33,7 @@ export interface PostalStatementEntry {
   debit: string
   credit: string
   balance: string
-  payment_transaction_id: string
+  payment_transaction_id: string | null
   payment_direction: 'incoming' | 'outgoing' | null
   payment_method: string | null
   account_name_snapshot: string | null
@@ -92,14 +96,17 @@ export function normalizePostalStatement(value: unknown, workspaceId: string, or
   if (BigInt(summary.opening_balance) + BigInt(summary.credit_total) - BigInt(summary.debit_total) !== BigInt(summary.closing_balance)) throw invalid()
   const entries = data.entries.map((value): PostalStatementEntry => {
     const row = record(value)
-    if (!['collection', 'settlement', 'delivery_fee'].includes(String(row.kind))
+    if (!['delivery_accrual', 'collection', 'settlement', 'delivery_fee'].includes(String(row.kind))
       || !postalStates.includes(row.shipment_state as PostalState)
       || !Number.isSafeInteger(row.shipment_number) || Number(row.shipment_number) <= 0
       || (row.payment_direction !== null && row.payment_direction !== 'incoming' && row.payment_direction !== 'outgoing')) throw invalid()
+    if (row.kind === 'delivery_accrual' && row.payment_transaction_id !== null) throw invalid()
+    const paymentTransactionId = row.kind === 'delivery_accrual' ? null : text(row.payment_transaction_id)
     const amount = money(row.signed_amount)
     const debit = money(row.debit)
     const credit = money(row.credit)
-    const delta = row.kind === 'delivery_fee' ? 0n : BigInt(amount) * (row.kind === 'settlement' ? -1n : 1n)
+    const delta = row.kind === 'delivery_accrual' ? BigInt(amount)
+      : row.kind === 'settlement' ? -BigInt(amount) : 0n
     if (BigInt(amount) === 0n || BigInt(debit) !== (delta < 0n ? -delta : 0n)
       || BigInt(credit) !== (delta > 0n ? delta : 0n)) throw invalid()
     return {
@@ -108,7 +115,7 @@ export function normalizePostalStatement(value: unknown, workspaceId: string, or
       shipment_number: Number(row.shipment_number), shipment_created_at: date(row.shipment_created_at),
       recipient_name: text(row.recipient_name), primary_phone: text(row.primary_phone),
       shipment_state: row.shipment_state as PostalState, signed_amount: amount,
-      debit, credit, balance: money(row.balance), payment_transaction_id: text(row.payment_transaction_id),
+      debit, credit, balance: money(row.balance), payment_transaction_id: paymentTransactionId,
       payment_direction: row.payment_direction, payment_method: nullableText(row.payment_method),
       account_name_snapshot: nullableText(row.account_name_snapshot), notes: nullableText(row.notes),
     }

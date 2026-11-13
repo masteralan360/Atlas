@@ -3,7 +3,7 @@ import { supabase } from '@/auth/supabase'
 import { queryClient } from '@/query/queryClient'
 import { queryKeys } from '@/query/queryKeys'
 import { tracked, type PostalScope } from './postal'
-import { canReadPostalStatement, normalizePostalOrganization, normalizePostalStatement, postalStatementTables, type PostalStatementInput } from './postalStatementData'
+import { canReadPostalStatement, normalizePostalOrganization, normalizePostalStatement, postalStatementDisplayConfig, postalStatementTables, type PostalStatementInput } from './postalStatementData'
 export * from './postalStatementData'
 const invalid = () => new Error('postal_invalid_result')
 
@@ -32,7 +32,9 @@ export function usePostalStatement(input: PostalStatementInput) {
       const { data, error } = await supabase.rpc('postal_organization_statement', {
         p_workspace_id: input.workspaceId, p_organization_id: input.organizationId,
         p_page: input.page, p_page_size: input.pageSize, p_start: input.start ?? null,
-        p_end: input.end ?? null, p_search: input.search, p_kind: input.kind,
+        p_end: input.end ?? null, p_search: input.search,
+        p_kind: input.kind === 'all' && !postalStatementDisplayConfig.showRecipientCollectionRows
+          ? 'organization' : input.kind,
       }).abortSignal(signal)
       if (error) throw error
       // Derived balances are Query state, never canonical Dexie business rows.

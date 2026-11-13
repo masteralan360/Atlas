@@ -100,6 +100,8 @@ import { LABEL_PRINT_TEMPLATE_KEY, type LabelPrintPageSize } from '@/lib/labelPr
 import { EmptyShipmentLabel, EmptyShipmentQrLabel } from '@/postal/EmptyShipmentLabel'
 import { ShipmentLabel, SmallShipmentLabel } from '@/postal/ShipmentLabel'
 import type { PostalLocationCatalog, PostalShipment } from '@/postal/domain'
+import { PostalAccountStatementPrintTemplate, paginatePostalStatementPrintData } from '@/postal/OrganizationAccountStatementPrintTemplate'
+import type { PostalStatementPrintData, PostalStatementPrintPageData } from '@/local-db/postalStatementPrint'
 import { ModernA4InvoiceTemplate, MODERN_A4_MOVABLE_COMPONENT_KEYS } from '@/ui/components/ModernA4InvoiceTemplate'
 import {
     ProfessionalA4InvoiceTemplate,
@@ -141,6 +143,7 @@ export const POSTAL_SMALL_SHIPMENT_LABEL_TEMPLATE_KEY = 'postal.SmallShipmentLab
 export const POSTAL_EMPTY_SHIPMENT_LABEL_TEMPLATE_KEY = 'postal.EmptyShipmentLabel'
 export const POSTAL_EMPTY_SHIPMENT_LABEL_NATIVE_KEY = 'postal-empty-shipment-label'
 export const POSTAL_SMALL_SHIPMENT_QR_LABEL_TEMPLATE_KEY = 'postal.SmallShipmentQrLabel'
+export const POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY = 'postal.AccountStatement'
 export const PARTNER_DETAILS_TEMPLATE_FIELD_KEYS = {
     showWhoOwesWhom: 'showWhoOwesWhom',
     showOrders: 'showOrders'
@@ -472,6 +475,17 @@ export const CUSTOM_TEMPLATE_TARGETS: CustomTemplateTarget[] = [
         printFormat: 'label',
         page: { widthMm: 40, heightMm: 58 }
     },
+    {
+        moduleTypeKey: POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY,
+        workspaceModuleKey: 'postal_service',
+        get moduleLabel() { return i18n.t('postal.title', { defaultValue: 'Post Service' }) },
+        get typeLabel() { return i18n.t('postal.statement.printTemplateName', { defaultValue: 'Organization Account Statement' }) },
+        get description() { return i18n.t('postal.statement.printTemplateDescription', { defaultValue: 'Landscape account statement with shipment QR codes and signature lines.' }) },
+        nativeTemplateKey: POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY,
+        nativeTemplateAvailable: true,
+        printFormat: 'a4',
+        page: { widthMm: 297, heightMm: 210 }
+    },
     ...REAL_ESTATE_CONTRACT_TARGETS.map((target) => ({
         ...target,
         workspaceModuleKey: 'real_estate' as const,
@@ -765,6 +779,8 @@ export type CustomTemplatePreviewOptions = {
     postalQrBatchLabel?: boolean
     postalQrId?: string
     postalQrIds?: string[]
+    postalAccountStatementData?: PostalStatementPrintData | PostalStatementPrintPageData
+    postalAccountStatementLayout?: CustomTemplateLayout
 }
 
 const SAMPLE_POSTAL_SHIPMENT: PostalShipment = {
@@ -2300,6 +2316,110 @@ function createLoanAccountStatementPreview(options: CustomTemplatePreviewOptions
     }
 }
 
+const SAMPLE_POSTAL_ACCOUNT_STATEMENT_DATA: PostalStatementPrintData = {
+    organization: {
+        id: 'sample-postal-organization',
+        workspace_id: 'sample-workspace',
+        name: 'Sample Merchant',
+        phone: '07501234567',
+        code: 'POST-0001',
+        leader_id: null
+    },
+    entries: [{
+        id: 'sample-postal-statement-entry',
+        kind: 'delivery_accrual',
+        created_at: '2026-10-19T12:04:00.000Z',
+        shipment_id: 'sample-postal-shipment',
+        shipment_number: 7,
+        shipment_created_at: '2026-10-19T10:00:00.000Z',
+        recipient_name: 'Sample Recipient',
+        primary_phone: '07701234567',
+        shipment_state: 'delivered',
+        signed_amount: '170000',
+        debit: '0',
+        credit: '170000',
+        balance: '170000',
+        payment_transaction_id: null,
+        payment_direction: null,
+        payment_method: null,
+        account_name_snapshot: null,
+        notes: null,
+        shipment: {
+            qr_id: '00000000-0000-4000-8000-000000000007',
+            governorate: 'baghdad',
+            area: 'baghdad-centre',
+            address: 'Sample destination address',
+            cod_amount: '170000',
+            delivery_fee: '5000',
+            pieces: 2
+        }
+    }],
+    total: 1,
+    shipment_counts: { total: 1, baghdad: 1, provinces: 0 },
+    summary: {
+        opening_balance: '0', debit_total: '0', credit_total: '170000', closing_balance: '170000',
+        collections: '0', settlements: '0', delivery_fees: '5000', current_due_to: '170000',
+        current_due_from: '0', recipient_due: '170000', recipient_refund_due: '0', missing_tariffs: 0
+    },
+    search: '',
+    kind: 'all',
+    generated_at: '2026-10-19T12:04:00.000Z'
+}
+
+function createPostalAccountStatementPreview(
+    target: CustomTemplateTarget,
+    options: CustomTemplatePreviewOptions
+): TemplatePreview {
+    const data = options.postalAccountStatementData || SAMPLE_POSTAL_ACCOUNT_STATEMENT_DATA
+    const configuredLanguage = options.printLang
+        || (options.features?.print_lang && options.features.print_lang !== 'auto'
+            ? options.features.print_lang
+            : i18n.language)
+    const fixedPrintLang: TemplatePreview['fixedPrintLang'] = configuredLanguage.startsWith('ar')
+        ? 'ar'
+        : configuredLanguage.startsWith('ku')
+            ? 'ku'
+            : 'en'
+    const defaultLayout: CustomTemplateLayout = options.postalAccountStatementLayout || {
+        version: 1,
+        label: i18n.t('postal.statement.printTemplateName', { defaultValue: 'Organization Account Statement' }),
+        moduleTypeKey: POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY,
+        nativeTemplateKey: target.nativeTemplateKey,
+        page: target.page || { widthMm: 297, heightMm: 210 },
+        fields: {},
+        fieldOrders: {},
+        fieldLabelOverrides: {},
+        annotations: [],
+        texts: [],
+        images: [],
+        shapes: [],
+        updatedAt: new Date().toISOString()
+    }
+
+    return {
+        fields: [],
+        movableComponents: [],
+        page: target.page,
+        fixedPrintLang,
+        createElement: (_values, _effectiveId, printLangOverride) => (
+            <PostalAccountStatementPrintTemplate
+                data={data}
+                workspaceName={options.workspaceName}
+                printLang={printLangOverride || fixedPrintLang}
+                logoUrl={options.features?.logo_url}
+                locationCatalog={options.postalLocationCatalog}
+            />
+        ),
+        buildPdf: (_element, printLangOverride) => buildCustomTemplateLayoutPdf({
+            target,
+            layout: defaultLayout,
+            values: {},
+            options: { ...options, postalAccountStatementData: data, printLang: printLangOverride || fixedPrintLang },
+            fieldMode: 'layoutOverrides'
+        })
+    }
+}
+
 function createOrderDetailsPreview(options: CustomTemplatePreviewOptions): TemplatePreview {
     const order = options.order || SAMPLE_ORDER_DATA
     const kind = options.orderKind || 'sales'
@@ -2614,6 +2734,10 @@ export function createCustomTemplatePreview(
         }
     }
 
+    if (target.moduleTypeKey === POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY) {
+        return createPostalAccountStatementPreview(target, options)
+    }
+
     if (target.moduleTypeKey === LABEL_PRINT_TEMPLATE_KEY) {
         const configuredLanguage = options.printLang
             || (options.features?.print_lang && options.features.print_lang !== 'auto'
@@ -2872,6 +2996,27 @@ export async function buildCustomTemplateLayoutPdf({
             ...layout,
             fields: nonBlankFields(layout.fields || {})
         }
+    if (target.moduleTypeKey === POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY) {
+        const statementData = options?.postalAccountStatementData || SAMPLE_POSTAL_ACCOUNT_STATEMENT_DATA
+        const statementPages = 'pageNumber' in statementData
+            ? [statementData]
+            : paginatePostalStatementPrintData(statementData)
+        const pageElements = statementPages.map((pageData) => renderCustomTemplateLayoutElement({
+            target,
+            layout: printableLayout,
+            values,
+            options: { ...options, postalAccountStatementData: pageData },
+            effectiveId,
+            fieldMode
+        }))
+        return generateTemplatePdf({
+            pages: pageElements,
+            format: 'a4',
+            printLang: preview.fixedPrintLang,
+            pageSizeMm: printableLayout.page,
+            receiptQuality
+        })
+    }
     const pages = target.printFormat === 'label' && postalQrIds?.length
         ? postalQrIds.map((postalQrId) => renderCustomTemplateLayoutElement({
             target,

@@ -1,5 +1,6 @@
 import { isTauri } from '@/lib/platform'
 import { platformService } from '@/services/platformService'
+import { r2Service } from '@/services/r2Service'
 
 // iOS can terminate a large burst of image reads while the print DOM is being
 // prepared. Keep the pre-capture data-URL conversion deliberately small and
@@ -128,28 +129,33 @@ export async function inlineCaptureableImages(container: HTMLElement) {
                 const bytes = await platformService.readFile(tauriFilePath)
                 await setInlineSource(await blobToDataUrl(new Blob([bytes], { type: imageMimeFromPath(tauriFilePath) || 'application/octet-stream' })))
             } else if (/^(https?:|blob:)/i.test(source)) {
-                // PWA media is persisted as a relative path and displayed from
-                // R2. html-to-image fetches that URL again while serializing its
-                // SVG foreignObject; WebKit can drop that second request and
-                // replace it with the transparent image placeholder. Inline the
-                // source before capture so the clone contains pixels rather
-                // than another network dependency.
-                const response = await fetch(source, {
-                    credentials: 'omit',
-                    referrerPolicy: 'no-referrer'
-                })
-                if (!response.ok) {
-                    throw new Error(`Image request failed with status ${response.status}.`)
-                }
+                // PWA media is displayed from R2. Read same-worker URLs through
+                // the authenticated R2 path before capture; this avoids CORS and
+                // gateway failures and prevents html-to-image from making a
+                // second network request while serializing its SVG foreignObject.
+                const r2Bytes = await r2Service.downloadFromUrl(source)
+                if (r2Bytes) {
+                    const mimeType = imageMimeFromPath(source)
+                    if (!mimeType) throw new Error('Expected a supported image file extension for the R2 image.')
+                    await setInlineSource(await blobToDataUrl(new Blob([r2Bytes], { type: mimeType })))
+                } else {
+                    const response = await fetch(source, {
+                        credentials: 'omit',
+                        referrerPolicy: 'no-referrer'
+                    })
+                    if (!response.ok) {
+                        throw new Error(`Image request failed with status ${response.status}.`)
+                    }
 
-                const blob = await response.blob()
-                const mimeType = blob.type.startsWith('image/')
-                    ? blob.type
-                    : imageMimeFromPath(source)
-                if (!mimeType) {
-                    throw new Error(`Expected an image response but received ${blob.type || 'an unknown content type'}.`)
+                    const blob = await response.blob()
+                    const mimeType = blob.type.startsWith('image/')
+                        ? blob.type
+                        : imageMimeFromPath(source)
+                    if (!mimeType) {
+                        throw new Error(`Expected an image response but received ${blob.type || 'an unknown content type'}.`)
+                    }
+                    await setInlineSource(await blobToDataUrl(blob.type === mimeType ? blob : new Blob([blob], { type: mimeType })))
                 }
-                await setInlineSource(await blobToDataUrl(blob.type === mimeType ? blob : new Blob([blob], { type: mimeType })))
             } else {
                 return
             }

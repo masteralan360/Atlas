@@ -94,6 +94,7 @@ export const queryKeys = {
     all: (workspaceId: string) => ['atlas', 'workspace', workspaceId, 'postal'] as const,
     primaryBranch: (scope: import('@/local-db/postal').PostalScope) => [...queryKeys.postal.all(scope.workspaceId), 'primary-branch', scope.userId, scope.role, scope.permissionScope] as const,
     statement: (input: import('@/local-db/postalStatement').PostalStatementInput) => [...queryKeys.postal.all(input.workspaceId), 'statement', input] as const,
+    statementPrint: (input: import('@/local-db/postalStatementPrint').PostalStatementPrintInput) => [...queryKeys.postal.all(input.workspaceId), 'statement-print', input] as const,
     statementOrganizations: (scope: import('@/local-db/postal').PostalScope, search: string) => [...queryKeys.postal.all(scope.workspaceId), 'statement-organizations', scope, search] as const,
     page: (input: import('@/local-db/postal').PostalPageInput) => [...queryKeys.postal.all(input.workspaceId), 'page', input] as const,
     summary: (input: import('@/local-db/postal').PostalSummaryInput) => [...queryKeys.postal.all(input.workspaceId), 'summary', input] as const,

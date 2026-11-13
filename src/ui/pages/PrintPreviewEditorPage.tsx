@@ -1351,17 +1351,26 @@ export function PrintPreviewEditorPage() {
     const showPersistedDocumentActions = Boolean(
         source.onSave && ((source.generatePdfBlob && editableData) || (templatePreview && fieldValues))
     )
+    const canGenerateCurrentActionPdf = Boolean(
+        (source.generatePdfBlob && editableData)
+        || (source.generatePreviewPdfBlob && !templatePreview && !source.data)
+        || (templatePreview && fieldValues)
+    )
+    const showDocumentActionButtons = showPersistedDocumentActions
+        || Boolean(source.showStandardPdfActions && canGenerateCurrentActionPdf)
     const withBalanceProgress = (label: string) => isFreshPartnerBalanceLoading
         ? t('print.actionWithProgress', { action: label, percentage: freshPartnerBalanceLoadingPercentage })
         : label
     const documentSaveActionLabel = withBalanceProgress(t('pdfPreview.save', { defaultValue: 'Save' }))
     const documentShareActionLabel = withBalanceProgress(t('pdfPreview.share', { defaultValue: 'Share' }))
-    const documentPrintActionLabel = withBalanceProgress(isInvoiceSavedThisSession
-        ? t('pdfPreview.print', { defaultValue: 'Print' })
-        : t('print.printAndSave', { defaultValue: 'Print & Save' }))
+    const documentPrintActionLabel = withBalanceProgress(
+        showPersistedDocumentActions && !isInvoiceSavedThisSession
+            ? t('print.printAndSave', { defaultValue: 'Print & Save' })
+            : t('pdfPreview.print', { defaultValue: 'Print' })
+    )
 
     const handleDocumentAction = async (action: 'print' | 'share' | 'save') => {
-        if (!source || !showPersistedDocumentActions || actionInProgressRef.current) return
+        if (!source || !showDocumentActionButtons || actionInProgressRef.current) return
         const printWindow = action === 'print' ? preparePdfPrintWindow() : undefined
         let printWindowUsed = false
 
@@ -1425,7 +1434,7 @@ export function PrintPreviewEditorPage() {
 
             const blob = await generateCurrentActionPdfBlob()
             actionPdfBlob = blob
-            if (!invoiceSavedThisSessionRef.current) {
+            if (showPersistedDocumentActions && !invoiceSavedThisSessionRef.current) {
                 if (!source.onSave) throw new Error('Invoice saving is unavailable.')
                 isPersisting = true
                 const savePromise = source.onSave(blob)
@@ -2299,7 +2308,7 @@ export function PrintPreviewEditorPage() {
                                 </span>
                             </button>
                         )}
-                        {showPersistedDocumentActions && (
+                        {showDocumentActionButtons && (
                             <>
                                 <button
                                     type="button"
@@ -2338,7 +2347,7 @@ export function PrintPreviewEditorPage() {
                         )}
                         {hasTemplatePrimaryAction && (
                             source.onSave && source.onPrint ? (
-                                !showPersistedDocumentActions && <button
+                                !showDocumentActionButtons && <button
                                     className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs font-medium hover:bg-accent disabled:opacity-50"
                                     onClick={() => void saveTemplatePreview(undefined, undefined, 'print')}
                                     disabled={isSaving || !isTemplatePrintReady}
@@ -2361,7 +2370,7 @@ export function PrintPreviewEditorPage() {
                                 <span>{t('printPreviewEditor.testPrint', { defaultValue: 'Test Print' })}</span>
                             </button>
                         ) : null}
-                        {hasTemplatePrimaryAction && (!showPersistedDocumentActions || source.onSaveTemplateLayout) && (
+                        {hasTemplatePrimaryAction && (!showDocumentActionButtons || source.onSaveTemplateLayout) && (
                             <button
                                 className={cn(
                                     'inline-flex items-center justify-center rounded-md h-8 text-xs font-medium transition-colors gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 md:w-auto md:px-3',
@@ -3404,7 +3413,7 @@ export function PrintPreviewEditorPage() {
                             </span>
                         </button>
                     )}
-                    {showPersistedDocumentActions ? (
+                    {showDocumentActionButtons ? (
                         <>
                             <button
                                 type="button"

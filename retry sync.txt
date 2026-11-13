@@ -2,10 +2,14 @@ negative delivery fee
 
 Account Statement post service
 
-Allow Archive of shipments
+Pending Sale orders must be editable if no payment has gone through
 
-Rawan, Hide Workspace Members, Only Jumla Price book, No edit price POS, only pending status
+Sales Orders Page Special Print With Products
+
+only pending status
 Check their orders
+
+Discount POS Quick Order
 
 Product Live Recongnition on camera
 

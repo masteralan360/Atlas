@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '@/auth'
 import { isSupabaseConfigured } from '@/auth/supabase'
 import { connectionManager } from '@/lib/connectionManager'
+import { isTauri } from '@/lib/platform'
 import { LAST_SYNC_KEY } from '@/sync/constants'
 import { runManagedFullSync } from '@/sync/syncCoordinator'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
@@ -11,7 +12,7 @@ const WARMUP_VERSION = 1
 const MODULE_PRELOAD_BATCH_SIZE = 4
 
 function isInstalledPwa() {
-    if (typeof window === 'undefined') return false
+    if (typeof window === 'undefined' || isTauri()) return false
 
     return window.matchMedia('(display-mode: standalone)').matches
         || window.matchMedia('(display-mode: window-controls-overlay)').matches

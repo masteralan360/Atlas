@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'wouter'
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table'
-import { Building2, FileText, Link2, Unlink, RefreshCw, Search, Wallet, TrendingUp, TrendingDown, Scale, HandCoins } from 'lucide-react'
+import { Building2, FileText, Link2, Unlink, RefreshCw, Search, Wallet, TrendingUp, TrendingDown, Scale, HandCoins, Printer, Loader2 } from 'lucide-react'
 import { Button, Card, CardContent, CardHeader, CardTitle, Badge, Input, Select, SelectTrigger, SelectValue, SelectContent, SelectItem, Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/ui/components'
 import { AppPagination } from '@/ui/components/AppPagination'
 import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
@@ -11,14 +11,35 @@ import { usePaginationBounds, usePaginationState } from '@/hooks/usePaginationSt
 import { useDateRange } from '@/context/DateRangeContext'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { getPaymentMethodLabel, type PaymentMethodOption } from '@/lib/paymentMethods'
-import { usePostalStatement, postalStatementTables, type PostalStatementEntry, type PostalStatementKind } from '@/local-db/postalStatement'
-import type { PostalScope } from '@/local-db/postal'
-import { formatPostalShipmentId, type PostalOrganization } from './domain'
+import { usePostalStatement, postalStatementDisplayConfig, postalStatementTables, type PostalStatementEntry, type PostalStatementKind } from '@/local-db/postalStatement'
+import { usePostalStatementPrint, type PostalStatementPrintData, type PostalStatementPrintInput } from '@/local-db/postalStatementPrint'
+import {
+  POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY,
+  buildCustomTemplateLayoutPdf,
+  createCustomTemplatePreview,
+  getCustomTemplatePrintLanguageWarning,
+  getCustomTemplateTarget,
+  getStoredCustomTemplateLabel,
+  isCustomTemplatePrintLanguageCompatible,
+  readCustomTemplateLayout,
+  resolveCustomTemplatePrintLanguage,
+  type StoredCustomTemplateRow,
+} from '@/lib/customTemplates'
+import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
+import type { CustomTemplateLayout } from '@/lib/printPreviewEditorStore'
+import type { PrintFormat } from '@/services/pdfGenerator'
+import { usePostalLocationCatalog, type PostalScope } from '@/local-db/postal'
+import { emptyPostalLocationCatalog, formatPostalShipmentId, type PostalOrganization } from './domain'
 import { OrganizationAutoCompleteInput } from './OrganizationAutoCompleteInput'
 import { PostalError, PostalLoading } from './shared'
+import { PrintFlow } from '@/ui/components/PrintFlow'
+import { useWorkspace } from '@/workspace'
+import { useToast } from '@/ui/components/use-toast'
 
-const KINDS = ['all', 'collection', 'settlement', 'delivery_fee'] as const
-const kindKeys = { all: 'postal.statement.allTransactions', collection: 'postal.statement.recipientMovements', settlement: 'postal.settlementEvent', delivery_fee: 'postal.deliveryFeeCollection' } as const
+const KINDS: readonly PostalStatementKind[] = postalStatementDisplayConfig.showRecipientCollectionRows
+  ? ['all', 'delivery_accrual', 'collection', 'settlement', 'delivery_fee']
+  : ['all', 'delivery_accrual', 'settlement', 'delivery_fee']
+const kindKeys = { all: 'postal.statement.allTransactions', delivery_accrual: 'postal.statement.deliveryAccrual', collection: 'postal.statement.recipientMovements', settlement: 'postal.settlementEvent', delivery_fee: 'postal.deliveryFeeCollection' } as const
 const NUMERIC_COLUMNS = new Set(['cash', 'debit', 'credit', 'balance'])
 
 export function OrganizationAccountStatement({ scope }: { scope: PostalScope }) {
@@ -27,12 +48,21 @@ export function OrganizationAccountStatement({ scope }: { scope: PostalScope }) 
 }
 function StatementContent({ scope }: { scope: PostalScope }) {
   const { t, i18n } = useTranslation()
+  const { features, workspaceName } = useWorkspace()
+  const { toast } = useToast()
   const [, navigate] = useLocation()
   const [organization, setOrganization] = useState<PostalOrganization | null>(null)
   const [organizationQuery, setOrganizationQuery] = useState('')
   const [search, setSearch] = useState('')
   const [kind, setKind] = useState<PostalStatementKind>('all')
+  const [printRequestInput, setPrintRequestInput] = useState<PostalStatementPrintInput | null>(null)
+  const [printData, setPrintData] = useState<PostalStatementPrintData | null>(null)
+  const [printFlowOpen, setPrintFlowOpen] = useState(false)
+  const [customTemplates, setCustomTemplates] = useState<StoredCustomTemplateRow[]>([])
+  const [selectedPrintTemplate, setSelectedPrintTemplate] = useState<StoredCustomTemplateRow | null>(null)
   const { dateRange, customDates, dateFilterDayBoundary } = useDateRange()
+  const locationCatalogQuery = usePostalLocationCatalog(scope)
+  const locationCatalog = locationCatalogQuery.data ?? emptyPostalLocationCatalog
   const dates = getDateRangeBounds(dateRange, customDates, new Date(), dateFilterDayBoundary)
   const start = dates.start?.toISOString()
   const end = dates.end?.toISOString()
@@ -46,6 +76,7 @@ function StatementContent({ scope }: { scope: PostalScope }) {
   })
   const query = usePostalStatement({ ...scope, organizationId: organization?.id ?? '',
     page: pagination.currentPage, pageSize: pagination.pageSize, start, end, search, kind })
+  const printQuery = usePostalStatementPrint(printRequestInput)
   const bounds = usePaginationBounds({ ...pagination, totalCount: query.data?.total,
     isLoading: query.isFetching || query.isPending, error: query.error })
   const display = (amount: string) => `${new Intl.NumberFormat(i18n.language).format(BigInt(amount))} ${t('postal.iqd')}`
@@ -76,12 +107,13 @@ function StatementContent({ scope }: { scope: PostalScope }) {
               ? 'postal.settlementReceiveFromMerchant' : kindKeys[entry.kind])}</p>
           {entry.payment_method && <p className="text-xs text-muted-foreground">{getPaymentMethodLabel(entry.payment_method as PaymentMethodOption, t)}</p>}
           {entry.account_name_snapshot && <p className="text-xs text-muted-foreground"><bdi>{entry.account_name_snapshot}</bdi></p>}
-          <p className="break-all font-mono text-[10px] text-muted-foreground" title={t('postal.statement.paymentReference')}><bdi dir="ltr">{entry.payment_transaction_id}</bdi></p>
+          {entry.payment_transaction_id && <p className="break-all font-mono text-[10px] text-muted-foreground" title={t('postal.statement.paymentReference')}><bdi dir="ltr">{entry.payment_transaction_id}</bdi></p>}
           {entry.notes && <p className="max-w-64 whitespace-pre-wrap break-words text-xs text-muted-foreground"><bdi>{entry.notes}</bdi></p>}
         </div>
       } },
       { id: 'cash', header: t('postal.statement.cashMovement'), cell: ({ row }) => {
         const entry = row.original
+        if (entry.kind === 'delivery_accrual') return <span className="text-xs text-muted-foreground">{t('postal.statement.noCashMovement')}</span>
         const amount = BigInt(entry.signed_amount)
         return <div className="min-w-32 space-y-1 text-end tabular-nums">
           <p><bdi dir="ltr">{money(String(amount < 0n ? -amount : amount))}</bdi></p>
@@ -100,6 +132,121 @@ function StatementContent({ scope }: { scope: PostalScope }) {
     rowCount: query.data?.total ?? 0, getRowId: (row) => `${row.kind}:${row.id}`,
     state: { pagination: { pageIndex: bounds.currentPage - 1, pageSize: pagination.pageSize } } })
   const statement = !query.isFetching && !query.error ? query.data : undefined
+  const currentTemplatePrintLanguage = resolveCustomTemplatePrintLanguage(features.print_lang, i18n.language)
+  const printTarget = useMemo(() => getCustomTemplateTarget(POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY), [])
+  const availablePrintTemplates = useMemo(() => customTemplates.filter((template) => (
+    template.module_type_key === POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY
+    && template.active
+    && Boolean(readCustomTemplateLayout(template))
+  )), [customTemplates])
+  const selectedPrintLayout = useMemo(() => selectedPrintTemplate
+    && isCustomTemplatePrintLanguageCompatible(selectedPrintTemplate, currentTemplatePrintLanguage)
+    ? readCustomTemplateLayout(selectedPrintTemplate)
+    : null, [currentTemplatePrintLanguage, selectedPrintTemplate])
+  const activePrintLayout = useMemo<CustomTemplateLayout | null>(() => {
+    if (selectedPrintLayout) return selectedPrintLayout
+    if (!printTarget) return null
+    return {
+      version: 1,
+      label: t('postal.statement.printTemplateName'),
+      moduleTypeKey: POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY,
+      nativeTemplateKey: printTarget.nativeTemplateKey,
+      page: printTarget.page || { widthMm: 297, heightMm: 210 },
+      fields: {},
+      fieldOrders: {},
+      fieldLabelOverrides: {},
+      annotations: [],
+      texts: [],
+      images: [],
+      shapes: [],
+      updatedAt: new Date().toISOString(),
+    }
+  }, [printTarget, selectedPrintLayout, t])
+  const printPreview = useMemo(() => printTarget && printData && activePrintLayout
+    ? createCustomTemplatePreview(printTarget, {
+      workspaceId: scope.workspaceId,
+      workspaceName,
+      features,
+      postalLocationCatalog: locationCatalog,
+      postalAccountStatementData: printData,
+      postalAccountStatementLayout: activePrintLayout,
+      printLang: currentTemplatePrintLanguage,
+    })
+    : undefined, [activePrintLayout, currentTemplatePrintLanguage, features, locationCatalog, printData, printTarget, scope.workspaceId, workspaceName])
+  const customPrintOptions = useMemo(() => availablePrintTemplates.map((template) => ({
+    format: 'a4' as const,
+    template,
+    label: getStoredCustomTemplateLabel(template),
+    description: t('postal.statement.savedTemplateDescription'),
+    primary: template.primary,
+    disabled: !isCustomTemplatePrintLanguageCompatible(template, currentTemplatePrintLanguage),
+    warning: getCustomTemplatePrintLanguageWarning(template, currentTemplatePrintLanguage, t),
+  })), [availablePrintTemplates, currentTemplatePrintLanguage, t])
+
+  useEffect(() => {
+    if (!scope.workspaceId) {
+      setCustomTemplates([])
+      return
+    }
+    let cancelled = false
+    void fetchCachedCustomTemplates(scope.workspaceId, {
+      moduleTypeKey: POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY,
+      activeOnly: true,
+    }).then((templates) => {
+      if (!cancelled) setCustomTemplates(templates as StoredCustomTemplateRow[])
+    }).catch((error) => {
+      console.error('[OrganizationAccountStatement] Could not load print templates:', error)
+      if (!cancelled) setCustomTemplates([])
+    })
+    return () => { cancelled = true }
+  }, [scope.workspaceId])
+
+  useEffect(() => {
+    if (!printRequestInput) return
+    if (printQuery.error && !printQuery.isFetching) {
+      toast({ title: t('postal.statement.printErrorTitle'), description: t('postal.statement.printFailed'), variant: 'destructive' })
+      setPrintRequestInput(null)
+      return
+    }
+    if (printQuery.data && !printQuery.isFetching) {
+      setPrintData(printQuery.data)
+      setPrintFlowOpen(true)
+      setPrintRequestInput(null)
+    }
+  }, [printQuery.data, printQuery.error, printQuery.isFetching, printRequestInput, t, toast])
+
+  const handlePrintSelection = (_format: PrintFormat, template?: StoredCustomTemplateRow, nativeTemplateKey?: string) => {
+    const requestedKey = template?.module_type_key || nativeTemplateKey
+    if (requestedKey !== POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY) return
+    if (template && !isCustomTemplatePrintLanguageCompatible(template, currentTemplatePrintLanguage)) return
+    setSelectedPrintTemplate(template || null)
+  }
+
+  const buildEditablePrintPdf = async (layout: CustomTemplateLayout, printLangOverride?: string, effectiveId?: string) => {
+    if (!printTarget || !printData) throw new Error('Postal statement print data is unavailable.')
+    return buildCustomTemplateLayoutPdf({
+      target: printTarget,
+      layout,
+      values: {},
+      options: {
+        workspaceId: scope.workspaceId,
+        workspaceName,
+        features,
+        postalLocationCatalog: locationCatalog,
+        postalAccountStatementData: printData,
+        postalAccountStatementLayout: layout,
+        printLang: printLangOverride || currentTemplatePrintLanguage,
+      },
+      effectiveId,
+      fieldMode: 'layoutOverrides',
+    })
+  }
+
+  const closePrintFlow = () => {
+    setPrintFlowOpen(false)
+    setPrintData(null)
+    setSelectedPrintTemplate(null)
+  }
   const clear = () => { setOrganization(null); setOrganizationQuery('') }
   return (
     <div className="min-w-0 space-y-5">
@@ -108,9 +255,30 @@ function StatementContent({ scope }: { scope: PostalScope }) {
           <h2 className="flex items-center gap-2 text-lg font-semibold"><FileText className="h-5 w-5 text-primary" />{t('postal.accountStatement')}</h2>
           {organization && <ModulePageFreshness tableNames={postalStatementTables} />}
         </div>
-        <Button variant="outline" className="gap-2 rounded-xl" disabled={!organization || query.isFetching} onClick={() => void query.refetch()}>
-          <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} />{t('postal.statement.refresh')}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" className="gap-2 rounded-xl" disabled={!organization || !statement || query.isFetching || printQuery.isFetching || !!printRequestInput}
+            onClick={() => {
+              if (!organization) return
+              setPrintData(null)
+              setSelectedPrintTemplate(null)
+              setPrintRequestInput({
+                ...scope,
+                organizationId: organization.id,
+                ...(start ? { start } : {}),
+                ...(end ? { end } : {}),
+                search,
+                kind,
+              })
+            }}>
+            {printRequestInput && printQuery.isFetching
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Printer className="h-4 w-4" />}
+            {printRequestInput && printQuery.isFetching ? t('postal.statement.printLoading') : t('common.print')}
+          </Button>
+          <Button variant="outline" className="gap-2 rounded-xl" disabled={!organization || query.isFetching} onClick={() => void query.refetch()}>
+            <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} />{t('postal.statement.refresh')}
+          </Button>
+        </div>
       </div>
       <Card><CardContent className="grid gap-4 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <div className="min-w-0 space-y-2">
@@ -205,6 +373,36 @@ function StatementContent({ scope }: { scope: PostalScope }) {
           </CardContent>
         </Card>}
       </>}
+      {printData && printTarget && activePrintLayout && printPreview ? <PrintFlow
+        isOpen={printFlowOpen}
+        onClose={closePrintFlow}
+        onConfirm={closePrintFlow}
+        title={t('postal.statement.printTitle')}
+        originId={printData.organization.id}
+        customTemplate={{
+          moduleTypeKey: POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY,
+          nativeTemplateKey: printTarget.nativeTemplateKey,
+          templateId: selectedPrintTemplate?.id,
+          label: selectedPrintTemplate ? getStoredCustomTemplateLabel(selectedPrintTemplate) : t('postal.statement.printTemplateName'),
+        }}
+        templatePreview={printPreview}
+        initialTemplateLayout={activePrintLayout}
+        generateTemplateLayoutBlob={buildEditablePrintPdf}
+        features={features}
+        workspaceName={workspaceName}
+        module="global"
+        showSaveButton={false}
+        showStandardPdfActions
+        allowA4Document
+        printSelectionOptions={[{
+          format: 'a4',
+          nativeTemplateKey: POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY,
+          label: t('postal.statement.printTemplateName'),
+          description: t('postal.statement.printTemplateDescription'),
+        }]}
+        printSelectionTemplates={customPrintOptions}
+        onPrintSelection={handlePrintSelection}
+      /> : null}
     </div>
   )
 }

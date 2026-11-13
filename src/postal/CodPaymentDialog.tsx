@@ -53,7 +53,7 @@ export function CodPaymentDialog({
       ? Number(shipment.delivery_fee ?? 0) - feeCollected
       : kind === 'collection'
         ? shipment.cod_amount - summary.collected
-        : summary.collected - summary.settled
+        : shipment.cod_amount - summary.settled
   const [digits, setDigits] = useState(String(Math.abs(remaining)))
   const [method, setMethod] = useState<PaymentMethodOption>('cash')
   const [account, setAccount] = useState<PaymentAccount | null>(null)

@@ -308,6 +308,8 @@ export type PrintPreviewEditorSource = {
     /** Opens the browser/native print dialog without persisting the generated document. */
     onPrint?: (blob: Blob) => Promise<void>
     printActionLabel?: string
+    /** Shows Save, Share, and Print actions for generated PDFs that are not persisted documents. */
+    showStandardPdfActions?: boolean
     invoiceData?: any
     effectiveId?: string
     generatePdfBlob?: (editedData: UniversalInvoice, printLangOverride?: string, tableRowCount?: number) => Promise<Blob>

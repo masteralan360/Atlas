@@ -1,5 +1,6 @@
 import { getActiveBusinessWorkspaceId } from '@/lib/network'
 import { recordNetworkError } from '@/lib/errorLogger'
+import { isTauri } from '@/lib/platform'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 // Legacy backend message: this limit is enforced against CHARGED usage, even
@@ -103,6 +104,28 @@ function getRequestMethod(input: RequestInfo | URL, init?: RequestInit) {
 
 function getRequestEndpoint(input: RequestInfo | URL) {
     return getRequestUrl(input)?.pathname ?? 'unknown'
+}
+
+function isSupabaseRestRead(
+    input: RequestInfo | URL,
+    init: RequestInit | undefined,
+    supabaseUrl: string,
+) {
+    if (!isTauri() || !['GET', 'HEAD'].includes(getRequestMethod(input, init))) return false
+
+    const requestUrl = getRequestUrl(input)
+    if (!requestUrl) return false
+
+    try {
+        const baseUrl = new URL(supabaseUrl)
+        if (requestUrl.origin !== baseUrl.origin) return false
+
+        const basePath = baseUrl.pathname.replace(/\/+$/, '')
+        const restPrefix = `${basePath}/rest/v1/`.replace(/\/{2,}/g, '/')
+        return requestUrl.pathname.startsWith(restPrefix)
+    } catch {
+        return false
+    }
 }
 
 async function captureNetworkResponseError(
@@ -685,9 +708,19 @@ export function createWorkspaceUsageFetch(options: WorkspaceUsageFetchOptions): 
 
         const requestInput = gatewayRequest?.input ?? directRequest?.input ?? input
         const requestInit = gatewayRequest?.init ?? directRequest?.init ?? init
+        // Atlas already persists server data in Dexie for responsive offline reads.
+        // Avoid keeping a second, opaque copy of Tauri REST responses in WebView2's
+        // disk cache; leave storage objects and ordinary browser assets cacheable.
+        const effectiveRequestInit = isSupabaseRestRead(
+            requestInput,
+            requestInit,
+            normalizedOptions.supabaseUrl,
+        )
+            ? { ...(requestInit ?? {}), cache: 'no-store' as RequestCache }
+            : requestInit
         let response: Response
         try {
-            response = await normalizedOptions.fetchImpl(requestInput, requestInit)
+            response = await normalizedOptions.fetchImpl(requestInput, effectiveRequestInit)
         } catch (error) {
             recordNetworkError({
                 method: getRequestMethod(requestInput, requestInit),

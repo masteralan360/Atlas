@@ -45,6 +45,7 @@ interface PrintFlowProps {
     title?: string
     children?: ReactNode
     showSaveButton?: boolean
+    showStandardPdfActions?: boolean
     invoiceData?: Omit<Invoice, 'id' | 'workspaceId' | 'createdAt' | 'updatedAt' | 'syncStatus' | 'lastSyncedAt' | 'version' | 'isDeleted' | 'invoiceid'> & { invoiceid?: string }
     pdfData?: any // UniversalInvoice
     pdfBuilder?: (options: { format: PrintFormat; effectiveId: string; printLangOverride?: string }) => Promise<Blob>
@@ -92,6 +93,7 @@ export function PrintFlow({
     title,
     children,
     showSaveButton = true,
+    showStandardPdfActions = false,
     invoiceData,
     pdfData,
     pdfBuilder,
@@ -491,6 +493,7 @@ export function PrintFlow({
                     onSave: onPreviewSave || (!onPreviewPrint && hasPdfData && (showSaveButton || enableTemplatePreviewSave) ? handleSave : undefined),
                     onPrint: onPreviewPrint,
                     printActionLabel: previewPrintActionLabel,
+                    showStandardPdfActions,
                     effectiveId,
                     printFormat,
                     workspaceId,
@@ -515,7 +518,8 @@ export function PrintFlow({
                         printLangOverride
                     }),
                     onPrint: onPreviewPrint || ((blob) => printPdfBlob(blob, { title: previewTitle })),
-                    printActionLabel: previewPrintActionLabel || t('pdfPreview.print', { defaultValue: 'Print' })
+                    printActionLabel: previewPrintActionLabel || t('pdfPreview.print', { defaultValue: 'Print' }),
+                    showStandardPdfActions
                 })
             } else if (templateContent) {
                 const genericTemplatePreview: TemplatePreview = {
@@ -544,7 +548,8 @@ export function PrintFlow({
                     templatePreview: genericTemplatePreview,
                     onSave: onPreviewSave,
                     onPrint: onPreviewPrint || ((blob) => printPdfBlob(blob, { title: previewTitle })),
-                    printActionLabel: previewPrintActionLabel || t('pdfPreview.print', { defaultValue: 'Print' })
+                    printActionLabel: previewPrintActionLabel || t('pdfPreview.print', { defaultValue: 'Print' }),
+                    showStandardPdfActions
                 })
             } else {
                 throw new Error('No printable content is available.')
@@ -564,7 +569,7 @@ export function PrintFlow({
                 variant: 'destructive'
             })
         }
-    }, [printFormat, printLang, title, t, setLocation, handleSave, pdfData, hasPdfData, printableFeatures, workspaceId, workspaceName, workspaceFooterContacts, invoiceData, effectiveId, pdfBuilder, translations, templateContent, templatePreviewProp, customTemplate, templateFieldValues, initialTemplateLayout, allowTemplateFieldEditing, enableTemplatePreviewSave, templatePrimaryActionLabel, generateTemplateLayoutBlob, onPreviewPrint, onPreviewSave, previewPrintActionLabel, showSaveButton, toast])
+    }, [printFormat, printLang, title, t, setLocation, handleSave, pdfData, hasPdfData, printableFeatures, workspaceId, workspaceName, workspaceFooterContacts, invoiceData, effectiveId, pdfBuilder, translations, templateContent, templatePreviewProp, customTemplate, templateFieldValues, initialTemplateLayout, allowTemplateFieldEditing, enableTemplatePreviewSave, templatePrimaryActionLabel, generateTemplateLayoutBlob, onPreviewPrint, onPreviewSave, previewPrintActionLabel, showSaveButton, showStandardPdfActions, toast])
 
     useEffect(() => {
         if (!shouldOpenPrintPreviewEditor(isOpen, selectedPrintFormat, previewOpenedRef.current)) return
