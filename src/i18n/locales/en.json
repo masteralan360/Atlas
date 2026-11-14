@@ -1189,7 +1189,8 @@
       "unread": "Unread",
       "archived": "Archived",
       "workspace": "Workspace",
-      "user": "User"
+      "user": "User",
+      "organization": "Organization"
     },
     "unread": "unread",
     "allCaughtUp": "You are all caught up",

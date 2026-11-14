@@ -47,13 +47,15 @@ export function normalizeNotificationInboxPageItem(value: unknown): Notification
     'id', 'workspace_id', 'user_id', 'notification_type', 'scope', 'priority', 'title', 'created_at', 'updated_at',
   ]
   if (requiredStrings.some((field) => typeof value[field] !== 'string')) return null
-  if (!['event_id', 'dedupe_key', 'body', 'action_url', 'action_label', 'read_at', 'archived_at'].every((field) => isNullableString(value[field]))) {
+  if (!['user', 'workspace', 'system', 'organization'].includes(value.scope as string)) return null
+  if (!['event_id', 'organization_id', 'dedupe_key', 'body', 'action_url', 'action_label', 'read_at', 'archived_at'].every((field) => isNullableString(value[field]))) {
     return null
   }
 
   return normalizeNotificationInboxRow({
     ...value,
     event_id: typeof value.event_id === 'string' ? value.event_id : null,
+    organization_id: typeof value.organization_id === 'string' ? value.organization_id : null,
     dedupe_key: typeof value.dedupe_key === 'string' ? value.dedupe_key : null,
     body: typeof value.body === 'string' ? value.body : null,
     action_url: typeof value.action_url === 'string' ? value.action_url : null,

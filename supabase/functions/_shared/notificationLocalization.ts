@@ -121,6 +121,78 @@ export function localizeNotification(input: NotificationLocalizationInput, reque
   const fallbackBody = readString(input.body)
   const fallbackActionLabel = readString(input.actionLabel) || (language === 'ar' ? '\u0641\u062a\u062d' : language === 'ku' ? '\u06a9\u0631\u062f\u0646\u06d5\u0648\u06d5' : 'Open')
 
+  if (notificationType === 'postal_shipment_status_changed') {
+    const shipmentNumberValue = readNumber(payload.shipment_number)
+    const shipmentNumber = shipmentNumberValue === null
+      ? readString(payload.shipment_number)
+      : formatNumber(shipmentNumberValue, language)
+    const clientName = readString(payload.client_name)
+    const stateMessage: Record<string, string> = language === 'ar'
+      ? {
+          draft: `\u0644\u0627 \u062a\u0632\u0627\u0644 ${shipmentNumber ? `\u0627\u0644\u0634\u062d\u0646\u0629 #${shipmentNumber}` : '\u0627\u0644\u0634\u062d\u0646\u0629'}${clientName ? ` \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0627\u0644\u0639\u0645\u064a\u0644 ${clientName}` : ''} \u0645\u0633\u0648\u062f\u0629.`,
+          received: `\u062a\u0645 \u0627\u0633\u062a\u0644\u0627\u0645 ${shipmentNumber ? `\u0627\u0644\u0634\u062d\u0646\u0629 #${shipmentNumber}` : '\u0627\u0644\u0634\u062d\u0646\u0629'}${clientName ? ` \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0627\u0644\u0639\u0645\u064a\u0644 ${clientName}` : ''} \u0641\u064a \u0627\u0644\u0645\u0643\u062a\u0628.`,
+          in_transit: `${shipmentNumber ? `\u0627\u0644\u0634\u062d\u0646\u0629 #${shipmentNumber}` : '\u0627\u0644\u0634\u062d\u0646\u0629'}${clientName ? ` \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0627\u0644\u0639\u0645\u064a\u0644 ${clientName}` : ''} \u0641\u064a \u0627\u0644\u0637\u0631\u064a\u0642 \u0627\u0644\u0622\u0646.`,
+          arrived: `\u0648\u0635\u0644\u062a ${shipmentNumber ? `\u0627\u0644\u0634\u062d\u0646\u0629 #${shipmentNumber}` : '\u0627\u0644\u0634\u062d\u0646\u0629'}${clientName ? ` \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0627\u0644\u0639\u0645\u064a\u0644 ${clientName}` : ''} \u0625\u0644\u0649 \u0627\u0644\u0641\u0631\u0639.`,
+          out_for_delivery: `\u062e\u0631\u062c\u062a ${shipmentNumber ? `\u0627\u0644\u0634\u062d\u0646\u0629 #${shipmentNumber}` : '\u0627\u0644\u0634\u062d\u0646\u0629'}${clientName ? ` \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0627\u0644\u0639\u0645\u064a\u0644 ${clientName}` : ''} \u0644\u0644\u062a\u0648\u0635\u064a\u0644.`,
+          postponed: `\u062a\u0645 \u062a\u0623\u062c\u064a\u0644 \u062a\u0648\u0635\u064a\u0644 ${shipmentNumber ? `\u0627\u0644\u0634\u062d\u0646\u0629 #${shipmentNumber}` : '\u0627\u0644\u0634\u062d\u0646\u0629'}${clientName ? ` \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0627\u0644\u0639\u0645\u064a\u0644 ${clientName}` : ''}.`,
+          delivered: `\u062a\u0645 \u062a\u0648\u0635\u064a\u0644 ${shipmentNumber ? `\u0627\u0644\u0634\u062d\u0646\u0629 #${shipmentNumber}` : '\u0627\u0644\u0634\u062d\u0646\u0629'}${clientName ? ` \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0627\u0644\u0639\u0645\u064a\u0644 ${clientName}` : ''}.`,
+          cancelled: `\u062a\u0645 \u0625\u0644\u063a\u0627\u0621 ${shipmentNumber ? `\u0627\u0644\u0634\u062d\u0646\u0629 #${shipmentNumber}` : '\u0627\u0644\u0634\u062d\u0646\u0629'}${clientName ? ` \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0627\u0644\u0639\u0645\u064a\u0644 ${clientName}` : ''}.`,
+        }
+      : language === 'ku'
+        ? {
+            draft: `${shipmentNumber ? `\u0628\u0627\u0631 #${shipmentNumber}` : '\u0628\u0627\u0631'}${clientName ? `\u06cc \u0628\u06c6 \u06a9\u0695\u06cc\u0627\u0631 ${clientName}` : ''} \u0647\u06ce\u0634\u062a\u0627 \u0695\u06d5\u0634\u0646\u0648\u0648\u0633\u06d5.`,
+            received: `${shipmentNumber ? `\u0628\u0627\u0631 #${shipmentNumber}` : '\u0628\u0627\u0631'}${clientName ? `\u06cc \u0628\u06c6 \u06a9\u0695\u06cc\u0627\u0631 ${clientName}` : ''} \u0644\u06d5 \u0626\u06c6\u0641\u06cc\u0633 \u0648\u06d5\u0631\u06af\u06cc\u0631\u0627.`,
+            in_transit: `${shipmentNumber ? `\u0628\u0627\u0631 #${shipmentNumber}` : '\u0628\u0627\u0631'}${clientName ? `\u06cc \u0628\u06c6 \u06a9\u0695\u06cc\u0627\u0631 ${clientName}` : ''} \u0626\u06ce\u0633\u062a\u0627 \u0644\u06d5 \u06af\u0648\u0627\u0633\u062a\u0646\u06d5\u0648\u06d5\u062f\u0627\u06cc\u06d5.`,
+            arrived: `${shipmentNumber ? `\u0628\u0627\u0631 #${shipmentNumber}` : '\u0628\u0627\u0631'}${clientName ? `\u06cc \u0628\u06c6 \u06a9\u0695\u06cc\u0627\u0631 ${clientName}` : ''} \u06af\u06d5\u06cc\u0634\u062a\u06d5 \u0644\u0642.`,
+            out_for_delivery: `${shipmentNumber ? `\u0628\u0627\u0631 #${shipmentNumber}` : '\u0628\u0627\u0631'}${clientName ? `\u06cc \u0628\u06c6 \u06a9\u0695\u06cc\u0627\u0631 ${clientName}` : ''} \u0628\u06c6 \u06af\u06d5\u06cc\u0627\u0646\u062f\u0646 \u062f\u06d5\u0631\u0686\u0648\u0648.`,
+            postponed: `${shipmentNumber ? `\u0628\u0627\u0631 #${shipmentNumber}` : '\u0628\u0627\u0631'}${clientName ? `\u06cc \u0628\u06c6 \u06a9\u0695\u06cc\u0627\u0631 ${clientName}` : ''} \u0647\u06ce\u0646\u0627\u0646\u06cc \u062f\u0648\u0627\u062e\u0631\u0627.`,
+            delivered: `${shipmentNumber ? `\u0628\u0627\u0631 #${shipmentNumber}` : '\u0628\u0627\u0631'}${clientName ? `\u06cc \u0628\u06c6 \u06a9\u0695\u06cc\u0627\u0631 ${clientName}` : ''} \u06af\u06d5\u06cc\u06d5\u0646\u0631\u0627.`,
+            cancelled: `${shipmentNumber ? `\u0628\u0627\u0631 #${shipmentNumber}` : '\u0628\u0627\u0631'}${clientName ? `\u06cc \u0628\u06c6 \u06a9\u0695\u06cc\u0627\u0631 ${clientName}` : ''} \u0647\u06d5\u06b5\u0648\u06d5\u0634\u0627\u06cc\u06d5\u0648\u06d5.`,
+          }
+        : {
+            draft: `Your shipment${shipmentNumber ? ` #${shipmentNumber}` : ''}${clientName ? ` for client ${clientName}` : ''} is still a draft.`,
+            received: `Your shipment${shipmentNumber ? ` #${shipmentNumber}` : ''}${clientName ? ` for client ${clientName}` : ''} has been received at the office.`,
+            in_transit: `Your shipment${shipmentNumber ? ` #${shipmentNumber}` : ''}${clientName ? ` for client ${clientName}` : ''} is now in transit.`,
+            arrived: `Your shipment${shipmentNumber ? ` #${shipmentNumber}` : ''}${clientName ? ` for client ${clientName}` : ''} has arrived at the branch.`,
+            out_for_delivery: `Your shipment${shipmentNumber ? ` #${shipmentNumber}` : ''}${clientName ? ` for client ${clientName}` : ''} is out for delivery.`,
+            postponed: `Delivery of your shipment${shipmentNumber ? ` #${shipmentNumber}` : ''}${clientName ? ` for client ${clientName}` : ''} has been postponed.`,
+            delivered: `Your shipment${shipmentNumber ? ` #${shipmentNumber}` : ''}${clientName ? ` for client ${clientName}` : ''} has been delivered.`,
+            cancelled: `Your shipment${shipmentNumber ? ` #${shipmentNumber}` : ''}${clientName ? ` for client ${clientName}` : ''} has been cancelled.`,
+          }
+    const resultingState = readString(payload.resulting_state)
+    const body = stateMessage[resultingState]
+      ?? (language === 'ar'
+        ? `\u062a\u0645 \u062a\u062d\u062f\u064a\u062b \u062d\u0627\u0644\u0629 ${shipmentNumber ? `\u0627\u0644\u0634\u062d\u0646\u0629 #${shipmentNumber}` : '\u0627\u0644\u0634\u062d\u0646\u0629'}${clientName ? ` \u0627\u0644\u062e\u0627\u0635\u0629 \u0628\u0627\u0644\u0639\u0645\u064a\u0644 ${clientName}` : ''}.`
+        : language === 'ku'
+          ? `\u062f\u06c6\u062e\u06cc ${shipmentNumber ? `\u0628\u0627\u0631 #${shipmentNumber}` : '\u0628\u0627\u0631'}${clientName ? `\u06cc \u0628\u06c6 \u06a9\u0695\u06cc\u0627\u0631 ${clientName}` : ''} \u0646\u0648\u06ce\u06a9\u0631\u0627\u06cc\u06d5\u0648\u06d5.`
+          : `Your shipment${shipmentNumber ? ` #${shipmentNumber}` : ''}${clientName ? ` for client ${clientName}` : ''} has a new status: ${formatNotificationTypeFallback(resultingState).toLowerCase()}.`)
+    let bodyWithIsolates = body
+    if (shipmentNumber) {
+      const shipmentReference = `#${shipmentNumber}`
+      bodyWithIsolates = bodyWithIsolates.split(shipmentReference).join(`\u2066${shipmentReference}\u2069`)
+    }
+    if (clientName) {
+      bodyWithIsolates = bodyWithIsolates.split(clientName).join(`\u2068${clientName}\u2069`)
+    }
+
+    return {
+      language,
+      title: language === 'ar'
+        ? '\u062a\u062d\u062f\u064a\u062b \u0627\u0644\u0634\u062d\u0646\u0629'
+        : language === 'ku'
+          ? '\u0646\u0648\u06ce\u06a9\u0627\u0631\u06cc \u0628\u0627\u0631'
+          : 'Shipment update',
+      body: bodyWithIsolates,
+      actionLabel: language === 'ar'
+        ? '\u0641\u062a\u062d \u0627\u0644\u0634\u062d\u0646\u0629'
+        : language === 'ku'
+          ? '\u06a9\u0631\u062f\u0646\u06d5\u0648\u06d5\u06cc \u0628\u0627\u0631'
+          : 'Open shipment',
+      actionUrl,
+      typeLabel: language === 'ar' ? '\u062d\u0627\u0644\u0629 \u0627\u0644\u0634\u062d\u0646\u0629' : language === 'ku' ? '\u062f\u06c6\u062e\u06cc \u0628\u0627\u0631' : 'Shipment Status',
+    }
+  }
+
   if (notificationType === 'beauty3_appointment_reminder') {
     const procedureDate = formatDate(readString(payload.procedure_date), language)
 

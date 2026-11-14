@@ -9,7 +9,8 @@ export type NotificationInboxRecord = {
     workspace_id: string
     user_id: string
     notification_type: string
-    scope: string
+    scope: NotificationScope
+    organization_id?: string | null
     priority: string
     dedupe_key: string | null
     title: string
@@ -22,6 +23,8 @@ export type NotificationInboxRecord = {
     created_at: string
     updated_at: string
 }
+
+export type NotificationScope = 'user' | 'workspace' | 'system' | 'organization'
 
 export type NotificationInboxRow = Omit<NotificationInboxRecord, 'payload'> & {
     payload: unknown

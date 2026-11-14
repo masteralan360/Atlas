@@ -1,6 +1,6 @@
 negative delivery fee
 
-Account Statement post service
+Post Service Notification
 
 Pending Sale orders must be editable if no payment has gone through
 
