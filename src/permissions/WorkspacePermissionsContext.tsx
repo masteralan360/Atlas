@@ -19,6 +19,7 @@ import {
   runSupabaseAction,
 } from "@/lib/supabaseRequest";
 import {
+  hasCachedPermissions,
   readCachedPermissions,
   writeCachedPermissions,
 } from "./workspacePermissionCache";
@@ -39,24 +40,28 @@ export function WorkspacePermissionsProvider({
     [],
   );
   const [isLoading, setIsLoading] = useState(false);
+  const [loadedPermissionScope, setLoadedPermissionScope] = useState("");
 
   const workspaceId = user?.workspaceId ?? "";
   const userId = user?.id ?? "";
   const userRole = user?.role;
   const permissionsEnabled = hasCapability("workspaceManagementPermissions");
   const postalEnabled = hasFeature('postal_service');
+  const permissionScope = `${workspaceId}:${userId}`;
 
   const refreshPermissions = useCallback(async () => {
     const shouldLoadPermissions = permissionsEnabled || postalEnabled || userRole === "staff";
     if (!isAuthenticated || !workspaceId || !userId || !shouldLoadPermissions) {
       setPermissionKeys([]);
       setIsLoading(false);
+      setLoadedPermissionScope(permissionScope);
       return;
     }
 
     if (userRole === "admin") {
       setPermissionKeys([]);
       setIsLoading(false);
+      setLoadedPermissionScope(permissionScope);
       return;
     }
 
@@ -83,12 +88,16 @@ export function WorkspacePermissionsProvider({
               keys.push(data.key)
             }
           }
+        } else {
+          throw new Error("Local permission storage is unavailable");
         }
         setPermissionKeys(keys);
         writeCachedPermissions(workspaceId, userId, keys);
+        setLoadedPermissionScope(permissionScope);
       } else {
         const cached = readCachedPermissions(workspaceId, userId);
         setPermissionKeys(cached);
+        setLoadedPermissionScope(permissionScope);
       }
       setIsLoading(false);
       return;
@@ -120,16 +129,20 @@ export function WorkspacePermissionsProvider({
 
       setPermissionKeys(nextKeys);
       writeCachedPermissions(workspaceId, userId, nextKeys);
+      setLoadedPermissionScope(permissionScope);
     } catch (error) {
       const normalized = normalizeSupabaseActionError(error);
       console.warn("[Permissions] Failed to fetch workspace permissions:", normalized);
-      if (permissionKeys.length === 0) {
-        setPermissionKeys([]);
+      if (hasCachedPermissions(workspaceId, userId)) {
+        setPermissionKeys(readCachedPermissions(workspaceId, userId));
+        setLoadedPermissionScope(permissionScope);
       }
+      // If no scoped cache exists, Sales Order selectors stay closed until a
+      // successful permission load supplies the legacy unrestricted default.
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, isLocalMode, permissionsEnabled, postalEnabled, userId, userRole, workspaceId]);
+  }, [isAuthenticated, isLocalMode, permissionScope, permissionsEnabled, postalEnabled, userId, userRole, workspaceId]);
 
   useEffect(() => {
     void refreshPermissions();
@@ -186,6 +199,10 @@ export function WorkspacePermissionsProvider({
     () => new Set<WorkspacePermissionKey>(permissionKeys),
     [permissionKeys],
   );
+  const shouldLoadPermissions = permissionsEnabled || postalEnabled || userRole === "staff";
+  const permissionsAreLoading = userRole === "admin"
+    ? false
+    : isLoading || (shouldLoadPermissions && loadedPermissionScope !== permissionScope);
 
   const hasPermission = useCallback(
     (permission: WorkspacePermissionKey) => {
@@ -198,7 +215,7 @@ export function WorkspacePermissionsProvider({
     <WorkspacePermissionsContext.Provider
       value={{
         permissionKeys,
-        isLoading,
+        isLoading: permissionsAreLoading,
         hasPermission,
         refreshPermissions,
       }}

@@ -87,7 +87,7 @@ import {
     type WorkspacePaymentMethod
 } from '@/local-db'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
-import { canReturnSalesOrder, hasEffectiveSalesAgentCommissionPermission, useHideCosts, useViewOwnRecordScope, useWorkspacePermissions } from '@/permissions'
+import { canReturnSalesOrder, hasEffectiveSalesAgentCommissionPermission, useHideCosts, useSalesOrderHidePermissions, useViewOwnRecordScope, useWorkspacePermissions } from '@/permissions'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { PrintFlow } from '@/ui/components/PrintFlow'
 import { ReturnConfirmationModal } from '@/ui/components/ReturnConfirmationModal'
@@ -276,6 +276,7 @@ function ReturnedOrderValue({
 export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string; orderId: string }) {
     const { t, i18n } = useTranslation()
     const { user } = useAuth()
+    const salesOrderHidePermissions = useSalesOrderHidePermissions()
     const hideCosts = useHideCosts()
     const invoiceViewOwnScope = useViewOwnRecordScope('invoice_history.view_own')
     const { features, workspaceName, isLocalMode, hasFeature } = useWorkspace()
@@ -1210,8 +1211,8 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const actions = isSales
         ? [
             isApprovalRequested && canApproveOrderRequests ? { key: 'approve', icon: BadgeCheck, label: t('orders.actions.approve', { defaultValue: 'Approve' }), onClick: () => runWorkflowAction('approve', () => approveSalesOrderRequest(order.id, user?.id ?? null), t('orders.actions.approveRequestSuccess', { defaultValue: 'Order request approved' })), variant: 'default' as const } : null,
-            !isApprovalRequested && canManageOrder && order.status === 'draft' ? { key: 'reserve', icon: PackageCheck, label: t('orders.actions.reserve') || 'Reserve', onClick: () => runWorkflowAction('reserve', () => updateSalesOrderStatus(order.id, 'pending', { actingUserRole: user?.role }), t('orders.details.messages.reserveSuccess') || 'Sales order reserved'), variant: 'default' as const } : null,
-            !isApprovalRequested && canManageOrder && order.status === 'pending' ? { key: 'complete', icon: CircleCheck, label: t('orders.actions.complete') || 'Complete', onClick: () => runWorkflowAction('complete', () => updateSalesOrderStatus(order.id, 'completed', { actingUserRole: user?.role }), t('orders.details.messages.completeSuccess') || 'Sales order completed'), variant: 'default' as const } : null,
+            !isApprovalRequested && canManageOrder && order.status === 'draft' && salesOrderHidePermissions.isStatusAllowed('pending') ? { key: 'reserve', icon: PackageCheck, label: t('orders.actions.reserve') || 'Reserve', onClick: () => runWorkflowAction('reserve', () => updateSalesOrderStatus(order.id, 'pending', { actingUserRole: user?.role }), t('orders.details.messages.reserveSuccess') || 'Sales order reserved'), variant: 'default' as const } : null,
+            !isApprovalRequested && canManageOrder && order.status === 'pending' && salesOrderHidePermissions.isStatusAllowed('completed') ? { key: 'complete', icon: CircleCheck, label: t('orders.actions.complete') || 'Complete', onClick: () => runWorkflowAction('complete', () => updateSalesOrderStatus(order.id, 'completed', { actingUserRole: user?.role }), t('orders.details.messages.completeSuccess') || 'Sales order completed'), variant: 'default' as const } : null,
             !isApprovalRequested && canManageOrder && order.status === 'pending' ? { key: 'cancel', icon: XCircle, label: t('orders.actions.cancel') || 'Cancel', onClick: () => setCancelConfirm({ isOpen: true }), variant: 'outline' as const } : null,
             canArchiveOrder ? { key: 'archive', icon: Archive, label: t('orders.archive.archiveAction'), onClick: () => setArchiveConfirmation('archive'), variant: 'outline' as const } : null
         ].filter(Boolean)
@@ -1328,7 +1329,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
-                description: error?.message || 'Failed to record settlement',
+                description: getLocalizedOrderError(error, t, t('payments.settlementFailed', { defaultValue: 'Failed to record settlement.' })),
                 variant: 'destructive'
             })
         } finally {

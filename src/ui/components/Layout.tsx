@@ -365,7 +365,7 @@ export function Layout({ children }: LayoutProps) {
     [user?.workspaceId]
   )
   useEffect(() => {
-    if (!isSupabaseConfigured) {
+    if (import.meta.env.DEV || !isSupabaseConfigured) {
       setModuleMaintenanceSettings([])
       return
     }

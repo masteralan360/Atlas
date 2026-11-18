@@ -18,6 +18,7 @@ import {
     useWorkspaceOrderInstallments
 } from '@/local-db'
 import { cn, formatCurrency, formatDate } from '@/lib/utils'
+import { getLocalizedOrderError } from '@/lib/orderErrors'
 import {
     ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MAX_MM,
     ATLAS_STANDARD_HEADER_DIVIDER_OFFSET_MIN_MM
@@ -573,7 +574,7 @@ export function OrderInstallmentsMirror({ workspaceId }: { workspaceId: string }
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
-                description: error?.message || 'Failed to record installment payment',
+                description: getLocalizedOrderError(error, t, t('payments.settlementFailed', { defaultValue: 'Failed to record settlement.' })),
                 variant: 'destructive'
             })
         } finally {

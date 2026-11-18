@@ -14,6 +14,13 @@ import {
     CardContent,
     CardHeader,
     CardTitle,
+    AppDialog,
+    AppDialogBody,
+    AppDialogContent,
+    AppDialogFooter,
+    AppDialogHeader,
+    AppDialogTitle,
+    AppDialogDescription,
     Dialog,
     DialogContent,
     DialogHeader,
@@ -29,7 +36,7 @@ import {
     SelectValue,
     Switch
 } from '@/ui/components'
-import { UsersRound, UserMinus, Loader2, Shield, Eye, Briefcase, UserRound, KeyRound, ShieldCheck, Copy, CopyCheck } from 'lucide-react'
+import { UsersRound, UserMinus, Loader2, Shield, Eye, Briefcase, UserRound, KeyRound, ShieldCheck, Copy, CopyCheck, CreditCard, ListOrdered, Settings2 } from 'lucide-react'
 import { ProfileCardModal } from '@/ui/components/ProfileCardModal'
 import { useTranslation } from 'react-i18next'
 import { cn, formatDate, generateId } from '@/lib/utils'
@@ -50,6 +57,19 @@ import { launcherSections, launcherSectionOrder } from '@/ui/navigation/navigati
 import type { PlanModuleKey } from '@/plans/workspacePlans'
 import { db } from '@/local-db'
 import { getLocalModeSqliteConnection } from '@/local-db/localModeSqlite'
+import {
+    getMaximumSalesOrderStatus,
+    getProhibitedSalesOrderPaymentMethods,
+    getSalesOrderMaxStatusPermissionKey,
+    getSalesOrderPaymentMethodHidePermissionKey,
+    type SalesOrderAdvancementStatus,
+    type SalesOrderPaymentMethod
+} from '@/permissions/salesOrderHidePermissions'
+import { getPaymentMethodLabel } from '@/lib/paymentMethods'
+import {
+    SalesOrderPaymentMethodPermissionsDialog,
+    SalesOrderStatusAdvancementPermissionsDialog
+} from '@/ui/components/members/SalesOrderHidePermissionsDialogs'
 
 interface Member {
     id: string
@@ -206,6 +226,8 @@ export function Members() {
     const [permissionMutationKey, setPermissionMutationKey] = useState<string | null>(null)
     const [memberToKick, setMemberToKick] = useState<Member | null>(null)
     const [permissionMember, setPermissionMember] = useState<Member | null>(null)
+    const [salesOrderPermissionDialog, setSalesOrderPermissionDialog] = useState<'paymentMethods' | 'status' | null>(null)
+    const [salesOrderPermissionSaving, setSalesOrderPermissionSaving] = useState(false)
     const [selectedPermissionModule, setSelectedPermissionModule] = useState<string>('global')
     const [profileUserId, setProfileUserId] = useState<string | null>(null)
     const [error, setError] = useState<string | null>(null)
@@ -454,6 +476,102 @@ export function Members() {
         }
     }
 
+    const saveSalesOrderHidePermissionCategory = async (
+        member: Member,
+        keyPrefix: string,
+        nextKeys: string[],
+        action: () => Promise<{ error?: unknown }>
+    ) => {
+        if (
+            user?.role !== 'admin'
+            || !user.workspaceId
+            || member.role !== 'staff'
+            || member.id === user.id
+            || !canManageWorkspacePermissions
+        ) return
+
+        setSalesOrderPermissionSaving(true)
+        setError(null)
+        try {
+            if (isLocalMode) {
+                await db.transaction('rw', db.workspace_permissions, async () => {
+                    const currentRows = await db.workspace_permissions
+                        .where('[workspaceId+userUuid]')
+                        .equals([user.workspaceId, member.id])
+                        .toArray()
+                    await db.workspace_permissions.bulkDelete(
+                        currentRows.filter((row) => row.key.startsWith(keyPrefix)).map((row) => row.id)
+                    )
+                    for (const key of nextKeys) {
+                        await db.workspace_permissions.put({
+                            id: generateId(),
+                            workspaceId: user.workspaceId,
+                            userUuid: member.id,
+                            key,
+                            module: 'orders'
+                        })
+                    }
+                })
+                setPermissions((current) => [
+                    ...current.filter((row) => !(
+                        row.user_uuid === member.id && row.key.startsWith(keyPrefix)
+                    )),
+                    ...nextKeys.map((key) => ({
+                        id: generateId(),
+                        workspace_id: user.workspaceId!,
+                        user_uuid: member.id,
+                        key,
+                        module: 'orders'
+                    }))
+                ])
+            } else {
+                const { error } = await action()
+                if (error) throw normalizeSupabaseActionError(error)
+            }
+
+            if (!isLocalMode) await fetchPermissions()
+            window.dispatchEvent(new CustomEvent('workspace-permissions:changed'))
+            setSalesOrderPermissionDialog(null)
+        } catch (err) {
+            console.error('Error updating Sales Order hide permissions:', err)
+            setError(t('members.permissions.salesOrderPermissionSaveFailed', {
+                defaultValue: 'Sales Order permissions could not be saved. Check your connection and try again.'
+            }))
+        } finally {
+            setSalesOrderPermissionSaving(false)
+        }
+    }
+
+    const saveSalesOrderPaymentMethods = (
+        member: Member,
+        prohibitedMethods: SalesOrderPaymentMethod[]
+    ) => saveSalesOrderHidePermissionCategory(
+        member,
+        'orders.salesOrderPaymentMethod.',
+        prohibitedMethods.map((method) => getSalesOrderPaymentMethodHidePermissionKey(method)),
+        () => runSupabaseAction('members.permissions.salesOrderPaymentMethods', () =>
+            supabase.rpc('set_sales_order_payment_method_hide_permissions', {
+                p_member_id: member.id,
+                p_prohibited_methods: prohibitedMethods
+            })
+        )
+    )
+
+    const saveSalesOrderMaximumStatus = (
+        member: Member,
+        maximumStatus: SalesOrderAdvancementStatus
+    ) => saveSalesOrderHidePermissionCategory(
+        member,
+        'orders.salesOrderMaxStatus.',
+        [getSalesOrderMaxStatusPermissionKey(maximumStatus)],
+        () => runSupabaseAction('members.permissions.salesOrderMaximumStatus', () =>
+            supabase.rpc('set_sales_order_maximum_status_permission', {
+                p_member_id: member.id,
+                p_maximum_status: maximumStatus
+            })
+        )
+    )
+
     const handleGlobalViewOwnToggle = async (member: Member, shouldGrant: boolean) => {
         if (user?.role !== 'admin' || !user.workspaceId || member.role === 'admin' || !canManageWorkspacePermissions) {
             return
@@ -560,6 +678,14 @@ export function Members() {
             ? permissionsByUserId.get(permissionMember.id) || new Set<WorkspacePermissionKey>()
             : new Set<WorkspacePermissionKey>()
     ), [permissionMember, permissionsByUserId])
+    const salesOrderProhibitedMethods = useMemo(
+        () => getProhibitedSalesOrderPaymentMethods(selectedMemberPermissionKeys),
+        [selectedMemberPermissionKeys]
+    )
+    const salesOrderMaximumStatus = useMemo(
+        () => getMaximumSalesOrderStatus(selectedMemberPermissionKeys),
+        [selectedMemberPermissionKeys]
+    )
 
     const selectedMemberIsCoach = permissionMember?.role === 'staff'
         && selectedMemberPermissionKeys.has('coach')
@@ -1069,21 +1195,27 @@ export function Members() {
                 </CardContent>
             </Card >
 
-            <Dialog open={!!permissionMember} onOpenChange={(open) => { if (!open) setPermissionMember(null) }}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
+            <AppDialog open={!!permissionMember} onOpenChange={(open) => {
+                if (!open && !salesOrderPermissionSaving) {
+                    setPermissionMember(null)
+                    setSalesOrderPermissionDialog(null)
+                }
+            }}>
+                <AppDialogContent className="max-w-4xl" showCloseButton={!salesOrderPermissionSaving}>
+                    <AppDialogHeader>
+                        <AppDialogTitle className="flex items-center gap-2">
                             <KeyRound className="h-5 w-5 text-primary" />
                             {t('members.permissions.manageTitle', { defaultValue: 'Manage Permissions' })}
-                        </DialogTitle>
-                        <DialogDescription>
+                        </AppDialogTitle>
+                        <AppDialogDescription>
                             {t('members.permissions.manageDescription', {
                                 name: permissionMember?.name,
                                 defaultValue: 'Choose a module, then toggle the available permissions for {{name}}.'
                             })}
-                        </DialogDescription>
-                    </DialogHeader>
+                        </AppDialogDescription>
+                    </AppDialogHeader>
 
+                    <AppDialogBody>
                     <div className="space-y-4">
                         <div className="flex items-center justify-between gap-3">
                             <Button
@@ -1157,6 +1289,75 @@ export function Members() {
                         </div>
 
                         <div className="space-y-4">
+                            {permissionMember?.role === 'staff' && selectedPermissionModule === 'orders' ? (
+                                <section className="space-y-3 rounded-xl border border-primary/15 bg-primary/[0.03] p-3">
+                                    <div className="flex items-center gap-2 text-sm font-semibold">
+                                        <Settings2 className="h-4 w-4 text-primary" />
+                                        {t('members.permissions.salesOrderRestrictions', { defaultValue: 'Sales Order Restrictions' })}
+                                    </div>
+                                    <div className="rounded-lg border border-border/60 bg-background/70 p-3">
+                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                            <div className="flex min-w-0 items-start gap-2.5">
+                                                <CreditCard className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                                                <div className="min-w-0">
+                                                    <p className="font-medium">
+                                                        {t('members.permissions.salesOrderPaymentMethodsTitle', { defaultValue: 'Sales Order Payment Method Hide Permissions' })}
+                                                    </p>
+                                                    <p className="mt-1 text-sm text-muted-foreground">
+                                                        {salesOrderProhibitedMethods.length === 0
+                                                            ? t('members.permissions.salesOrderPaymentMethodsAllAllowed', { defaultValue: 'All Sales Order payment methods are allowed.' })
+                                                            : t('members.permissions.salesOrderPaymentMethodsHiddenSummary', {
+                                                                methods: salesOrderProhibitedMethods.map((method) => getPaymentMethodLabel(method, t)).join(', '),
+                                                                defaultValue: 'Hidden methods: {{methods}}'
+                                                            })}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="shrink-0 gap-2"
+                                                disabled={permissionsLoading || salesOrderPermissionSaving}
+                                                onClick={() => setSalesOrderPermissionDialog('paymentMethods')}
+                                            >
+                                                {t('members.permissions.configure', { defaultValue: 'Configure' })}
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    <div className="rounded-lg border border-border/60 bg-background/70 p-3">
+                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                            <div className="flex min-w-0 items-start gap-2.5">
+                                                <ListOrdered className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                                                <div className="min-w-0">
+                                                    <p className="font-medium">
+                                                        {t('members.permissions.salesOrderStatusTitle', { defaultValue: 'Sales Order Status Advancement Permissions' })}
+                                                    </p>
+                                                    <p className="mt-1 text-sm text-muted-foreground">
+                                                        {t('members.permissions.salesOrderMaximumStatusSummary', {
+                                                            status: t(`orders.status.${salesOrderMaximumStatus}`, { defaultValue: salesOrderMaximumStatus }),
+                                                            defaultValue: 'Maximum allowed status: {{status}}'
+                                                        })}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                className="shrink-0 gap-2"
+                                                disabled={permissionsLoading || salesOrderPermissionSaving}
+                                                onClick={() => setSalesOrderPermissionDialog('status')}
+                                            >
+                                                {t('members.permissions.configure', { defaultValue: 'Configure' })}
+                                            </Button>
+                                        </div>
+                                    </div>
+                                    {error ? (
+                                        <p role="alert" className="text-sm text-destructive">{error}</p>
+                                    ) : null}
+                                </section>
+                            ) : null}
                             {permissionMember && selectedPermissionModule === 'global' && (
                                 <div className="rounded-lg border border-border/60 bg-background/60 p-4">
                                     <div className="flex items-start justify-between gap-4">
@@ -1258,8 +1459,43 @@ export function Members() {
                             })}
                         </div>
                     </div>
-                </DialogContent>
-            </Dialog>
+                    </AppDialogBody>
+                    <AppDialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            disabled={salesOrderPermissionSaving}
+                            onClick={() => {
+                                setPermissionMember(null)
+                                setSalesOrderPermissionDialog(null)
+                            }}
+                        >
+                            {t('common.close', { defaultValue: 'Close' })}
+                        </Button>
+                    </AppDialogFooter>
+                </AppDialogContent>
+            </AppDialog>
+
+            {permissionMember ? (
+                <>
+                    <SalesOrderPaymentMethodPermissionsDialog
+                        open={salesOrderPermissionDialog === 'paymentMethods'}
+                        onOpenChange={(open) => setSalesOrderPermissionDialog(open ? 'paymentMethods' : null)}
+                        memberName={permissionMember.name}
+                        permissionKeys={selectedMemberPermissionKeys}
+                        isSaving={salesOrderPermissionSaving}
+                        onSave={(prohibitedMethods) => saveSalesOrderPaymentMethods(permissionMember, prohibitedMethods)}
+                    />
+                    <SalesOrderStatusAdvancementPermissionsDialog
+                        open={salesOrderPermissionDialog === 'status'}
+                        onOpenChange={(open) => setSalesOrderPermissionDialog(open ? 'status' : null)}
+                        memberName={permissionMember.name}
+                        permissionKeys={selectedMemberPermissionKeys}
+                        isSaving={salesOrderPermissionSaving}
+                        onSave={(maximumStatus) => saveSalesOrderMaximumStatus(permissionMember, maximumStatus)}
+                    />
+                </>
+            ) : null}
 
             {/* Copy Permissions Dialog */}
             <Dialog open={copyDialogOpen} onOpenChange={(open) => { if (!open) setCopyDialogOpen(false) }}>

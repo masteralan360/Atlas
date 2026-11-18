@@ -4,7 +4,7 @@ import { Loader2, X } from 'lucide-react'
 
 import { type BusinessPartner, type PaymentObligation, type WorkspacePaymentMethod, useBusinessPartners } from '@/local-db'
 import { formatCurrency, formatDate, formatLocalDateTimeValue, formatNumericInput, generateId, parseFormattedNumber, parseLocalDateTimeValue, sanitizeNumericInput } from '@/lib/utils'
-import { LOAN_ADJUSTMENT_PAYMENT_METHOD, STANDARD_PAYMENT_METHODS } from '@/lib/paymentMethods'
+import { getPaymentMethodLabel, LOAN_ADJUSTMENT_PAYMENT_METHOD, STANDARD_PAYMENT_METHODS } from '@/lib/paymentMethods'
 import { Input } from '@/ui/components/input'
 import {
   Button,
@@ -21,6 +21,7 @@ import {
 } from '@/ui/components'
 import { PartnerAutocompleteInput } from '@/ui/components/crm/PartnerAutocompleteInput'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
+import { useSalesOrderHidePermissions } from '@/permissions'
 import { PaymentMethodSelector } from '@/ui/components/PaymentMethodSelector'
 import { PaymentAccountSelector } from './PaymentAccountSelector'
 
@@ -64,6 +65,7 @@ export function SettlementDialog({
 }: SettlementDialogProps) {
     const { t } = useTranslation()
     const { features } = useWorkspace()
+    const salesOrderHidePermissions = useSalesOrderHidePermissions()
     const [paymentMethod, setPaymentMethod] = useState<WorkspacePaymentMethod>('cash')
     const [paymentAccountId, setPaymentAccountId] = useState<string | null>(null)
     const [paymentAccountNameSnapshot, setPaymentAccountNameSnapshot] = useState<string | null>(null)
@@ -74,15 +76,16 @@ export function SettlementDialog({
     const [linkedCounterparty, setLinkedCounterparty] = useState<{ id: string; name: string } | null>(null)
     const orderPaymentRequestRef = useRef<{ obligationId: string; fingerprint: string; id: string } | null>(null)
     const showsCounterpartyPicker = obligation?.sourceType === 'real_estate_commission'
+    const isSalesOrderSettlement = obligation?.sourceType === 'sales_order'
     const showsAmountInput = obligation?.sourceType === 'real_estate_commission'
         || obligation?.sourceType === 'sales_order'
         || obligation?.sourceType === 'purchase_order'
         || obligation?.sourceType === 'clinical_appointment'
         || obligation?.sourceType === 'agent_commission_payout'
         || obligation?.sourceType === 'agent_commission_recovery'
-    const businessPartners = useBusinessPartners(showsCounterpartyPicker ? obligation?.workspaceId : undefined, { includeRealEstateRoles: true }) || []
+    const businessPartners = useBusinessPartners(showsCounterpartyPicker ? obligation?.workspaceId : undefined, { includeRealEstateRoles: true })
 
-    const businessPartnerById = useMemo(() => new Map(businessPartners.map((partner) => [partner.id, partner])), [businessPartners])
+    const businessPartnerById = useMemo(() => new Map((businessPartners ?? []).map((partner) => [partner.id, partner])), [businessPartners])
     const defaultBusinessPartnerId = getMetadataString(obligation?.metadata, 'businessPartnerId')
     const defaultBusinessPartner = defaultBusinessPartnerId ? businessPartnerById.get(defaultBusinessPartnerId) : undefined
     const defaultCounterpartyName = defaultBusinessPartner?.partnerName || obligation?.counterpartyName || obligation?.title || ''
@@ -120,6 +123,17 @@ export function SettlementDialog({
         : t('settlementModal.payable', { defaultValue: 'Payable' })
 
     const requiresLinkedCounterparty = showsCounterpartyPicker
+    const settlementMethods = useMemo(() => {
+        const methods = includeLoanAdjustment
+            ? [...STANDARD_PAYMENT_METHODS, LOAN_ADJUSTMENT_PAYMENT_METHOD]
+            : STANDARD_PAYMENT_METHODS
+        if (!isSalesOrderSettlement) return methods
+        const allowedMethods = new Set<string>(salesOrderHidePermissions.allowedPaymentMethods)
+        return methods.filter((method) => allowedMethods.has(method))
+    }, [includeLoanAdjustment, isSalesOrderSettlement, salesOrderHidePermissions.allowedPaymentMethods])
+    const salesOrderPermissionsLoading = isSalesOrderSettlement && salesOrderHidePermissions.isLoading
+    const selectedMethodAllowed = !isSalesOrderSettlement
+        || (!salesOrderPermissionsLoading && salesOrderHidePermissions.isPaymentMethodAllowed(paymentMethod))
     const allowsOverpayment = obligation?.sourceType === 'clinical_appointment'
     const parsedAmount = parseFormattedNumber(amount || '0')
     const hasEditedAmount = !!obligation
@@ -131,6 +145,9 @@ export function SettlementDialog({
     const canSubmit = !!obligation
         && !!selectedPaidAt
         && hasValidAmount
+        && !salesOrderPermissionsLoading
+        && selectedMethodAllowed
+        && settlementMethods.some((method) => method === paymentMethod)
         && (!requiresLinkedCounterparty || !!linkedCounterparty?.id)
 
     const handleCounterpartySelect = (partner: BusinessPartner) => {
@@ -301,17 +318,39 @@ export function SettlementDialog({
                                     <Label>{t('settlementModal.paymentMethod', { defaultValue: 'Payment Method' })} *</Label>
                                     <PaymentMethodSelector
                                         value={paymentMethod}
-                                        onValueChange={(value) => setPaymentMethod(value as WorkspacePaymentMethod)}
+                                        onValueChange={(value) => {
+                                            if (isSalesOrderSettlement && !salesOrderHidePermissions.isPaymentMethodAllowed(value)) return
+                                            setPaymentMethod(value as WorkspacePaymentMethod)
+                                        }}
                                         onLinkedPaymentAccountSelect={(account) => {
                                             setPaymentAccountId(account.id)
                                             setPaymentAccountNameSnapshot(account.name)
                                         }}
                                         workspaceId={obligation.workspaceId}
-                                        methods={includeLoanAdjustment
-                                            ? [...STANDARD_PAYMENT_METHODS, LOAN_ADJUSTMENT_PAYMENT_METHOD]
-                                            : STANDARD_PAYMENT_METHODS}
-                                        disabled={isSubmitting}
+                                        methods={settlementMethods}
+                                        unavailableValueLabel={salesOrderPermissionsLoading
+                                            ? t('members.permissions.salesOrderPermissionsLoading', { defaultValue: 'Sales Order permissions are still loading.' })
+                                            : isSalesOrderSettlement && !selectedMethodAllowed
+                                                ? t('members.permissions.currentSalesOrderMethodRestricted', {
+                                                    method: getPaymentMethodLabel(paymentMethod, t),
+                                                    defaultValue: '{{method}} is hidden for this member. Choose an allowed method.'
+                                                })
+                                                : undefined}
+                                        disabled={isSubmitting || salesOrderPermissionsLoading || settlementMethods.length === 0}
                                     />
+                                    {salesOrderPermissionsLoading ? (
+                                        <p className="text-xs text-muted-foreground">
+                                            {t('members.permissions.salesOrderPermissionsLoading', { defaultValue: 'Sales Order permissions are still loading.' })}
+                                        </p>
+                                    ) : isSalesOrderSettlement && settlementMethods.length === 0 ? (
+                                        <p className="text-xs text-destructive">
+                                            {t('members.permissions.noSalesOrderPaymentMethodsAllowed', { defaultValue: 'No Sales Order payment methods are currently allowed. Ask an administrator to update your permissions.' })}
+                                        </p>
+                                    ) : isSalesOrderSettlement && !selectedMethodAllowed ? (
+                                        <p className="text-xs text-destructive">
+                                            {t('members.permissions.salesOrderPaymentMethodNotAllowed', { defaultValue: 'This Sales Order payment method is not allowed for your account.' })}
+                                        </p>
+                                    ) : null}
                                 </div>
 
                                 <PaymentAccountSelector

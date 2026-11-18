@@ -1,8 +1,12 @@
 import type { UserRole } from '@/local-db/models'
 import { isSupportedWorkspacePermissionKey, WORKSPACE_PERMISSION_DEFINITIONS, type WorkspacePermissionKey } from './workspacePermissionDefinitions'
+import { isSalesOrderHidePermissionKey } from './salesOrderHidePermissions'
 
 /** Shared permission decision for the provider and independently authenticated route checks. */
 export function resolveWorkspacePermission(role: UserRole | undefined, enabled: boolean, keys: ReadonlySet<WorkspacePermissionKey>, permission: WorkspacePermissionKey | 'global.print') {
+    // These keys store deny/max rules and must be evaluated by the centralized
+    // Sales Order helpers, never as ordinary feature grants.
+    if (isSalesOrderHidePermissionKey(permission)) return false
     if (permission.startsWith('postService.')) return role === 'admin' || (role === 'staff' && keys.has(permission as WorkspacePermissionKey))
     if (permission === 'global.hideCosts') return role !== 'admin' && enabled && keys.has(permission)
     if (permission === 'orders.saleOrdersAccess' && role === 'staff' && keys.has('coach')) return true

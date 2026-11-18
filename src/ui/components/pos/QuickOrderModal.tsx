@@ -23,6 +23,7 @@ import {
     type SalesOrder
 } from '@/local-db'
 import { formatCurrency } from '@/lib/utils'
+import { getLocalizedOrderError } from '@/lib/orderErrors'
 import { getOrderLineFreeBonusQuantity } from '@/lib/orderLineItems'
 import { getQuickOrderInstallmentSummary } from '@/lib/quickOrderInstallments'
 import { getQuickOrderLoanRepaymentSummary } from '@/lib/orderFinancing'
@@ -76,6 +77,7 @@ import {
 import { findLinkedProductCommissionAgent } from '@/ui/components/commissions/productCommissionAgent'
 import { hasConfiguredSalesOrderCommission } from '@/ui/components/commissions/salesOrderCommissionSummary'
 import { isSalesAccountSelectionVisible } from '@/ui/components/commissions/oldSalesAgentConfiguration'
+import { useSalesOrderHidePermissions } from '@/permissions'
 
 export type QuickOrderCheckoutData = {
     customer: BusinessPartner
@@ -248,6 +250,7 @@ export function QuickOrderModal({
 }: QuickOrderModalProps) {
     const { t, i18n } = useTranslation()
     const { user } = useAuth()
+    const salesOrderHidePermissions = useSalesOrderHidePermissions()
     const showSalesAccountSelection = isSalesAccountSelectionVisible({
         agentSalesAccountsEnabled,
         userRole: user?.role
@@ -367,9 +370,14 @@ export function QuickOrderModal({
 
     const paymentMethods = useMemo<PaymentMethodOption[]>(() => [
         ...STANDARD_PAYMENT_METHODS,
-        ...(loansEnabled ? [ORDER_FINANCING_PAYMENT_METHODS[0]] : []),
-        ...(installmentsEnabled ? [ORDER_FINANCING_PAYMENT_METHODS[1]] : [])
-    ], [installmentsEnabled, loansEnabled])
+        ...(!isFreeOnlyOrder && loansEnabled ? [ORDER_FINANCING_PAYMENT_METHODS[0]] : []),
+        ...(!isFreeOnlyOrder && installmentsEnabled ? [ORDER_FINANCING_PAYMENT_METHODS[1]] : [])
+    ].filter((method) => salesOrderHidePermissions.allowedPaymentMethods.includes(method)), [
+        installmentsEnabled,
+        isFreeOnlyOrder,
+        loansEnabled,
+        salesOrderHidePermissions.allowedPaymentMethods
+    ])
     const isInstallmentBased = paymentMethod === 'installments'
     const isFinanced = paymentMethod === 'loan' || paymentMethod === 'installments'
     const isLoanPartiallyPaid = paymentMethod === 'loan' && paymentStatus === 'partial'
@@ -386,8 +394,11 @@ export function QuickOrderModal({
     const isQuickOrderValid = Boolean(
         orderCounterparty
         && !reservationGuard.blocked
-        && orderStatus
-        && (isFreeOnlyOrder || (paymentStatus && paymentMethod))
+        && !salesOrderHidePermissions.isLoading
+        && salesOrderHidePermissions.isStatusAllowed(orderStatus)
+        && paymentMethod
+        && salesOrderHidePermissions.isPaymentMethodAllowed(paymentMethod)
+        && (isFreeOnlyOrder || paymentStatus)
         && (!isInstallmentBased || (
             firstDueDate
             && installmentSummary.isValid
@@ -427,18 +438,51 @@ export function QuickOrderModal({
     }, [isFreeOnlyOrder, isOpen])
 
     useEffect(() => {
+        if (!isOpen || salesOrderHidePermissions.isLoading) return
+        if (!salesOrderHidePermissions.isStatusAllowed(orderStatus) && salesOrderHidePermissions.maximumStatus) {
+            setOrderStatus(salesOrderHidePermissions.maximumStatus)
+        }
+        if (paymentMethod && !salesOrderHidePermissions.isPaymentMethodAllowed(paymentMethod)) {
+            setPaymentMethod(null)
+            setPaymentStatus(null)
+            setPaymentAccount(null)
+        }
+    }, [
+        isOpen,
+        orderStatus,
+        paymentMethod,
+        salesOrderHidePermissions,
+        salesOrderHidePermissions.isLoading,
+        salesOrderHidePermissions.isPaymentMethodAllowed,
+        salesOrderHidePermissions.isStatusAllowed,
+        salesOrderHidePermissions.maximumStatus
+    ])
+
+    useEffect(() => {
         if (!isOpen) return
         setNotes('')
         setIsNotesVisible(false)
     }, [isOpen])
 
     const validateQuickOrder = () => {
+        if (salesOrderHidePermissions.isLoading) {
+            setSubmitError(t('members.permissions.salesOrderPermissionsLoading', { defaultValue: 'Sales Order permissions are still loading.' }))
+            return false
+        }
         if (!orderCounterparty) {
             setSubmitError(t('orders.form.selectCustomer'))
             return false
         }
-        if (!isFreeOnlyOrder && !paymentMethod) {
+        if (!paymentMethod) {
             setSubmitError(t('orders.form.errors.paymentMethodRequired'))
+            return false
+        }
+        if (!salesOrderHidePermissions.isPaymentMethodAllowed(paymentMethod)) {
+            setSubmitError(t('members.permissions.salesOrderPaymentMethodNotAllowed', { defaultValue: 'This Sales Order payment method is not allowed for your account.' }))
+            return false
+        }
+        if (!salesOrderHidePermissions.isStatusAllowed(orderStatus)) {
+            setSubmitError(t('members.permissions.salesOrderStatusNotAllowed', { defaultValue: 'You cannot advance this Sales Order to the selected status.' }))
             return false
         }
         if (!isFreeOnlyOrder && !paymentStatus) {
@@ -559,7 +603,7 @@ export function QuickOrderModal({
                 commissionEnabled: shouldCreditCommission,
                 orderStatus,
                 paymentStatus: isFreeOnlyOrder ? 'paid' : paymentStatus!,
-                paymentMethod: isFreeOnlyOrder ? 'cash' : paymentMethod!,
+                paymentMethod: paymentMethod!,
                 installmentCount: installmentSummary.installmentCount ?? 3,
                 installmentFrequency,
                 initialPaymentAmount: isInstallmentBased
@@ -582,7 +626,7 @@ export function QuickOrderModal({
                 ? t('agentSalesAccounts.notEnabled')
                 : message === 'agent_sales_account_unavailable'
                     ? t('agentSalesAccounts.unavailable')
-                    : message || t('orders.form.errors.saveSalesFailed'))
+                    : getLocalizedOrderError(error, t, t('orders.form.errors.saveSalesFailed')))
         }
     }
 
@@ -758,13 +802,13 @@ export function QuickOrderModal({
                                 ))
                                 setIsCommissionPanelOpen(false)
                             }}
-                            disabled={isSubmitting || isCommissionPanelOpen}
+                            disabled={isSubmitting || isCommissionPanelOpen || salesOrderHidePermissions.isLoading || salesOrderHidePermissions.allowedStatuses.length === 0}
                         >
                             <SelectTrigger id="quick-order-status"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="completed">{t('orders.status.completed')}</SelectItem>
-                                <SelectItem value="pending">{t('orders.status.pending')}</SelectItem>
-                                <SelectItem value="draft">{t('orders.status.draft')}</SelectItem>
+                                {salesOrderHidePermissions.allowedStatuses.map((status) => (
+                                    <SelectItem key={status} value={status}>{t(`orders.status.${status}`)}</SelectItem>
+                                ))}
                             </SelectContent>
                         </Select>
                     </div>
@@ -817,39 +861,48 @@ export function QuickOrderModal({
                             </p>
                         </div>
                     </div>
-                ) : (
-                    <>
-                        <div className="grid gap-2">
-                            <Label htmlFor="quick-order-payment">
-                                {t('pos.paymentMethod')} <span className="text-destructive">*</span>
-                            </Label>
-                            <PaymentMethodSelect
-                                id="quick-order-payment"
-                                value={paymentMethod}
-                                onValueChange={(value) => {
-                                    setPaymentMethod(value)
-                                    setLoanInitialRepaymentAmount('')
-                                    setLoanDueDate('')
-                                    setPaymentStatus((current) => getQuickOrderPaymentStatusAfterMethodChange(
-                                        current,
-                                        value,
-                                        orderStatus
-                                    ))
-                                    setIsCommissionPanelOpen(false)
-                                }}
-                                onLinkedPaymentAccountSelect={setPaymentAccount}
-                                workspaceId={workspaceId}
-                                methods={paymentMethods}
-                                allowNone
-                                noneLabel={t('pos.quickOrder.selectPaymentMethod')}
-                                placeholder={t('pos.quickOrder.selectPaymentMethod')}
-                                disabled={isSubmitting || isCommissionPanelOpen}
-                            />
-                        </div>
+                ) : null}
 
-                        {isPaidOnSave
+                <div className="grid gap-2">
+                    <Label htmlFor="quick-order-payment">
+                        {t('pos.paymentMethod')} <span className="text-destructive">*</span>
+                    </Label>
+                    <PaymentMethodSelect
+                        id="quick-order-payment"
+                        value={paymentMethod}
+                        onValueChange={(value) => {
+                            setPaymentMethod(value)
+                            setLoanInitialRepaymentAmount('')
+                            setLoanDueDate('')
+                            setPaymentStatus((current) => getQuickOrderPaymentStatusAfterMethodChange(
+                                current,
+                                value,
+                                orderStatus
+                            ))
+                            setIsCommissionPanelOpen(false)
+                        }}
+                        onLinkedPaymentAccountSelect={setPaymentAccount}
+                        workspaceId={workspaceId}
+                        methods={paymentMethods}
+                        allowNone
+                        noneLabel={t('pos.quickOrder.selectPaymentMethod')}
+                        placeholder={t('pos.quickOrder.selectPaymentMethod')}
+                        disabled={isSubmitting || isCommissionPanelOpen || salesOrderHidePermissions.isLoading || paymentMethods.length === 0}
+                    />
+                    {salesOrderHidePermissions.isLoading ? (
+                        <p role="status" className="text-xs text-muted-foreground">
+                            {t('members.permissions.salesOrderPermissionsLoading', { defaultValue: 'Sales Order permissions are still loading.' })}
+                        </p>
+                    ) : paymentMethods.length === 0 ? (
+                        <p role="alert" className="text-xs text-destructive">
+                            {t('members.permissions.noSalesOrderPaymentMethodsAllowed', { defaultValue: 'No Sales Order payment methods are currently allowed. Ask an administrator to update your permissions.' })}
+                        </p>
+                    ) : null}
+                </div>
+
+                {!isFreeOnlyOrder && (isPaidOnSave
                             || (isInstallmentBased && (installmentSummary.initialPaymentAmount ?? 0) > 0)
-                            || (isLoanPartiallyPaid && (loanRepaymentSummary.initialPaymentAmount ?? 0) > 0) ? (
+                            || (isLoanPartiallyPaid && (loanRepaymentSummary.initialPaymentAmount ?? 0) > 0)) ? (
                             <PaymentAccountSelector
                                 workspaceId={workspaceId}
                                 value={paymentAccount?.id ?? null}
@@ -858,9 +911,6 @@ export function QuickOrderModal({
                                 cashDrawerOnly={paymentMethod === 'cash'}
                             />
                         ) : null}
-
-                    </>
-                )}
 
                 {showCustomerCommissionAssignments ? (
                     <div className="space-y-3">

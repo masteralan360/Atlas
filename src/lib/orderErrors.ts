@@ -1,5 +1,6 @@
-import type { TFunction } from 'i18next'
 import { normalizeStockReservationError } from './stockReservationConflict'
+
+type OrderErrorTranslator = (key: string, options?: Record<string, unknown>) => string
 
 const ORDER_ERROR_TRANSLATIONS: Record<string, { key: string; fallback: string }> = {
     return_request_identity_mismatch: {
@@ -17,6 +18,18 @@ const ORDER_ERROR_TRANSLATIONS: Record<string, { key: string; fallback: string }
     sales_order_return_not_allowed: {
         key: 'orders.form.errors.salesOrderReturnNotAllowed',
         fallback: 'You do not have permission to return this sales order.'
+    },
+    sales_order_payment_method_not_allowed: {
+        key: 'members.permissions.salesOrderPaymentMethodNotAllowed',
+        fallback: 'This Sales Order payment method is not allowed for your account.'
+    },
+    sales_order_status_advancement_not_allowed: {
+        key: 'members.permissions.salesOrderStatusNotAllowed',
+        fallback: 'You cannot advance this Sales Order to the selected status.'
+    },
+    sales_order_permissions_unavailable: {
+        key: 'members.permissions.salesOrderPermissionsUnavailable',
+        fallback: 'Sales Order permissions could not be verified. Check your connection and try again.'
     },
     order_cancellation_pending: {
         key: 'orders.cancellationPending',
@@ -52,7 +65,7 @@ const ORDER_ERROR_TRANSLATIONS: Record<string, { key: string; fallback: string }
     }
 }
 
-export function getLocalizedOrderError(error: unknown, t: TFunction, fallback = 'Action failed') {
+export function getLocalizedOrderError(error: unknown, t: OrderErrorTranslator, fallback = 'Action failed') {
     const reservationError = normalizeStockReservationError(error)
     if (reservationError) return reservationError.message
     const message = error instanceof Error

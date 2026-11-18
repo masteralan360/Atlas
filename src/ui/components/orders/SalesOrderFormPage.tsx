@@ -7,7 +7,7 @@ import { useAuth } from '@/auth'
 import { useUiAccess } from '@/context/UiAccessContext'
 import { isMobile } from '@/lib/platform'
 import { getPrioritizedPaymentMethod, setPrioritizedPaymentMethod } from '@/lib/prioritizedPaymentMethod'
-import { ORDER_FINANCING_PAYMENT_METHODS, STANDARD_PAYMENT_METHODS, type PaymentMethodOption } from '@/lib/paymentMethods'
+import { ORDER_FINANCING_PAYMENT_METHODS, STANDARD_PAYMENT_METHODS, getPaymentMethodLabel, type PaymentMethodOption } from '@/lib/paymentMethods'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { buildOrderExchangeRatesSnapshot, convertCurrencyAmountWithLiveRates, getAppliedCurrencyConversion, getPrimaryExchangeDetails } from '@/lib/orderCurrency'
 import { calculateOrderTotalWithAdjustments, normalizeOrderAdjustments, repriceOrderAdjustment } from '@/lib/orderAdjustments'
@@ -78,7 +78,8 @@ import { isOrderReadOnly } from '@/lib/orderEditability'
 import { resolvePartnerPriceBookUnitPrice } from '@/lib/priceBooks'
 import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
 import { isRemoteOrderSaveConfirmationError, ORDER_SUMMARY_RECOVERY_PERSISTENCE_ERROR, type OrderSaveProgress } from '@/lib/orderSaveProgress'
-import { hasEffectiveSalesAgentCommissionPermission, useHideCosts, useWorkspacePermissions } from '@/permissions'
+import { getLocalizedOrderError } from '@/lib/orderErrors'
+import { hasEffectiveSalesAgentCommissionPermission, useHideCosts, useSalesOrderHidePermissions, useWorkspacePermissions } from '@/permissions'
 import {
     assertValidOrderUnitQuantity,
     buildProductUomOrderOptions,
@@ -291,6 +292,7 @@ export function SalesOrderFormPage({
     const { t } = useTranslation()
     const { toast } = useToast()
     const { user } = useAuth()
+    const salesOrderHidePermissions = useSalesOrderHidePermissions()
     const hideCosts = useHideCosts()
     const { features, hasCapability, hasFeature } = useWorkspace()
     const { permissionKeys } = useWorkspacePermissions()
@@ -301,6 +303,14 @@ export function SalesOrderFormPage({
         agentSalesAccountsEnabled,
         userRole: user?.role
     })
+    const salesOrderPaymentMethods = useMemo<PaymentMethodOption[]>(() => [
+        ...STANDARD_PAYMENT_METHODS,
+        ...(hasFeature('loans') ? [ORDER_FINANCING_PAYMENT_METHODS[0]] : []),
+        ...(hasFeature('installments') ? [ORDER_FINANCING_PAYMENT_METHODS[1]] : [])
+    ].filter((method) => salesOrderHidePermissions.allowedPaymentMethods.includes(method)), [
+        hasFeature,
+        salesOrderHidePermissions.allowedPaymentMethods
+    ])
 
     const products = useProducts(workspaceId)
     const productUoms = useProductUoms(workspaceId)
@@ -581,6 +591,20 @@ export function SalesOrderFormPage({
         setInitialPaymentAccountNameSnapshot(editingOrder.initialPaymentAccountNameSnapshot ?? null)
         setItems(mapExistingOrderItems(editingOrder))
     }, [defaultStorageId, editingOrder, editingOrderId, mapExistingOrderItems])
+
+    useEffect(() => {
+        if (salesOrderHidePermissions.isLoading || editingOrderId) return
+        if (!salesOrderHidePermissions.isPaymentMethodAllowed(paymentMethod)) {
+            setPaymentMethod(salesOrderPaymentMethods[0] ?? '')
+        }
+    }, [
+        editingOrderId,
+        paymentMethod,
+        salesOrderHidePermissions,
+        salesOrderHidePermissions.isLoading,
+        salesOrderHidePermissions.isPaymentMethodAllowed,
+        salesOrderPaymentMethods
+    ])
 
     useEffect(() => {
         if (!editingOrder || !products.length) return
@@ -1316,6 +1340,8 @@ export function SalesOrderFormPage({
     const isFinanced = paymentMethod === 'loan' || paymentMethod === 'installments'
     const isInstallmentBased = paymentMethod === 'installments'
     const canSubmit = Boolean(selectedCustomer) &&
+        !salesOrderHidePermissions.isLoading &&
+        salesOrderHidePermissions.isPaymentMethodAllowed(paymentMethod) &&
         items.some((item) => item.productId && item.unitRef && hasOrderLineInventoryQuantity(item)) &&
         items.every((item) => !item.productId || Boolean(item.unitRef)) &&
         (!priceBooksEnabled || isPriceBookCatalogReady) &&
@@ -1375,6 +1401,23 @@ export function SalesOrderFormPage({
         if (isOrderEditorBlocked || isExistingOrderReadOnly) return
         if (priceBooksEnabled && !isPriceBookCatalogReady) return
         if (!user?.workspaceId || isSaving) return
+
+        if (salesOrderHidePermissions.isLoading) {
+            toast({
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: t('members.permissions.salesOrderPermissionsLoading', { defaultValue: 'Sales Order permissions are still loading.' }),
+                variant: 'destructive'
+            })
+            return
+        }
+        if (!salesOrderHidePermissions.isPaymentMethodAllowed(paymentMethod)) {
+            toast({
+                title: t('common.error', { defaultValue: 'Error' }),
+                description: t('members.permissions.salesOrderPaymentMethodNotAllowed', { defaultValue: 'This Sales Order payment method is not allowed for your account.' }),
+                variant: 'destructive'
+            })
+            return
+        }
 
         if (minimumPriceViolations.length > 0) {
             const violation = minimumPriceViolations[0]
@@ -1727,7 +1770,7 @@ export function SalesOrderFormPage({
                 ? t('agentSalesAccounts.notEnabled')
                 : error?.message === 'agent_sales_account_unavailable'
                     ? t('agentSalesAccounts.unavailable')
-                    : error?.message || t('orders.form.errors.saveSalesFailed', { defaultValue: 'Failed to save sales order.' })
+                    : getLocalizedOrderError(error, t, t('orders.form.errors.saveSalesFailed', { defaultValue: 'Failed to save sales order.' }))
             dismissSaveProgressToast()
             toast({
                 title: t('common.error') || 'Error',
@@ -2459,6 +2502,7 @@ export function SalesOrderFormPage({
                                         <Label htmlFor="sales-payment" className="flex items-center gap-2">
                                             <CreditCard className="h-4 w-4 text-muted-foreground" />
                                             {t('pos.paymentMethod', { defaultValue: 'Payment Method' })}
+                                            <span className="text-destructive">*</span>
                                         </Label>
                                         <PaymentMethodSelect
                                             id="sales-payment"
@@ -2472,11 +2516,14 @@ export function SalesOrderFormPage({
                                                 setInitialPaymentAccountNameSnapshot(account.name)
                                             }}
                                             workspaceId={workspaceId}
-                                            methods={[
-                                                ...STANDARD_PAYMENT_METHODS,
-                                                ...(hasFeature('loans') ? [ORDER_FINANCING_PAYMENT_METHODS[0]] : []),
-                                                ...(hasFeature('installments') ? [ORDER_FINANCING_PAYMENT_METHODS[1]] : [])
-                                            ]}
+                                            methods={salesOrderPaymentMethods}
+                                            disabled={isSaving || salesOrderHidePermissions.isLoading || salesOrderPaymentMethods.length === 0}
+                                            unavailableValueLabel={salesOrderHidePermissions.isLoading
+                                                ? t('members.permissions.salesOrderPermissionsLoading', { defaultValue: 'Sales Order permissions are still loading.' })
+                                                : t('members.permissions.currentSalesOrderMethodRestricted', {
+                                                    method: getPaymentMethodLabel(paymentMethod as PaymentMethodOption, t),
+                                                    defaultValue: '{{method}} is hidden for this member. Choose an allowed method.'
+                                                })}
                                             onOptionPointerDown={(event, method) => {
                                                 if (!(event.shiftKey || isAccessKeyHeld) || isMobile()) return
                                                 if (prioritizedMethod === method) {
@@ -2492,6 +2539,22 @@ export function SalesOrderFormPage({
                                                 ? <Star className="ml-2 inline h-3 w-3 fill-yellow-400" />
                                                 : null}
                                         />
+                                        {salesOrderHidePermissions.isLoading ? (
+                                            <p role="status" className="text-xs text-muted-foreground">
+                                                {t('members.permissions.salesOrderPermissionsLoading', { defaultValue: 'Sales Order permissions are still loading.' })}
+                                            </p>
+                                        ) : salesOrderPaymentMethods.length === 0 ? (
+                                            <p role="alert" className="text-xs text-destructive">
+                                                {t('members.permissions.noSalesOrderPaymentMethodsAllowed', { defaultValue: 'No Sales Order payment methods are currently allowed. Ask an administrator to update your permissions.' })}
+                                            </p>
+                                        ) : salesOrderHidePermissions.isPaymentMethodRestricted(paymentMethod) ? (
+                                            <p role="alert" className="text-xs text-destructive">
+                                                {t('members.permissions.currentSalesOrderMethodRestricted', {
+                                                    method: getPaymentMethodLabel(paymentMethod as PaymentMethodOption, t),
+                                                    defaultValue: '{{method}} is hidden for this member. Choose an allowed method.'
+                                                })}
+                                            </p>
+                                        ) : null}
                                         {(isPaid || (isFinanced && initialPayment > 0)) ? (
                                             <PaymentAccountSelector
                                                 workspaceId={workspaceId}

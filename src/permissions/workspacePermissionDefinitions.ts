@@ -32,6 +32,21 @@ import {
   Trash2,
   Coins,
 } from "lucide-react";
+import {
+  ORDER_FINANCING_PAYMENT_METHODS,
+  STANDARD_PAYMENT_METHODS,
+} from "@/lib/paymentMethods";
+
+export const SALES_ORDER_PERMISSION_PAYMENT_METHODS = [
+  ...STANDARD_PAYMENT_METHODS,
+  ...ORDER_FINANCING_PAYMENT_METHODS,
+] as const;
+
+export const SALES_ORDER_PERMISSION_STATUSES = [
+  "draft",
+  "pending",
+  "completed",
+] as const;
 
 export const WORKSPACE_PERMISSION_DEFINITIONS = [
   { key: 'postService.merchant', module: 'postService', labelKey: 'postal.merchant', defaultLabel: 'Merchant', descriptionKey: 'postal.merchantPermission', defaultDescription: 'Create and track shipments for the assigned merchant organization.', icon: Store, section: 'sell-and-serve' },
@@ -768,17 +783,34 @@ export const WORKSPACE_PERMISSION_DEFINITIONS = [
   },
 ] as const;
 
+type PermissionKeySegment<T extends string> = T extends `${infer Head}_${infer Tail}`
+  ? `${Head}${PermissionKeySegment<Tail>}`
+  : T;
+
 export type WorkspacePermissionKey =
-  (typeof WORKSPACE_PERMISSION_DEFINITIONS)[number]["key"];
+  | (typeof WORKSPACE_PERMISSION_DEFINITIONS)[number]["key"]
+  | `orders.salesOrderPaymentMethod.${PermissionKeySegment<(typeof SALES_ORDER_PERMISSION_PAYMENT_METHODS)[number]>}`
+  | `orders.salesOrderMaxStatus.${(typeof SALES_ORDER_PERMISSION_STATUSES)[number]}`;
 
 const supportedPermissionKeys = new Set<string>(
   WORKSPACE_PERMISSION_DEFINITIONS.map((permission) => permission.key),
 );
 
+const salesOrderHidePermissionSuffixes = new Set<string>([
+  ...SALES_ORDER_PERMISSION_PAYMENT_METHODS.map(
+    (method) => `salesOrderPaymentMethod.${method.replace(/_/g, "")}`,
+  ),
+  ...SALES_ORDER_PERMISSION_STATUSES.map(
+    (status) => `salesOrderMaxStatus.${status}`,
+  ),
+]);
+
 export function isSupportedWorkspacePermissionKey(
   key: string,
 ): key is WorkspacePermissionKey {
-  return supportedPermissionKeys.has(key);
+  if (supportedPermissionKeys.has(key)) return true;
+  if (!key.startsWith("orders.")) return false;
+  return salesOrderHidePermissionSuffixes.has(key.slice("orders.".length));
 }
 
 export function getWorkspacePermissionModule(key: string) {

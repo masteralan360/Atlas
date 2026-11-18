@@ -7,6 +7,11 @@ function getCacheKey(workspaceId: string, userId: string) {
   return `atlas_workspace_permissions:${workspaceId}:${userId}`;
 }
 
+export function hasCachedPermissions(workspaceId: string, userId: string) {
+  return typeof localStorage !== "undefined"
+    && localStorage.getItem(getCacheKey(workspaceId, userId)) !== null;
+}
+
 export function readCachedPermissions(
   workspaceId: string,
   userId: string,

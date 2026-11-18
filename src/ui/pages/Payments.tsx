@@ -75,6 +75,7 @@ import { PaymentTransactionPrintTemplate, type PaymentTransactionPrintData, type
 import { PrintFlow } from '@/ui/components/PrintFlow'
 import type { TemplatePreview } from '@/lib/printPreviewEditorStore'
 import { getPaymentTransactionReversalState } from '@/lib/paymentReversals'
+import { getLocalizedOrderError } from '@/lib/orderErrors'
 import { generateTemplatePdf } from '@/services/pdfGenerator'
 import { printPdfBlob } from '@/services/pdfPrintService'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
@@ -512,7 +513,7 @@ export function Payments() {
         } catch (error: any) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: error?.message || t('payments.settlementFailed', { defaultValue: 'Failed to record settlement.' }),
+                description: getLocalizedOrderError(error, t, t('payments.settlementFailed', { defaultValue: 'Failed to record settlement.' })),
                 variant: 'destructive'
             })
         } finally {

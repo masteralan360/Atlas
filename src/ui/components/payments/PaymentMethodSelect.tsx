@@ -28,6 +28,8 @@ interface SharedPaymentMethodSelectProps {
     id?: string
     disabled?: boolean
     placeholder?: string
+    /** Shown in the closed trigger when a saved value is no longer selectable. */
+    unavailableValueLabel?: string
     triggerClassName?: string
     onOptionPointerDown?: (event: PointerEvent<HTMLDivElement>, method: PaymentMethodOption) => void
     renderOptionEnd?: (method: PaymentMethodOption) => ReactNode
@@ -105,6 +107,7 @@ export function PaymentMethodSelect({
     id,
     disabled = false,
     placeholder,
+    unavailableValueLabel,
     triggerClassName,
     onOptionPointerDown,
     renderOptionEnd,
@@ -164,7 +167,11 @@ export function PaymentMethodSelect({
             disabled={disabled}
         >
             <SelectTrigger id={id} className={triggerClassName}>
-                <SelectValue placeholder={placeholder} />
+                <SelectValue
+                    placeholder={value != null && !orderedMethods.includes(value)
+                        ? unavailableValueLabel ?? placeholder
+                        : placeholder}
+                />
             </SelectTrigger>
             <SelectContent>
                 {allowNone ? <SelectItem value="__none__">{noneLabel}</SelectItem> : null}

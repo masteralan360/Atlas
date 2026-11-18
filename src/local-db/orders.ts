@@ -18,7 +18,7 @@ import {
 import { roundOrderValue } from '@/lib/orderPrecision'
 import { convertCurrencyAmountWithAvailableSnapshot, convertCurrencyAmountWithSnapshot } from '@/lib/orderCurrency'
 import { createOrderAdjustment, normalizeOrderAdjustments, type OrderAdjustmentDraft } from '@/lib/orderAdjustments'
-import { isOnline } from '@/lib/network'
+import { getActiveBusinessUserId, getActiveBusinessUserRole, isOnline } from '@/lib/network'
 import {
     createRemoteOrderSaveConfirmationError,
     ORDER_SAVE_PROGRESS,
@@ -46,6 +46,12 @@ import { useOptionalWorkspacePermissions } from '@/permissions/workspacePermissi
 import { useWorkspace } from '@/workspace'
 import { canReturnSalesOrder, SALES_ORDER_RETURN_NOT_ALLOWED } from '@/permissions/salesOrderReturnPermissions'
 import type { WorkspacePermissionKey } from '@/permissions/workspacePermissionDefinitions'
+import { hasCachedPermissions, readCachedPermissions } from '@/permissions/workspacePermissionCache'
+import {
+    isSalesOrderPaymentMethodAllowed,
+    isSalesOrderStatusAllowed
+} from '@/permissions/salesOrderHidePermissions'
+import { SALES_ORDER_PERMISSION_STATUSES } from '@/permissions/workspacePermissionDefinitions'
 import i18n from '@/i18n/config'
 
 import { db } from './database'
@@ -344,6 +350,64 @@ function roundAmount(amount: number, _currency: CurrencyCode) {
 
 async function runMutation<T>(label: string, promiseFactory: () => PromiseLike<T>): Promise<T> {
     return runSupabaseAction(label, promiseFactory)
+}
+
+type SalesOrderHidePermissionCheck = {
+    paymentMethod?: string | null
+    status?: string | null
+}
+
+async function getActiveSalesOrderHidePermissionKeys(workspaceId: string, actorId: string) {
+    if (shouldUseCloudBusinessData(workspaceId)) {
+        if (isOnline(workspaceId)) {
+            const { data, error } = await runMutation('orders.salesOrderHidePermissions.fetch', () =>
+                supabase
+                    .from('workspace_permissions')
+                    .select('key')
+                    .eq('workspace_id', workspaceId)
+                    .eq('user_uuid', actorId)
+            )
+            if (error) {
+                throw new Error('sales_order_permissions_unavailable')
+            }
+            return new Set((data ?? []).map((row) => row.key))
+        }
+
+        // An absent cache cannot distinguish a legacy unrestricted member
+        // from one whose restrictions have not been synchronized yet.
+        if (!hasCachedPermissions(workspaceId, actorId)) {
+            throw new Error('sales_order_permissions_unavailable')
+        }
+    }
+
+    const localRows = await db.workspace_permissions
+        .where('[workspaceId+userUuid]')
+        .equals([workspaceId, actorId])
+        .toArray()
+    const cachedKeys = readCachedPermissions(workspaceId, actorId)
+    return new Set([
+        ...localRows.map((row) => row.key),
+        ...cachedKeys
+    ])
+}
+
+async function assertSalesOrderHidePermissions(
+    workspaceId: string,
+    requested: SalesOrderHidePermissionCheck
+) {
+    const actorId = getActiveBusinessUserId()
+    if (!actorId || getActiveBusinessUserRole(workspaceId) !== 'staff') return
+
+    const permissionKeys = await getActiveSalesOrderHidePermissionKeys(workspaceId, actorId)
+    if (requested.paymentMethod !== undefined
+        && !isSalesOrderPaymentMethodAllowed(requested.paymentMethod, permissionKeys)) {
+        throw new Error('sales_order_payment_method_not_allowed')
+    }
+    if (requested.status != null
+        && (SALES_ORDER_PERMISSION_STATUSES as readonly string[]).includes(requested.status)
+        && !isSalesOrderStatusAllowed(requested.status, permissionKeys)) {
+        throw new Error('sales_order_status_advancement_not_allowed')
+    }
 }
 
 function getSyncMetadata(workspaceId: string, timestamp: string) {
@@ -1729,6 +1793,11 @@ async function appendInitialOrderPaymentTransaction(
 
     const sourceType = orderType === 'sales' ? 'sales_order' : 'purchase_order'
     const isFinanced = isOrderFinancingMethod(order.paymentMethod)
+    if (orderType === 'sales' && !isFinanced) {
+        await assertSalesOrderHidePermissions(order.workspaceId, {
+            paymentMethod: order.paymentMethod || 'cash'
+        })
+    }
     const paymentAmount = isFinanced
         ? roundOrderAmount(Math.max(0, Number(order.initialPaymentAmount || 0)), order.currency)
         : order.paidAmount
@@ -3129,6 +3198,22 @@ export async function rebuildOrderPaymentState(
     const hasRemoteOrderSnapshot = options.preserveRemoteItemSnapshots
         ?? (order.syncStatus === 'synced' || activePayments.some((payment) => payment.syncStatus === 'synced'))
     const preserveRemoteItemSnapshots = order.status !== 'draft' && hasRemoteOrderSnapshot
+    let rebuiltPaymentMethod: OrderPaymentMethod | undefined =
+        (latestPayment?.paymentMethod as OrderPaymentMethod | undefined) || order.paymentMethod || 'cash'
+    if (orderType === 'sales' && rebuiltPaymentMethod !== order.paymentMethod) {
+        try {
+            await assertSalesOrderHidePermissions(order.workspaceId, { paymentMethod: rebuiltPaymentMethod })
+        } catch (error) {
+            if (error instanceof Error && error.message === 'sales_order_payment_method_not_allowed') {
+                // A reversal or payment rebuild can expose an older historical
+                // method. Keep the saved order method stable when that method
+                // is now prohibited for this staff member.
+                rebuiltPaymentMethod = order.paymentMethod
+            } else {
+                throw error
+            }
+        }
+    }
     const updated = {
         ...order,
         isPaid: paymentStatus === 'paid',
@@ -3136,7 +3221,7 @@ export async function rebuildOrderPaymentState(
         paidAmount: normalizedPaidAmount,
         balanceAmount,
         paidAt: paymentStatus === 'paid' ? latestPayment?.paidAt || now : null,
-        paymentMethod: (latestPayment?.paymentMethod as OrderPaymentMethod | undefined) || order.paymentMethod || 'cash',
+        paymentMethod: rebuiltPaymentMethod,
         nextDueDate,
         updatedAt: now,
         version: order.version + 1,
@@ -3221,6 +3306,9 @@ export async function recordOrderPayment(
     const order = await orderTable.get(input.orderId) as SalesOrder | PurchaseOrder | undefined
     if (!order || order.isDeleted || order.workspaceId !== workspaceId) {
         throw new Error('Order not found')
+    }
+    if (input.orderType === 'sales') {
+        await assertSalesOrderHidePermissions(workspaceId, { paymentMethod: input.paymentMethod })
     }
     await assertNoPendingFinancedOrderCancellation(workspaceId, order.id)
     if (isOrderFinancingMethod(order.paymentMethod) || order.linkedLoanId) {
@@ -3477,6 +3565,10 @@ async function createSalesOrderInternal(
             return confirmed
         }
     }
+    await assertSalesOrderHidePermissions(workspaceId, {
+        paymentMethod: data.paymentMethod ?? 'cash',
+        status: data.status ?? 'draft'
+    })
     const order = await measureSalesOrderStage(
         options?.trace,
         'crudDebugger.stages.salesOrderPreparation',
@@ -3859,6 +3951,10 @@ async function createQuickSalesOrderInternal(
     if (targetStatus !== 'draft' && targetStatus !== 'pending' && targetStatus !== 'completed') {
         throw new Error('Quick orders must be saved as draft, pending, or completed')
     }
+    await assertSalesOrderHidePermissions(workspaceId, {
+        paymentMethod: data.paymentMethod ?? 'cash',
+        status: targetStatus
+    })
     if (targetStatus !== 'draft') {
         assertInventoryMutationConnectivity(workspaceId)
     }
@@ -3978,6 +4074,11 @@ async function updateSalesOrderInternal(id: string, data: Partial<SalesOrder>, o
     options?.trace?.setEntityId(existing.id)
     options?.trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
 
+    await assertSalesOrderHidePermissions(existing.workspaceId, {
+        paymentMethod: data.paymentMethod,
+        status: data.status
+    })
+
     await assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id)
 
     if (existing.status !== 'draft') {
@@ -4064,6 +4165,11 @@ async function updateSalesOrderInternal(id: string, data: Partial<SalesOrder>, o
     if (confirmedAdjustments.length === 0) delete updated.orderAdjustments
 
     updated.nextDueDate = isOrderFinancingMethod(updated.paymentMethod) ? updated.firstDueDate || null : null
+    if (updated.paymentMethod !== existing.paymentMethod) {
+        await assertSalesOrderHidePermissions(existing.workspaceId, {
+            paymentMethod: updated.paymentMethod
+        })
+    }
     await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', async () => {
         await assertOrderStorageAccess(updated)
         await assertSalesOrderMinimumPrices(updated, options)
@@ -4387,6 +4493,8 @@ async function updateSalesOrderStatusOnce(
     options?.trace?.setEntityId(existing.id)
     options?.trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
 
+    await assertSalesOrderHidePermissions(existing.workspaceId, { status })
+
     if (usesLocalStockExecution(existing.workspaceId) && !Dexie.currentTransaction) {
         return db.transaction('rw', db.tables, () => updateSalesOrderStatusOnce(id, status, options))
     }
@@ -4584,6 +4692,11 @@ export async function setSalesOrderPaymentStatus(
     const existing = await db.sales_orders.get(id)
     if (!existing || existing.isDeleted) {
         throw new Error('Sales order not found')
+    }
+    if (input.paymentMethod !== undefined && input.paymentMethod !== existing.paymentMethod) {
+        await assertSalesOrderHidePermissions(existing.workspaceId, {
+            paymentMethod: input.paymentMethod
+        })
     }
     if (isOrderFinancingMethod(existing.paymentMethod) || existing.linkedLoanId) {
         throw new Error('financed_order_payments_managed_in_loan_module')

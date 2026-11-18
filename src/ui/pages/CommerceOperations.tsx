@@ -12,7 +12,7 @@ import {
 import { useOptionalAuth } from '@/auth/AuthContext'
 import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
-import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
+import { hasEffectiveSalesAgentCommissionPermission, useSalesOrderHidePermissions, useWorkspacePermissions } from '@/permissions'
 import { db } from '@/local-db/database'
 import type { Agent, BusinessPartner, CommerceOperationRecord, CommerceOperationRecordType, CurrencyCode, CustomAgentType, ExchangeRateSnapshot, PaymentAccount, Product, SalesOrder, SalesOrderItem } from '@/local-db/models'
 import { createQuickSalesOrder, resolveSocialOrderAgentCreator } from '@/local-db/orders'
@@ -71,6 +71,7 @@ import { useDateRange } from '@/context/DateRangeContext'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { isOnline } from '@/lib/network'
 import { STANDARD_PAYMENT_METHODS, type PaymentMethodOption } from '@/lib/paymentMethods'
+import { getLocalizedOrderError } from '@/lib/orderErrors'
 import { getCommerceOperationsPartnerLabels } from './commerceOperationsPartnerLabels'
 import { TieredCommissionOrderEstimate } from '@/ui/components/commissions/TieredCommissionOrderEstimate'
 
@@ -779,6 +780,12 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
   const { toast } = useToast()
   const { exchangeData, eurRates, tryRates } = useExchangeRate()
   const { hasCapability } = useWorkspace()
+  const {
+    isLoading: salesOrderPermissionsLoading,
+    allowedPaymentMethods: salesOrderAllowedPaymentMethods,
+    isStatusAllowed: isSalesOrderStatusAllowed,
+    isPaymentMethodAllowed: isSalesOrderPaymentMethodAllowed,
+  } = useSalesOrderHidePermissions()
   const canUseFreeBonus = hasCapability('orderFreeBonus')
   const [buyerName, setBuyerName] = useState('')
   const [buyerPhone, setBuyerPhone] = useState('')
@@ -811,6 +818,20 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
   const [attempted, setAttempted] = useState(false)
   const [date, setDate] = useState(new Date())
   const paymentAccountsState = usePaymentAccountsState(workspaceId, userId)
+  const allowedCommercePaymentMethods = useMemo(
+    () => salesOrderAllowedPaymentMethods.filter((method) =>
+      (STANDARD_PAYMENT_METHODS as readonly string[]).includes(method),
+    ),
+    [salesOrderAllowedPaymentMethods],
+  )
+  useEffect(() => {
+    if (salesOrderPermissionsLoading) return
+    setPaymentMethod((current) => (
+      current && allowedCommercePaymentMethods.includes(current as typeof allowedCommercePaymentMethods[number])
+        ? current
+        : allowedCommercePaymentMethods[0] ?? null
+    ))
+  }, [allowedCommercePaymentMethods, salesOrderPermissionsLoading])
   const previewExchangeRates = useMemo(
     () => buildOrderExchangeRatesSnapshot({ exchangeData, eurRates, tryRates }),
     [exchangeData, eurRates, tryRates],
@@ -928,6 +949,10 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
       && parseAmount(line.price) !== null
       && parseAmount(line.costPrice) !== null)
     && (city !== 'other' || otherCity.trim()) && !deliveryFeeInvalid && !discountInvalid && totalCurrency
+    && !salesOrderPermissionsLoading
+    && isSalesOrderStatusAllowed('completed')
+    && Boolean(paymentMethod && isSalesOrderPaymentMethodAllowed(paymentMethod))
+    && allowedCommercePaymentMethods.length > 0
     && (!agentId || (orderAgentEnabled && agentsLoaded && selectedAgentAvailable)),
   )
   const isCreatingBuyer = isEnteringNewBuyer
@@ -1064,7 +1089,8 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
 
   async function saveCompletedPaidOrder() {
     if (!canSave || !workspaceId || !totalCurrency || !paymentDialogOpen) return
-    if (paymentRequired && (!paymentMethod || !STANDARD_PAYMENT_METHODS.includes(paymentMethod as typeof STANDARD_PAYMENT_METHODS[number]))) return
+    if (!paymentMethod || !isSalesOrderPaymentMethodAllowed(paymentMethod)
+      || !STANDARD_PAYMENT_METHODS.includes(paymentMethod as typeof STANDARD_PAYMENT_METHODS[number])) return
     if (!paymentAccountSelectionReady || (paymentAccount && (!paymentAccountsState.isReady || !selectedPaymentAccount || selectedPaymentAccountInvalid))) {
       toast({ title: t('commerceOperations.toast.orderFailed'), description: t('commerceOperations.validation.paymentAccountUnavailable'), variant: 'destructive' })
       return
@@ -1170,7 +1196,7 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
         paidAmount: orderTotal,
         balanceAmount: 0,
         paidAt: paymentRequired ? new Date().toISOString() : null,
-        paymentMethod: paymentRequired ? paymentMethod as NonNullable<SalesOrder['paymentMethod']> : 'cash',
+        paymentMethod: paymentMethod as NonNullable<SalesOrder['paymentMethod']>,
         initialPaymentAccountId: paymentRequired ? selectedPaymentAccount?.id ?? null : null,
         initialPaymentAccountNameSnapshot: paymentRequired ? selectedPaymentAccount?.name ?? null : null,
         initialPaymentAmount: 0,
@@ -1218,8 +1244,12 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
       setPaymentDialogOpen(false)
       onSaved()
       resetForm()
-    } catch {
-      toast({ title: t('commerceOperations.toast.orderFailed'), description: t('commerceOperations.toast.tryAgain'), variant: 'destructive' })
+    } catch (error) {
+      toast({
+        title: t('commerceOperations.toast.orderFailed'),
+        description: getLocalizedOrderError(error, t, t('commerceOperations.toast.tryAgain')),
+        variant: 'destructive',
+      })
     } finally {
       setSaving(false)
     }
@@ -1524,6 +1554,13 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
           </div>
           <div className="mt-4 rounded-xl bg-primary/5 p-4"><div className="flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.subtotal')}</span><span>{totalCurrency ? amountLabel(lineSubtotal, totalCurrency, iqdPreference) : '—'}</span></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.deliveryFee')}</span><span>{amountLabel(fee, 'iqd', iqdPreference)}</span></div><div className="mt-2 flex justify-between gap-3 text-sm"><span>{t('commerceOperations.order.discount')}</span><span>{totalCurrency ? amountLabel(discountAmount, totalCurrency, iqdPreference) : '—'}</span></div><div className="mt-3 flex justify-between gap-3 border-t pt-3 text-lg font-bold"><span>{t('commerceOperations.order.total')}</span><span>{totalCurrency && total !== null ? amountLabel(total, totalCurrency, iqdPreference) : '—'}</span></div></div>
           <p className="mt-3 text-xs text-muted-foreground">{t('commerceOperations.order.paymentAtIntakeHint')}</p>
+          {salesOrderPermissionsLoading ? (
+            <p role="status" className="text-xs text-muted-foreground">{t('members.permissions.salesOrderPermissionsLoading')}</p>
+          ) : !isSalesOrderStatusAllowed('completed') ? (
+            <p role="alert" className="text-xs text-destructive">{t('members.permissions.salesOrderStatusNotAllowed')}</p>
+          ) : allowedCommercePaymentMethods.length === 0 ? (
+            <p role="alert" className="text-xs text-destructive">{t('members.permissions.noSalesOrderPaymentMethodsAllowed')}</p>
+          ) : null}
         <div className="flex justify-end border-t pt-4">
           <Button type="button" className="gap-2" disabled={!canSave || saving || preparingPayment || paymentDialogOpen} onClick={() => void continueToPayment()}>
             {preparingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wallet className="h-4 w-4" />}
@@ -1569,21 +1606,28 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
                 <p className="text-sm text-muted-foreground">{t(paymentRequired ? 'commerceOperations.order.amountReceived' : 'commerceOperations.order.total')}</p>
                 <p className="mt-1 text-2xl font-bold tabular-nums">{totalCurrency ? amountLabel(orderTotalForPayment, totalCurrency, iqdPreference) : '—'}</p>
               </div>
+              <div className="space-y-2">
+                <RequiredLabel>{t('pos.paymentMethod')}</RequiredLabel>
+                <PaymentMethodSelector
+                  value={paymentMethod}
+                  onValueChange={setPaymentMethod}
+                  methods={allowedCommercePaymentMethods}
+                  allowNone
+                  noneLabel={t('pos.quickOrder.selectPaymentMethod')}
+                  workspaceId={workspaceId}
+                  disabled={saving || salesOrderPermissionsLoading || allowedCommercePaymentMethods.length === 0}
+                  onLinkedPaymentAccountSelect={handlePaymentAccountChange}
+                />
+                {salesOrderPermissionsLoading ? (
+                  <p role="status" className="text-xs text-muted-foreground">{t('members.permissions.salesOrderPermissionsLoading')}</p>
+                ) : allowedCommercePaymentMethods.length === 0 ? (
+                  <p role="alert" className="text-xs text-destructive">{t('members.permissions.noSalesOrderPaymentMethodsAllowed')}</p>
+                ) : !isSalesOrderStatusAllowed('completed') ? (
+                  <p role="alert" className="text-xs text-destructive">{t('members.permissions.salesOrderStatusNotAllowed')}</p>
+                ) : null}
+              </div>
               {paymentRequired ? (
                 <>
-                  <div className="space-y-2">
-                    <RequiredLabel>{t('pos.paymentMethod')}</RequiredLabel>
-                    <PaymentMethodSelector
-                      value={paymentMethod}
-                      onValueChange={setPaymentMethod}
-                      methods={STANDARD_PAYMENT_METHODS}
-                      allowNone
-                      noneLabel={t('pos.quickOrder.selectPaymentMethod')}
-                      workspaceId={workspaceId}
-                      disabled={saving}
-                      onLinkedPaymentAccountSelect={handlePaymentAccountChange}
-                    />
-                  </div>
                   <PaymentAccountSelector
                     workspaceId={workspaceId}
                     value={paymentAccount?.id ?? null}
@@ -1601,7 +1645,7 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
           <Button type="button" variant="outline" disabled={saving || preparingPayment} onClick={() => setPaymentDialogOpen(false)}>{t('commerceOperations.actions.backToOrder')}</Button>
           <Button
             type="button"
-            disabled={saving || preparingPayment || !canSave || (paymentRequired && (!paymentMethod || !STANDARD_PAYMENT_METHODS.includes(paymentMethod as typeof STANDARD_PAYMENT_METHODS[number]))) || !paymentAccountSelectionReady || (Boolean(paymentAccount) && (!paymentAccountsState.isReady || selectedPaymentAccountInvalid))}
+            disabled={saving || preparingPayment || !canSave || !paymentMethod || !isSalesOrderPaymentMethodAllowed(paymentMethod) || !STANDARD_PAYMENT_METHODS.includes(paymentMethod as typeof STANDARD_PAYMENT_METHODS[number]) || !paymentAccountSelectionReady || (Boolean(paymentAccount) && (!paymentAccountsState.isReady || selectedPaymentAccountInvalid))}
             onClick={() => void saveCompletedPaidOrder()}
           >
             {saving ? <Loader2 className="me-2 h-4 w-4 animate-spin" /> : <Check className="me-2 h-4 w-4" />}

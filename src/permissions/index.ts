@@ -6,3 +6,5 @@ export * from "./viewOwnRecordPermissions";
 export * from "./useHideCosts";
 export * from "./salesAgentCommissionPermissions";
 export * from "./salesOrderReturnPermissions";
+export * from "./salesOrderHidePermissions";
+export * from "./useSalesOrderHidePermissions";

@@ -3,7 +3,7 @@ import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { Archive, BadgeCheck, BadgeDollarSign, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, ClipboardCheck, Clock3, CreditCard, EllipsisVertical, Eye, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLocalizedOrderError } from '@/lib/orderErrors'
-import type { PaymentMethodOption } from '@/lib/paymentMethods'
+import { getPaymentMethodLabel as getSalesOrderPaymentMethodLabel, type PaymentMethodOption } from '@/lib/paymentMethods'
 import { useLocation, useRoute } from 'wouter'
 
 import { SalesOrderFormPage } from '@/ui/components/orders/SalesOrderFormPage'
@@ -82,7 +82,7 @@ import {
     type WorkspacePaymentMethod
 } from '@/local-db'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
-import { hasEffectiveSalesAgentCommissionPermission, useWorkspacePermissions } from '@/permissions'
+import { hasEffectiveSalesAgentCommissionPermission, useSalesOrderHidePermissions, useWorkspacePermissions } from '@/permissions'
 import { isMobile } from '@/lib/platform'
 import { cn } from '@/lib/utils'
 import { DateRangeBadge } from '@/ui/components/DateRangeBadge'
@@ -380,6 +380,12 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const { user } = useAuth()
     const { features, workspaceName } = useWorkspace()
     const { permissionKeys } = useWorkspacePermissions()
+    const salesOrderHidePermissions = useSalesOrderHidePermissions()
+    const simpleSalesPaymentMethods = useMemo<PaymentMethodOption[]>(() => (
+        (['cash', 'bank_transfer'] as const).filter((method) =>
+            salesOrderHidePermissions.allowedPaymentMethods.includes(method),
+        )
+    ), [salesOrderHidePermissions.allowedPaymentMethods])
     const workspaceUsers = useWorkspaceUsers(workspaceId)
     const workspaceUserNamesById = useMemo(() => new Map(
         workspaceUsers.map((workspaceUser) => [workspaceUser.id, workspaceUser.name.trim()] as const)
@@ -990,7 +996,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         } catch (error: any) {
             toast({
                 title: t('common.error') || 'Error',
-                description: error?.message || 'Failed to record settlement',
+                description: getLocalizedOrderError(error, t, t('payments.settlementFailed', { defaultValue: 'Failed to record settlement.' })),
                 variant: 'destructive'
             })
         } finally {
@@ -1169,6 +1175,23 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     async function handleSalesSubmit(event: FormEvent) {
         event.preventDefault()
         if (!user?.workspaceId) return
+
+        if (salesOrderHidePermissions.isLoading) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: t('members.permissions.salesOrderPermissionsLoading', { defaultValue: 'Sales Order permissions are still loading.' }),
+                variant: 'destructive'
+            })
+            return
+        }
+        if (!salesOrderHidePermissions.isPaymentMethodAllowed(salesForm.paymentMethod)) {
+            toast({
+                title: t('common.error') || 'Error',
+                description: t('members.permissions.salesOrderPaymentMethodNotAllowed', { defaultValue: 'This Sales Order payment method is not allowed for your account.' }),
+                variant: 'destructive'
+            })
+            return
+        }
 
         if (salesMinimumPriceViolations.length > 0) {
             const violation = salesMinimumPriceViolations[0]
@@ -1458,7 +1481,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             t('orders.actions.approveRequestSuccess', { defaultValue: 'Order request approved' })
                         )
                     })}
-                    {!isApprovalRequested && canManageOrders && isSalesOrder && order.status === 'draft' && renderWorkflowItem({
+                    {!isApprovalRequested && canManageOrders && isSalesOrder && order.status === 'draft' && salesOrderHidePermissions.isStatusAllowed('pending') && renderWorkflowItem({
                         actionName: 'reserve',
                         icon: PackagePlus,
                         label: t('orders.actions.reserve') || 'Reserve',
@@ -1469,7 +1492,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             'Sales order reserved'
                         )
                     })}
-                    {!isApprovalRequested && canManageOrders && isSalesOrder && order.status === 'pending' && renderWorkflowItem({
+                    {!isApprovalRequested && canManageOrders && isSalesOrder && order.status === 'pending' && salesOrderHidePermissions.isStatusAllowed('completed') && renderWorkflowItem({
                         actionName: 'complete',
                         icon: CircleCheck,
                         label: t('orders.actions.complete') || 'Complete',
@@ -2590,14 +2613,38 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                                     <Label htmlFor="sales-payment" className="flex items-center gap-2">
                                                         <CreditCard className="h-4 w-4 text-muted-foreground" />
                                                         {t('pos.paymentMethod') || 'Payment Method'}
+                                                        <span className="text-destructive">*</span>
                                                     </Label>
                                                     <PaymentMethodSelect
                                                         id="sales-payment"
                                                         value={salesForm.paymentMethod as PaymentMethodOption}
                                                         onValueChange={(value) => setSalesForm((current) => ({ ...current, paymentMethod: value }))}
                                                         workspaceId={user?.workspaceId}
-                                                        methods={['cash', 'bank_transfer'] as const}
+                                                        methods={simpleSalesPaymentMethods}
+                                                        disabled={salesOrderHidePermissions.isLoading || simpleSalesPaymentMethods.length === 0}
+                                                        unavailableValueLabel={salesOrderHidePermissions.isPaymentMethodRestricted(salesForm.paymentMethod)
+                                                            ? t('members.permissions.currentSalesOrderMethodRestricted', {
+                                                                method: getSalesOrderPaymentMethodLabel(salesForm.paymentMethod as PaymentMethodOption, t),
+                                                                defaultValue: '{{method}} is hidden for this member. Choose an allowed method.'
+                                                            })
+                                                            : getSalesOrderPaymentMethodLabel(salesForm.paymentMethod as PaymentMethodOption, t)}
                                                     />
+                                                    {salesOrderHidePermissions.isLoading ? (
+                                                        <p role="status" className="text-xs text-muted-foreground">
+                                                            {t('members.permissions.salesOrderPermissionsLoading', { defaultValue: 'Sales Order permissions are still loading.' })}
+                                                        </p>
+                                                    ) : simpleSalesPaymentMethods.length === 0 ? (
+                                                        <p role="alert" className="text-xs text-destructive">
+                                                            {t('members.permissions.noSalesOrderPaymentMethodsAllowed', { defaultValue: 'No Sales Order payment methods are currently allowed. Ask an administrator to update your permissions.' })}
+                                                        </p>
+                                                    ) : salesOrderHidePermissions.isPaymentMethodRestricted(salesForm.paymentMethod) ? (
+                                                        <p role="alert" className="text-xs text-destructive">
+                                                            {t('members.permissions.currentSalesOrderMethodRestricted', {
+                                                                method: getSalesOrderPaymentMethodLabel(salesForm.paymentMethod as PaymentMethodOption, t),
+                                                                defaultValue: '{{method}} is hidden for this member. Choose an allowed method.'
+                                                            })}
+                                                        </p>
+                                                    ) : null}
                                                 </div>
                                                 <div className="flex items-center justify-between rounded-2xl border bg-muted/20 px-4 py-3">
                                                     <div>
@@ -2672,7 +2719,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
 
                             <DialogFooter layout="structured">
                                 <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => setDialogOpen(false)}>{t('common.cancel') || 'Cancel'}</Button>
-                                <Button type="submit" className="w-full sm:w-auto" disabled={isSaving || salesMinimumPriceViolations.length > 0}>
+                                <Button type="submit" className="w-full sm:w-auto" disabled={isSaving || salesOrderHidePermissions.isLoading || !salesOrderHidePermissions.isPaymentMethodAllowed(salesForm.paymentMethod) || salesMinimumPriceViolations.length > 0}>
                                     {isSaving ? (t('common.loading') || 'Loading...') : (editingSalesOrder ? (t('common.save') || 'Save') : (t('orders.form.saveOrder') || 'Save Order'))}
                                 </Button>
                             </DialogFooter>
