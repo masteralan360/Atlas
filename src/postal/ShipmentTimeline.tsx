@@ -31,10 +31,12 @@ export function ShipmentTimeline({
   events,
   state,
   complete = true,
+  showActor,
 }: {
   events: PostalEvent[]
   state: PostalState
   complete?: boolean
+  showActor: boolean
 }) {
   const { t, i18n } = useTranslation()
   const drag = useRef<{ x: number; left: number } | null>(null)
@@ -119,7 +121,9 @@ export function ShipmentTimeline({
                   <time className="block text-xs" dateTime={event.created_at}>
                     {new Date(event.created_at).toLocaleString(i18n.language)}
                   </time>
-                  <p className="break-words text-sm">{event.actor_name}</p>
+                  {showActor && (
+                    <p className="break-words text-sm">{event.actor_name}</p>
+                  )}
                   {!!event.metadata.origin_name && (
                     <p className="text-xs">
                       {String(event.metadata.origin_name)}

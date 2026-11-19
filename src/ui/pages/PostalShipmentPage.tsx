@@ -697,6 +697,7 @@ export default function PostalShipmentPage({
             events={events}
             state={shipment.state}
             complete={!history.hasNextPage}
+            showActor={scope.role === 'admin'}
           />
           {history.hasNextPage && (
             <Button
