@@ -143,12 +143,14 @@ function validateRule(input: ProductCommissionRuleInput) {
 export async function replaceProductCommissionRule(
     workspaceId: string,
     productId: string,
-    input: ProductCommissionRuleInput | null
+    input: ProductCommissionRuleInput | null,
+    priceBookId: string | null = null
 ) {
     const existingRules = await db.product_commission_rules
         .where('[workspaceId+productId]')
         .equals([workspaceId, productId])
-        .and((row) => !row.isDeleted && row.isActive && !row.effectiveTo)
+        .and((row) => !row.isDeleted && row.isActive && !row.effectiveTo
+            && (row.priceBookId ?? null) === priceBookId)
         .toArray()
     const now = new Date().toISOString()
 
@@ -164,6 +166,17 @@ export async function replaceProductCommissionRule(
         await db.product_commission_rules.bulkPut(retired)
         await Promise.all(retired.map((rule) => syncEntity(RULE_TABLE, rule)))
         return null
+    }
+
+    if (priceBookId) {
+        const [priceBook, association] = await Promise.all([
+            db.price_books.get(priceBookId),
+            db.price_book_items.where('[priceBookId+productId]').equals([priceBookId, productId]).first()
+        ])
+        if (!priceBook || priceBook.workspaceId !== workspaceId || priceBook.isDeleted
+            || !association || association.workspaceId !== workspaceId || association.isDeleted) {
+            throw new Error('Price Book commission requires an active product Price Book association')
+        }
     }
 
     const terms = validateRule(input)
@@ -196,6 +209,7 @@ export async function replaceProductCommissionRule(
         id: generateId(),
         workspaceId,
         productId,
+        priceBookId,
         commissionType: input.commissionType,
         ...terms,
         recipientScope: input.recipientScope,
@@ -413,12 +427,22 @@ export function useProductCommissionCatalogState(workspaceId?: string, enabled =
 export function activeProductCommissionRule(
     rules: readonly ProductCommissionRule[],
     productId: string,
-    at: string
+    at: string,
+    priceBookId?: string | null
 ) {
-    return rules
+    const eligible = rules
         .filter((rule) => !rule.isDeleted && rule.productId === productId && rule.isActive
             && String(rule.effectiveFrom || rule.updatedAt || rule.createdAt || '') <= at
             && (!rule.effectiveTo || rule.effectiveTo > at))
-        .sort((left, right) => String(right.effectiveFrom || right.updatedAt || right.createdAt || '')
-            .localeCompare(String(left.effectiveFrom || left.updatedAt || left.createdAt || '')))[0] || null
+    const sortNewest = (left: ProductCommissionRule, right: ProductCommissionRule) => (
+        String(right.effectiveFrom || right.updatedAt || right.createdAt || '')
+            .localeCompare(String(left.effectiveFrom || left.updatedAt || left.createdAt || ''))
+    )
+    if (priceBookId) {
+        const override = eligible
+            .filter((rule) => rule.priceBookId === priceBookId)
+            .sort(sortNewest)[0]
+        if (override) return override
+    }
+    return eligible.filter((rule) => rule.priceBookId == null).sort(sortNewest)[0] || null
 }

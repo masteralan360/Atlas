@@ -242,6 +242,7 @@ describe('Price Book local data', () => {
 
     it('hard-deletes the book and its items while clearing assigned partners', async () => {
         const book = await createPriceBook(WORKSPACE_ID, { name: 'Retired Tier' })
+        const productId = makeProduct().id
         const [item] = await replaceProductPriceBookItems(WORKSPACE_ID, makeProduct().id, [{
             priceBookId: book.id,
             costPrice: 8,
@@ -256,12 +257,28 @@ describe('Price Book local data', () => {
             role: 'customer',
             priceBookId: book.id
         })
+        const timestamp = new Date().toISOString()
+        const defaultCommissionId = crypto.randomUUID()
+        const scopedCommissionId = crypto.randomUUID()
+        const baseRule = {
+            id: defaultCommissionId, workspaceId: WORKSPACE_ID, productId, priceBookId: null,
+            commissionType: 'percentage' as const, ratePercent: 5, fixedAmount: null, fixedCurrency: null,
+            recipientScope: 'all_assigned' as const, effectiveFrom: timestamp, effectiveTo: null,
+            isActive: true, notes: null, createdBy: null, createdAt: timestamp, updatedAt: timestamp,
+            syncStatus: 'synced' as const, lastSyncedAt: timestamp, version: 1, isDeleted: false,
+        }
+        await db.product_commission_rules.bulkPut([
+            baseRule as never,
+            { ...baseRule, id: scopedCommissionId, priceBookId: book.id } as never,
+        ])
 
         await hardDeletePriceBook(book.id)
 
         expect(await db.price_books.get(book.id)).toBeUndefined()
         expect(await db.price_book_items.get(item.id)).toBeUndefined()
         expect((await db.business_partners.get(partner.id))?.priceBookId).toBeNull()
+        expect(await db.product_commission_rules.get(scopedCommissionId)).toBeUndefined()
+        expect(await db.product_commission_rules.get(defaultCommissionId)).toMatchObject({ priceBookId: null })
     })
 
     it('rekeys persisted and queued order provenance when a server item ID wins', async () => {

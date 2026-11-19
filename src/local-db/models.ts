@@ -1032,6 +1032,8 @@ export interface AgentCommissionMembership extends BaseEntity {
  */
 export interface ProductCommissionRule extends BaseEntity {
   productId: string
+  /** Null/absent is the native product price; a value scopes this rule to one Price Book. */
+  priceBookId?: string | null
   commissionType: CommissionPlanType
   /** Percentage uses net line revenue; fixed amounts use `fixedCurrency`. */
   ratePercent: number

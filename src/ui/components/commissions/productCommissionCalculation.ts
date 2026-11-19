@@ -14,6 +14,7 @@ export type ProductCommissionPreviewItem = {
     quantity: number
     convertedUnitPrice?: number
     lineTotal?: number
+    priceBookId?: string | null
 }
 
 export type ProductCommissionPreviewRow = {
@@ -44,7 +45,7 @@ export function buildProductCommissionPreviewRows({
     at: string
 }): ProductCommissionPreviewRow[] {
     return items.flatMap((item) => {
-        const rule = activeProductCommissionRule(rules, item.productId, at)
+        const rule = activeProductCommissionRule(rules, item.productId, at, item.priceBookId)
         if (!rule || Number(item.quantity || 0) <= 0) return []
         const allowed = rule.recipientScope === 'all_assigned'
             ? agentIds

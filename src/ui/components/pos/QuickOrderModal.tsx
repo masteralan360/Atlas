@@ -319,6 +319,7 @@ export function QuickOrderModal({
             productId: item.product_id,
             productName: item.name,
             quantity,
+            priceBookId: item.price_book_id ?? null,
             // The checkout total is already in settlement currency. Allocate
             // it proportionally so the preview uses the same basis as the
             // pending quick order, including a cart-level discount.

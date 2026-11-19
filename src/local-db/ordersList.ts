@@ -23,6 +23,7 @@ import {
   getSalesOrderIdsAssignedToLinkedFieldAgent
 } from './orders'
 import { getAppliedCurrencyConversion } from '@/lib/orderCurrency'
+import { activeProductCommissionRule } from './productCommissions'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { queryKeys } from '@/query/queryKeys'
 import type {
@@ -390,15 +391,6 @@ async function summarizeLocalProductCommissions(
     recipientsByRuleId.set(recipient.ruleId, eligibleAgents)
   }
   const now = new Date().toISOString()
-  const ruleByProductId = new Map<string, ProductCommissionRule>()
-  for (const rule of context.rules) {
-    const effectiveFrom = String(rule.effectiveFrom || rule.updatedAt || rule.createdAt || '')
-    if (rule.isDeleted || !rule.isActive || effectiveFrom > now || (rule.effectiveTo && rule.effectiveTo <= now)) continue
-    const current = ruleByProductId.get(rule.productId)
-    const currentEffectiveFrom = String(current?.effectiveFrom || current?.updatedAt || current?.createdAt || '')
-    if (!current || effectiveFrom > currentEffectiveFrom) ruleByProductId.set(rule.productId, rule)
-  }
-
   for (let offset = 0; offset < orderIds.length; offset += 100) {
     const batchIds = orderIds.slice(offset, offset + 100)
     const assignmentKeys = batchIds.map((orderId) => [workspaceId, orderId])
@@ -440,7 +432,7 @@ async function summarizeLocalProductCommissions(
       const summary = totals.get(order.currency) || { total: 0, unavailableConversion: false }
       for (const item of order.items) {
         if (!(Number(item.quantity || 0) > 0)) continue
-        const rule = ruleByProductId.get(item.productId)
+        const rule = activeProductCommissionRule(context.rules, item.productId, now, item.priceBookId)
         if (!rule) continue
         const eligibleAgentCount = rule.recipientScope === 'all_assigned'
           ? agentIds.size

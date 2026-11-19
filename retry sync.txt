@@ -1,3 +1,7 @@
+Price Books Product Commission
+
+Edit And Adjust Permission
+
 negative delivery fee
 
 Post Service Notification
@@ -21,13 +25,11 @@ offline data load for server-side only lists
 
 Create simple loan business partner + attached
 
-Discount by Price books
-
 Sale Order Exchange
 
 Fix Purchase Order form page and fix purchase order error, order_payment_source_not_found
 
-Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide 
+Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
 
 Add by unit in adjustment
 

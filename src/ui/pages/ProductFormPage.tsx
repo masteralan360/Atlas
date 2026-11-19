@@ -439,9 +439,17 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     )
     const sourceProductCommissionRule = useMemo(() => (product?.id
         ? productCommissionRules
-            .filter((rule) => rule.productId === product.id && rule.isActive && !rule.effectiveTo)
+            .filter((rule) => rule.productId === product.id && (rule.priceBookId ?? null) === null && rule.isActive && !rule.effectiveTo)
             .sort((left, right) => right.effectiveFrom.localeCompare(left.effectiveFrom))[0]
         : undefined), [product?.id, productCommissionRules])
+    const sourcePriceBookCommissionRules = useMemo(() => product?.id
+        ? productCommissionRules.filter((rule) => (
+            rule.productId === product.id
+            && Boolean(rule.priceBookId)
+            && rule.isActive
+            && !rule.effectiveTo
+        ))
+        : [], [product?.id, productCommissionRules])
     const sourceProductCommissionAgentIds = useMemo(() => sourceProductCommissionRule
         ? productCommissionRuleAgents.filter((row) => row.ruleId === sourceProductCommissionRule.id).map((row) => row.agentId)
         : [], [productCommissionRuleAgents, sourceProductCommissionRule])
@@ -496,6 +504,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const [priceBookRows, setPriceBookRows] = useState<ProductPriceBookDraft[]>([])
     const [productUomDrafts, setProductUomDrafts] = useState<ProductUomDraft[]>([])
     const [productCommissionDraft, setProductCommissionDraft] = useState<ProductCommissionRuleDraft>(() => emptyProductCommissionRuleDraft(features.default_currency))
+    const [priceBookCommissionDrafts, setPriceBookCommissionDrafts] = useState<Record<string, ProductCommissionRuleDraft>>({})
     const [productTierCommissionDraft, setProductTierCommissionDraft] = useState<ProductTierCommissionDraft>({ enabled: false, rates: [] })
     const [isSaving, setIsSaving] = useState(false)
     const [overrideAttention, setOverrideAttention] = useState(false)
@@ -551,6 +560,8 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     const initialProductUomsSnapshotRef = useRef<string | null>(null)
     const initializedProductCommissionRuleKeyRef = useRef<string | null>(null)
     const initialProductCommissionSnapshotRef = useRef<string | null>(null)
+    const initializedPriceBookCommissionRulesKeyRef = useRef<string | null>(null)
+    const initialPriceBookCommissionSnapshotRef = useRef<string | null>(null)
     const initializedProductTierCommissionKeyRef = useRef<string | null>(null)
     const initialProductTierCommissionSnapshotRef = useRef<string | null>(null)
     const createdProductIdRef = useRef<string | null>(null)
@@ -621,6 +632,18 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         && JSON.stringify(productCommissionDraft) !== initialProductCommissionSnapshotRef.current
     ), [isReadOnly, productCommissionDraft, productCommissionsEnabled])
 
+    const arePriceBookCommissionDraftsDirty = useMemo(() => (
+        productCommissionsEnabled
+        && priceBooksEnabled
+        && !isReadOnly
+        && initialPriceBookCommissionSnapshotRef.current !== null
+        && JSON.stringify(priceBookCommissionDrafts) !== initialPriceBookCommissionSnapshotRef.current
+    ), [isReadOnly, priceBookCommissionDrafts, priceBooksEnabled, productCommissionsEnabled])
+
+    const hasProductCommissionChanges = isProductCommissionDirty
+        || arePriceBookCommissionDraftsDirty
+        || (productCommissionsEnabled && priceBooksEnabled && arePriceBookRowsDirty)
+
     const isProductTierCommissionDirty = useMemo(() => (
         productTierCommissionsEnabled
         && !isReadOnly
@@ -643,6 +666,23 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         }
         return null
     }, [productCommissionDraft, productCommissionsEnabled, t])
+
+    const priceBookCommissionValidationMessage = useMemo(() => {
+        if (!productCommissionsEnabled || !priceBooksEnabled) return null
+        const associatedBookIds = new Set(priceBookRows.map((row) => row.priceBookId))
+        for (const [priceBookId, draft] of Object.entries(priceBookCommissionDrafts)) {
+            if (!associatedBookIds.has(priceBookId)) continue
+            if (!draft.enabled) continue
+            const amount = Number(draft.amount)
+            if (!Number.isFinite(amount) || amount <= 0 || (draft.commissionType === 'percentage' && amount > 100)) {
+                return t('salesAgentCommissions.productCommission.invalidAmount')
+            }
+            if (draft.recipientScope === 'selected_assigned' && draft.agentIds.length === 0) {
+                return t('salesAgentCommissions.productCommission.invalidRecipients')
+            }
+        }
+        return null
+    }, [priceBookCommissionDrafts, priceBookRows, priceBooksEnabled, productCommissionsEnabled, t])
 
     const productTierCommissionValidationMessage = useMemo(() => {
         if (!productTierCommissionsEnabled || !productTierCommissionDraft.enabled) return null
@@ -921,6 +961,70 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     }, [features.default_currency, formData.currency, mode, product, productCommissionsEnabled, sourceProductCommissionAgentIds, sourceProductCommissionRule])
 
     useEffect(() => {
+        if (!productCommissionsEnabled || !priceBooksEnabled || !isProductCommissionCatalogReady) return
+        if (mode !== 'create' && (!product || !isPriceBookCatalogReady)) return
+        const sourceKey = mode === 'create'
+            ? `create:${features.default_currency}`
+            : product ? `${mode}:${product.id}` : null
+        if (!sourceKey || initializedPriceBookCommissionRulesKeyRef.current === sourceKey) return
+
+        const next: Record<string, ProductCommissionRuleDraft> = {}
+        const bookIds = new Set([
+            ...priceBookRows.map((row) => row.priceBookId),
+            ...sourcePriceBookCommissionRules.map((rule) => rule.priceBookId).filter((id): id is string => Boolean(id))
+        ])
+        for (const priceBookId of bookIds) {
+            const rule = sourcePriceBookCommissionRules
+                .filter((candidate) => candidate.priceBookId === priceBookId)
+                .sort((left, right) => right.effectiveFrom.localeCompare(left.effectiveFrom))[0]
+            const agentIds = rule
+                ? productCommissionRuleAgents.filter((row) => row.ruleId === rule.id).map((row) => row.agentId)
+                : []
+            next[priceBookId] = rule ? {
+                enabled: true,
+                commissionType: rule.commissionType,
+                amount: String(rule.commissionType === 'fixed_amount'
+                    ? rule.fixedAmount || ''
+                    : rule.ratePercent || ''),
+                currency: rule.fixedCurrency || formData.currency,
+                recipientScope: rule.recipientScope,
+                agentIds
+            } : emptyProductCommissionRuleDraft(formData.currency)
+        }
+        setPriceBookCommissionDrafts(next)
+        initialPriceBookCommissionSnapshotRef.current = JSON.stringify(next)
+        initializedPriceBookCommissionRulesKeyRef.current = sourceKey
+    }, [
+        features.default_currency,
+        formData.currency,
+        isPriceBookCatalogReady,
+        isProductCommissionCatalogReady,
+        mode,
+        priceBookRows,
+        priceBooksEnabled,
+        product,
+        productCommissionRuleAgents,
+        productCommissionsEnabled,
+        sourcePriceBookCommissionRules
+    ])
+
+    useEffect(() => {
+        if (!productCommissionsEnabled || !priceBooksEnabled || !initializedPriceBookCommissionRulesKeyRef.current) return
+        setPriceBookCommissionDrafts((current) => {
+            let changed = false
+            const next = { ...current }
+            for (const row of priceBookRows) {
+                if (next[row.priceBookId]) continue
+                next[row.priceBookId] = emptyProductCommissionRuleDraft(formData.currency)
+                changed = true
+            }
+            if (changed) initialPriceBookCommissionSnapshotRef.current = initialPriceBookCommissionSnapshotRef.current
+                ?? JSON.stringify(current)
+            return changed ? next : current
+        })
+    }, [formData.currency, priceBookRows, priceBooksEnabled, productCommissionsEnabled])
+
+    useEffect(() => {
         const config = productTierCommissionCatalog.data
         if (!productTierCommissionsEnabled || !config) return
         const sourceKey = mode === 'edit'
@@ -1162,13 +1266,16 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         const normalizedErrorMessage = error instanceof Error ? error.message.toLowerCase() : ''
         if (
             normalizedErrorMessage.includes('product commission')
+            || normalizedErrorMessage.includes('price book commission')
             || normalizedErrorMessage.includes('eligible field agents')
             || normalizedErrorMessage.includes('at least one agent')
         ) {
             toast({
                 variant: 'destructive',
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: normalizedErrorMessage.includes('currency')
+                description: normalizedErrorMessage.includes('price book')
+                    ? t('salesAgentCommissions.productCommission.priceBookAssociationRequired')
+                    : normalizedErrorMessage.includes('currency')
                     ? t('salesAgentCommissions.errors.commissionExchangeRateUnavailable')
                     : normalizedErrorMessage.includes('agent')
                         ? t('salesAgentCommissions.productCommission.invalidRecipients')
@@ -1458,7 +1565,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             return false
         }
 
-        if (productCommissionsEnabled && isProductCommissionDirty && !isProductCommissionCatalogReady) {
+        if (productCommissionsEnabled && hasProductCommissionChanges && !isProductCommissionCatalogReady) {
             toast({
                 title: productCommissionCatalogError
                     ? t('common.error', { defaultValue: 'Error' })
@@ -1471,10 +1578,10 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
             return false
         }
 
-        if (productCommissionValidationMessage) {
+        if (productCommissionValidationMessage || priceBookCommissionValidationMessage) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
-                description: productCommissionValidationMessage,
+                description: productCommissionValidationMessage || priceBookCommissionValidationMessage,
                 variant: 'destructive'
             })
             return false
@@ -1731,6 +1838,33 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                 initialProductCommissionSnapshotRef.current = JSON.stringify(productCommissionDraft)
             }
 
+            if (productCommissionsEnabled && priceBooksEnabled && (arePriceBookCommissionDraftsDirty || arePriceBookRowsDirty)) {
+                const associatedBookIds = new Set(priceBookRows.map((row) => row.priceBookId))
+                const commissionBookIds = new Set([
+                    ...associatedBookIds,
+                    ...sourcePriceBookCommissionRules.map((rule) => rule.priceBookId).filter((id): id is string => Boolean(id))
+                ])
+                for (const priceBookId of commissionBookIds) {
+                    const draft = priceBookCommissionDrafts[priceBookId]
+                    const enabled = associatedBookIds.has(priceBookId) && Boolean(draft?.enabled)
+                    await replaceProductCommissionRule(
+                        workspaceId,
+                        savedProductId,
+                        enabled && draft ? {
+                            commissionType: draft.commissionType,
+                            ratePercent: draft.commissionType === 'percentage' ? Number(draft.amount) : 0,
+                            fixedAmount: draft.commissionType === 'fixed_amount' ? Number(draft.amount) : null,
+                            fixedCurrency: draft.commissionType === 'fixed_amount' ? draft.currency : null,
+                            recipientScope: draft.recipientScope,
+                            agentIds: draft.agentIds,
+                            createdBy: user?.id || null
+                        } : null,
+                        priceBookId
+                    )
+                }
+                initialPriceBookCommissionSnapshotRef.current = JSON.stringify(priceBookCommissionDrafts)
+            }
+
             if (productTierCommissionsEnabled && isProductTierCommissionDirty) {
                 if (productTierCommissionValidationMessage) throw new Error('tiered_product_commission_configuration_invalid')
                 const nextTierDraft: ProductTierCommissionDraft = {
@@ -1868,6 +2002,7 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
         || (isEditing && !productUomCatalog.isReady)
         || (priceBooksEnabled && !isPriceBookCatalogReady)
         || Boolean(productCommissionValidationMessage)
+        || Boolean(priceBookCommissionValidationMessage)
     const isWaitingForConfiguredInitialization = mode === 'create'
         && hasSavedInitializationRules
         && (!areInitializationCatalogsReady
@@ -2924,14 +3059,45 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
                             ) : null}
                             {productCommissionsEnabled ? (
                                 isProductCommissionCatalogReady ? (
-                                    <ProductCommissionRuleEditor
-                                        workspaceId={workspaceId}
-                                        draft={productCommissionDraft}
-                                        onChange={setProductCommissionDraft}
-                                        iqdDisplayPreference={features.iqd_display_preference}
-                                        validationMessage={productCommissionValidationMessage}
-                                        disabled={isReadOnly || isSaving}
-                                    />
+                                    <div className="space-y-5">
+                                        <ProductCommissionRuleEditor
+                                            workspaceId={workspaceId}
+                                            draft={productCommissionDraft}
+                                            onChange={setProductCommissionDraft}
+                                            iqdDisplayPreference={features.iqd_display_preference}
+                                            validationMessage={productCommissionValidationMessage}
+                                            disabled={isReadOnly || isSaving}
+                                        />
+                                        {priceBooksEnabled && isPriceBookCatalogReady ? priceBookRows.map((row) => {
+                                            const draft = priceBookCommissionDrafts[row.priceBookId]
+                                                ?? emptyProductCommissionRuleDraft(formData.currency)
+                                            const amount = Number(draft.amount)
+                                            const validationMessage = draft.enabled
+                                                && (!Number.isFinite(amount) || amount <= 0 || (draft.commissionType === 'percentage' && amount > 100))
+                                                ? t('salesAgentCommissions.productCommission.invalidAmount')
+                                                : draft.enabled && draft.recipientScope === 'selected_assigned' && draft.agentIds.length === 0
+                                                    ? t('salesAgentCommissions.productCommission.invalidRecipients')
+                                                    : null
+                                            const priceBookName = priceBooks.find((book) => book.id === row.priceBookId)?.name
+                                                ?? t('priceBooks.unavailable', { defaultValue: 'Unavailable Price Book' })
+                                            return (
+                                                <ProductCommissionRuleEditor
+                                                    key={row.priceBookId}
+                                                    workspaceId={workspaceId}
+                                                    scopeId={row.priceBookId}
+                                                    priceBookName={priceBookName}
+                                                    draft={draft}
+                                                    onChange={(next) => setPriceBookCommissionDrafts((current) => ({
+                                                        ...current,
+                                                        [row.priceBookId]: next
+                                                    }))}
+                                                    iqdDisplayPreference={features.iqd_display_preference}
+                                                    validationMessage={validationMessage}
+                                                    disabled={isReadOnly || isSaving}
+                                                />
+                                            )
+                                        }) : null}
+                                    </div>
                                 ) : (
                                     <div className="border-t border-border/60 pt-6">
                                         <div className={cn(

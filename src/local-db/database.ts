@@ -4012,6 +4012,11 @@ export class AtlasDatabase extends Dexie {
       }
     })
 
+    this.version(168).stores({
+      product_commission_rules:
+        'id, workspaceId, productId, priceBookId, isActive, effectiveFrom, effectiveTo, updatedAt, isDeleted, syncStatus, [workspaceId+productId], [workspaceId+productId+priceBookId], [workspaceId+isActive]'
+    })
+
     this.registerIndexedDbDiagnostics()
     this.registerLocalModeSqliteAuthority()
     this.registerLocalModeSyncHooks()

@@ -44,7 +44,9 @@ export function ProductCommissionRuleEditor({
     onChange,
     iqdDisplayPreference,
     validationMessage,
-    disabled = false
+    disabled = false,
+    priceBookName,
+    scopeId
 }: {
     workspaceId: string
     draft: ProductCommissionRuleDraft
@@ -52,6 +54,9 @@ export function ProductCommissionRuleEditor({
     iqdDisplayPreference: IQDDisplayPreference
     validationMessage?: string | null
     disabled?: boolean
+    /** When set, this editor configures an override for one Price Book. */
+    priceBookName?: string
+    scopeId?: string
 }) {
     const { t } = useTranslation()
     const directory = useCommissionAgentDirectory(workspaceId)
@@ -62,6 +67,9 @@ export function ProductCommissionRuleEditor({
         const next = availableAgents[0]
         if (next) set({ agentIds: [...draft.agentIds, next.agent.id] })
     }
+    const scopeKey = scopeId || 'default'
+    const enabledId = `product-commission-enabled-${scopeKey}`
+    const amountId = `product-commission-amount-${scopeKey}`
 
     return (
         <section className="space-y-4 border-t border-border/60 pt-6">
@@ -69,18 +77,24 @@ export function ProductCommissionRuleEditor({
                 <div className="space-y-1">
                     <div className="flex items-center gap-2 text-sm font-black uppercase tracking-widest text-violet-600 dark:text-violet-300">
                         <Coins className="h-4 w-4" />
-                        {t('salesAgentCommissions.productCommission.title')}
+                        {priceBookName
+                            ? t('salesAgentCommissions.productCommission.priceBookTitle', { name: priceBookName })
+                            : t('salesAgentCommissions.productCommission.defaultTitle')}
                     </div>
                     <p className="max-w-2xl text-sm text-muted-foreground">
-                        {t('salesAgentCommissions.productCommission.description')}
+                        {priceBookName
+                            ? t('salesAgentCommissions.productCommission.priceBookDescription')
+                            : t('salesAgentCommissions.productCommission.defaultDescription')}
                     </p>
                 </div>
                 <div className="flex items-center gap-3 rounded-xl border bg-background/70 px-3 py-2">
-                    <Label htmlFor="product-commission-enabled" className="text-sm font-semibold">
-                        {t('salesAgentCommissions.productCommission.enable')}
+                    <Label htmlFor={enabledId} className="text-sm font-semibold">
+                        {priceBookName
+                            ? t('salesAgentCommissions.productCommission.enablePriceBook')
+                            : t('salesAgentCommissions.productCommission.enableDefault')}
                     </Label>
                     <Switch
-                        id="product-commission-enabled"
+                        id={enabledId}
                         checked={draft.enabled}
                         onCheckedChange={(enabled) => set({ enabled })}
                         disabled={disabled}
@@ -90,13 +104,15 @@ export function ProductCommissionRuleEditor({
 
             {!draft.enabled ? (
                 <div className="rounded-2xl border border-dashed border-border/70 bg-muted/20 px-4 py-6 text-center text-sm text-muted-foreground">
-                    {t('salesAgentCommissions.productCommission.empty')}
+                    {priceBookName
+                        ? t('salesAgentCommissions.productCommission.priceBookFallback')
+                        : t('salesAgentCommissions.productCommission.defaultEmpty')}
                 </div>
             ) : (
                 <div className="space-y-5 rounded-2xl border border-violet-500/25 bg-violet-500/[0.035] p-4 sm:p-5">
                     <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
-                            <Label>{t('salesAgentCommissions.productCommission.type')}</Label>
+                            <Label>{t('salesAgentCommissions.productCommission.type')} <span aria-hidden="true">*</span></Label>
                             <Select
                                 value={draft.commissionType}
                                 onValueChange={(value) => set({ commissionType: value as CommissionPlanType, amount: '' })}
@@ -110,14 +126,14 @@ export function ProductCommissionRuleEditor({
                             </Select>
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="product-commission-amount">
+                            <Label htmlFor={amountId}>
                                 {draft.commissionType === 'percentage'
                                     ? t('salesAgentCommissions.productCommission.percentage')
                                     : t('salesAgentCommissions.productCommission.amount')}
                             </Label>
                             <div className={cn('grid gap-2', draft.commissionType === 'fixed_amount' && 'sm:grid-cols-[1fr_150px]')}>
                                 <Input
-                                    id="product-commission-amount"
+                                    id={amountId}
                                     type="text"
                                     inputMode="decimal"
                                     placeholder="0"
@@ -131,6 +147,7 @@ export function ProductCommissionRuleEditor({
                                     <CurrencySelector
                                         value={draft.currency}
                                         onChange={(currency) => set({ currency })}
+                                        label={`${t('salesAgentCommissions.productCommission.currency')} *`}
                                         iqdDisplayPreference={iqdDisplayPreference}
                                         disabled={disabled}
                                     />
@@ -143,7 +160,7 @@ export function ProductCommissionRuleEditor({
                         <div className="flex items-start gap-2">
                             <UsersRound className="mt-0.5 h-4 w-4 text-violet-600" />
                             <div>
-                                <Label>{t('salesAgentCommissions.productCommission.recipients')}</Label>
+                                <Label>{t('salesAgentCommissions.productCommission.recipients')} <span aria-hidden="true">*</span></Label>
                                 <p className="mt-1 text-xs text-muted-foreground">{t('salesAgentCommissions.productCommission.recipientsHint')}</p>
                             </div>
                         </div>

@@ -706,7 +706,8 @@ export function SalesOrderFormPage({
         productId: item.productId,
         productName: item.productSearch,
         quantity: soldQuantityToInventoryQuantity(Number(item.quantity) || 0, Number(item.unitFactor) || 1),
-        convertedUnitPrice: Number(item.unitPrice) || 0
+        convertedUnitPrice: Number(item.unitPrice) || 0,
+        priceBookId: item.priceBookId || null
     })), [items])
     const inventoryByStorageProduct = useMemo(() => new Map(
         inventory.map((row) => [`${row.storageId}:${row.productId}`, row.quantity])

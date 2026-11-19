@@ -565,7 +565,8 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         productId: item.productId,
         productName: item.productName,
         quantity: item.quantity,
-        convertedUnitPrice: item.convertedUnitPrice
+        convertedUnitPrice: item.convertedUnitPrice,
+        priceBookId: item.priceBookId ?? null
     })) || [], [salesOrder])
     const canManage = user?.role === 'admin'
         || (user?.role === 'staff' && !(resolved?.kind === 'sales'

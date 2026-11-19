@@ -390,6 +390,7 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
       break;
     case "product_commission_rules":
       addParent("products", "productId", "product_id");
+      addParent("price_books", "priceBookId", "price_book_id");
       break;
     case "product_commission_rule_agents":
       addParent("product_commission_rules", "ruleId", "rule_id");

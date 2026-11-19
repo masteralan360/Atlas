@@ -262,7 +262,7 @@ export function hasEligibleProductCommission({
     const selectedAgentIds = [...new Set(agentIds.filter(Boolean))]
     return items.some((item) => {
         if (Number(item.quantity || 0) <= 0) return false
-        const rule = activeProductCommissionRule(rules, item.productId, at)
+        const rule = activeProductCommissionRule(rules, item.productId, at, item.priceBookId)
         if (!rule) return false
         return rule.recipientScope === 'all_assigned'
             ? selectedAgentIds.length > 0

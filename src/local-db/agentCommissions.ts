@@ -1483,8 +1483,8 @@ async function ensureLocalOrderCreatorProductCommissionAssignmentInternal(order:
       .toArray(),
   ]);
   const recipientRuleIds = new Set(recipients.map((recipient) => recipient.ruleId));
-  const eligible = productIds.some((productId) => {
-    const rule = activeProductCommissionRule(rules, productId, occurredAt);
+  const eligible = (order.items || []).some((item) => {
+    const rule = activeProductCommissionRule(rules, item.productId, occurredAt, item.priceBookId);
     return Boolean(rule && (
       rule.recipientScope === "all_assigned" || recipientRuleIds.has(rule.id)
     ));
@@ -1585,7 +1585,7 @@ async function getProductCommissionTargets(
   const targets: ProductCommissionTarget[] = [];
   for (const line of orderedItems) {
     if (line.baseQuantity <= 0) continue;
-    const rule = activeProductCommissionRule(rules, line.item.productId, occurredAt);
+    const rule = activeProductCommissionRule(rules, line.item.productId, occurredAt, line.item.priceBookId);
     if (!rule) continue;
     if (rule.recipientScope === 'selected_assigned' && !recipientIdsByRule.get(rule.id)?.has(assignment.agentId)) continue;
     const allocation = grossTotal > 0 ? line.grossAmount / grossTotal : 0;

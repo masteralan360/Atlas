@@ -684,12 +684,14 @@ export async function hardDeletePriceBook(id: string): Promise<void> {
     }
 
     const workspaceId = priceBook.workspaceId
-    const [priceBookItems, assignedPartners, workspaceMutations] = await Promise.all([
+    const [priceBookItems, assignedPartners, scopedCommissionRules, workspaceMutations] = await Promise.all([
         db.price_book_items.where('priceBookId').equals(id).toArray(),
         db.business_partners.where('priceBookId').equals(id).toArray(),
+        db.product_commission_rules.where('priceBookId').equals(id).toArray(),
         db.offline_mutations.where('workspaceId').equals(workspaceId).toArray()
     ])
     const itemIds = new Set(priceBookItems.map((item) => item.id))
+    const scopedCommissionRuleIds = new Set(scopedCommissionRules.map((rule) => rule.id))
     const shouldDeleteRemotely = shouldUseCloudData(workspaceId) && isOnline(workspaceId)
 
     if (shouldDeleteRemotely) {
@@ -708,6 +710,14 @@ export async function hardDeletePriceBook(id: string): Promise<void> {
                 return mutation.entityId === id
             }
             if (mutation.entityType !== 'price_book_items') {
+                if (mutation.entityType === 'product_commission_rules') {
+                    const mutationPriceBookId = mutation.payload.priceBookId ?? mutation.payload.price_book_id
+                    return scopedCommissionRuleIds.has(mutation.entityId) || mutationPriceBookId === id
+                }
+                if (mutation.entityType === 'product_commission_rule_agents') {
+                    const ruleId = mutation.payload.ruleId ?? mutation.payload.rule_id
+                    return typeof ruleId === 'string' && scopedCommissionRuleIds.has(ruleId)
+                }
                 return false
             }
             const mutationPriceBookId = mutation.payload.priceBookId ?? mutation.payload.price_book_id
@@ -734,7 +744,14 @@ export async function hardDeletePriceBook(id: string): Promise<void> {
 
     await db.transaction(
         'rw',
-        [db.price_books, db.price_book_items, db.business_partners, db.offline_mutations],
+        [
+            db.price_books,
+            db.price_book_items,
+            db.business_partners,
+            db.product_commission_rules,
+            db.product_commission_rule_agents,
+            db.offline_mutations
+        ],
         async () => {
             await db.price_books.delete(id)
             if (itemIds.size > 0) {
@@ -744,6 +761,14 @@ export async function hardDeletePriceBook(id: string): Promise<void> {
                 await Promise.all(assignedPartners.map((partner) => (
                     db.business_partners.update(partner.id, { priceBookId: null })
                 )))
+            }
+            if (scopedCommissionRuleIds.size > 0) {
+                await db.product_commission_rules.bulkDelete(Array.from(scopedCommissionRuleIds))
+                const recipientRows = await db.product_commission_rule_agents
+                    .where('ruleId').anyOf(Array.from(scopedCommissionRuleIds)).toArray()
+                if (recipientRows.length > 0) {
+                    await db.product_commission_rule_agents.bulkDelete(recipientRows.map((row) => row.id))
+                }
             }
             if (staleMutationIds.length > 0) {
                 await db.offline_mutations.bulkDelete(staleMutationIds)

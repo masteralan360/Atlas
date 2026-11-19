@@ -1085,6 +1085,90 @@ describe("sales agent commission lifecycle", () => {
     expect(await db.agent_product_commission_entries.where("orderId").equals(order.id).count()).toBe(0);
   });
 
+  it("selects Price Book overrides by source, falls back to the default, and keeps earned snapshots immutable", async () => {
+    const productCommissions = await import("./productCommissions");
+    const order = completedOrder(crypto.randomUUID());
+    const productId = order.items[0].productId;
+    const priceBookIds = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
+    const now = new Date().toISOString();
+    const books = priceBookIds.map((id, index) => ({
+      id, workspaceId: WORKSPACE_ID, name: `Book ${index + 1}`, createdAt: now, updatedAt: now,
+      version: 1, isDeleted: false, syncStatus: "synced" as const, lastSyncedAt: now,
+    }));
+    await db.price_books.bulkPut(books);
+    await db.price_book_items.bulkPut(priceBookIds.map((priceBookId, index) => ({
+      id: crypto.randomUUID(), workspaceId: WORKSPACE_ID, priceBookId, productId,
+      costPrice: 50, price: [80, 90, 70][index], currency: "usd" as const,
+      createdAt: now, updatedAt: now, version: 1, isDeleted: false,
+      syncStatus: "synced" as const, lastSyncedAt: now,
+    })));
+
+    order.items = [
+      { ...order.items[0], id: "native-price", quantity: 1, lineTotal: 100, convertedUnitPrice: 100, priceBookId: null },
+      { ...order.items[0], id: "fixed-book", quantity: 1, lineTotal: 80, convertedUnitPrice: 80, priceBookId: priceBookIds[0] },
+      { ...order.items[0], id: "percentage-book", quantity: 1, lineTotal: 90, convertedUnitPrice: 90, priceBookId: priceBookIds[1] },
+      { ...order.items[0], id: "fallback-book", quantity: 1, lineTotal: 70, convertedUnitPrice: 70, priceBookId: priceBookIds[2] },
+    ];
+    order.subtotal = 340;
+    order.total = 340;
+    order.paidAmount = 340;
+    await db.sales_orders.put(order);
+    await db.agents.put({ ...fieldAgent(crypto.randomUUID()), linkedUserId: order.createdBy });
+
+    const defaultRule = await productCommissions.replaceProductCommissionRule(WORKSPACE_ID, productId, {
+      commissionType: "percentage", ratePercent: 5, recipientScope: "all_assigned",
+      effectiveFrom: new Date(Date.now() - 1_000).toISOString(),
+    });
+    const fixedRule = await productCommissions.replaceProductCommissionRule(WORKSPACE_ID, productId, {
+      commissionType: "fixed_amount", fixedAmount: 3, fixedCurrency: "usd", recipientScope: "all_assigned",
+      effectiveFrom: new Date(Date.now() - 1_000).toISOString(),
+    }, priceBookIds[0]);
+    const percentageRule = await productCommissions.replaceProductCommissionRule(WORKSPACE_ID, productId, {
+      commissionType: "percentage", ratePercent: 3, recipientScope: "all_assigned",
+      effectiveFrom: new Date(Date.now() - 1_000).toISOString(),
+    }, priceBookIds[1]);
+    await expect(productCommissions.replaceProductCommissionRule(WORKSPACE_ID, productId, {
+      commissionType: "percentage", ratePercent: 101, recipientScope: "all_assigned",
+    }, priceBookIds[0])).rejects.toThrow("Product commission percentage must be greater than zero and no more than 100");
+    await expect(productCommissions.replaceProductCommissionRule(WORKSPACE_ID, productId, {
+      commissionType: "fixed_amount", fixedAmount: 2, fixedCurrency: "usd",
+      recipientScope: "selected_assigned", agentIds: [],
+    }, priceBookIds[0])).rejects.toThrow("Select at least one agent for this product commission");
+    await expect(productCommissions.replaceProductCommissionRule(WORKSPACE_ID, productId, {
+      commissionType: "fixed_amount", fixedAmount: 2, fixedCurrency: "usd",
+      recipientScope: "all_assigned",
+    }, crypto.randomUUID())).rejects.toThrow("Price Book commission requires an active product Price Book association");
+
+    await commissions.accrueSalesOrderCommission(WORKSPACE_ID, order.id, order.createdBy);
+
+    const entries = await db.agent_product_commission_entries.where("orderId").equals(order.id)
+      .and((entry) => entry.kind === "accrual").toArray();
+    const byItemId = new Map(entries.map((entry) => [entry.orderItemId, entry]));
+    expect(byItemId.get("native-price")).toMatchObject({ ruleId: defaultRule?.id, commissionType: "percentage", commissionPerUnit: 5, amount: 5 });
+    expect(byItemId.get("fixed-book")).toMatchObject({ ruleId: fixedRule?.id, commissionType: "fixed_amount", fixedSourceAmount: 3, commissionPerUnit: 3, amount: 3 });
+    expect(byItemId.get("percentage-book")).toMatchObject({ ruleId: percentageRule?.id, commissionType: "percentage", ratePercent: 3, commissionPerUnit: 2.7, amount: 2.7 });
+    expect(byItemId.get("fallback-book")).toMatchObject({ ruleId: defaultRule?.id, commissionType: "percentage", ratePercent: 5, commissionPerUnit: 3.5, amount: 3.5 });
+
+    await productCommissions.replaceProductCommissionRule(WORKSPACE_ID, productId, {
+      commissionType: "percentage", ratePercent: 20, recipientScope: "all_assigned",
+    });
+    await productCommissions.replaceProductCommissionRule(WORKSPACE_ID, productId, {
+      commissionType: "fixed_amount", fixedAmount: 9, fixedCurrency: "usd", recipientScope: "all_assigned",
+    }, priceBookIds[0]);
+    await commissions.accrueSalesOrderCommission(WORKSPACE_ID, order.id, order.createdBy);
+
+    const historical = await db.agent_product_commission_entries.where("orderId").equals(order.id)
+      .and((entry) => entry.kind === "accrual").toArray();
+    expect(historical).toHaveLength(4);
+    expect(new Map(historical.map((entry) => [entry.orderItemId, entry])).get("fixed-book"))
+      .toMatchObject({ ruleId: fixedRule?.id, fixedSourceAmount: 3, commissionPerUnit: 3, amount: 3 });
+    const activeBookRules = await db.product_commission_rules.where("[workspaceId+productId]")
+      .equals([WORKSPACE_ID, productId])
+      .and((rule) => rule.priceBookId === priceBookIds[0] && rule.isActive && !rule.effectiveTo && !rule.isDeleted)
+      .toArray();
+    expect(activeBookRules).toHaveLength(1);
+  });
+
   it("credits an unpaid marketplace shipment to its field agent with product commission only", async () => {
     const productCommissions = await import("./productCommissions");
     const order = {
