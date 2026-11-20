@@ -2260,6 +2260,9 @@
     "addCategory": "زیادکردنی جۆر",
     "subtitle": "بەڕێوەبردنی کۆگاکەت",
     "addProduct": "زیادکردنی بەرهەم",
+    "permissionBlockedTitle": "فۆڕمی بەرهەم بەردەست نییە",
+    "permissionBlockedCreate": "زیادکردنی بەرهەم بۆ هەژمارەکەت سنووردارە. بۆ گەڕانەوە بۆ بەرهەمەکان کلیک بکە یان پەیوەندی بە بەڕێوەبەرەوە بکە.",
+    "permissionBlockedEdit": "دەستکاریکردن و لەبەرگرتنەوەی بەرهەم بۆ هەژمارەکەت سنووردارە. بۆ گەڕانەوە بۆ بەرهەمەکان کلیک بکە یان پەیوەندی بە بەڕێوەبەرەوە بکە.",
     "lowStock": "کۆگای کەم",
     "stockTotalInSmallerUnits": "کۆی گشتی بە یەکە بچووکەکە: {{quantity}}",
     "searchPlaceholder": "گەڕان لە بەرهەمەکان...",
@@ -4276,6 +4279,12 @@
       "salesHistoryAccessDescription": "دەستگەیشتن بە فرۆشتنە تەواوبووەکان، گەڕاندنەوەکان و تۆمارە فرۆشتنەکان.",
       "productsAccess": "بەرهەمەکان",
       "productsAccessDescription": "دەستگەیشتن بە کاتالۆگی بەرهەم، یاساکانی کۆگا و نرخدانان.",
+      "productsHideEditAndClone": "شاردنەوەی دوگمەکانی دەستکاری و لەبەرگرتنەوە",
+      "productsHideEditAndCloneDescription": "دوگمەکانی دەستکاری و لەبەرگرتنەوە لە پەڕەی بەرهەمەکان بۆ ئەم ئەندامە بشارەوە.",
+      "productsHideAddProductButton": "شاردنەوەی دوگمەی زیادکردنی بەرهەم",
+      "productsHideAddProductButtonDescription": "دوگمەی زیادکردنی بەرهەم لە پەڕەی بەرهەمەکان بۆ ئەم ئەندامە بشارەوە.",
+      "productsHideAddStockContextMenu": "شاردنەوەی هەڵبژاردەی زیادکردنی کۆگا لە مێنیوی کۆنتێکست",
+      "productsHideAddStockContextMenuDescription": "هەڵبژاردەی زیادکردنی کۆگا لە مێنیوی کۆنتێکستی بەرهەمەکان بۆ ئەم ئەندامە بشارەوە.",
       "budgetAccess": "بوودجە",
       "budgetAccessDescription": "دەستگەیشتن بە تۆمارە حسابدارییەکان، بوودجە و کۆنتڕۆڵی دارایی."
     }

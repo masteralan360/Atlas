@@ -19,6 +19,7 @@ import {
     Ruler,
     Save,
     Settings,
+    ShieldAlert,
     Tag,
     Trash2,
     Type,
@@ -3763,7 +3764,64 @@ function ProductEditor({ mode, productId }: { mode: ProductFormMode; productId?:
     )
 }
 
-export function ProductCreatePage() {
+function ProductFormPermissionOverlay({ action }: { action: 'create' | 'edit' }) {
+    const { t } = useTranslation()
+    const [, navigate] = useLocation()
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 p-4 backdrop-blur-md" role="alert" aria-live="assertive">
+            <div className="absolute inset-0 bg-destructive/[0.04]" aria-hidden="true" />
+            <Card className="relative w-full max-w-lg border-amber-500/30 shadow-2xl">
+                <CardContent className="flex flex-col items-center gap-4 p-6 text-center sm:p-8">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                        <ShieldAlert className="h-7 w-7" aria-hidden="true" />
+                    </div>
+                    <div className="space-y-2">
+                        <h1 className="text-xl font-bold text-foreground">
+                            {t('products.permissionBlockedTitle')}
+                        </h1>
+                        <p className="text-sm leading-relaxed text-muted-foreground">
+                            {t(action === 'create' ? 'products.permissionBlockedCreate' : 'products.permissionBlockedEdit')}
+                        </p>
+                    </div>
+                    <Button type="button" variant="outline" className="gap-2" allowViewer={true} onClick={() => navigate('/products')}>
+                        <ArrowLeft className="h-4 w-4" />
+                        {t('products.backToList')}
+                    </Button>
+                </CardContent>
+            </Card>
+        </div>
+    )
+}
+
+function ProductFormRoute({ mode, productId }: { mode: ProductFormMode; productId?: string }) {
+    const { user } = useAuth()
+    const { permissionKeys, isLoading: permissionsLoading } = useWorkspacePermissions()
+    const { t } = useTranslation()
+    const blockedPermission = mode === 'create'
+        ? 'products.hideAddProductButton'
+        : 'products.hideEditAndClone'
+    const needsPermissionCheck = user?.role !== 'admin'
+        && (mode !== 'edit' || user?.role === 'staff')
+
+    if (needsPermissionCheck && permissionsLoading) {
+        return (
+            <div className="flex min-h-[60vh] w-full items-center justify-center gap-3 text-sm text-muted-foreground" role="status" aria-live="polite">
+                <LoaderCircle className="h-5 w-5 animate-spin" />
+                {t('common.loading')}
+            </div>
+        )
+    }
+
+    if (needsPermissionCheck && permissionKeys.includes(blockedPermission)) {
+        return <ProductFormPermissionOverlay action={mode === 'create' ? 'create' : 'edit'} />
+    }
+
+    if (mode === 'create') return <ProductCreatePageContent />
+    return <ProductEditor mode={mode} productId={productId} />
+}
+
+function ProductCreatePageContent() {
     const { t } = useTranslation()
     const { user } = useAuth()
     const [, navigate] = useLocation()
@@ -3821,12 +3879,16 @@ export function ProductCreatePage() {
     return <ProductEditor mode="create" />
 }
 
+export function ProductCreatePage() {
+    return <ProductFormRoute mode="create" />
+}
+
 export function ProductEditPage() {
     const [, params] = useRoute('/products/:productId')
-    return <ProductEditor mode="edit" productId={params?.productId} />
+    return <ProductFormRoute mode="edit" productId={params?.productId} />
 }
 
 export function ProductClonePage() {
     const [, params] = useRoute('/products/:productId/clone')
-    return <ProductEditor mode="clone" productId={params?.productId} />
+    return <ProductFormRoute mode="clone" productId={params?.productId} />
 }

@@ -2257,6 +2257,9 @@
     "addCategory": "إضافة فئة",
     "subtitle": "إدارة المخزون الخاص بك",
     "addProduct": "إضافة منتج",
+    "permissionBlockedTitle": "نموذج المنتج غير متاح",
+    "permissionBlockedCreate": "إضافة المنتجات مقيدة لحسابك. ارجع إلى المنتجات أو تواصل مع المسؤول.",
+    "permissionBlockedEdit": "تعديل المنتجات واستنساخها مقيد لحسابك. ارجع إلى المنتجات أو تواصل مع المسؤول.",
     "lowStock": "مخزون منخفض",
     "stockTotalInSmallerUnits": "الإجمالي بالوحدة الأصغر: {{quantity}}",
     "addStock": "إضافة مخزون",
@@ -4270,6 +4273,12 @@
       "salesHistoryAccessDescription": "الوصول إلى المبيعات المكتملة والمرتجعات وسجلات المبيعات.",
       "productsAccess": "المنتجات",
       "productsAccessDescription": "الوصول إلى كتالوج المنتجات وقواعد المخزون والتسعير.",
+      "productsHideEditAndClone": "إخفاء زري التعديل والاستنساخ",
+      "productsHideEditAndCloneDescription": "إخفاء زري التعديل والاستنساخ في صفحة المنتجات لهذا العضو.",
+      "productsHideAddProductButton": "إخفاء زر إضافة منتج",
+      "productsHideAddProductButtonDescription": "إخفاء زر إضافة منتج في صفحة المنتجات لهذا العضو.",
+      "productsHideAddStockContextMenu": "إخفاء إجراء إضافة المخزون من القائمة السياقية",
+      "productsHideAddStockContextMenuDescription": "إخفاء إجراء إضافة المخزون من القوائم السياقية للمنتجات لهذا العضو.",
       "budgetAccess": "الميزانية",
       "budgetAccessDescription": "الوصول إلى السجلات المحاسبية والميزانيات والضوابط المالية."
     }

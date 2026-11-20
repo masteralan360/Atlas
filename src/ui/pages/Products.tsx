@@ -49,7 +49,7 @@ import {
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
-import { useHideCosts } from '@/permissions'
+import { useHideCosts, useWorkspacePermissions } from '@/permissions'
 import { hasValidProductCost } from '@/lib/productCost'
 import { isService } from '@/lib/catalogItem'
 import { findProductByOrderBarcode } from '@/lib/orderBarcodeScan'
@@ -359,6 +359,7 @@ function ProductFilterMultiSelect({
 export function Products() {
     const { user, session } = useAuth()
     const hideCosts = useHideCosts()
+    const { permissionKeys, isLoading: permissionsLoading } = useWorkspacePermissions()
     const { features, branchInfo, hasCapability, hasFeature, workspaceName } = useWorkspace()
     const { t, i18n } = useTranslation()
     const productImagePreviewSide = i18n.dir() === 'rtl' ? 'left' : 'right'
@@ -393,6 +394,14 @@ export function Products() {
     }), [categories, features.allowed_currencies, storages])
 
     const canEdit = user?.role === 'admin' || user?.role === 'staff'
+    const hideProductEditAndClone = user?.role !== 'admin'
+        && (permissionsLoading || permissionKeys.includes('products.hideEditAndClone'))
+    const hideAddProductButton = user?.role !== 'admin'
+        && (permissionsLoading || permissionKeys.includes('products.hideAddProductButton'))
+    const hideAddStockContextMenu = user?.role !== 'admin'
+        && (permissionsLoading || permissionKeys.includes('products.hideAddStockContextMenu'))
+    const canEditProduct = canEdit && !hideProductEditAndClone
+    const canShowAddProductButton = canEdit && !hideAddProductButton
     const canDelete = user?.role === 'admin'
     const canCloneProducts = user?.role === 'admin'
     const isBranchWorkspace = Boolean(branchInfo?.isBranch)
@@ -2277,10 +2286,12 @@ export function Products() {
                                     {t('priceBooks.title', { defaultValue: 'Price Books' })}
                                 </Button>
                             )}
-                            <Button onClick={() => openProductForm()}>
-                                <Plus className="h-4 w-4" />
-                                {t('products.addProduct')}
-                            </Button>
+                            {canShowAddProductButton && (
+                                <Button onClick={() => openProductForm()}>
+                                    <Plus className="h-4 w-4" />
+                                    {t('products.addProduct')}
+                                </Button>
+                            )}
                         </div>
                     )}
                 </div>
@@ -2599,16 +2610,18 @@ export function Products() {
                                                                             isLinkedVariant && 'gap-1.5 pt-2',
                                                                             hasNoDisplayedStock(product) && 'grayscale'
                                                                         )}>
-                                                                            <Button
-                                                                                variant="secondary"
-                                                                                size="sm"
-                                                                                allowViewer={!canEdit}
-                                                                                className={cn('h-10 gap-2 rounded-xl px-6 font-bold', isLinkedVariant && 'h-9 gap-1.5 rounded-lg px-4 text-xs')}
-                                                                                onClick={() => openProductForm(product)}
-                                                                            >
-                                                                                {canEdit ? <Pencil className="h-4 w-4" /> : <Info className="h-4 w-4" />}
-                                                                                {canEdit ? t('common.edit') : (t('common.view') || 'View')}
-                                                                            </Button>
+                                                                            {(canEditProduct || !canEdit) && (
+                                                                                <Button
+                                                                                    variant="secondary"
+                                                                                    size="sm"
+                                                                                    allowViewer={!canEdit}
+                                                                                    className={cn('h-10 gap-2 rounded-xl px-6 font-bold', isLinkedVariant && 'h-9 gap-1.5 rounded-lg px-4 text-xs')}
+                                                                                    onClick={() => openProductForm(product)}
+                                                                                >
+                                                                                    {canEdit ? <Pencil className="h-4 w-4" /> : <Info className="h-4 w-4" />}
+                                                                                    {canEdit ? t('common.edit') : (t('common.view') || 'View')}
+                                                                                </Button>
+                                                                            )}
                                                                             {canEdit && !isService(product) && (
                                                                                 <Button
                                                                                     variant="secondary"
@@ -2623,7 +2636,7 @@ export function Products() {
                                                                                     {t('products.addStock', { defaultValue: 'Add Stock' })}
                                                                                 </Button>
                                                                             )}
-                                                                            {canEdit && !isService(product) && (
+                                                                            {canEditProduct && !isService(product) && (
                                                                                 <Button
                                                                                     variant="ghost"
                                                                                     size="icon"
@@ -2649,7 +2662,7 @@ export function Products() {
                                                                     </div>
                                                                 </ContextMenuTrigger>
                                                                 <ContextMenuContent>
-                                                                    {canEdit && !isService(product) && (
+                                                                    {canEdit && !hideAddStockContextMenu && !isService(product) && (
                                                                         <ContextMenuItem className="gap-2" onSelect={() => { setSelectedProductForStock(product.id); setAdjustmentDialogOpen(true); }}>
                                                                             <Boxes className="h-4 w-4" />
                                                                             {t('products.addStock', { defaultValue: 'Add Stock' })}
@@ -2754,17 +2767,19 @@ export function Products() {
                                                                 </div>
 
                                                                 <div className={cn('flex gap-1', hasNoDisplayedStock(product) && 'grayscale')}>
-                                                                    <Button
-                                                                        variant="ghost"
-                                                                        size="icon"
-                                                                        allowViewer={!canEdit}
-                                                                        aria-label={canEdit ? (t('common.edit') || 'Edit') : (t('common.view') || 'View')}
-                                                                        className="h-8 w-8 rounded-lg transition-colors hover:bg-primary/10 hover:text-primary"
-                                                                        onClick={() => openProductForm(product)}
-                                                                    >
-                                                                        {canEdit ? <Pencil className="h-3.5 w-3.5" /> : <Info className="h-3.5 w-3.5" />}
-                                                                    </Button>
-                                                                    {canEdit && !isService(product) && (
+                                                                    {(canEditProduct || !canEdit) && (
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            allowViewer={!canEdit}
+                                                                            aria-label={canEdit ? (t('common.edit') || 'Edit') : (t('common.view') || 'View')}
+                                                                            className="h-8 w-8 rounded-lg transition-colors hover:bg-primary/10 hover:text-primary"
+                                                                            onClick={() => openProductForm(product)}
+                                                                        >
+                                                                            {canEdit ? <Pencil className="h-3.5 w-3.5" /> : <Info className="h-3.5 w-3.5" />}
+                                                                        </Button>
+                                                                    )}
+                                                                    {canEditProduct && !isService(product) && (
                                                                         <Button
                                                                             variant="ghost"
                                                                             size="icon"
@@ -2791,7 +2806,7 @@ export function Products() {
                                                         </div>
                                                     </ContextMenuTrigger>
                                                     <ContextMenuContent>
-                                                        {canEdit && !isService(product) && (
+                                                        {canEdit && !hideAddStockContextMenu && !isService(product) && (
                                                             <ContextMenuItem className="gap-2" onSelect={() => { setSelectedProductForStock(product.id); setAdjustmentDialogOpen(true); }}>
                                                                 <Boxes className="h-4 w-4" />
                                                                 {t('products.addStock', { defaultValue: 'Add Stock' })}
@@ -3015,16 +3030,18 @@ export function Products() {
                                                                                     {t('products.addStock', { defaultValue: 'Add Stock' })}
                                                                                 </Button>
                                                                             )}
-                                                                            <Button
-                                                                                variant="ghost"
-                                                                                size="icon"
-                                                                                allowViewer={!canEdit}
-                                                                                aria-label={canEdit ? (t('common.edit') || 'Edit') : (t('common.view') || 'View')}
-                                                                                onClick={() => openProductForm(product)}
-                                                                            >
-                                                                                {canEdit ? <Pencil className="h-4 w-4" /> : <Info className="h-4 w-4 text-primary" />}
-                                                                            </Button>
-                                                                            {canEdit && !isService(product) && (
+                                                                            {(canEditProduct || !canEdit) && (
+                                                                                <Button
+                                                                                    variant="ghost"
+                                                                                    size="icon"
+                                                                                    allowViewer={!canEdit}
+                                                                                    aria-label={canEdit ? (t('common.edit') || 'Edit') : (t('common.view') || 'View')}
+                                                                                    onClick={() => openProductForm(product)}
+                                                                                >
+                                                                                    {canEdit ? <Pencil className="h-4 w-4" /> : <Info className="h-4 w-4 text-primary" />}
+                                                                                </Button>
+                                                                            )}
+                                                                            {canEditProduct && !isService(product) && (
                                                                                 <Button variant="ghost" size="icon" aria-label={t('common.clone') || 'Clone'} onClick={() => handleCloneProduct(product)}>
                                                                                     <Copy className="h-4 w-4 text-primary" />
                                                                                 </Button>
@@ -3040,7 +3057,7 @@ export function Products() {
                                                             </TableRow>
                                                         </ContextMenuTrigger>
                                                         <ContextMenuContent>
-                                                            {canEdit && !isService(product) && (
+                                                            {canEdit && !hideAddStockContextMenu && !isService(product) && (
                                                                 <ContextMenuItem className="gap-2" onSelect={() => { setSelectedProductForStock(product.id); setAdjustmentDialogOpen(true); }}>
                                                                     <Boxes className="h-4 w-4" />
                                                                     {t('products.addStock', { defaultValue: 'Add Stock' })}

@@ -2306,6 +2306,9 @@
     "addCategory": "Add Category",
     "subtitle": "Manage your inventory",
     "addProduct": "Add Product",
+    "permissionBlockedTitle": "Product form unavailable",
+    "permissionBlockedCreate": "Adding products is restricted for your account. Return to Products or contact an administrator.",
+    "permissionBlockedEdit": "Editing and cloning products are restricted for your account. Return to Products or contact an administrator.",
     "lowStock": "Low Stock",
     "stockTotalInSmallerUnits": "Total in smaller units: {{quantity}}",
     "addStock": "Add Stock",
@@ -6171,6 +6174,12 @@
       "salesHistoryAccessDescription": "Access completed sales, returns, and sales records.",
       "productsAccess": "Products",
       "productsAccessDescription": "Access the product catalog, stock rules, and pricing.",
+      "productsHideEditAndClone": "Hide Edit and Clone buttons",
+      "productsHideEditAndCloneDescription": "Hide the Edit and Clone buttons on the Products page for this member.",
+      "productsHideAddProductButton": "Hide Add Product button",
+      "productsHideAddProductButtonDescription": "Hide the Add Product button on the Products page for this member.",
+      "productsHideAddStockContextMenu": "Hide Add Stock context menu action",
+      "productsHideAddStockContextMenuDescription": "Hide the Add Stock action in product context menus for this member.",
       "budgetAccess": "Budget",
       "budgetAccessDescription": "Access accounting records, budgets, and financial controls."
     }
