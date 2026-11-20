@@ -39,7 +39,7 @@ import {
   SmallDialogHeader,
   SmallDialogTitle,
 } from '@/ui/components/small-dialog'
-import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
+import { DeleteConfirmationDialog } from '@/ui/components/ui/delete-confirmation-dialog'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { PrintSelectionModal } from '@/ui/components/PrintSelectionModal'
 import {
@@ -754,7 +754,7 @@ export default function PostalShipmentPage({
           onClose={() => setPayment(null)}
         />
       )}
-      <DeleteConfirmationModal
+      <DeleteConfirmationDialog
         isOpen={deleting}
         isLoading={action.busy}
         onClose={() => {

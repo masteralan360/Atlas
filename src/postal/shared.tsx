@@ -107,15 +107,15 @@ export function LocationPicker({
       })()
   return (
     <>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3">
         {(['governorate', 'area'] as const).map((field) => (
-          <div key={field} className="space-y-2">
-            <label className="text-sm font-medium" htmlFor={`postal-${field}`}>
+          <div key={field} className="min-w-0 space-y-1.5 sm:space-y-2">
+            <label className="block truncate text-xs font-medium sm:text-sm" htmlFor={`postal-${field}`}>
               {t(`postal.${field}`)} *
             </label>
             <Button
               id={`postal-${field}`}
-              className="w-full justify-start"
+              className="h-9 w-full min-w-0 justify-start px-2 text-xs sm:h-10 sm:px-3 sm:text-sm"
               type="button"
               variant="outline"
               disabled={disabled || (field === 'area' && !governorate)}
@@ -124,15 +124,17 @@ export function LocationPicker({
                 setPicker(field)
               }}
             >
-              <MapPin className="me-2 h-4 w-4 shrink-0" />
-              {(field === 'governorate' ? governorate : area)
-                ? locationLabel(
+              <MapPin className="me-1.5 h-3.5 w-3.5 shrink-0 sm:me-2 sm:h-4 sm:w-4" />
+              <span className="truncate">
+                {(field === 'governorate' ? governorate : area)
+                  ? locationLabel(
                     field === 'governorate' ? governorate : area,
                     i18n.language,
                     field === 'area' ? governorate : undefined,
                     catalog,
                   )
-                : t('postal.select')}
+                  : t('postal.select')}
+              </span>
             </Button>
           </div>
         ))}

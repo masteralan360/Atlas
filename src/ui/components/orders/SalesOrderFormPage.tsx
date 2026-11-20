@@ -296,6 +296,7 @@ export function SalesOrderFormPage({
     const hideCosts = useHideCosts()
     const { features, hasCapability, hasFeature } = useWorkspace()
     const { permissionKeys } = useWorkspacePermissions()
+    const isSellingPriceReadOnly = user?.role !== 'admin' && permissionKeys.includes('pos.hideModifyPriceButton')
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
     const salesAgentCommissionsEnabled = hasFeature('sales_agent_commissions')
     const agentSalesAccountsEnabled = hasFeature('agent_sales_accounts')
@@ -2345,6 +2346,7 @@ export function SalesOrderFormPage({
                                                             'w-full min-w-0',
                                                             minimumPriceViolation && 'border-destructive bg-destructive/5 text-destructive focus-visible:ring-destructive/25'
                                                         )}
+                                                        disabled={isSellingPriceReadOnly}
                                                         value={formatNumericInput(item.unitPrice)}
                                                         onChange={(event) => updateItem(item.clientId, { unitPrice: sanitizeNumericInput(event.target.value, { allowDecimal: true, maxFractionDigits: 3 }) })}
                                                         placeholder={t('common.sellingPrice', { defaultValue: 'Selling Price' })}

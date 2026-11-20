@@ -1,4 +1,4 @@
-import { usePostalScope } from '@/postal/usePostalAccess'
+import { usePostalScope, usePostalAction } from '@/postal/usePostalAccess'
 import { useAuth } from '@/auth'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'wouter'
@@ -31,6 +31,7 @@ import {
   Star,
   Archive,
   RotateCcw,
+  Trash2,
 } from 'lucide-react'
 import {
   AppDialog,
@@ -59,6 +60,7 @@ import { DateRangeFilters } from '@/ui/components/DateRangeFilters'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { WorkspaceAccountCreation } from '@/ui/components/workspace/WorkspaceAccountCreation'
 import { CameraBarcodeScannerModal } from '@/ui/components/pos/CameraBarcodeScannerModal'
+import { DeleteConfirmationDialog } from '@/ui/components/ui/delete-confirmation-dialog'
 import {
   usePaginationState,
   usePaginationBounds,
@@ -72,6 +74,7 @@ import {
   postalTables,
   resolvePostalQr,
   getPostalOrganization,
+  postalCommand,
 } from '@/local-db/postal'
 import { PostalDashboardCards } from '@/postal/PostalDashboardCards'
 import { ShipmentArchiveDialog } from '@/postal/ShipmentArchiveDialog'
@@ -150,6 +153,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
   const { toast } = useToast()
   const { workspaceName } = useWorkspace()
   const { permissionKeys } = useWorkspacePermissions()
+  const shipmentAction = usePostalAction()
   const canAccessAutoScan = user?.role === 'admin'
     || (user?.role === 'staff' && permissionKeys.includes('postService.officeEmployee'))
   const canAutoPrint = canAccessAutoScan && !permissionKeys.includes('global.NOprint')
@@ -176,6 +180,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
     shipment: PostalShipment
     isArchive: boolean
   } | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<PostalShipment | null>(null)
   const [scanner, setScanner] = useState(false)
   const scannedId = useRef<string | null>(null)
   const [autoScanReceiveShipment, setAutoScanReceiveShipment] = useState<
@@ -774,6 +779,20 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
                     <Archive className="h-4 w-4" aria-hidden="true" />
                   </Button>
                 )}
+                {(scope.role === 'admin' || scope.role === 'merchant') &&
+                  shipment.state === 'draft' && (
+                    <Button
+                      variant="destructive"
+                      size="icon"
+                      className="shrink-0"
+                      aria-label={t('postal.deleteDraftAction')}
+                      title={t('postal.deleteDraftAction')}
+                      disabled={shipmentAction.busy}
+                      onClick={() => setDeleteTarget(shipment)}
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    </Button>
+                  )}
               </div>
             )
           },
@@ -978,7 +997,15 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
         },
       ]
     return []
-  }, [tab, t, i18n.language, locationCatalog, navigate, scope.role])
+  }, [
+    tab,
+    t,
+    i18n.language,
+    locationCatalog,
+    navigate,
+    scope.role,
+    shipmentAction.busy,
+  ])
   const table = useReactTable({
     data: query.data?.rows ?? [],
     columns,
@@ -1371,6 +1398,32 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
         shipment={archiveTarget?.shipment ?? null}
         isArchive={archiveTarget?.isArchive ?? true}
         onClose={() => setArchiveTarget(null)}
+      />
+      <DeleteConfirmationDialog
+        isOpen={deleteTarget !== null}
+        isLoading={shipmentAction.busy}
+        itemName={deleteTarget?.recipient_name ?? ''}
+        title={t('postal.deleteDraftConfirmTitle')}
+        description={t('postal.deleteDraftConfirmDescription')}
+        onClose={() => {
+          if (!shipmentAction.busy) setDeleteTarget(null)
+        }}
+        onConfirm={() => {
+          const shipment = deleteTarget
+          if (!shipment) return
+          void shipmentAction.run(
+            `delete:${shipment.id}:${shipment.revision}`,
+            async (request) => {
+              await postalCommand(
+                scope,
+                'delete_draft',
+                { id: shipment.id, revision: shipment.revision },
+                request,
+              )
+              setDeleteTarget(null)
+            },
+          )
+        }}
       />
       {creating && (
         <CreateShipmentFlow

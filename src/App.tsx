@@ -25,7 +25,7 @@ import { DateRangeProvider } from "@/context/DateRangeContext";
 import { UiAccessProvider } from "@/context/UiAccessContext";
 import { WorkspacePermissionsProvider, useWorkspacePermissions } from "@/permissions";
 import { FleetLocationSharingProvider } from "@/fleet/FleetLocationSharingContext";
-import { AutoSyncOverlay } from "@/ui/components/AutoSyncOverlay";
+import { AutoSyncController } from "@/ui/components/AutoSyncController";
 import { OfflineEntryOverlay } from "@/ui/components/OfflineEntryOverlay";
 import { NetworkStatusNotifications } from "@/ui/components/NetworkStatusNotifications";
 import { SyncIntegrityOverlay } from "@/ui/components/SyncIntegrityOverlay";
@@ -1479,7 +1479,7 @@ function App() {
               <WorkspaceExtraDaysDialog />
               <WorkspaceAdminMessageDialog />
               <FaviconHandler />
-              <AutoSyncOverlay />
+              <AutoSyncController />
               <OfflineEntryOverlay />
               <NetworkStatusNotifications />
               <SyncIntegrityOverlay />
