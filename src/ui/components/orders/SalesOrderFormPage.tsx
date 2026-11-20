@@ -74,7 +74,7 @@ import {
 } from '@/local-db'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useOrderEditorLiveData } from '@/hooks/useOrderEditorLiveData'
-import { isOrderReadOnly } from '@/lib/orderEditability'
+import { isEditableUnpaidReservedSalesOrder, isOrderReadOnly } from '@/lib/orderEditability'
 import { resolvePartnerPriceBookUnitPrice } from '@/lib/priceBooks'
 import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
 import { isRemoteOrderSaveConfirmationError, ORDER_SUMMARY_RECOVERY_PERSISTENCE_ERROR, type OrderSaveProgress } from '@/lib/orderSaveProgress'
@@ -153,6 +153,8 @@ import {
 import { OrderEditorLoadingSection, OrderEditorReadOnlyScope } from './OrderEditorLoadingOverlay'
 import { ProgressToast } from '@/ui/components/ProgressToast'
 import { ToastAction } from '@/ui/components/toast'
+import { useStockDemandGuard } from '@/local-db/stockReservations'
+import { StockDemandNotice } from '@/ui/components/inventory/StockReservationInfo'
 
 interface SalesOrderFormPageProps {
     workspaceId: string
@@ -393,7 +395,10 @@ export function SalesOrderFormPage({
     })
     const isOrderEditorBlocked = Boolean(editingOrderId)
         && (orderEditorLiveData.isLoading || Boolean(orderEditorLiveData.error))
-    const isExistingOrderReadOnly = isOrderReadOnly(editingOrder?.status)
+    const isPendingUnpaidOrderEdit = isEditableUnpaidReservedSalesOrder(editingOrder)
+    const isFinancedPendingUnpaidOrderEdit = isPendingUnpaidOrderEdit
+        && (editingOrder?.paymentMethod === 'loan' || editingOrder?.paymentMethod === 'installments')
+    const isExistingOrderReadOnly = isOrderReadOnly(editingOrder?.status) && !isPendingUnpaidOrderEdit
     const readOnlyOrderStatusLabel = editingOrder && isExistingOrderReadOnly
         ? t(`orders.status.${editingOrder.status}`, { defaultValue: editingOrder.status })
         : ''
@@ -425,7 +430,11 @@ export function SalesOrderFormPage({
 
     const [isSaving, setIsSaving] = useState(false)
     const progressToastRef = useRef<ReturnType<typeof toast> | null>(null)
-    const saveOperationRef = useRef<{ orderId: string; initialPaymentTransactionId: string } | null>(null)
+    const saveOperationRef = useRef<{
+        orderId: string
+        initialPaymentTransactionId: string
+        financingOperationId: string
+    } | null>(null)
     const dismissSaveProgressToast = useCallback(() => {
         if (progressToastRef.current) {
             progressToastRef.current.dismiss()
@@ -809,6 +818,49 @@ export function SalesOrderFormPage({
             baseUnitCode: item.baseUnitCode || current.baseUnitCode
         }
     }, [getProductUnitOptions])
+
+    const reservationValidationDemands = useMemo(() => {
+        if (!isPendingUnpaidOrderEdit || !editingOrder) return []
+
+        const previousByPosition = new Map<string, number>()
+        for (const item of editingOrder.items) {
+            const product = products.find((entry) => entry.id === item.productId)
+            if (product && isService(product)) continue
+            const storageId = item.storageId || editingOrder.sourceStorageId
+            if (!storageId) continue
+            const key = `${item.productId}:${storageId}`
+            previousByPosition.set(key, (previousByPosition.get(key) || 0) + getOrderLineInventoryQuantity(item))
+        }
+
+        const currentByPosition = new Map<string, { productId: string; storageId: string; quantity: number }>()
+        for (const item of items) {
+            if (!item.productId) continue
+            const product = products.find((entry) => entry.id === item.productId)
+            if (product && isService(product)) continue
+            const storageId = item.storageId || sourceStorageId
+            if (!storageId) continue
+            const unitOption = getFormUnitOption(item, product)
+            const factor = unitOption?.factor ?? Math.max(Number(item.unitFactor) || 1, 0)
+            const quantity = soldQuantityToInventoryQuantity(Number(item.quantity) || 0, factor)
+                + soldQuantityToInventoryQuantity(Number(item.freeBonusQuantity) || 0, factor)
+            const key = `${item.productId}:${storageId}`
+            const current = currentByPosition.get(key)
+            currentByPosition.set(key, {
+                productId: item.productId,
+                storageId,
+                quantity: (current?.quantity || 0) + quantity
+            })
+        }
+
+        return [...currentByPosition.entries()]
+            .filter(([key, demand]) => demand.quantity > (previousByPosition.get(key) || 0) + 0.0000005)
+            .map(([, demand]) => demand)
+    }, [editingOrder, getFormUnitOption, isPendingUnpaidOrderEdit, items, products, sourceStorageId])
+    const reservationGuard = useStockDemandGuard(
+        workspaceId,
+        reservationValidationDemands,
+        isPendingUnpaidOrderEdit ? editingOrderId : undefined
+    )
 
     const getUnitLabel = useCallback((unitCode: string) =>
         t(`products.units.${unitCode}`, { defaultValue: unitCode }), [t])
@@ -1673,7 +1725,7 @@ export function SalesOrderFormPage({
                 exchangeRateSource: primaryRate?.exchangeRateSource ?? null,
                 exchangeRateTimestamp: primaryRate?.exchangeRateTimestamp ?? null,
                 exchangeRates: hasOrderRateSnapshot ? snapshot : null,
-                status: 'draft' as SalesOrderStatus,
+                status: editingOrder?.status ?? ('draft' as SalesOrderStatus),
                 expectedDeliveryDate: expectedDeliveryDate || null,
                 createdAt: parseLocalDateTimeValue(orderCreationDate)?.toISOString() || formOpenedAtRef.current,
                 actualDeliveryDate: null,
@@ -1692,7 +1744,7 @@ export function SalesOrderFormPage({
                 installmentFrequency: isFinanced ? installmentFrequency : null,
                 firstDueDate: isFinanced ? firstDueDate || null : null,
                 nextDueDate: isFinanced ? firstDueDate || null : null,
-                reservedAt: null,
+                reservedAt: editingOrder?.reservedAt ?? null,
                 shippingAddress: shippingAddress || undefined,
                 notes: notes || undefined,
                 ...(requiresApprovalRequest ? {
@@ -1706,7 +1758,8 @@ export function SalesOrderFormPage({
 
             const saveOperation = saveOperationRef.current ?? {
                 orderId: editingOrderId ?? generateId(),
-                initialPaymentTransactionId: generateId()
+                initialPaymentTransactionId: generateId(),
+                financingOperationId: generateId()
             }
             saveOperationRef.current = saveOperation
             const saveOptions = {
@@ -1714,10 +1767,12 @@ export function SalesOrderFormPage({
                 deferSummaryRefresh: true,
                 orderId: saveOperation.orderId,
                 initialPaymentTransactionId: saveOperation.initialPaymentTransactionId,
+                financingOperationId: saveOperation.financingOperationId,
                 onProgress: updateSaveProgressToast,
                 actingUserRole: user.role,
                 minimumPriceValidationItems
             }
+            if (isPendingUnpaidOrderEdit) await reservationGuard.assert()
             const savedOrder = editingOrderId
                 ? await updateSalesOrder(editingOrderId, payload, saveOptions)
                 : await createSalesOrder(workspaceId, payload, user?.id ?? null, saveOptions)
@@ -1831,6 +1886,10 @@ export function SalesOrderFormPage({
                             state={customerInformationLoad}
                             onRetry={orderEditorLiveData.retry}
                             onBack={onCancel}
+                            readOnly={isPendingUnpaidOrderEdit ? true : undefined}
+                            readOnlyTitle={isPendingUnpaidOrderEdit ? t('orders.form.customerInformationLockedTitle') : undefined}
+                            readOnlyMessage={isPendingUnpaidOrderEdit ? t('orders.form.customerInformationLockedMessage') : undefined}
+                            readOnlyDescription={isPendingUnpaidOrderEdit ? t('orders.form.customerInformationLockedDescription') : undefined}
                         >
                         <Card
                             ref={customerInformationRef}
@@ -2090,6 +2149,7 @@ export function SalesOrderFormPage({
                                     </Button>
                                 </CardHeader>
                                 <CardContent className="space-y-3">
+                                    <StockDemandNotice workspaceId={workspaceId} guard={reservationGuard} />
                                     {displayedItems.map((item) => {
                                         const product = products.find((entry) => entry.id === item.productId)
                                         const itemUnitOptions = product ? getProductUnitOptions(product.id) : []
@@ -2498,6 +2558,7 @@ export function SalesOrderFormPage({
                                                 label={t('orders.form.currency', { defaultValue: 'Currency' })}
                                                 iqdDisplayPreference={features.iqd_display_preference}
                                                 allowedCurrencies={Array.from(new Set([features.default_currency, ...features.allowed_currencies])) as CurrencyCode[]}
+                                                disabled={isSaving || isFinancedPendingUnpaidOrderEdit}
                                             />
                                         </div>
                                     </div>
@@ -2520,7 +2581,7 @@ export function SalesOrderFormPage({
                                             }}
                                             workspaceId={workspaceId}
                                             methods={salesOrderPaymentMethods}
-                                            disabled={isSaving || salesOrderHidePermissions.isLoading || salesOrderPaymentMethods.length === 0}
+                                            disabled={isSaving || isFinancedPendingUnpaidOrderEdit || salesOrderHidePermissions.isLoading || salesOrderPaymentMethods.length === 0}
                                             unavailableValueLabel={salesOrderHidePermissions.isLoading
                                                 ? t('members.permissions.salesOrderPermissionsLoading', { defaultValue: 'Sales Order permissions are still loading.' })
                                                 : t('members.permissions.currentSalesOrderMethodRestricted', {
@@ -2623,6 +2684,7 @@ export function SalesOrderFormPage({
                                             onInstallmentCountChange={setInstallmentCount}
                                             installmentFrequency={installmentFrequency}
                                             onInstallmentFrequencyChange={setInstallmentFrequency}
+                                            initialPaymentDisabled={isFinancedPendingUnpaidOrderEdit}
                                         />
                                     ) : null}
                                 </CardContent>
@@ -2716,7 +2778,7 @@ export function SalesOrderFormPage({
                                 </p>
                             </CardHeader>
                             <CardContent className="space-y-3">
-                                <Button type="submit" className="h-12 w-full rounded-xl font-black" disabled={!canSubmit || isSaving || isOrderEditorBlocked}>
+                                <Button type="submit" className="h-12 w-full rounded-xl font-black" disabled={!canSubmit || isSaving || isOrderEditorBlocked || reservationGuard.blocked}>
                                     {isSaving
                                         ? (t('common.loading') || 'Loading...')
                                         : requiresApprovalRequest

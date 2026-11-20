@@ -26,6 +26,10 @@ type OrderEditorLoadingSectionProps = {
     onRetry: () => void
     onBack: () => void
     children: ReactNode
+    readOnly?: boolean
+    readOnlyTitle?: string
+    readOnlyMessage?: string
+    readOnlyDescription?: string
 }
 
 type OrderEditorReadOnlyContextValue = {
@@ -52,9 +56,19 @@ export function OrderEditorReadOnlyScope({ isReadOnly, statusLabel, children }: 
     )
 }
 
-export function OrderEditorLoadingSection({ state, onRetry, onBack, children }: OrderEditorLoadingSectionProps) {
+export function OrderEditorLoadingSection({
+    state,
+    onRetry,
+    onBack,
+    children,
+    readOnly,
+    readOnlyTitle,
+    readOnlyMessage,
+    readOnlyDescription
+}: OrderEditorLoadingSectionProps) {
     const contentRef = useRef<HTMLDivElement>(null)
-    const { isReadOnly, statusLabel } = useContext(OrderEditorReadOnlyContext)
+    const { isReadOnly: scopeIsReadOnly, statusLabel } = useContext(OrderEditorReadOnlyContext)
+    const isReadOnly = readOnly ?? scopeIsReadOnly
     const isLoadingBlocked = state.isLoading || Boolean(state.error)
     const isBlocked = isLoadingBlocked || isReadOnly
 
@@ -85,13 +99,27 @@ export function OrderEditorLoadingSection({ state, onRetry, onBack, children }: 
                     onBack={onBack}
                 />
             ) : isReadOnly ? (
-                <OrderEditorReadOnlyOverlay statusLabel={statusLabel} />
+                <OrderEditorReadOnlyOverlay
+                    statusLabel={statusLabel}
+                    title={readOnlyTitle}
+                    message={readOnlyMessage}
+                    description={readOnlyDescription}
+                />
             ) : null}
         </div>
     )
 }
 
-function OrderEditorReadOnlyOverlay({ statusLabel }: Pick<OrderEditorReadOnlyContextValue, 'statusLabel'>) {
+function OrderEditorReadOnlyOverlay({
+    statusLabel,
+    title,
+    message,
+    description
+}: Pick<OrderEditorReadOnlyContextValue, 'statusLabel'> & {
+    title?: string
+    message?: string
+    description?: string
+}) {
     const { t } = useTranslation()
 
     return (
@@ -104,13 +132,13 @@ function OrderEditorReadOnlyOverlay({ statusLabel }: Pick<OrderEditorReadOnlyCon
             <div className="w-full max-w-sm rounded-2xl border border-emerald-500/30 bg-background/95 p-5 text-center shadow-lg">
                 <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm dark:text-emerald-400">
                     <LockKeyhole className="h-3.5 w-3.5" />
-                    {t('orders.form.editorReadOnly')}
+                    {title || t('orders.form.editorReadOnly')}
                 </span>
                 <p className="mt-3 text-sm font-medium text-foreground">
-                    {t('orders.form.editorReadOnlyStatus', { status: statusLabel })}
+                    {message || t('orders.form.editorReadOnlyStatus', { status: statusLabel })}
                 </p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                    {t('orders.form.editorReadOnlyDescription')}
+                    {description || t('orders.form.editorReadOnlyDescription')}
                 </p>
             </div>
         </div>

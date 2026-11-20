@@ -3,6 +3,7 @@ import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { Archive, BadgeCheck, BadgeDollarSign, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, ClipboardCheck, Clock3, CreditCard, EllipsisVertical, Eye, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { getLocalizedOrderError } from '@/lib/orderErrors'
+import { isEditableUnpaidReservedSalesOrder } from '@/lib/orderEditability'
 import { getPaymentMethodLabel as getSalesOrderPaymentMethodLabel, type PaymentMethodOption } from '@/lib/paymentMethods'
 import { useLocation, useRoute } from 'wouter'
 
@@ -1670,8 +1671,12 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                             </TableRow>
                         ) : rows.map((row) => {
                             const isDraft = row.status === 'draft'
+                            const isEditablePendingUnpaid = activeTab === 'sales'
+                                && isEditableUnpaidReservedSalesOrder(row as SalesOrder)
                             const isApprovalRequested = isOrderApprovalRequested(row)
-                            const canEdit = canManageOrders && isDraft && (!isApprovalRequested || canApproveOrderRequests)
+                            const canEdit = canManageOrders
+                                && (isDraft || isEditablePendingUnpaid)
+                                && (!isApprovalRequested || canApproveOrderRequests)
                             const canDelete = canDeleteOrders && isDraft
                             const returnStatus = activeTab === 'sales' ? (row as SalesOrder).returnStatus : 'none'
                             const isFullyReturnedSalesOrder = activeTab === 'sales' && returnStatus === 'full'
@@ -1823,8 +1828,12 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     </div>
                 ) : rows.map((row) => {
                     const isDraft = row.status === 'draft'
+                    const isEditablePendingUnpaid = activeTab === 'sales'
+                        && isEditableUnpaidReservedSalesOrder(row as SalesOrder)
                     const isApprovalRequested = isOrderApprovalRequested(row)
-                    const canEdit = canManageOrders && isDraft && (!isApprovalRequested || canApproveOrderRequests)
+                    const canEdit = canManageOrders
+                        && (isDraft || isEditablePendingUnpaid)
+                        && (!isApprovalRequested || canApproveOrderRequests)
                     const canDelete = canDeleteOrders && isDraft
                     const returnStatus = activeTab === 'sales' ? (row as SalesOrder).returnStatus : 'none'
                     const isFullyReturnedSalesOrder = activeTab === 'sales' && returnStatus === 'full'

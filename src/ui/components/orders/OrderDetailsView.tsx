@@ -5,6 +5,7 @@ import { Archive, ArrowLeft, BadgeCheck, BadgeDollarSign, CalendarDays, CircleAl
 import { useTranslation } from 'react-i18next'
 import { getLocalizedOrderError } from '@/lib/orderErrors'
 import { isOrderArchiveEligible } from '@/lib/orderArchiving'
+import { isEditableUnpaidReservedSalesOrder } from '@/lib/orderEditability'
 import { ORDER_STATUS_ADVANCE_HOLD_DURATION_MS } from '@/lib/pressAndHold'
 import { PressAndHoldButton } from '@/ui/components/PressAndHoldButton'
 import { useLocation } from 'wouter'
@@ -1094,7 +1095,10 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const isSales = resolved.kind === 'sales'
     const order = resolved.order
     const isApprovalRequested = isOrderApprovalRequested(order)
-    const canEditOrder = !order.isArchived && canManageOrder && order.status === 'draft' && (!isApprovalRequested || canApproveOrderRequests)
+    const canEditOrder = !order.isArchived
+        && canManageOrder
+        && (order.status === 'draft' || (isSales && isEditableUnpaidReservedSalesOrder(order as SalesOrder)))
+        && (!isApprovalRequested || canApproveOrderRequests)
     const currency = order.currency
     const iqd = features.iqd_display_preference
     const orderAdjustments = normalizeOrderAdjustments(order.orderAdjustments, currency)

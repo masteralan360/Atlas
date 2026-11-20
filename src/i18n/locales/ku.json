@@ -3002,6 +3002,9 @@
       "editorReadOnly": "داواکارییەکە قفل کراوە",
       "editorReadOnlyStatus": "ئەم داواکارییە {{status}} ـە و چیتر ناتوانرێت دەستکاری بکرێت.",
       "editorReadOnlyDescription": "دەتوانیت لێرە وردەکارییە کۆتاییەکان ببینیت. بۆ گەڕانەوە بۆ داواکارییەکان، گەڕانەوە بەکاربهێنە.",
+      "customerInformationLockedTitle": "زانیاری کڕیار قفل کراوە",
+      "customerInformationLockedMessage": "ناتوانرێت زانیاری کڕیار لە داواکارییەکی تەرخانکراودا بگۆڕدرێت.",
+      "customerInformationLockedDescription": "کڕیار، هەژماری فرۆشتن و ناونیشانی گەیاندن لە کاتی دەستکاریکردنی ئەم داواکارییەدا ناگۆڕدرێن.",
       "saveProgressTitle": "پاشەکەوتکردنی داواکاری",
       "saveProgressPreparing": "ئامادەکردنی داواکاری…",
       "saveProgressPayment": "تۆمارکردنی پارەدان…",
@@ -3108,7 +3111,20 @@
         "initialPaymentRequired": "بڕی پارەدانی پێشەکی بنووسە. ئەگەر پارەدانی پێشەکی نییە ٠ بنووسە.",
         "initialPaymentMustBeLessThanTotal": "بڕی پارەدانی پێشەکی دەبێت لە کۆی گشتی داواکاری کەمتر بێت.",
         "loanRepaymentTransactionUnavailable": "مامەڵەی سەرەتایی ئەم پارەدانەی قەرزە بەردەست نییە.",
-        "returnRequestIdentityMismatch": "داواکاری گەڕاندنەوەکە گۆڕاوە. پێش هەوڵدانەوە داواکارییەکە نوێ بکەرەوە."
+        "returnRequestIdentityMismatch": "داواکاری گەڕاندنەوەکە گۆڕاوە. پێش هەوڵدانەوە داواکارییەکە نوێ بکەرەوە.",
+        "financedOrderLoanMissing": "بارکردنی ئەو قەرزەی بەستراوە سەرکەوتوو نەبوو. داواکارییەکە نوێ بکەرەوە و دووبارە هەوڵ بدەوە.",
+        "financedOrderLoanMismatch": "قەرزی بەستراو گۆڕاوە یان چیتر لەگەڵ ئەم داواکارییە ناگونجێت. نوێی بکەرەوە و دووبارە هەوڵ بدەوە.",
+        "financedOrderHasPaymentHistory": "ئەم داواکارییە مێژووی پارەدانی هەیە، بۆیە چیتر ناتوانرێت مەرجەکانی قەرزەکەی بگۆڕدرێن.",
+        "financedOrderCurrencyLocked": "تا ئەم قەرزە بەستراوە بە داواکارییەکە، ناتوانرێت دراوەکە بگۆڕدرێت.",
+        "financedOrderTotalInvalid": "کۆی گشتی داواکاریی گۆڕدراو دەبێت لە سفر گەورەتر بێت.",
+        "financedOrderScheduleRequired": "یەکەم بەرواری وادەی قیست هەڵبژێرە.",
+        "financedOrderScheduleInvalid": "خشتەی قیستەکان دروست نییە. بەروار، دووبارەبوونەوە و ژمارەی قیستەکان بپشکنە.",
+        "financedOrderPaymentMethodLocked": "هەمان شێوازی پارەدانی ئێستای قەرز یان قیست بۆ داواکارییەکە بهێڵەرەوە.",
+        "financedOrderNotEditable": "تەنها داواکارییە چاوەڕوانە بێ‌پارەدانەکان کە هیچ پارەدانێکیان تۆمار نەکراوە دەتوانرێت بگۆڕدرێن.",
+        "financedOrderStillUnpaid": "داواکاریی گۆڕدراو دەبێت هەر بێ‌پارەدان بمێنێتەوە.",
+        "financedOrderConflict": "داواکارییەکە یان خشتەی قیستەکان گۆڕاوە. داواکارییەکە نوێ بکەرەوە و دووبارە هەوڵ بدەوە.",
+        "financedOrderCreditLimitExceeded": "داواکاریی گۆڕدراو لە سنووری قەرزی کڕیار زیاترە.",
+        "financedOrderCreditRateUnavailable": "ناتوانرێت سنووری قەرزی کڕیار بپشکنرێت چونکە نرخی دراو بەردەست نییە."
       }
     },
     "adjustments": {

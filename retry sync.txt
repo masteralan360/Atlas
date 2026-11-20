@@ -1,13 +1,11 @@
 negative delivery fee
 
+PWA Faster
+
 Post Service Notification
 
-Product Edit Permissions
 Pending Sale orders must be editable if no payment has gone through
 Sales Orders Page Special Print With Products
-
-only pending status
-Check their orders
 
 Discount POS Quick Order
 

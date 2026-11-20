@@ -354,9 +354,11 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
       };
       addCommandParent("business_partners", "linked_party_id");
       addCommandParent("payment_accounts", "account_id");
-      addCommandParent("loans", "loan_id");
-      addCommandParent("loan_commands", "loan_id");
+      addCommandParent("loans", "loan_id", "p_loan_id");
+      addCommandParent("loan_commands", "loan_id", "p_loan_id");
+      addCommandParent("loan_commands", "order_id", "p_order_id");
       addCommandParent("loan_commands", "loan_payment_id");
+      addCommandParent("sales_orders", "order_id", "p_order_id");
       break;
     }
     case "order_cancellation_commands":
@@ -398,11 +400,13 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
       break;
     case "sales_order_agent_assignments":
       addParent("sales_orders", "orderId", "order_id");
+      addParent("loan_commands", "orderId", "order_id");
       addParent("agents", "agentId", "agent_id");
       addParent("sales_order_agent_assignments", "previousAssignmentId", "previous_assignment_id");
       break;
     case "agent_commission_entries":
       addParent("sales_orders", "orderId", "order_id");
+      addParent("loan_commands", "orderId", "order_id");
       addParent("sales_order_agent_assignments", "assignmentId", "assignment_id");
       addParent("agents", "agentId", "agent_id");
       addParent("agent_commission_memberships", "membershipId", "membership_id");
@@ -412,6 +416,7 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
       break;
     case "agent_product_commission_entries":
       addParent("sales_orders", "orderId", "order_id");
+      addParent("loan_commands", "orderId", "order_id");
       addParent("sales_order_agent_assignments", "assignmentId", "assignment_id");
       addParent("agents", "agentId", "agent_id");
       addParent("products", "productId", "product_id");
@@ -421,6 +426,7 @@ function getMutationParentKeys(mutation: MutationSyncOrderItem) {
       break;
     case "sales_agent_commission_reconciliation":
       addParent("sales_orders", "orderId", "order_id");
+      addParent("loan_commands", "orderId", "order_id");
       addParent("sales_order_agent_assignments", "assignmentId", "assignment_id");
       addParent("agent_commission_memberships", "membershipId", "membership_id");
       addParent("agent_commission_plans", "planId", "plan_id");
@@ -1221,7 +1227,7 @@ export async function processMutationQueue(
         const action = payload.action;
         const commandPayload = payload.payload;
         if (
-          (action !== "create" && action !== "payment" && action !== "reversal")
+          (action !== "create" && action !== "payment" && action !== "reversal" && action !== "order_edit")
           || !commandPayload
           || typeof commandPayload !== "object"
           || Array.isArray(commandPayload)
@@ -1229,6 +1235,17 @@ export async function processMutationQueue(
           throw new Error("Loan replay command is invalid");
         }
         const loanPayload = commandPayload as Record<string, unknown>;
+
+        if (action === "order_edit") {
+          const { data, error } = await supabase.rpc("update_pending_financed_sales_order", loanPayload);
+          if (error) throw error;
+          const { persistLoanAggregateRpcResult } = await import("@/local-db/loanTransactions");
+          await persistLoanAggregateRpcResult(data);
+          await db.offline_mutations.update(id, { status: "synced", error: undefined });
+          successCount++;
+          reportCompleted();
+          continue;
+        }
 
         const rpcName = action === "create"
           ? "create_loan"
@@ -1272,7 +1289,8 @@ export async function processMutationQueue(
               || (candidate.entityType === "loan_commands"
                 && candidate.payload.payload != null
                 && typeof candidate.payload.payload === "object"
-                && (candidate.payload.payload as Record<string, unknown>).loan_id === order.linkedLoanId)))
+                && ((candidate.payload.payload as Record<string, unknown>).loan_id
+                  ?? (candidate.payload.payload as Record<string, unknown>).p_loan_id) === order.linkedLoanId)))
           .count();
         if (prerequisites > 0) {
           throw new Error("Order cancellation is waiting for earlier order or loan changes to sync");

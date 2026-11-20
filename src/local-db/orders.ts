@@ -36,8 +36,9 @@ import { isPositiveQuantity, quantitiesEqual, roundQuantity } from '@/lib/quanti
 import { canBePurchased, isService } from '@/lib/catalogItem'
 import { getPartnerSyncWriteRpc, getSupabaseClientForTable, getSupabaseRemoteTableName } from '@/lib/supabaseSchema'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
-import { generateId, toCamelCase } from '@/lib/utils'
+import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
 import { getWorkspaceDataMode } from '@/workspace/workspaceMode'
+import { isEditableUnpaidReservedSalesOrder } from '@/lib/orderEditability'
 import { isCrudDebuggerEnabled, runCrudOperation, type CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import { readWorkspaceCache } from '@/workspace/workspaceCache'
 import { supabase } from '@/auth/supabase'
@@ -62,6 +63,7 @@ import { assertStaffMinimumSellingPrices, type MinimumSellingPriceCheckItem } fr
 import { serializePartnerSummaryRefresh } from './partnerSummaryRefresh'
 import {
     ORDER_AMOUNT_EPSILON,
+    addOrderInstallmentDate,
     getOrderBalanceAmount,
     getOrderPaidAmount,
     rebuildOrderInstallmentsFromPayments,
@@ -135,6 +137,7 @@ import type {
 import { supportsSalesAgentWorkflows } from './models'
 import { buildInventoryMovementTransactionId, createInventoryTransaction, hydrateInventoryTransactionsForReferences } from './inventoryTransactions'
 import { appendPaymentTransaction, synchronizeOrderPaymentReferences } from './payments'
+import { persistLoanAggregateRpcResult } from './loanTransactions'
 import { mirrorPaymentAccountTransactionLocally } from './paymentAccounts'
 import { fetchAccessibleServiceIds, useServiceAccessIds } from './serviceAccess'
 
@@ -246,6 +249,8 @@ export type OrderFormSaveOptions = {
     orderId?: string
     /** Stable client identity prevents a retry from duplicating the first payment. */
     initialPaymentTransactionId?: string
+    /** Stable retry identity for an atomic pending financed order edit. */
+    financingOperationId?: string
     /** Current user's role for Local-mode validation; Supabase re-reads it in Cloud/Hybrid. */
     actingUserRole?: UserRole
     /** Optional prices already converted to each product's selling-price currency. */
@@ -1232,11 +1237,25 @@ function formatOrderInventoryQuantity(quantity: number, unitLabel: string) {
     return unitLabel ? `${formattedQuantity} ${unitLabel}` : formattedQuantity
 }
 
-async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: string) {
-    assertInventoryMutationConnectivity(order.workspaceId)
-    const productIds = Array.from(new Set(order.items.map((item) => item.productId)))
+async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: string, previousOrder?: SalesOrder) {
+    const productIds = Array.from(new Set([
+        ...order.items.map((item) => item.productId),
+        ...(previousOrder?.items.map((item) => item.productId) ?? [])
+    ]))
     const products = await db.products.where('id').anyOf(productIds).toArray()
     const productMap = new Map(products.map((product) => [product.id, product]))
+    const previousQuantityByPosition = new Map<string, number>()
+    if (previousOrder) {
+        for (const item of previousOrder.items) {
+            const product = productMap.get(item.productId)
+            if (product && isService(product)) continue
+            const storageId = resolveSalesOrderItemStorageId(previousOrder, item)
+            if (!storageId) continue
+            const positionKey = buildInventoryReservationKey(item.productId, storageId)
+            previousQuantityByPosition.set(positionKey,
+                roundQuantity((previousQuantityByPosition.get(positionKey) ?? 0) + getOrderLineInventoryQuantity(item)))
+        }
+    }
     const requiredByPosition = new Map<string, {
         productId: string
         storageId: string
@@ -1274,10 +1293,19 @@ async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: str
 
     if (requiredByPosition.size === 0) return
 
+    const requirementsToValidate = previousOrder
+        ? [...requiredByPosition.entries()]
+            .filter(([key, requirement]) => requirement.quantity > (previousQuantityByPosition.get(key) ?? 0) + 0.0000005)
+            .map(([, requirement]) => requirement)
+        : [...requiredByPosition.values()]
+    if (requirementsToValidate.length === 0) return
+
+    assertInventoryMutationConnectivity(order.workspaceId)
+
     const [reservations, inventoryRows] = await Promise.all([
         getReservedQuantityMaps(order.workspaceId, productMap, excludeOrderId),
         db.inventory.where('[productId+storageId]')
-            .anyOf(Array.from(requiredByPosition.values(), ({ productId, storageId }) => [productId, storageId]))
+            .anyOf(requirementsToValidate.map(({ productId, storageId }) => [productId, storageId]))
             .and((row) => row.workspaceId === order.workspaceId && !row.isDeleted)
             .toArray()
     ])
@@ -1288,7 +1316,7 @@ async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: str
         if (!quantityByPosition.has(key)) quantityByPosition.set(key, row.quantity)
     }
 
-    for (const requirement of requiredByPosition.values()) {
+    for (const requirement of requirementsToValidate) {
         const storageQuantity = quantityByPosition.get(
             buildInventoryReservationKey(requirement.productId, requirement.storageId)
         ) ?? 0
@@ -4059,6 +4087,184 @@ export async function createCompletedSalesOrder(
     }, createdBy, options)
 }
 
+type PendingFinancedSalesOrderEdit = {
+    order: SalesOrder
+    loan: Loan
+    installments: LoanInstallment[]
+    operationId: string
+    rpcPayload: Record<string, unknown>
+    remoteCommitEligible: boolean
+}
+
+async function preparePendingFinancedSalesOrderEdit(
+    existing: SalesOrder,
+    requestedOrder: SalesOrder,
+    now: string,
+    operationId: string
+): Promise<PendingFinancedSalesOrderEdit> {
+    const loanId = existing.linkedLoanId
+    if (!loanId || !isOrderFinancingMethod(existing.paymentMethod)) {
+        throw new Error('financed_order_loan_missing')
+    }
+    const loan = await db.loans.get(loanId)
+    if (!loan || loan.isDeleted || loan.workspaceId !== existing.workspaceId
+        || loan.source !== 'order' || loan.orderType !== 'sales' || loan.orderId !== existing.id
+        || (loan.status !== 'active' && loan.status !== 'overdue')
+        || loan.direction !== 'lent'
+        || loan.loanCategory !== (existing.paymentMethod === 'loan' ? 'simple' : 'standard')
+        || loan.settlementCurrency !== existing.currency) {
+        throw new Error('financed_order_loan_missing')
+    }
+
+    const [allInstallments, loanPayments, loanTransactions] = await Promise.all([
+        db.loan_installments.where('loanId').equals(loanId).toArray(),
+        db.loan_payments.where('loanId').equals(loanId).toArray(),
+        db.payment_transactions.where('sourceRecordId').equals(loanId).toArray()
+    ])
+    const installments = allInstallments.filter((item) => !item.isDeleted)
+    const orderTransactions = await db.payment_transactions
+        .where('[workspaceId+sourceType+sourceRecordId]')
+        .equals([existing.workspaceId, 'sales_order', existing.id])
+        .toArray()
+    const hasPaymentHistory = loanPayments.some((payment) => !payment.isDeleted)
+        || loanTransactions.some((payment) => !payment.isDeleted && payment.sourceModule === 'loans')
+        || orderTransactions.some((payment) => !payment.isDeleted)
+    if (hasPaymentHistory
+        || Number(existing.initialPaymentAmount || 0) > ORDER_AMOUNT_EPSILON
+        || Number(loan.totalPaidAmount || 0) > ORDER_AMOUNT_EPSILON
+        || Math.abs(Number(loan.balanceAmount || 0) - Number(existing.total || 0)) > ORDER_AMOUNT_EPSILON
+        || Math.abs(Number(loan.principalAmount || 0) - Number(existing.total || 0)) > ORDER_AMOUNT_EPSILON
+        || installments.some((item) => Number(item.paidAmount || 0) > ORDER_AMOUNT_EPSILON
+            || Math.abs(Number(item.balanceAmount || 0) - Number(item.plannedAmount || 0)) > ORDER_AMOUNT_EPSILON
+            || (item.status !== 'unpaid' && item.status !== 'overdue'))) {
+        throw new Error('financed_order_has_payment_history')
+    }
+
+    if (requestedOrder.currency !== existing.currency) {
+        throw new Error('financed_order_currency_locked')
+    }
+    const total = roundOrderAmount(Math.max(0, Number(requestedOrder.total || 0)), existing.currency)
+    if (total <= ORDER_AMOUNT_EPSILON) throw new Error('financed_order_total_invalid')
+
+    const installmentFrequency = requestedOrder.installmentFrequency || loan.installmentFrequency || 'monthly'
+    const firstDueDate = requestedOrder.firstDueDate?.slice(0, 10) || null
+    const installmentCount = existing.paymentMethod === 'loan'
+        ? 1
+        : Math.max(1, Math.trunc(Number(requestedOrder.installmentCount || 1)))
+    if (existing.paymentMethod === 'installments' && !firstDueDate) {
+        throw new Error('financed_order_schedule_required')
+    }
+
+    const order: SalesOrder = {
+        ...requestedOrder,
+        status: 'pending',
+        isPaid: false,
+        paymentStatus: 'unpaid',
+        paidAmount: 0,
+        paidAt: null,
+        initialPaymentAmount: 0,
+        balanceAmount: total,
+        currency: existing.currency,
+        paymentMethod: existing.paymentMethod,
+        linkedLoanId: loan.id,
+        isInstallmentBased: existing.paymentMethod === 'installments',
+        installmentCount: existing.paymentMethod === 'loan' && !firstDueDate ? 0 : installmentCount,
+        installmentFrequency,
+        firstDueDate,
+        nextDueDate: firstDueDate,
+        initialPaymentAccountId: existing.initialPaymentAccountId ?? null,
+        initialPaymentAccountNameSnapshot: existing.initialPaymentAccountNameSnapshot ?? null,
+        updatedAt: now,
+        version: existing.version + 1,
+        ...getSyncMetadata(existing.workspaceId, now)
+    }
+
+    const baseAmount = roundOrderAmount(total / installmentCount, existing.currency)
+    let accumulated = 0
+    const nextInstallments: LoanInstallment[] = Array.from({ length: installmentCount }, (_, index): LoanInstallment => {
+        const installmentNo = index + 1
+        const plannedAmount = installmentNo === installmentCount
+            ? roundOrderAmount(total - accumulated, existing.currency)
+            : baseAmount
+        accumulated = roundOrderAmount(accumulated + plannedAmount, existing.currency)
+        const dueDate = firstDueDate
+            ? addOrderInstallmentDate(firstDueDate, installmentFrequency, index)
+            : null
+        // Reuse a soft-deleted row when restoring a schedule position. This
+        // keeps a queued offline edit compatible with the still-committed
+        // remote installment identity until the coalesced edit is replayed.
+        const current = installments.find((item) => item.installmentNo === installmentNo)
+            || allInstallments.find((item) => item.installmentNo === installmentNo && item.isDeleted)
+        return {
+            ...(current ?? {} as LoanInstallment),
+            id: current?.id || uuidv5(`${operationId}:loan-installment:${installmentNo}`, uuidv5.URL),
+            workspaceId: existing.workspaceId,
+            loanId: loan.id,
+            installmentNo,
+            dueDate,
+            plannedAmount,
+            paidAmount: 0,
+            balanceAmount: plannedAmount,
+            status: dueDate && dueDate < now.slice(0, 10) ? 'overdue' : 'unpaid',
+            paidAt: null,
+            integrityVersion: Math.max(current?.integrityVersion || 0, 1),
+            createdAt: current?.createdAt || now,
+            updatedAt: now,
+            version: (current?.version || 0) + (current ? 1 : 0),
+            isDeleted: false,
+            ...getSyncMetadata(existing.workspaceId, now)
+        }
+    })
+    const removedInstallments = installments
+        .filter((item) => item.installmentNo > installmentCount)
+        .map((item) => ({
+            ...item,
+            isDeleted: true,
+            status: 'cancelled' as const,
+            updatedAt: now,
+            version: item.version + 1,
+            ...getSyncMetadata(existing.workspaceId, now)
+        }))
+    const loanUpdated: Loan = {
+        ...loan,
+        principalAmount: total,
+        totalPaidAmount: 0,
+        balanceAmount: total,
+        installmentCount,
+        installmentFrequency,
+        firstDueDate,
+        nextDueDate: nextInstallments[0]?.dueDate ?? null,
+        status: nextInstallments[0]?.dueDate && nextInstallments[0].dueDate < now.slice(0, 10)
+            ? 'overdue'
+            : 'active',
+        updatedAt: now,
+        version: loan.version + 1,
+        integrityVersion: Math.max(loan.integrityVersion || 0, 1),
+        ...getSyncMetadata(existing.workspaceId, now)
+    }
+    const allUpdatedInstallments = [...nextInstallments, ...removedInstallments]
+    const rpcOrder = toSnakeCase(order as unknown as Record<string, unknown>)
+    rpcOrder.order_adjustments = order.orderAdjustments ?? null
+    const rpcPayload = {
+        p_order_id: order.id,
+        p_loan_id: loan.id,
+        p_expected_order_version: existing.version,
+        p_expected_loan_version: loan.version,
+        p_operation_id: operationId,
+        p_order: rpcOrder,
+        p_installment_ids: nextInstallments.map((item) => item.id)
+    }
+
+    return {
+        order,
+        loan: loanUpdated,
+        installments: allUpdatedInstallments,
+        operationId,
+        rpcPayload,
+        remoteCommitEligible: loan.syncStatus === 'synced'
+    }
+}
+
 async function updateSalesOrderInternal(id: string, data: Partial<SalesOrder>, options?: OrderFormSaveOptions) {
     reportOrderSaveProgress(options, 'preparing')
     const existing = await measureSalesOrderStage(
@@ -4075,18 +4281,29 @@ async function updateSalesOrderInternal(id: string, data: Partial<SalesOrder>, o
     options?.trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
 
     await assertSalesOrderHidePermissions(existing.workspaceId, {
-        paymentMethod: data.paymentMethod,
-        status: data.status
+        paymentMethod: data.paymentMethod
     })
 
     await assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id)
 
-    if (existing.status !== 'draft') {
-        throw new Error('Only draft sales orders can be edited')
+    const isFinancedReservedUnpaidEdit = isEditableUnpaidReservedSalesOrder(existing)
+        && isOrderFinancingMethod(existing.paymentMethod)
+    if (isFinancedReservedUnpaidEdit
+        && shouldUseCloudBusinessData(existing.workspaceId)
+        && isOnline(existing.workspaceId)) {
+        await hydrateOrderFinancingFromSupabase(existing.workspaceId, existing.id, existing.linkedLoanId!)
     }
 
     const now = new Date().toISOString()
     const activePayments = await listActiveOrderPayments(existing.workspaceId, 'sales_order', existing.id)
+    if (isEditableUnpaidReservedSalesOrder(existing) && activePayments.length > 0) {
+        throw new Error('Orders with posted payments cannot be edited')
+    }
+    const isReservedUnpaidEdit = isEditableUnpaidReservedSalesOrder(existing)
+        && activePayments.length === 0
+    if (existing.status !== 'draft' && !isReservedUnpaidEdit) {
+        throw new Error('Only draft or unpaid reserved sales orders can be edited')
+    }
     if (activePayments.some((payment) => payment.metadata?.isDownPayment !== true)) {
         throw new Error('Orders with posted installment payments cannot be edited')
     }
@@ -4094,15 +4311,23 @@ async function updateSalesOrderInternal(id: string, data: Partial<SalesOrder>, o
         activePayments.reduce((sum, payment) => sum + payment.amount, 0),
         data.currency || existing.currency
     )
-    const salesAccountAgentIdWasProvided = Object.prototype.hasOwnProperty.call(data, 'salesAccountAgentId')
+    const salesAccountAgentIdWasProvided = !isReservedUnpaidEdit
+        && Object.prototype.hasOwnProperty.call(data, 'salesAccountAgentId')
     const salesAccountAgentId = salesAccountAgentIdWasProvided
         ? data.salesAccountAgentId ?? null
         : existing.salesAccountAgentId ?? null
-    const counterpartyWasChanged = data.businessPartnerId !== undefined || data.customerId !== undefined
+    const counterpartyWasChanged = !isReservedUnpaidEdit
+        && (data.businessPartnerId !== undefined || data.customerId !== undefined)
     const salesAccount = salesAccountAgentId && (salesAccountAgentIdWasProvided || counterpartyWasChanged)
         ? await resolveSalesAccountAgentCounterparty(existing.workspaceId, salesAccountAgentId)
         : null
-    const counterparty = salesAccount
+    const counterparty = isReservedUnpaidEdit
+        ? await normalizeSalesOrderCounterparty({
+            businessPartnerId: existing.businessPartnerId ?? null,
+            customerId: existing.businessPartnerId ?? existing.customerId,
+            customerName: existing.customerName
+        })
+        : salesAccount
         ? await normalizeSalesOrderCounterparty({
             businessPartnerId: salesAccount.partner.id,
             customerId: salesAccount.partner.id,
@@ -4135,9 +4360,18 @@ async function updateSalesOrderInternal(id: string, data: Partial<SalesOrder>, o
     )
     const workspace = await db.workspaces.get(existing.workspaceId)
     const commissionEnabled = data.commissionEnabled ?? existing.commissionEnabled ?? true
-    const updated: SalesOrder = {
+    let updated: SalesOrder = {
         ...existing,
         ...data,
+        status: existing.status,
+        reservedAt: existing.reservedAt ?? null,
+        actualDeliveryDate: existing.actualDeliveryDate ?? null,
+        ...(isReservedUnpaidEdit ? {
+            businessPartnerId: existing.businessPartnerId ?? null,
+            customerId: existing.businessPartnerId ?? existing.customerId,
+            customerName: existing.customerName,
+            shippingAddress: existing.shippingAddress
+        } : {}),
         salesAccountAgentId,
         commissionEnabled,
         // A mode exists only while an order has commission attribution. When
@@ -4164,6 +4398,30 @@ async function updateSalesOrderInternal(id: string, data: Partial<SalesOrder>, o
     }
     if (confirmedAdjustments.length === 0) delete updated.orderAdjustments
 
+    let financedEdit: PendingFinancedSalesOrderEdit | null = null
+    if (isFinancedReservedUnpaidEdit) {
+        if (data.paymentMethod !== undefined && data.paymentMethod !== existing.paymentMethod) {
+            throw new Error('financed_order_payment_method_locked')
+        }
+        const queuedEdit = shouldUseCloudBusinessData(existing.workspaceId) && !options?.requireRemoteConfirmation
+            ? await db.offline_mutations
+                .where('[entityType+entityId+status]')
+                .equals(['loan_commands', existing.id, 'pending'])
+                .first()
+            : undefined
+        const queuedPayload = queuedEdit?.payload.payload && typeof queuedEdit.payload.payload === 'object'
+            ? queuedEdit.payload.payload as Record<string, unknown>
+            : null
+        const operationId = options?.financingOperationId
+            || (typeof queuedPayload?.p_operation_id === 'string' ? queuedPayload.p_operation_id : generateId())
+        financedEdit = await preparePendingFinancedSalesOrderEdit(existing, updated, now, operationId)
+        if (queuedPayload) {
+            financedEdit.rpcPayload.p_expected_order_version = queuedPayload.p_expected_order_version
+            financedEdit.rpcPayload.p_expected_loan_version = queuedPayload.p_expected_loan_version
+        }
+        updated = financedEdit.order
+    }
+
     updated.nextDueDate = isOrderFinancingMethod(updated.paymentMethod) ? updated.firstDueDate || null : null
     if (updated.paymentMethod !== existing.paymentMethod) {
         await assertSalesOrderHidePermissions(existing.workspaceId, {
@@ -4174,32 +4432,100 @@ async function updateSalesOrderInternal(id: string, data: Partial<SalesOrder>, o
         await assertOrderStorageAccess(updated)
         await assertSalesOrderMinimumPrices(updated, options)
         await assertSalesOrderProductsAvailable(updated)
+        if (isReservedUnpaidEdit
+            && (!shouldUseCloudBusinessData(existing.workspaceId) || !isOnline(existing.workspaceId))) {
+            await assertSalesStockAvailable(updated, existing.id, existing)
+        }
     })
     reportOrderSaveProgress(options, 'payment')
-    await measureSalesOrderStage(
-        options?.trace,
-        'crudDebugger.stages.salesOrderPayment',
-        'unknown',
-        () => appendInitialOrderPaymentTransaction('sales', updated, options),
-        'crudDebugger.details.salesOrderPaymentBoundary'
-    )
-    await measureSalesOrderStage(
-        options?.trace,
-        'crudDebugger.stages.salesOrderLocalWrite',
-        'persistence',
-        () => db.sales_orders.put(updated),
-        'crudDebugger.details.dexiePersistence'
-    )
-    const orderForSync = hasOrderAdjustmentsUpdate && confirmedAdjustments.length === 0
-        ? { ...updated, orderAdjustments: null }
-        : updated
     reportOrderSaveProgress(options, 'saving')
-    await syncUpsertEntities(
-        'sales_orders',
-        [orderForSync as unknown as Record<string, unknown> & { id: string; version: number }],
-        existing.workspaceId,
-        { requireRemoteConfirmation: options?.requireRemoteConfirmation, trace: options?.trace }
-    )
+    if (financedEdit) {
+        const canCommitFinancedEditRemotely = shouldUseCloudBusinessData(existing.workspaceId)
+            && isOnline(existing.workspaceId)
+            && existing.syncStatus === 'synced'
+            && financedEdit.remoteCommitEligible
+        if (canCommitFinancedEditRemotely) {
+            const { data: result, error } = await measureSalesOrderStage(
+                options?.trace,
+                'crudDebugger.stages.salesOrderRemote',
+                'network',
+                () => runMutation('orders.updatePendingFinancedSalesOrder', () =>
+                    supabase.rpc('update_pending_financed_sales_order', financedEdit!.rpcPayload)
+                ),
+                'crudDebugger.details.salesOrderRemoteRoundTrip'
+            )
+            if (error) {
+                const reservationError = normalizeStockReservationError(error)
+                if (reservationError) throw reservationError
+                throw normalizeSupabaseActionError(error)
+            }
+            const aggregate = await measureSalesOrderStage(
+                options?.trace,
+                'crudDebugger.stages.salesOrderResponse',
+                'response',
+                () => persistLoanAggregateRpcResult(result)
+            )
+            if (!aggregate.linkedOrder || aggregate.linkedOrder.id !== existing.id) {
+                throw createRemoteOrderSaveConfirmationError()
+            }
+            updated = aggregate.linkedOrder as SalesOrder
+        } else {
+            if (shouldUseCloudBusinessData(existing.workspaceId) && options?.requireRemoteConfirmation) {
+                throw createRemoteOrderSaveConfirmationError()
+            }
+            await measureSalesOrderStage(
+                options?.trace,
+                'crudDebugger.stages.salesOrderLocalWrite',
+                'persistence',
+                () => db.transaction('rw', [
+                    db.sales_orders,
+                    db.loans,
+                    db.loan_installments,
+                    db.offline_mutations
+                ], async () => {
+                    await db.sales_orders.put(updated)
+                    await db.loans.put(financedEdit!.loan)
+                    if (financedEdit!.installments.length > 0) {
+                        await db.loan_installments.bulkPut(financedEdit!.installments)
+                    }
+                    if (shouldUseCloudBusinessData(existing.workspaceId)) {
+                        await addToOfflineMutations(
+                            'loan_commands',
+                            financedEdit!.order.id,
+                            'create',
+                            { action: 'order_edit', payload: financedEdit!.rpcPayload },
+                            existing.workspaceId
+                        )
+                    }
+                }),
+                'crudDebugger.details.dexiePersistence'
+            )
+        }
+    } else {
+        await measureSalesOrderStage(
+            options?.trace,
+            'crudDebugger.stages.salesOrderPayment',
+            'unknown',
+            () => appendInitialOrderPaymentTransaction('sales', updated, options),
+            'crudDebugger.details.salesOrderPaymentBoundary'
+        )
+        await measureSalesOrderStage(
+            options?.trace,
+            'crudDebugger.stages.salesOrderLocalWrite',
+            'persistence',
+            () => db.sales_orders.put(updated),
+            'crudDebugger.details.dexiePersistence'
+        )
+        const orderForSync = hasOrderAdjustmentsUpdate && confirmedAdjustments.length === 0
+            ? { ...updated, orderAdjustments: null }
+            : updated
+        await syncUpsertEntities(
+            'sales_orders',
+            [orderForSync as unknown as Record<string, unknown> & { id: string; version: number }],
+            existing.workspaceId,
+            { requireRemoteConfirmation: options?.requireRemoteConfirmation, trace: options?.trace }
+        )
+    }
     invalidateOrdersList(existing.workspaceId, 'sales')
     reportOrderSaveProgress(options, 'confirming')
     await synchronizeSalesAccountCommissionBeneficiaryBestEffort(existing.workspaceId, updated.id, updated.createdBy)

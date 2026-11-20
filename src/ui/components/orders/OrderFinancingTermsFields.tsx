@@ -37,6 +37,7 @@ type OrderFinancingTermsFieldsProps = {
     installmentFrequency: InstallmentFrequency
     onInstallmentFrequencyChange: (value: InstallmentFrequency) => void
     initialPaymentRequired?: boolean
+    initialPaymentDisabled?: boolean
     disabled?: boolean
 }
 
@@ -55,6 +56,7 @@ export function OrderFinancingTermsFields({
     installmentFrequency,
     onInstallmentFrequencyChange,
     initialPaymentRequired = false,
+    initialPaymentDisabled = false,
     disabled = false
 }: OrderFinancingTermsFieldsProps) {
     const { t } = useTranslation()
@@ -116,7 +118,7 @@ export function OrderFinancingTermsFields({
                     onChange={(event) => onInitialPaymentAmountChange(
                         sanitizeNumericInput(event.target.value, { allowDecimal: true, maxFractionDigits: 3 })
                     )}
-                    disabled={disabled}
+                    disabled={disabled || initialPaymentDisabled}
                 />
             </div>
             <div className="min-w-0 space-y-2">

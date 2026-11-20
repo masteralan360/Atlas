@@ -2998,6 +2998,9 @@
       "editorReadOnly": "الطلب مقفل",
       "editorReadOnlyStatus": "هذا الطلب {{status}} ولا يمكن تعديله بعد الآن.",
       "editorReadOnlyDescription": "يمكنك مراجعة التفاصيل النهائية هنا. استخدم رجوع للعودة إلى الطلبات.",
+      "customerInformationLockedTitle": "معلومات العميل مقفلة",
+      "customerInformationLockedMessage": "لا يمكن تغيير معلومات العميل في طلب محجوز.",
+      "customerInformationLockedDescription": "يبقى العميل وحساب المبيعات وعنوان الشحن كما هي أثناء تعديل هذا الطلب.",
       "saveProgressTitle": "جارٍ حفظ الطلب",
       "saveProgressPreparing": "جارٍ تجهيز الطلب…",
       "saveProgressPayment": "جارٍ تسجيل الدفعة…",
@@ -3104,7 +3107,20 @@
         "initialPaymentRequired": "أدخل مبلغ الدفعة المقدمة. أدخل 0 إذا لم توجد دفعة مقدمة.",
         "initialPaymentMustBeLessThanTotal": "يجب أن يكون مبلغ الدفعة المقدمة أقل من إجمالي الطلب.",
         "loanRepaymentTransactionUnavailable": "المعاملة الأصلية لسداد هذا القرض غير متاحة.",
-        "returnRequestIdentityMismatch": "تغير طلب الإرجاع. حدّث الطلب قبل المحاولة مجدداً."
+        "returnRequestIdentityMismatch": "تغير طلب الإرجاع. حدّث الطلب قبل المحاولة مجدداً.",
+        "financedOrderLoanMissing": "تعذر تحميل القرض المرتبط. حدّث الطلب ثم حاول مرة أخرى.",
+        "financedOrderLoanMismatch": "تغير القرض المرتبط أو لم يعد مطابقاً لهذا الطلب. حدّثه ثم حاول مرة أخرى.",
+        "financedOrderHasPaymentHistory": "لدى هذا الطلب سجل دفعات، لذلك لم يعد بالإمكان تعديل شروط تمويله.",
+        "financedOrderCurrencyLocked": "لا يمكن تغيير العملة ما دام هذا القرض مرتبطاً بالطلب.",
+        "financedOrderTotalInvalid": "يجب أن يكون إجمالي الطلب المعدل أكبر من صفر.",
+        "financedOrderScheduleRequired": "اختر تاريخ استحقاق القسط الأول.",
+        "financedOrderScheduleInvalid": "جدول الأقساط غير صالح. تحقق من التاريخ والتكرار وعدد الأقساط.",
+        "financedOrderPaymentMethodLocked": "أبقِ طريقة الدفع الحالية للطلب: قرض أو أقساط.",
+        "financedOrderNotEditable": "يمكن تعديل الطلبات المعلقة غير المدفوعة التي لم تسجل عليها دفعة فقط.",
+        "financedOrderStillUnpaid": "يجب أن يبقى الطلب المعدل غير مدفوع.",
+        "financedOrderConflict": "تغير الطلب أو جدول الأقساط. حدّث الطلب ثم حاول مرة أخرى.",
+        "financedOrderCreditLimitExceeded": "يتجاوز الطلب المعدل حد الائتمان الخاص بالعميل.",
+        "financedOrderCreditRateUnavailable": "تعذر التحقق من حد ائتمان العميل بسبب عدم توفر سعر صرف."
       }
     },
     "adjustments": {

@@ -4605,6 +4605,9 @@
       "editorReadOnly": "Order locked",
       "editorReadOnlyStatus": "This order is {{status}} and can no longer be edited.",
       "editorReadOnlyDescription": "You can review the finalized details here. Use Back to return to orders.",
+      "customerInformationLockedTitle": "Customer information locked",
+      "customerInformationLockedMessage": "Customer information cannot be changed on a reserved order.",
+      "customerInformationLockedDescription": "The customer, sales account, and shipping address stay unchanged while you edit this order.",
       "saveProgressTitle": "Saving order",
       "saveProgressPreparing": "Preparing order…",
       "saveProgressPayment": "Recording payment…",
@@ -4712,7 +4715,20 @@
         "initialPaymentRequired": "Enter an initial payment amount. Use 0 if there is no initial payment.",
         "initialPaymentMustBeLessThanTotal": "The initial payment must be less than the order total.",
         "loanRepaymentTransactionUnavailable": "The original transaction for this loan repayment is unavailable.",
-        "returnRequestIdentityMismatch": "This return request changed. Refresh the order before trying again."
+        "returnRequestIdentityMismatch": "This return request changed. Refresh the order before trying again.",
+        "financedOrderLoanMissing": "The linked loan could not be loaded. Refresh the order and try again.",
+        "financedOrderLoanMismatch": "The linked loan changed or does not match this order. Refresh and try again.",
+        "financedOrderHasPaymentHistory": "This order has payment history, so its financing terms can no longer be edited.",
+        "financedOrderCurrencyLocked": "The currency cannot be changed while this loan is linked.",
+        "financedOrderTotalInvalid": "The edited order total must be greater than zero.",
+        "financedOrderScheduleRequired": "Select a first due date for the installment schedule.",
+        "financedOrderScheduleInvalid": "The installment schedule is invalid. Check the date, frequency, and installment count.",
+        "financedOrderPaymentMethodLocked": "Keep the order on its existing Loan or Installments payment method.",
+        "financedOrderNotEditable": "Only unpaid pending orders with no posted payment can be edited.",
+        "financedOrderStillUnpaid": "The edited order must remain unpaid.",
+        "financedOrderConflict": "The order or installment schedule changed. Refresh the order and try again.",
+        "financedOrderCreditLimitExceeded": "The updated order exceeds the customer's credit limit.",
+        "financedOrderCreditRateUnavailable": "The customer's credit limit cannot be checked because an exchange rate is unavailable."
       }
     },
     "adjustments": {

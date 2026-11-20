@@ -308,17 +308,18 @@ function addMutationRecoveryTargets(
         const command = payload.payload && typeof payload.payload === 'object'
             ? payload.payload as Record<string, unknown>
             : {}
-        const loanId = command.loan_id ?? (payload.action === 'create' ? mutation.entityId : undefined)
+        const loanId = command.loan_id ?? command.p_loan_id
+            ?? (payload.action === 'create' ? mutation.entityId : undefined)
         if (typeof loanId === 'string') addLoanAggregateTargets(targets, loanId, mutation.workspaceId)
         for (const id of [command.payment_transaction_id, command.reversal_transaction_id, command.original_transaction_id]) {
             addRecoveryIdTarget(targets, 'payment_transactions', id)
         }
         for (const id of [command.account_id]) addRecoveryIdTarget(targets, 'payment_accounts', id)
         addRecoveryIdTarget(targets, 'business_partners', command.linked_party_id)
-        const orderId = command.order_id
+        const orderId = command.order_id ?? command.p_order_id
         if (typeof orderId === 'string') {
             if (command.order_type === 'purchase') addRecoveryIdTarget(targets, 'purchase_orders', orderId)
-            if (command.order_type === 'sales') addRecoveryIdTarget(targets, 'sales_orders', orderId)
+            if (command.order_type === 'sales' || payload.action === 'order_edit') addRecoveryIdTarget(targets, 'sales_orders', orderId)
         }
         return
     }
