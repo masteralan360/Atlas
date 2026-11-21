@@ -4,10 +4,6 @@ PWA Faster
 
 Post Service Notification
 
-Sales Orders Page Special Print With Products
-
-Discount POS Quick Order
-
 Product Live Recongnition on camera
 
 Allow Stopping the Reciept to R2
@@ -23,13 +19,6 @@ Fix Purchase Order form page and fix purchase order error, order_payment_source_
 Transaction Reconciliation & Integrity Audit, Expandable,Auto Repeated, Plain English Explanation, AGENTS.md guide
 
 Add by unit in adjustment
-
-#
-Days of month for visits
-Weekly Maintenence
-
-Replace Maintenence Incase homeowner wasn't present
-#
 
 #
 

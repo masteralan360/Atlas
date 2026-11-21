@@ -26,6 +26,7 @@ import { getAppliedCurrencyConversion } from '@/lib/orderCurrency'
 import { activeProductCommissionRule } from './productCommissions'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { queryKeys } from '@/query/queryKeys'
+import { isCrudDebuggerEnabled, runCrudOperation, type CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import type {
   Agent,
   ProductCommissionRule,
@@ -81,6 +82,11 @@ export interface OrdersProductCommissionPreviewContext {
   canAssignSalesAgents: boolean
   canViewAllAgentCommissions: boolean
   canViewOwnAgentCommissions: boolean
+}
+
+export interface OrdersListPageOptions {
+  /** Trace this hook's primary page read in the development CRUD debugger. */
+  debugTraceRead?: boolean
 }
 
 const EMPTY_ORDERS_PAGE: OrdersListPage = {
@@ -466,49 +472,69 @@ export async function fetchOrdersListPage(
   localContext?: LocalOrdersListContext,
   commissionPreview?: OrdersProductCommissionPreviewContext,
   signal?: AbortSignal,
+  trace?: CrudTraceHandle
 ): Promise<OrdersListPage> {
   const workspaceId = query.workspaceId
   if (!workspaceId || query.enabled === false) return EMPTY_ORDERS_PAGE
 
   if (isOnline(workspaceId) && !isLocalWorkspaceMode(workspaceId)) {
-    const response = await runSupabaseAction('orders.listPage', () => {
-      const request = getSupabaseClientForTable(
-        query.orderType === 'sales' ? 'sales_orders' : 'purchase_orders'
-      ).rpc('get_orders_list_page_optimized', {
-      p_workspace_id: workspaceId,
-      p_order_type: query.orderType,
-      p_created_from: query.createdFrom ?? null,
-      p_created_to: query.createdTo ?? null,
-      p_fulfilled_from: query.fulfilledFrom ?? null,
-      p_fulfilled_to: query.fulfilledTo ?? null,
-      p_status: query.status ?? 'all',
-      p_payment_status: query.paymentStatus ?? 'all',
-      p_ecommerce_filter: query.ecommerceFilter ?? 'all',
-      p_commission_mode: query.commissionMode ?? 'all',
-      p_search: query.search ?? '',
-      p_include_archived: query.includeArchived ?? false,
-      p_page: query.page,
-      p_page_size: query.pageSize,
-      p_include_product_commission_preview: false
+    const fetchPage = async () => {
+      const result = await runSupabaseAction('orders.listPage', () => {
+        const request = getSupabaseClientForTable(
+          query.orderType === 'sales' ? 'sales_orders' : 'purchase_orders'
+        ).rpc('get_orders_list_page_optimized', {
+          p_workspace_id: workspaceId,
+          p_order_type: query.orderType,
+          p_created_from: query.createdFrom ?? null,
+          p_created_to: query.createdTo ?? null,
+          p_fulfilled_from: query.fulfilledFrom ?? null,
+          p_fulfilled_to: query.fulfilledTo ?? null,
+          p_status: query.status ?? 'all',
+          p_payment_status: query.paymentStatus ?? 'all',
+          p_ecommerce_filter: query.ecommerceFilter ?? 'all',
+          p_commission_mode: query.commissionMode ?? 'all',
+          p_search: query.search ?? '',
+          p_include_archived: query.includeArchived ?? false,
+          p_page: query.page,
+          p_page_size: query.pageSize,
+          p_include_product_commission_preview: false
+        })
+        return signal ? request.abortSignal(signal) : request
       })
-      return signal ? request.abortSignal(signal) : request
-    })
+      if (result.error) throw normalizeSupabaseActionError(result.error)
+      return result
+    }
+    const response = trace
+      ? await trace.measure('crudDebugger.stages.salesOrdersListRemote', 'network', fetchPage, 'crudDebugger.details.supabaseRoundTrip')
+      : await fetchPage()
 
-    if (response.error) throw normalizeSupabaseActionError(response.error)
-    const payload = response.data as Record<string, unknown> | null
-    if (!payload || !Array.isArray(payload.orders)) throw new Error('Invalid orders list response.')
-
-    const fetchedAt = new Date().toISOString()
-    const rows = payload.orders.map((value) => {
-      const row = normalizeOrder(value, workspaceId)
-      row.lastSyncedAt = fetchedAt
-      return row
-    })
+    const normalizeResponse = () => {
+      const payload = response.data as Record<string, unknown> | null
+      if (!payload || !Array.isArray(payload.orders)) throw new Error('Invalid orders list response.')
+      const fetchedAt = new Date().toISOString()
+      const rows = payload.orders.map((value) => {
+        const row = normalizeOrder(value, workspaceId)
+        row.lastSyncedAt = fetchedAt
+        return row
+      })
+      return { payload, rows }
+    }
+    const { payload, rows } = trace
+      ? await trace.measure('crudDebugger.stages.salesOrdersListResponse', 'response', normalizeResponse)
+      : normalizeResponse()
     const commerceAttributionByOrderId = query.orderType === 'sales' && query.includeCommerceAttribution
-      ? await fetchCommerceOrderAttributions(workspaceId, rows.map((row) => row.id), { signal })
+      ? trace
+        ? await trace.measure(
+          'crudDebugger.stages.salesOrdersListAttribution',
+          'network',
+          () => fetchCommerceOrderAttributions(workspaceId, rows.map((row) => row.id), { signal }),
+          'crudDebugger.details.supabaseRoundTrip'
+        )
+        : await fetchCommerceOrderAttributions(workspaceId, rows.map((row) => row.id), { signal })
       : {}
     const table = (query.orderType === 'sales' ? db.sales_orders : db.purchase_orders) as unknown as Table<SalesOrder | PurchaseOrder, string>
-    if (rows.length > 0) {
+    const syncPageCache = async () => {
+      if (rows.length === 0) return
       const existingRows = await table.bulkGet(rows.map((row) => row.id))
       const cacheRows = rows.filter((row, index) => {
         const existing = existingRows[index]
@@ -519,6 +545,11 @@ export async function fetchOrdersListPage(
         return !Number.isFinite(existingUpdatedAt) || !Number.isFinite(remoteUpdatedAt) || remoteUpdatedAt >= existingUpdatedAt
       })
       if (cacheRows.length > 0) await table.bulkPut(cacheRows as never[])
+    }
+    if (trace) {
+      await trace.measure('crudDebugger.stages.salesOrdersListCache', 'persistence', syncPageCache, 'crudDebugger.details.dexiePersistence')
+    } else {
+      await syncPageCache()
     }
 
     const asNumber = (value: unknown) => Number(value) || 0
@@ -550,16 +581,21 @@ export async function fetchOrdersListPage(
     }
   }
 
-  const storageAccess = localContext?.storageAccess ?? await getLocalStorageAccessSnapshot(workspaceId)
-  const viewOwn = localContext?.viewOwn ?? { isRestricted: false }
-  return readLocalOrdersListPage(
-    query,
-    storageAccess,
-    viewOwn,
-    localContext?.permissionKeys,
-    commissionPreview,
-    localContext?.agentSalesAccountsFeatureEnabled
-  )
+  const readLocalPage = async () => {
+    const storageAccess = localContext?.storageAccess ?? await getLocalStorageAccessSnapshot(workspaceId)
+    const viewOwn = localContext?.viewOwn ?? { isRestricted: false }
+    return readLocalOrdersListPage(
+      query,
+      storageAccess,
+      viewOwn,
+      localContext?.permissionKeys,
+      commissionPreview,
+      localContext?.agentSalesAccountsFeatureEnabled
+    )
+  }
+  return trace
+    ? trace.measure('crudDebugger.stages.salesOrdersListLocal', 'data', readLocalPage)
+    : readLocalPage()
 }
 
 async function fetchRemoteProductCommissionPreview(query: OrdersListPageQuery) {
@@ -609,7 +645,11 @@ async function getLocalStorageAccessSnapshot(workspaceId: string): Promise<Order
   }
 }
 
-export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?: OrdersProductCommissionPreviewContext) {
+export function useOrdersListPage(
+  query: OrdersListPageQuery,
+  commissionPreview?: OrdersProductCommissionPreviewContext,
+  options: OrdersListPageOptions = {}
+) {
   const online = useNetworkStatus()
   const queryClient = useQueryClient()
   const { features, activeWorkspace } = useWorkspace()
@@ -643,20 +683,51 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
   const agentSalesAccountsFeatureEnabled = Boolean(
     activeWorkspace?.id === workspaceId && features.agent_sales_accounts
   )
+  const shouldTraceRead = options.debugTraceRead === true
+  const lastTracedLocalPageKey = useRef<string | null>(null)
+  const localTraceKey = JSON.stringify([
+    queryKey,
+    storageAccess.signature,
+    viewOwn.isRestricted,
+    viewOwn.isCoachOwnOnly,
+    viewOwn.userId,
+    permissions?.permissionKeys,
+    agentSalesAccountsFeatureEnabled
+  ])
   const usesRemote = Boolean(workspaceId && online && !isLocalWorkspaceMode(workspaceId))
   const localPage = useLiveQuery(
-    () => request.enabled === false || usesRemote
-      ? EMPTY_ORDERS_PAGE
-      : readLocalOrdersListPage(
-        request,
-        storageAccess,
-        viewOwn,
-        permissions?.permissionKeys,
-        undefined,
-        agentSalesAccountsFeatureEnabled,
-        request.includeCommerceAttribution === true
-      ),
-    [request, storageAccess.signature, viewOwn.isRestricted, viewOwn.isCoachOwnOnly, viewOwn.userId, permissions?.permissionKeys, usesRemote, agentSalesAccountsFeatureEnabled],
+    async () => {
+      const readPage = () => request.enabled === false || usesRemote
+        ? EMPTY_ORDERS_PAGE
+        : readLocalOrdersListPage(
+          request,
+          storageAccess,
+          viewOwn,
+          permissions?.permissionKeys,
+          undefined,
+          agentSalesAccountsFeatureEnabled,
+          request.includeCommerceAttribution === true
+        )
+      if (!shouldTraceRead || request.orderType !== 'sales' || !isCrudDebuggerEnabled()
+        || request.enabled === false || usesRemote || !storageAccess.isReady
+        || lastTracedLocalPageKey.current === localTraceKey) {
+        return readPage()
+      }
+
+      lastTracedLocalPageKey.current = localTraceKey
+      try {
+        return await runCrudOperation(
+          { action: 'read', entityKey: 'salesOrder', workspaceId },
+          (trace) => trace
+            ? trace.measure('crudDebugger.stages.salesOrdersListLocal', 'data', readPage)
+            : readPage()
+        )
+      } catch (error) {
+        if (lastTracedLocalPageKey.current === localTraceKey) lastTracedLocalPageKey.current = null
+        throw error
+      }
+    },
+    [request, localTraceKey, storageAccess.signature, viewOwn.isRestricted, viewOwn.isCoachOwnOnly, viewOwn.userId, permissions?.permissionKeys, usesRemote, agentSalesAccountsFeatureEnabled, shouldTraceRead],
     EMPTY_ORDERS_PAGE
   )
   const localCommissionPreview = useLiveQuery(
@@ -686,7 +757,14 @@ export function useOrdersListPage(query: OrdersListPageQuery, commissionPreview?
   )
   const remotePageQuery = useQuery({
     queryKey: queryKeys.orders.page(request, viewOwn),
-    queryFn: ({ signal }) => fetchOrdersListPage(request, undefined, undefined, signal),
+    queryFn: ({ signal }) => {
+      const fetchPage = (trace?: CrudTraceHandle) => fetchOrdersListPage(request, undefined, undefined, signal, trace)
+      if (!shouldTraceRead || request.orderType !== 'sales' || !isCrudDebuggerEnabled()) return fetchPage()
+      return runCrudOperation(
+        { action: 'read', entityKey: 'salesOrder', workspaceId },
+        (trace) => fetchPage(trace)
+      )
+    },
     enabled: request.enabled !== false && Boolean(workspaceId) && usesRemote,
   })
   const remoteCommissionPreviewQuery = useQuery({

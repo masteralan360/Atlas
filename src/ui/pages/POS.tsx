@@ -4043,6 +4043,16 @@ export function POS() {
                 ? getPrimaryCheckoutRate(usedCurrencies, settlementCurrency, knownRates) ?? exchangeRates[0]
                 : null
 
+            const enteredTotalDiscount = Number.parseFloat(discountValue)
+            const hasEnteredTotalDiscount = Number.isFinite(enteredTotalDiscount) && enteredTotalDiscount > 0
+            const discountRate = !hasEnteredTotalDiscount
+                ? 0
+                : discountType === 'percent'
+                    ? Math.min(enteredTotalDiscount, 100) / 100
+                    : originalSubtotal > 0
+                        ? Math.min(enteredTotalDiscount / originalSubtotal, 1)
+                        : 0
+            let discountedSubtotal = 0
             const orderItems: SalesOrderItem[] = cart.map((item) => {
                 const product = findStockProduct(item.product_id, item.storageId)
                 const storageId = item.storageId || selectedStorageId
@@ -4061,7 +4071,16 @@ export function POS() {
                     ))
                     : undefined
                 const effectivePrice = getCartEffectivePrice(item)
-                const convertedUnitPrice = roundOrderValue(convertPrice(effectivePrice, originalCurrency, settlementCurrency))
+                const basePrice = getCartBasePrice(item)
+                const bulkDiscountMatchesPrice = discountRate > 0
+                    && Math.abs(effectivePrice - basePrice * (1 - discountRate)) < 0.001
+                // POS stores its total discount as a negotiated unit price. For
+                // Quick Orders, restore only prices that match that bulk discount
+                // so the sale order records the discount at order level instead.
+                const orderUnitPrice = bulkDiscountMatchesPrice ? basePrice : effectivePrice
+                const convertedUnitPrice = roundOrderValue(convertPrice(orderUnitPrice, originalCurrency, settlementCurrency))
+                const convertedEffectiveUnitPrice = roundOrderValue(convertPrice(effectivePrice, originalCurrency, settlementCurrency))
+                discountedSubtotal += roundOrderValue(convertedEffectiveUnitPrice * item.quantity)
                 const coefficient = item.unit_factor ?? 1
                 const selectedUnitCostPrice = item.uom_cost_price != null
                     ? convertPrice(item.uom_cost_price, sourceCurrency, originalCurrency)
@@ -4131,7 +4150,7 @@ export function POS() {
                         : {}),
                     lineTotal: roundOrderValue(convertedUnitPrice * item.quantity),
                     originalCurrency,
-                    originalUnitPrice: effectivePrice,
+                    originalUnitPrice: orderUnitPrice,
                     convertedUnitPrice,
                     settlementCurrency,
                     ...costSnapshot,
@@ -4156,12 +4175,14 @@ export function POS() {
                 }
             })
             const subtotal = roundOrderValue(orderItems.reduce((sum, item) => sum + item.lineTotal, 0))
+            const total = roundOrderValue(Math.max(0, discountedSubtotal))
+            const orderDiscount = roundOrderValue(Math.max(0, subtotal - total))
             const paymentMethod = checkout.paymentMethod as SalesOrder['paymentMethod']
             const isFinanced = isOrderFinancingMethod(paymentMethod)
             const initialPaymentAmount = isFinanced
                 ? roundOrderValue(Math.max(0, checkout.initialPaymentAmount))
                 : 0
-            const remainingBalance = roundOrderValue(Math.max(0, subtotal - initialPaymentAmount))
+            const remainingBalance = roundOrderValue(Math.max(0, total - initialPaymentAmount))
             const sourceStorageIds = Array.from(new Set(orderItems
                 .map((item) => item.storageId)
                 .filter((storageId): storageId is string => Boolean(storageId) && storageId !== SERVICES_VIRTUAL_STORAGE_ID)))
@@ -4174,9 +4195,9 @@ export function POS() {
                 sourceStorageId: sourceStorageIds.length === 1 ? sourceStorageIds[0] : null,
                 items: orderItems,
                 subtotal,
-                discount: 0,
+                discount: orderDiscount,
                 tax: 0,
-                total: subtotal,
+                total,
                 currency: settlementCurrency,
                 exchangeRate: primaryRate?.rate ?? null,
                 exchangeRateSource: primaryRate?.source ?? null,
@@ -4189,10 +4210,10 @@ export function POS() {
                 paymentStatus: checkout.paymentStatus,
                 paidAmount: isFinanced
                     ? initialPaymentAmount
-                    : checkout.paymentStatus === 'paid' ? subtotal : 0,
+                    : checkout.paymentStatus === 'paid' ? total : 0,
                 balanceAmount: isFinanced
                     ? remainingBalance
-                    : checkout.paymentStatus === 'paid' ? 0 : subtotal,
+                    : checkout.paymentStatus === 'paid' ? 0 : total,
                 paidAt: !isFinanced && checkout.paymentStatus === 'paid' ? checkoutTimestamp : null,
                 paymentMethod,
                 initialPaymentAmount,

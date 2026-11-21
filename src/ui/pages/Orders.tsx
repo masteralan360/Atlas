@@ -522,7 +522,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const [productsReportTemplates, setProductsReportTemplates] = useState<StoredCustomTemplateRow[]>([])
     const [selectedProductsReportTemplate, setSelectedProductsReportTemplate] = useState<StoredCustomTemplateRow | null>(null)
     const [selectedOrderPrintMode, setSelectedOrderPrintMode] = useState<'orders' | 'productsReport' | null>(null)
-    const ordersPage = useOrdersListPage(ordersPageQuery)
+    const ordersPage = useOrdersListPage(ordersPageQuery, undefined, { debugTraceRead: activeTab === 'sales' })
     const productsReportProductIds = useMemo(
         () => [...new Set(ordersForProductsReport?.flatMap((order) => order.items
             .map((item) => item.productId)
@@ -714,7 +714,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         includeArchived: true,
         includeCommerceAttribution: activeTab === 'sales' && Boolean(features.commerce_operations),
         enabled: archivesOpen
-    })
+    }, undefined, { debugTraceRead: activeTab === 'sales' })
     const archivedPagination = usePaginationBounds({
         currentPage: archivePagination.currentPage,
         setCurrentPage: archivePagination.setCurrentPage,
