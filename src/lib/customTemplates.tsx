@@ -61,6 +61,8 @@ import {
     type PartnerAccountStatementPrintData
 } from '@/ui/components/crm/PartnerAccountStatementPrintTemplate'
 import { PartnerProductMovementsPrintTemplate, type PartnerProductMovementsPrintData } from '@/ui/components/crm/PartnerProductMovementsPrintTemplate'
+import { SalesOrdersProductsReportPrintTemplate } from '@/ui/components/orders/SalesOrdersProductsReportPrintTemplate'
+import type { SalesOrdersProductsReportData } from '@/lib/salesOrdersProductsReport'
 import { LoanAccountStatementPrintTemplate } from '@/ui/components/loans/LoanAccountStatementPrintTemplate'
 import type { LoanAccountStatementPrintData } from '@/lib/loanAccountStatement'
 import {
@@ -136,6 +138,7 @@ export const ORDER_ATLAS_STANDARD_TEMPLATE_KEY = 'orders.AtlasStandard'
 export const ORDER_ATLAS_STANDARD_RETURN_TEMPLATE_KEY = 'orders.AtlasStandardReturn'
 export const ORDER_DETAILS_TEMPLATE_KEY = 'orders.Details'
 export const ORDER_RECEIPT_TEMPLATE_KEY = 'orders.Receipt'
+export const SALES_ORDERS_PRODUCTS_REPORT_TEMPLATE_KEY = 'orders.SalesProductsReport'
 export const TRAVEL_BOOKING_TEMPLATE_KEY = 'travelTransportation.Booking'
 export const INVENTORY_TRANSFER_BATCH_TEMPLATE_KEY = 'inventoryTransfer.Batch'
 export const POSTAL_SHIPMENT_LABEL_TEMPLATE_KEY = 'postal.ShipmentLabel'
@@ -357,6 +360,17 @@ export const CUSTOM_TEMPLATE_TARGETS: CustomTemplateTarget[] = [
         get typeLabel() { return i18n.t('businessPartners.productMovements.title') },
         get description() { return i18n.t('businessPartners.productMovements.accountStatementA4TemplateDescription') },
         nativeTemplateKey: PARTNER_PRODUCT_MOVEMENTS_TEMPLATE_KEY,
+        nativeTemplateAvailable: true,
+        printFormat: 'a4',
+        page: { widthMm: 210, heightMm: 297 }
+    },
+    {
+        moduleTypeKey: SALES_ORDERS_PRODUCTS_REPORT_TEMPLATE_KEY,
+        workspaceModuleKey: 'crm',
+        get moduleLabel() { return i18n.t('orders.title', { defaultValue: 'Orders' }) },
+        get typeLabel() { return i18n.t('orders.productsReport.title', { defaultValue: 'Sales Orders Products Report' }) },
+        get description() { return i18n.t('orders.productsReport.templateDescription', { defaultValue: 'Aggregated product quantities from the current Sales Orders list.' }) },
+        nativeTemplateKey: SALES_ORDERS_PRODUCTS_REPORT_TEMPLATE_KEY,
         nativeTemplateAvailable: true,
         printFormat: 'a4',
         page: { widthMm: 210, heightMm: 297 }
@@ -750,6 +764,7 @@ export type CustomTemplatePreviewOptions = {
     partnerOrderItemsData?: PartnerOrderItemsPrintData
     partnerAccountStatementData?: PartnerAccountStatementPrintData
     partnerProductMovementsData?: PartnerProductMovementsPrintData
+    salesOrdersProductsReportData?: SalesOrdersProductsReportData
     loanAccountStatementData?: LoanAccountStatementPrintData
     travelBookingData?: {
         booking: TravelBooking
@@ -2275,6 +2290,42 @@ function createPartnerProductMovementsPreview(options: CustomTemplatePreviewOpti
     }
 }
 
+function createSalesOrdersProductsReportPreview(options: CustomTemplatePreviewOptions): TemplatePreview {
+    const data = options.salesOrdersProductsReportData || {
+        rows: [{ key: 'sample-product-pcs', item: 'Product A', quantity: 5, unit: 'pcs' }],
+        unitTotals: [{ unit: 'pcs', quantity: 5 }],
+        generatedAt: '2026-09-01T10:00:00Z'
+    } satisfies SalesOrdersProductsReportData
+    const configuredPrintLang = options.features?.print_lang
+    const printLang = options.printLang
+        || (configuredPrintLang && configuredPrintLang !== 'auto' ? configuredPrintLang : 'en')
+    const fixedPrintLang: TemplatePreview['fixedPrintLang'] = printLang.startsWith('ar')
+        ? 'ar'
+        : printLang.startsWith('ku')
+            ? 'ku'
+            : 'en'
+
+    return {
+        fields: [],
+        movableComponents: [],
+        page: { widthMm: 210, heightMm: 297 },
+        fixedPrintLang,
+        createElement: (_values, _effectiveId, printLangOverride) => (
+            <SalesOrdersProductsReportPrintTemplate
+                workspaceName={options.workspaceName}
+                printLang={printLangOverride || fixedPrintLang}
+                data={data}
+                logoUrl={options.features?.logo_url}
+            />
+        ),
+        buildPdf: (element, printLangOverride) => generateTemplatePdf({
+            element,
+            format: 'a4',
+            printLang: printLangOverride || fixedPrintLang
+        })
+    }
+}
+
 function createLoanAccountStatementPreview(options: CustomTemplatePreviewOptions): TemplatePreview {
     const loanAccountStatementData = options.loanAccountStatementData || {
         partner: { partnerName: 'Sample Partner', phone: '', address: '' },
@@ -2814,6 +2865,10 @@ export function createCustomTemplatePreview(
 
     if (target.moduleTypeKey === PARTNER_PRODUCT_MOVEMENTS_TEMPLATE_KEY) {
         return createPartnerProductMovementsPreview(options)
+    }
+
+    if (target.moduleTypeKey === SALES_ORDERS_PRODUCTS_REPORT_TEMPLATE_KEY) {
+        return createSalesOrdersProductsReportPreview(options)
     }
 
     if (target.moduleTypeKey === LOAN_ACCOUNT_STATEMENT_TEMPLATE_KEY) {

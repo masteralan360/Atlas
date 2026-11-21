@@ -66,7 +66,7 @@ interface PrintFlowProps {
     module?: string
     printSelectionOptions?: PrintSelectionNativeOption[]
     printSelectionTemplates?: PrintSelectionTemplateOption[]
-    onPrintSelection?: (format: PrintFormat, template?: StoredCustomTemplateRow, nativeTemplateKey?: string, printVersion?: OrderPrintVersion) => void
+    onPrintSelection?: (format: PrintFormat, template?: StoredCustomTemplateRow, nativeTemplateKey?: string, printVersion?: OrderPrintVersion) => void | boolean | Promise<void | boolean>
     onCreateReturnTemplate?: () => void
     onPreviewPrint?: (blob: Blob) => Promise<void>
     onPreviewSave?: (blob: Blob) => Promise<string | undefined | void>
@@ -129,6 +129,8 @@ export function PrintFlow({
     const workspaceId = user?.workspaceId
     const workspaceContacts = useWorkspaceContacts(workspaceId)
     const [selectedPrintFormat, setSelectedPrintFormat] = useState<PrintFormat | null>(null)
+    const [isLoadingPrintSelection, setIsLoadingPrintSelection] = useState(false)
+    const printSelectionInFlightRef = useRef(false)
     const previewOpenedRef = useRef(false)
     const canPrint = useMemo(() => {
         const permissionKey = `${module || 'global'}.print` as any
@@ -138,6 +140,8 @@ export function PrintFlow({
     useEffect(() => {
         if (!isOpen) {
             setSelectedPrintFormat(null)
+            setIsLoadingPrintSelection(false)
+            printSelectionInFlightRef.current = false
             previewOpenedRef.current = false
         }
     }, [isOpen])
@@ -178,16 +182,36 @@ export function PrintFlow({
         }],
         [defaultPrintFormat, printSelectionOptions, t, title]
     )
-    const handlePrintSelection = useCallback((
+    const handlePrintSelection = useCallback(async (
         format: PrintFormat,
         template?: StoredCustomTemplateRow,
         nativeTemplateKey?: string,
         printVersion?: OrderPrintVersion
     ) => {
-        if (!canPrint) return
-        onPrintSelection?.(format, template, nativeTemplateKey, printVersion)
-        setSelectedPrintFormat(format)
-    }, [canPrint, onPrintSelection])
+        if (!canPrint || printSelectionInFlightRef.current) return
+        printSelectionInFlightRef.current = true
+        try {
+            const preparation = onPrintSelection?.(format, template, nativeTemplateKey, printVersion)
+            if (preparation && typeof (preparation as Promise<void | boolean>).then === 'function') {
+                setIsLoadingPrintSelection(true)
+                const canContinue = await preparation
+                if (canContinue === false) return
+            } else if (preparation === false) {
+                return
+            }
+            setSelectedPrintFormat(format)
+        } catch (error) {
+            console.error('[PrintFlow] Failed to prepare print selection:', error)
+            toast({
+                title: t('print.previewErrorTitle', { defaultValue: 'Could not open print preview' }),
+                description: t('print.previewErrorDescription', { defaultValue: 'Please try again.' }),
+                variant: 'destructive'
+            })
+        } finally {
+            printSelectionInFlightRef.current = false
+            setIsLoadingPrintSelection(false)
+        }
+    }, [canPrint, onPrintSelection, t, toast])
     const printableFeatures = useMemo(
         () => disableInvoiceQrInLocalMode(workspaceId, features),
         [features, workspaceId]
@@ -593,6 +617,7 @@ export function PrintFlow({
                 }))}
                 onCreateReturnTemplate={canPrint ? onCreateReturnTemplate : undefined}
                 allowA4Document={allowA4Document}
+                isLoading={isLoadingPrintSelection}
             />
         </>
     )

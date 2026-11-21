@@ -4418,6 +4418,13 @@
     "cancellationWaitingForSync": "Sync earlier order changes, then try cancelling again.",
     "cancellationFailed": "The order and loan could not be cancelled together. Refresh and try again.",
     "title": "Orders",
+    "productsReport": {
+      "title": "Sales Orders Products Report",
+      "description": "Shows aggregated product quantities from all sales orders matching the current list filters.",
+      "templateDescription": "Aggregated product quantities from the current Sales Orders list.",
+      "customTemplateDescription": "Use this saved Sales Orders Products Report layout.",
+      "empty": "No products are included in the matching sales orders."
+    },
     "subtitle": "orders total",
     "paymentStatus": "Payment status",
     "draftFinancing": {

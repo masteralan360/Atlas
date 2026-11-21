@@ -24,6 +24,8 @@ export type PrintSelectionNativeOption = {
     returned?: boolean
     /** Marks a normal order print whose rows include return adjustments. */
     returnsReflected?: boolean
+    /** Business reports can allow A4 without changing invoice print entitlements. */
+    allowA4Document?: boolean
     disabled?: boolean
     warning?: string
 }
@@ -38,6 +40,8 @@ export type PrintSelectionTemplateOption = {
     returned?: boolean
     /** Marks a normal order print whose rows include return adjustments. */
     returnsReflected?: boolean
+    /** Business reports can allow A4 without changing invoice print entitlements. */
+    allowA4Document?: boolean
     disabled?: boolean
     warning?: string
 }
@@ -135,11 +139,11 @@ export function PrintSelectionModal({
 
     const isReturnedVersion = printVersion === 'returned'
     const visibleNativeOptions = nativeOptions.filter((option) =>
-        (option.format !== 'a4' || canUseA4Invoices)
+        (option.format !== 'a4' || canUseA4Invoices || option.allowA4Document)
         && (isReturnedVersion ? option.returned : !option.returned)
     )
     const visibleTemplateOptions = templateOptions.filter((option) =>
-        (option.format !== 'a4' || canUseA4Invoices)
+        (option.format !== 'a4' || canUseA4Invoices || option.allowA4Document)
         && (isReturnedVersion ? option.returned : !option.returned)
     )
     // A saved return layout is the destination of the creation action, so do not

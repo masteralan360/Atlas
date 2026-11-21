@@ -1,4 +1,4 @@
-import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ModulePageFreshness } from '@/ui/components/ModulePageFreshness'
 import { Archive, BadgeCheck, BadgeDollarSign, CalendarDays, ChevronDown, CircleCheck, CircleDashed, CircleDollarSign, ClipboardCheck, Clock3, CreditCard, EllipsisVertical, Eye, LayoutGrid, List, ListFilter, Loader2, Lock, Package, PackageCheck, PackagePlus, Pencil, Plus, Printer, RefreshCw, RotateCcw, Search, ShoppingCart, Trash2, Truck, UsersRound, Wallet, Warehouse, XCircle, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -21,6 +21,21 @@ import { useExchangeRate } from '@/context/ExchangeRateContext'
 import { getLanguageDirection } from '@/lib/i18nRouting'
 import { formatLocalizedMonthYear } from '@/lib/monthDisplay'
 import { getReportOriginId } from '@/lib/printIdentity'
+import {
+    buildCustomTemplateLayoutPdf,
+    createCustomTemplatePreview,
+    getCustomTemplatePrintLanguageWarning,
+    getCustomTemplateTarget,
+    getStoredCustomTemplateLabel,
+    isCustomTemplatePrintLanguageCompatible,
+    readCustomTemplateLayout,
+    resolveCustomTemplatePrintLanguage,
+    SALES_ORDERS_PRODUCTS_REPORT_TEMPLATE_KEY,
+    type StoredCustomTemplateRow
+} from '@/lib/customTemplates'
+import { fetchCachedCustomTemplates } from '@/lib/cachedCustomTemplates'
+import { buildSalesOrdersProductsReport } from '@/lib/salesOrdersProductsReport'
+import type { CustomTemplateLayout } from '@/lib/printPreviewEditorStore'
 import { buildOrderExchangeRatesSnapshot, convertCurrencyAmountWithLiveRates, getAppliedCurrencyConversion, getPrimaryExchangeDetails } from '@/lib/orderCurrency'
 import { ORDER_DECIMAL_STEP, roundOrderValue } from '@/lib/orderPrecision'
 import { isBelowMinimumSellingPrice } from '@/lib/minimumSellingPrice'
@@ -379,7 +394,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     const { t, i18n } = useTranslation()
     const pageDirection = getLanguageDirection(i18n.resolvedLanguage || i18n.language)
     const { user } = useAuth()
-    const { features, workspaceName } = useWorkspace()
+    const { features, workspaceName, hasCapability } = useWorkspace()
     const { permissionKeys } = useWorkspacePermissions()
     const salesOrderHidePermissions = useSalesOrderHidePermissions()
     const simpleSalesPaymentMethods = useMemo<PaymentMethodOption[]>(() => (
@@ -503,7 +518,160 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         permissionKeys,
         'salesAgentCommissions.viewOwn'
     )
+    const [ordersForProductsReport, setOrdersForProductsReport] = useState<SalesOrder[] | null>(null)
+    const [productsReportTemplates, setProductsReportTemplates] = useState<StoredCustomTemplateRow[]>([])
+    const [selectedProductsReportTemplate, setSelectedProductsReportTemplate] = useState<StoredCustomTemplateRow | null>(null)
+    const [selectedOrderPrintMode, setSelectedOrderPrintMode] = useState<'orders' | 'productsReport' | null>(null)
     const ordersPage = useOrdersListPage(ordersPageQuery)
+    const productsReportProductIds = useMemo(
+        () => [...new Set(ordersForProductsReport?.flatMap((order) => order.items
+            .map((item) => item.productId)
+            .filter((productId): productId is string => Boolean(productId))) || [])],
+        [ordersForProductsReport]
+    )
+    const productsReportProducts = useProductsByIds(workspaceId, productsReportProductIds)
+    const productsReportProductUnits = useMemo(() => productsReportProducts.reduce<Record<string, string | null | undefined>>((units, product) => {
+        units[product.id] = product.unit
+        return units
+    }, {}), [productsReportProducts])
+    const productsReportData = useMemo(() => {
+        if (!ordersForProductsReport) return null
+        return {
+            ...buildSalesOrdersProductsReport(ordersForProductsReport, productsReportProductUnits),
+            generatedAt: new Date().toISOString()
+        }
+    }, [ordersForProductsReport, productsReportProductUnits])
+    const productsReportPrintLang = features.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
+    const currentProductsReportTemplateLanguage = resolveCustomTemplatePrintLanguage(productsReportPrintLang)
+    const productsReportTarget = useMemo(
+        () => getCustomTemplateTarget(SALES_ORDERS_PRODUCTS_REPORT_TEMPLATE_KEY),
+        []
+    )
+    const availableProductsReportTemplates = useMemo(
+        () => productsReportTemplates.filter((template) => template.module_type_key === SALES_ORDERS_PRODUCTS_REPORT_TEMPLATE_KEY
+            && template.active
+            && Boolean(readCustomTemplateLayout(template))),
+        [productsReportTemplates]
+    )
+    const selectedProductsReportLayout = useMemo(
+        () => selectedProductsReportTemplate
+            && isCustomTemplatePrintLanguageCompatible(selectedProductsReportTemplate, currentProductsReportTemplateLanguage)
+            ? readCustomTemplateLayout(selectedProductsReportTemplate)
+            : null,
+        [currentProductsReportTemplateLanguage, selectedProductsReportTemplate]
+    )
+    const activeProductsReportLayout = useMemo<CustomTemplateLayout | null>(() => {
+        if (selectedProductsReportLayout) return selectedProductsReportLayout
+        if (!productsReportTarget) return null
+        return {
+            version: 1,
+            label: t('orders.productsReport.title', { defaultValue: 'Sales Orders Products Report' }),
+            moduleTypeKey: SALES_ORDERS_PRODUCTS_REPORT_TEMPLATE_KEY,
+            nativeTemplateKey: productsReportTarget.nativeTemplateKey,
+            page: productsReportTarget.page!,
+            fields: {},
+            fieldOrders: {},
+            fieldLabelOverrides: {},
+            annotations: [],
+            texts: [],
+            images: [],
+            shapes: [],
+            updatedAt: new Date().toISOString()
+        }
+    }, [productsReportTarget, selectedProductsReportLayout, t])
+    const productsReportPreview = useMemo(
+        () => productsReportTarget && productsReportData
+            ? createCustomTemplatePreview(productsReportTarget, {
+                workspaceId,
+                workspaceName,
+                features,
+                salesOrdersProductsReportData: productsReportData,
+                printLang: productsReportPrintLang
+            })
+            : undefined,
+        [features, productsReportData, productsReportPrintLang, productsReportTarget, workspaceId, workspaceName]
+    )
+    const buildEditableProductsReportPdf = useCallback(async (
+        layout: CustomTemplateLayout,
+        printLangOverride?: string,
+        effectiveId?: string
+    ) => {
+        if (!productsReportTarget || !productsReportData) {
+            throw new Error('Sales orders products report data is not available.')
+        }
+        return buildCustomTemplateLayoutPdf({
+            target: productsReportTarget,
+            layout,
+            values: {},
+            options: {
+                workspaceId,
+                workspaceName,
+                features,
+                salesOrdersProductsReportData: productsReportData,
+                printLang: printLangOverride || productsReportPrintLang
+            },
+            effectiveId,
+            fieldMode: 'layoutOverrides'
+        })
+    }, [features, productsReportData, productsReportPrintLang, productsReportTarget, workspaceId, workspaceName])
+    const productsReportPrintOptions = useMemo(
+        () => availableProductsReportTemplates.map((template) => ({
+            format: 'a4' as const,
+            template,
+            label: getStoredCustomTemplateLabel(template),
+            description: t('orders.productsReport.customTemplateDescription', {
+                defaultValue: 'Use this saved Sales Orders Products Report layout.'
+            }),
+            primary: template.primary,
+            allowA4Document: true,
+            disabled: !isCustomTemplatePrintLanguageCompatible(template, currentProductsReportTemplateLanguage),
+            warning: getCustomTemplatePrintLanguageWarning(template, currentProductsReportTemplateLanguage, t)
+        })),
+        [availableProductsReportTemplates, currentProductsReportTemplateLanguage, t]
+    )
+    const salesOrderPrintOptions = useMemo(() => {
+        const defaultFormat: PrintFormat = hasCapability('a4PdfInvoices') ? 'a4' : 'receipt'
+        return [
+            {
+                format: defaultFormat,
+                nativeTemplateKey: 'orders.list',
+                label: t('orders.tabs.sales', { defaultValue: 'Sales Orders' }),
+                description: defaultFormat === 'receipt'
+                    ? t('sales.print.receiptdesc', { defaultValue: 'Thermal receipt document' })
+                    : t('sales.print.a4desc', { defaultValue: 'Detailed full-page document' })
+            },
+            {
+                format: 'a4' as const,
+                nativeTemplateKey: SALES_ORDERS_PRODUCTS_REPORT_TEMPLATE_KEY,
+                label: t('orders.productsReport.title', { defaultValue: 'Sales Orders Products Report' }),
+                description: t('orders.productsReport.description', {
+                    defaultValue: 'View aggregated quantities for products in the current Sales Orders list.'
+                }),
+                allowA4Document: true
+            }
+        ]
+    }, [hasCapability, t])
+    const handleOrderPrintSelection = useCallback(async (
+        _format: PrintFormat,
+        template?: StoredCustomTemplateRow,
+        nativeTemplateKey?: string
+    ) => {
+        const requestedKey = template?.module_type_key || nativeTemplateKey
+        const isProductsReport = requestedKey === SALES_ORDERS_PRODUCTS_REPORT_TEMPLATE_KEY
+        if (isProductsReport && template && !isCustomTemplatePrintLanguageCompatible(template, currentProductsReportTemplateLanguage)) return false
+        try {
+            const rows = await ordersPage.fetchAllMatches()
+            setSelectedOrderPrintMode(isProductsReport ? 'productsReport' : 'orders')
+            setSelectedProductsReportTemplate(isProductsReport ? template || null : null)
+            setOrdersForProductsReport(isProductsReport ? rows as SalesOrder[] : null)
+            setOrdersForPrint(isProductsReport ? null : rows)
+            return true
+        } catch (error) {
+            console.error('[Orders] Failed to load orders for printing:', error)
+            toast({ title: t('common.error'), description: t('orders.listLoadError'), variant: 'destructive' })
+            return false
+        }
+    }, [currentProductsReportTemplateLanguage, ordersPage.fetchAllMatches, t, toast])
     const products = useProducts(workspaceId, { enabled: dialogOpen })
     const visibleProductIds = useMemo(() => [...new Set(ordersPage.rows.flatMap((order) => order.items
         .map((item) => item.productId)
@@ -783,10 +951,26 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
     }
 
     const handleOpenOrderPrint = async () => {
-        const rows = await loadAllFilteredOrders()
-        if (!rows) return
-        setOrdersForPrint(rows)
+        if (ordersPage.isLoading || deferredSearch !== search) return
+        setOrdersForPrint(null)
+        setOrdersForProductsReport(null)
+        setSelectedProductsReportTemplate(null)
+        setSelectedOrderPrintMode(null)
         setShowPrintPreview(true)
+
+        if (activeTab === 'sales' && workspaceId) {
+            void fetchCachedCustomTemplates(workspaceId, {
+                moduleTypeKey: SALES_ORDERS_PRODUCTS_REPORT_TEMPLATE_KEY,
+                activeOnly: true
+            }).then((templates) => {
+                setProductsReportTemplates(templates as StoredCustomTemplateRow[])
+            }).catch((error) => {
+                console.warn('[Orders] Could not load Sales Orders Products Report templates:', error)
+                setProductsReportTemplates([])
+            })
+        } else {
+            setProductsReportTemplates([])
+        }
     }
 
     const handleOpenModuleWideAudit = async () => {
@@ -2313,9 +2497,9 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                                         <Archive className="h-4 w-4" />
                                         {t('orders.archive.open')}
                                     </Button>
-                                    <Button variant="outline" allowViewer={true} onClick={() => void handleOpenOrderPrint()} disabled={isLoadingFullOrderActionData || ordersPage.isLoading} className="gap-2 rounded-xl">
-                                        {isLoadingFullOrderActionData ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-                                        {isLoadingFullOrderActionData ? t('common.loading', { defaultValue: 'Loading...' }) : (t('common.print') || 'Print')}
+                                    <Button variant="outline" allowViewer={true} onClick={() => void handleOpenOrderPrint()} disabled={ordersPage.isLoading || deferredSearch !== search} className="gap-2 rounded-xl">
+                                        <Printer className="h-4 w-4" />
+                                        {t('common.print') || 'Print'}
                                     </Button>
                                 </div>
                             </div>
@@ -3186,15 +3370,34 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
             </AppDialog>
 
             <PrintFlow
-                isOpen={showPrintPreview && ordersForPrint !== null}
-                onClose={() => { setShowPrintPreview(false); setOrdersForPrint(null) }}
-                onConfirm={() => { setShowPrintPreview(false); setOrdersForPrint(null) }}
-                title={activeTab === 'sales' ? (t('orders.tabs.sales') || 'Sales Orders') : (t('orders.tabs.purchase') || 'Purchase Orders')}
+                isOpen={showPrintPreview}
+                onClose={() => {
+                    setShowPrintPreview(false)
+                    setOrdersForPrint(null)
+                    setOrdersForProductsReport(null)
+                    setSelectedProductsReportTemplate(null)
+                    setSelectedOrderPrintMode(null)
+                }}
+                onConfirm={() => {
+                    setShowPrintPreview(false)
+                    setOrdersForPrint(null)
+                    setOrdersForProductsReport(null)
+                    setSelectedProductsReportTemplate(null)
+                    setSelectedOrderPrintMode(null)
+                }}
+                title={selectedOrderPrintMode === 'productsReport'
+                    ? t('orders.productsReport.title', { defaultValue: 'Sales Orders Products Report' })
+                    : activeTab === 'sales' ? (t('orders.tabs.sales') || 'Sales Orders') : (t('orders.tabs.purchase') || 'Purchase Orders')}
                 module="orders"
                 features={features}
                 workspaceName={workspaceName}
-                originId={getReportOriginId(user?.workspaceId, 'order_report', `orders:${activeTab}`)}
-                invoiceData={{
+                documentId={selectedOrderPrintMode === 'productsReport'
+                    ? getReportOriginId(workspaceId, 'order_report', 'sales-orders-products-report')
+                    : undefined}
+                originId={selectedOrderPrintMode === 'productsReport'
+                    ? getReportOriginId(workspaceId, 'order_report', 'sales-orders-products-report')
+                    : getReportOriginId(user?.workspaceId, 'order_report', `orders:${activeTab}`)}
+                invoiceData={selectedOrderPrintMode === 'productsReport' ? undefined : {
                     invoiceid: `ORDERS-${activeTab.toUpperCase()}`,
                     totalAmount: (ordersForPrint || []).reduce((sum, order) => sum + order.total, 0),
                     settlementCurrency: features.default_currency || 'usd',
@@ -3203,7 +3406,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     cashierName: user?.name || 'Unknown',
                     printFormat: 'a4' as const
                 }}
-                pdfBuilder={async ({ format }: { format: PrintFormat; effectiveId: string }) => {
+                pdfBuilder={selectedOrderPrintMode === 'productsReport' ? undefined : async ({ format }: { format: PrintFormat; effectiveId: string }) => {
                     const printLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
                     const orders = ordersForPrint || []
                     const printSalesOrders = activeTab === 'sales' ? orders as SalesOrder[] : []
@@ -3231,7 +3434,7 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                         printLang,
                     })
                 }}
-                printTemplate={() => {
+                printTemplate={selectedOrderPrintMode === 'productsReport' ? undefined : () => {
                     const printLang = features?.print_lang && features.print_lang !== 'auto' ? features.print_lang : i18n.language
                     const orders = ordersForPrint || []
                     const printSalesOrders = activeTab === 'sales' ? orders as SalesOrder[] : []
@@ -3255,6 +3458,23 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                         />
                     )
                 }}
+                templatePreview={selectedOrderPrintMode === 'productsReport' ? productsReportPreview : undefined}
+                customTemplate={selectedOrderPrintMode === 'productsReport' && productsReportTarget ? {
+                    moduleTypeKey: SALES_ORDERS_PRODUCTS_REPORT_TEMPLATE_KEY,
+                    nativeTemplateKey: productsReportTarget.nativeTemplateKey,
+                    templateId: selectedProductsReportTemplate?.id,
+                    label: selectedProductsReportTemplate
+                        ? getStoredCustomTemplateLabel(selectedProductsReportTemplate)
+                        : t('orders.productsReport.title', { defaultValue: 'Sales Orders Products Report' })
+                } : undefined}
+                initialTemplateLayout={selectedOrderPrintMode === 'productsReport' ? activeProductsReportLayout : undefined}
+                generateTemplateLayoutBlob={selectedOrderPrintMode === 'productsReport' ? buildEditableProductsReportPdf : undefined}
+                showSaveButton={selectedOrderPrintMode !== 'productsReport'}
+                showStandardPdfActions={selectedOrderPrintMode === 'productsReport'}
+                allowA4Document={selectedOrderPrintMode === 'productsReport'}
+                printSelectionOptions={activeTab === 'sales' ? salesOrderPrintOptions : undefined}
+                printSelectionTemplates={activeTab === 'sales' ? productsReportPrintOptions : undefined}
+                onPrintSelection={handleOrderPrintSelection}
             />
             {activeTab === 'sales' && !isMobile() && (
                 <ModuleWideIntegrityAuditDialog

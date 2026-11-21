@@ -4,7 +4,6 @@ PWA Faster
 
 Post Service Notification
 
-Pending Sale orders must be editable if no payment has gone through
 Sales Orders Page Special Print With Products
 
 Discount POS Quick Order
@@ -12,8 +11,6 @@ Discount POS Quick Order
 Product Live Recongnition on camera
 
 Allow Stopping the Reciept to R2
-
-Orders filter out returned sales total
 
 offline data load for server-side only lists
 
