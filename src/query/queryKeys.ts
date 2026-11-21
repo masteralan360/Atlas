@@ -106,6 +106,16 @@ export const queryKeys = {
     all: (workspaceId: string | undefined) =>
       ['atlas', 'workspace', workspaceId ?? 'unscoped', 'direct-transactions'] as const,
   },
+  workspacePayment: {
+    all: (workspaceId: string | undefined) =>
+      ['atlas', 'workspace', workspaceId ?? 'unscoped', 'workspace-payment'] as const,
+    overview: (scope: { workspaceId: string; userId: string; role: string }) => [
+      ...queryKeys.workspacePayment.all(scope.workspaceId),
+      'overview',
+      scope.userId,
+      scope.role,
+    ] as const,
+  },
   tieredPerformanceCommissions: {
     all: (workspaceId: string | undefined) =>
       ['atlas', 'workspace', workspaceId ?? 'unscoped', 'tiered-performance-commissions'] as const,

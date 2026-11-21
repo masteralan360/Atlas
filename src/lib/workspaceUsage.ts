@@ -113,16 +113,28 @@ export async function recordWorkspaceDataTransfer(
     notifyWorkspaceUsageUpdated(workspaceId)
 }
 
-export async function getWorkspaceUsageStatus(workspaceId?: string): Promise<WorkspaceUsageStatus | null> {
-    const { data, error } = await supabase
+export async function getWorkspaceUsageStatus(workspaceId?: string, signal?: AbortSignal): Promise<WorkspaceUsageStatus | null> {
+    let request = supabase
         .rpc('get_workspace_usage_status', {
             p_workspace_id: workspaceId ?? null
         })
         .maybeSingle()
+    if (signal) request = request.abortSignal(signal)
+
+    const { data, error } = await request
 
     if (error) {
         throw error
     }
 
-    return data as WorkspaceUsageStatus | null
+    if (!data) return null
+
+    const row = data as unknown as Record<string, unknown>
+    const chargedUsageBytes = Number(row.charged_usage_bytes ?? row.data_transfer_bytes ?? 0)
+    return {
+        ...row,
+        charged_usage_bytes: Number.isFinite(chargedUsageBytes) && chargedUsageBytes > 0
+            ? Math.trunc(chargedUsageBytes)
+            : 0
+    } as unknown as WorkspaceUsageStatus
 }

@@ -1414,7 +1414,7 @@ export function POS() {
         localStorage.setItem('pos_show_exchange_ticker', String(showExchangeTicker))
     }, [showExchangeTicker])
     const [discountValue, setDiscountValue] = useState<string>('')
-    const [discountType, setDiscountType] = useState<'percent' | 'amount'>('percent')
+    const [discountType, setDiscountType] = useState<'percent' | 'amount'>('amount')
 
     useEffect(() => {
         localStorage.setItem('pos_held_sales', JSON.stringify(heldSales))
@@ -1829,6 +1829,7 @@ export function POS() {
         const converted = convertPrice(getCartBasePrice(item), itemCurrency, settlementCurrency)
         return sum + (converted * item.quantity)
     }, 0)
+    const cartLineCount = cart.length
     const totalItems = cart.reduce(
         (sum, item) => sum + item.quantity + getOrderLineFreeBonusQuantity(item),
         0
@@ -1986,15 +1987,11 @@ export function POS() {
         }
     }, [buildPreprintReceiptPdf, hasPermission, isPreprinting, preprintReceiptData, printPreprintReceipt, t, toast])
 
-    // Track originalSubtotal in a ref so the bulk discount effect doesn't
-    // re-run (and wipe per-item negotiated prices) when the cart changes.
-    const originalSubtotalRef = useRef(originalSubtotal)
-    useEffect(() => { originalSubtotalRef.current = originalSubtotal }, [originalSubtotal])
-
-    // Bulk Discount Effect — only runs when the user changes discountValue/discountType
+    // Reapply when the discount changes or its source cart changes. originalSubtotal
+    // uses base prices, so the negotiated prices created here do not retrigger it.
     useEffect(() => {
-        setCart(prev => applyPosBulkDiscount(prev, discountValue, discountType, originalSubtotalRef.current))
-    }, [discountValue, discountType])
+        setCart(prev => applyPosBulkDiscount(prev, discountValue, discountType, originalSubtotal))
+    }, [discountValue, discountType, originalSubtotal, cartLineCount])
 
     // Keyboard Navigation Effect
     useEffect(() => {
@@ -2789,6 +2786,14 @@ export function POS() {
 
     const parseFormattedNumber = (value: string) => {
         return parseFloat(value.replace(/,/g, ''))
+    }
+
+    const handleTotalDiscountInputChange = (value: string) => {
+        const raw = value.replace(/,/g, '').replace(/[^0-9.]/g, '')
+        const decimalIndex = raw.indexOf('.')
+        setDiscountValue(decimalIndex < 0
+            ? raw
+            : `${raw.slice(0, decimalIndex + 1)}${raw.slice(decimalIndex + 1).replace(/\./g, '')}`)
     }
 
     const openPriceEdit = (item: CartItem) => {
@@ -5095,7 +5100,8 @@ export function POS() {
                                     {showExchangeTicker && (
                                         <PosDiscountButton
                                             discountValue={discountValue}
-                                            setDiscountValue={setDiscountValue}
+                                            setDiscountValue={handleTotalDiscountInputChange}
+                                            formatValue={formatNumberWithCommas}
                                             discountType={discountType}
                                             setDiscountType={setDiscountType}
                                         />
@@ -5344,7 +5350,8 @@ export function POS() {
                                     {!showExchangeTicker && (
                                         <PosDiscountButton
                                             discountValue={discountValue}
-                                            setDiscountValue={setDiscountValue}
+                                            setDiscountValue={handleTotalDiscountInputChange}
+                                            formatValue={formatNumberWithCommas}
                                             discountType={discountType}
                                             setDiscountType={setDiscountType}
                                         />
@@ -6329,11 +6336,12 @@ const ExchangeTicker = ({
 interface PosDiscountButtonProps {
     discountValue: string
     setDiscountValue: (val: string) => void
+    formatValue: (val: string) => string
     discountType: 'percent' | 'amount'
     setDiscountType: (type: 'percent' | 'amount') => void
 }
 
-function PosDiscountButton({ discountValue, setDiscountValue, discountType, setDiscountType }: PosDiscountButtonProps) {
+function PosDiscountButton({ discountValue, setDiscountValue, formatValue, discountType, setDiscountType }: PosDiscountButtonProps) {
     const { t } = useTranslation()
     const hasDiscount = discountValue.trim() !== '' && parseFloat(discountValue) > 0
 
@@ -6355,12 +6363,13 @@ function PosDiscountButton({ discountValue, setDiscountValue, discountType, setD
                 <div className="flex items-center gap-2 bg-white dark:bg-black/20 p-1 rounded-xl border border-border/80 shadow-sm transition-all hover:border-primary/30">
                     <div className="flex-1 relative">
                         <Input
-                            type="number"
-                            value={discountValue}
+                            type="text"
+                            inputMode="decimal"
+                            value={formatValue(discountValue)}
                             onChange={(e) => setDiscountValue(e.target.value)}
                             onFocus={(e) => e.target.select()}
-                            className="h-8 bg-transparent border-none shadow-none focus-visible:ring-0 text-xs font-medium placeholder:text-muted-foreground/60 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            placeholder={t('pos.totalDiscount') || 'Total Discount'}
+                            className="h-8 bg-transparent border-none shadow-none focus-visible:ring-0 text-xs font-medium placeholder:text-muted-foreground/60"
+                            placeholder="0"
                         />
                     </div>
                     <div className="flex bg-muted/40 dark:bg-white/5 p-1 rounded-lg gap-1 border border-border/10">
@@ -7728,12 +7737,13 @@ function MobileCart({
                             <div className="flex items-center gap-3 bg-muted/30 p-2 rounded-2xl border border-border/50 transition-all focus-within:border-primary/50 focus-within:bg-background">
                                 <div className="flex-1 relative">
                                     <Input
-                                        type="number"
-                                        value={discountValue}
-                                        onChange={(e) => setDiscountValue(e.target.value)}
+                                        type="text"
+                                        inputMode="decimal"
+                                        onChange={(e) => handleTotalDiscountInputChange(e.target.value)}
                                         onFocus={(e) => e.target.select()}
-                                        className="h-12 bg-transparent border-none shadow-none focus-visible:ring-0 text-lg font-black placeholder:text-muted-foreground/40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                        placeholder="0.00"
+                                        value={formatNumberWithCommas(discountValue)}
+                                        className="h-12 bg-transparent border-none shadow-none focus-visible:ring-0 text-lg font-black placeholder:text-muted-foreground/40"
+                                        placeholder="0"
                                     />
                                 </div>
                                 <div className="flex bg-muted p-1 rounded-xl gap-1 border border-border/10">

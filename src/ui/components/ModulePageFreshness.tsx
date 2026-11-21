@@ -19,6 +19,7 @@ import {
     readWorkspaceDataFetch,
     WORKSPACE_DATA_HYDRATION_EVENT,
     WORKSPACE_DATA_FETCH_EVENT,
+    type WorkspaceDataFetchSource,
     type WorkspaceDataHydrationSnapshot,
     type WorkspaceDataFetchSnapshot
 } from '@/workspace/workspaceDataFreshness'
@@ -81,18 +82,21 @@ function useRegisterModulePageFreshnessLoading(isLoading: boolean) {
 export function ModulePageFreshness({
     className,
     tableNames,
+    source: sourceOverride,
     loadingIconOnly = false
 }: {
     className?: string
     /** Limits freshness feedback to the data actually shown by this module. */
     tableNames?: readonly string[]
+    /** Overrides the workspace business-data mode for centrally hosted data. */
+    source?: WorkspaceDataFetchSource
     /** Shows only a spinner while the scoped tables are refreshing. */
     loadingIconOnly?: boolean
 }) {
     const { t, i18n } = useTranslation()
     const { user } = useAuth()
     const { features } = useWorkspace()
-    const source = getWorkspaceDataFetchSource(features.data_mode)
+    const source = sourceOverride ?? getWorkspaceDataFetchSource(features.data_mode)
     const workspaceId = user?.workspaceId
     const tableNamesKey = tableNames?.filter(Boolean).join('|') ?? ''
     const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(() => (

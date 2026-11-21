@@ -146,6 +146,9 @@ const Members = lazy(() =>
 const Settings = lazy(() =>
   import("@/ui/pages/Settings").then((m) => ({ default: m.Settings })),
 );
+const WorkspacePayment = lazy(() =>
+  import("@/ui/pages/WorkspacePayment").then((m) => ({ default: m.WorkspacePayment })),
+);
 const Logs = lazy(() =>
   import("@/ui/pages/Logs").then((m) => ({ default: m.Logs })),
 );
@@ -2639,6 +2642,13 @@ function App() {
                         >
                           <Layout>
                             <Settings />
+                          </Layout>
+                        </ProtectedRoute>
+                      </Route>
+                      <Route path="/workspace-payment">
+                        <ProtectedRoute allowedRoles={["admin"]}>
+                          <Layout>
+                            <WorkspacePayment />
                           </Layout>
                         </ProtectedRoute>
                       </Route>

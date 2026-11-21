@@ -36,6 +36,17 @@ function normalizeModuleOrder(moduleOrder: unknown): string[] {
   return uniqueModuleHrefs
 }
 
+function keepWorkspacePaymentAboveSettings(moduleOrder: string[]): string[] {
+  const paymentIndex = moduleOrder.indexOf('/workspace-payment')
+  const settingsIndex = moduleOrder.indexOf('/settings')
+  if (paymentIndex < 0 || settingsIndex < 0 || paymentIndex < settingsIndex) return moduleOrder
+
+  const [paymentHref] = moduleOrder.splice(paymentIndex, 1)
+  const nextSettingsIndex = moduleOrder.indexOf('/settings')
+  moduleOrder.splice(nextSettingsIndex, 0, paymentHref)
+  return moduleOrder
+}
+
 export function readSidebarModuleOrder(serialized: string | null): SidebarModuleOrderBySection {
   if (!serialized) return {}
 
@@ -85,7 +96,10 @@ export function reconcileSidebarModuleOrder(
 ): string[] {
   const restoredOrder = normalizeModuleOrder(savedOrder)
 
-  return [...restoredOrder, ...visibleModuleHrefs.filter((href) => !restoredOrder.includes(href))]
+  return keepWorkspacePaymentAboveSettings([
+    ...restoredOrder,
+    ...visibleModuleHrefs.filter((href) => !restoredOrder.includes(href)),
+  ])
 }
 
 export function reorderVisibleSidebarModuleItems(
@@ -113,13 +127,13 @@ export function reorderVisibleSidebarModuleItems(
   const visibleHrefSet = new Set(visibleModuleHrefs)
   let visibleIndex = 0
 
-  return reconciledOrder.map((href) => {
+  return keepWorkspacePaymentAboveSettings(reconciledOrder.map((href) => {
     if (!visibleHrefSet.has(href)) return href
 
     const nextHref = reorderedVisibleHrefs[visibleIndex]
     visibleIndex += 1
     return nextHref
-  })
+  }))
 }
 
 export function getSidebarModuleOrderStorageKey(userId: string, workspaceId: string) {

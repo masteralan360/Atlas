@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState, type CSSProperties } from 'react'
 import { Link } from 'wouter'
-import { CircleHelp, LayoutDashboard, PanelRightOpen, Settings } from 'lucide-react'
+import { CircleHelp, CreditCard, LayoutDashboard, PanelRightOpen, Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useNavigationRailDisplay } from './NavigationRailDisplayContext'
 import {
@@ -21,11 +21,12 @@ import {
 interface NavigationRailProps {
   location: string
   hasSettings: boolean
+  hasWorkspacePayment: boolean
   hideDashboard?: boolean
   onNavigate: () => void
 }
 
-export function NavigationRail({ location, hasSettings, hideDashboard = false, onNavigate }: NavigationRailProps) {
+export function NavigationRail({ location, hasSettings, hasWorkspacePayment, hideDashboard = false, onNavigate }: NavigationRailProps) {
   const { t } = useTranslation()
   const { mode, setMode } = useNavigationRailDisplay()
   const [isPointerInside, setIsPointerInside] = useState(false)
@@ -144,6 +145,24 @@ export function NavigationRail({ location, hasSettings, hideDashboard = false, o
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
+          {hasWorkspacePayment && (
+            <Link
+              href="/workspace-payment"
+              onClick={onNavigate}
+              tabIndex={isExpanded ? 0 : -1}
+              className={cn(
+                'flex h-10 w-10 items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                location === '/workspace-payment' || location.startsWith('/workspace-payment/')
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:bg-primary/5 hover:text-primary'
+              )}
+              title={t('workspacePaymentPage.title')}
+              aria-label={t('workspacePaymentPage.title')}
+              aria-current={location === '/workspace-payment' || location.startsWith('/workspace-payment/') ? 'page' : undefined}
+            >
+              <CreditCard className="h-5 w-5" />
+            </Link>
+          )}
           {hasSettings && (
             <Link
               href="/settings"

@@ -548,6 +548,11 @@ export const moduleMetaByHref: Record<string, ModuleMeta> = {
     description: "Manage workspace-specific custom print layouts.",
     badge: "Print",
   },
+  "/workspace-payment": {
+    section: "people-and-workspace",
+    description: "Review workspace billing, usage, payment history, and PAYG charges.",
+    badge: "Billing",
+  },
   "/settings": {
     section: "people-and-workspace",
     description:

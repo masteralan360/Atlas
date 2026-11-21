@@ -81,13 +81,17 @@ export function ProtectedRoute({
 
     // PAYG limits block regular workspace pages for admins as well. The lock
     // page itself exposes the admin-only recovery action.
-    if (paygSummary?.paygLimitState?.locked && location !== '/locked-workspace') {
+    if (
+        paygSummary?.paygLimitState?.locked
+        && location !== '/locked-workspace'
+        && !location.startsWith('/workspace-payment')
+    ) {
         return <Redirect to="/locked-workspace" />
     }
 
     // Redirect locked workspace members to locked workspace page
     if (isLocked && location !== '/locked-workspace') {
-        const isAdminRoute = location.startsWith('/workspace-configuration') || location.startsWith('/settings') || location.startsWith('/logs') || location.startsWith('/mutation-queue');
+        const isAdminRoute = location.startsWith('/workspace-configuration') || location.startsWith('/settings') || location.startsWith('/workspace-payment') || location.startsWith('/logs') || location.startsWith('/mutation-queue');
 
         // If not an admin route, redirect everyone (including admins)
         // This ensures admins "feel" the lock on general pages like POS/Dashboard

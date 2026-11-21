@@ -1007,7 +1007,7 @@ export function Layout({ children }: LayoutProps) {
         if (!sectionKey) return []
 
         return group.items
-          .filter((item) => !showNavigationRail || item.href !== '/settings')
+          .filter((item) => !showNavigationRail || (item.href !== '/settings' && item.href !== '/workspace-payment'))
           .map((item) => ({ ...item, sectionKey, sectionTitle: group.title }))
       }),
     [navigation, showNavigationRail]
@@ -1052,7 +1052,7 @@ export function Layout({ children }: LayoutProps) {
         const moduleOrderIndex = new Map(moduleOrder.map((href, index) => [href, index]))
 
         const items = [...group.items]
-          .filter((item) => !sidebarFavoriteHrefSet.has(item.href) && (!showNavigationRail || item.href !== '/settings'))
+          .filter((item) => !sidebarFavoriteHrefSet.has(item.href) && (!showNavigationRail || (item.href !== '/settings' && item.href !== '/workspace-payment')))
           .sort(
             (left, right) => (moduleOrderIndex.get(left.href) ?? 0) - (moduleOrderIndex.get(right.href) ?? 0)
           )
@@ -1733,6 +1733,7 @@ export function Layout({ children }: LayoutProps) {
             <NavigationRail
               location={location}
               hasSettings={navigation.some((group) => group.items.some((item) => item.href === '/settings'))}
+              hasWorkspacePayment={navigation.some((group) => group.items.some((item) => item.href === '/workspace-payment'))}
               hideDashboard={
                 user?.role === 'staff' &&
                 hasFeature('postal_service') &&

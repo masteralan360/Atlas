@@ -1694,6 +1694,10 @@
         "description": "Manage workspace-specific custom print layouts.",
         "badge": "Print"
       },
+      "/workspace-payment": {
+        "description": "Review workspace billing, usage, payment history, and PAYG charges.",
+        "badge": "Billing"
+      },
       "/settings": {
         "description": "Adjust workspace configuration, behavior, and system preferences.",
         "badge": "Control"
@@ -9521,6 +9525,66 @@
       "invalidIqd": "Enter a whole-IQD amount within this profile’s range.",
       "forwardHint": "Usage through 1 GB is free; the final charge is rounded to whole IQD and capped at the 100 GB endpoint.",
       "reverseHint": "An estimate from the curve before whole-IQD rounding, shown to 6 decimal places. Flat-price segments use their highest GB point; 0 IQD includes the free usage tier."
+    }
+  },
+  "workspacePaymentPage": {
+    "title": "Workspace Payment",
+    "subtitle": "Review {{workspace}} billing, usage, charges, and payment activity.",
+    "demoUnavailable": "Billing details are not available in demo workspaces.",
+    "loading": "Loading workspace billing details…",
+    "loadError": "Workspace billing details could not be loaded. Check your connection and try again.",
+    "refreshError": "The latest billing details could not be refreshed. The information shown may be out of date.",
+    "retry": "Try again",
+    "accountStatus": "Workspace status",
+    "accountStatusDetail": "Billing access is currently available.",
+    "actionNeeded": "Review billing and payment details to restore normal access.",
+    "accessRestricted": "Workspace access is restricted by a non-payment setting.",
+    "inheritedBilling": "Billing is managed by the owning workspace.",
+    "workspaceBilling": "Billing applies to this workspace.",
+    "subscriptionAmount": "Subscription amount",
+    "subscriptionAmountDetail": "Current configured subscription price.",
+    "prepaidTermAmountDetail": "Amount paid for the active prepaid term.",
+    "nextBillingDate": "Next billing date",
+    "nextBillingDateDetail": "The next renewal or billing cycle deadline.",
+    "pendingPayment": "Payment awaiting review",
+    "pendingPaymentDetail": "{{amount}} submitted {{date}}. Access changes after administrator approval.",
+    "billingOverview": "Billing overview",
+    "allowance": "Included usage",
+    "allowanceDetail": "Usage allowance for the current billing arrangement.",
+    "billingCycle": "Billing cycle",
+    "monthlyCycle": "Monthly",
+    "monthlyCycleDetail": "Billing renews each month.",
+    "rollover": "Unused allowance rollover",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "rolloverDetail": "Whether unused allowance carries into the next cycle.",
+    "paymentSubmissions": "Payment submissions",
+    "paymentEnabledDetail": "Workspace payment submissions are enabled.",
+    "paymentDisabledDetail": "Contact the platform administrator about payment options.",
+    "extraDaysActive": "{{count}} extra subscription days are active.",
+    "usageOverview": "Usage overview",
+    "remainingUsage": "Usage remaining",
+    "remainingUsageDetail": "Based on this period’s charged usage allowance.",
+    "usageHistoryAccessible": "Daily charged usage history for the current period",
+    "noUsageLimits": "No storage or charged-usage limits are configured for this workspace.",
+    "cycleStartDate": "Cycle start date",
+    "noCyclesForRange": "No PAYG cycles fall within this date range.",
+    "noTransactionsForRange": "No payment records fall within this date range.",
+    "paygLimit": "Limit: {{value}} {{unit}}",
+    "unknownStatus": "Status unavailable",
+    "recentTransactions": "{{count}} payment records",
+    "paymentTypes": {
+      "subscription": "Subscription",
+      "usage": "Prepaid usage",
+      "payg": "PAYG usage",
+      "prepaid_term": "Prepaid term",
+      "unknown": "Payment"
+    },
+    "providers": {
+      "fib": "FIB",
+      "qicard": "QiCard",
+      "free": "Free renewal",
+      "manual": "Manual payment"
     }
   },
   "workspaceUsage": {

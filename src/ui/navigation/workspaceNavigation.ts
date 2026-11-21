@@ -798,6 +798,15 @@ export function buildWorkspaceNavigation({
             },
           ]
           : []),
+        ...(role === "admin"
+          ? [
+            {
+              name: t("workspacePaymentPage.title"),
+              href: "/workspace-payment",
+              icon: CreditCard,
+            },
+          ]
+          : []),
         {
           name: t("nav.settings", { defaultValue: "Settings" }),
           href: "/settings",

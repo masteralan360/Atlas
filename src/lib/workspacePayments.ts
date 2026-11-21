@@ -6,6 +6,7 @@ export const WORKSPACE_PAYMENT_CURRENCY = 'IQD' as const
 export const OPEN_WORKSPACE_PAYMENT_DIALOG_EVENT = 'open-workspace-payment-dialog'
 export const OPEN_WORKSPACE_PAYMENT_STATUS_DIALOG_EVENT = 'open-workspace-payment-status-dialog'
 export const OPEN_WORKSPACE_EXTRA_DAYS_DIALOG_EVENT = 'open-workspace-extra-days-dialog'
+export const WORKSPACE_PAYMENT_UPDATED_EVENT = 'workspace-payment-updated'
 export { WORKSPACE_PAYMENT_HOLD_DURATION_MS }
 
 export type WorkspacePaymentProvider = 'fib' | 'qicard' | 'free'
@@ -729,10 +730,13 @@ export function canSubmitWorkspacePayment(options: {
     )
 }
 
-export async function getWorkspacePaymentSummary(): Promise<WorkspacePaymentSummary> {
+export async function getWorkspacePaymentSummary(signal?: AbortSignal): Promise<WorkspacePaymentSummary> {
     const result = await runSupabaseAction(
         'workspacePayments.getSummary',
-        () => supabase.rpc('get_workspace_payment_summary'),
+        () => {
+            const request = supabase.rpc('get_workspace_payment_summary')
+            return signal ? request.abortSignal(signal) : request
+        },
         { timeoutMs: 12_000, platform: 'all' }
     ) as { data: unknown; error?: unknown }
 
@@ -743,10 +747,13 @@ export async function getWorkspacePaymentSummary(): Promise<WorkspacePaymentSumm
     return normalizeWorkspacePaymentSummary(result.data)
 }
 
-export async function getWorkspacePaygSummary(): Promise<WorkspacePaygSummary> {
+export async function getWorkspacePaygSummary(signal?: AbortSignal): Promise<WorkspacePaygSummary> {
     const result = await runSupabaseAction(
         'workspacePayments.getPaygSummary',
-        () => supabase.rpc('get_workspace_payg_summary_with_limit'),
+        () => {
+            const request = supabase.rpc('get_workspace_payg_summary_with_limit')
+            return signal ? request.abortSignal(signal) : request
+        },
         { timeoutMs: 12_000, platform: 'all' }
     ) as { data: unknown; error?: unknown }
     if (result.error) throw normalizeSupabaseActionError(result.error)
@@ -821,6 +828,9 @@ export async function submitWorkspacePaygPayment(
     if (result.error) throw normalizeSupabaseActionError(result.error)
     const transaction = normalizeWorkspacePaymentTransaction(unwrapRpcJson(result.data))
     if (!transaction) throw new Error('Workspace PAYG payment transaction is invalid')
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(WORKSPACE_PAYMENT_UPDATED_EVENT))
+    }
     return transaction
 }
 
@@ -911,6 +921,10 @@ async function performWorkspacePaymentSubmission(
     const transaction = normalizeWorkspacePaymentTransaction(unwrapRpcJson(result.data))
     if (!transaction) {
         throw new Error('Workspace payment transaction is invalid')
+    }
+
+    if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(WORKSPACE_PAYMENT_UPDATED_EVENT))
     }
 
     return transaction
