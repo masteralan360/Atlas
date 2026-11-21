@@ -4402,7 +4402,8 @@ export function POS() {
                                 openPriceEdit={openPriceEdit}
                                 clearNegotiatedPrice={clearNegotiatedPrice}
                                 discountValue={discountValue}
-                                setDiscountValue={setDiscountValue}
+                                setDiscountValue={handleTotalDiscountInputChange}
+                                formatDiscountValue={formatNumberWithCommas}
                                 discountType={discountType}
                                 setDiscountType={setDiscountType}
                                 hasTrulyMissingRates={hasTrulyMissingRates}
@@ -7171,6 +7172,7 @@ interface MobileCartProps {
     clearNegotiatedPrice: (item: CartItem) => void
     discountValue: string
     setDiscountValue: (val: string) => void
+    formatDiscountValue: (val: string) => string
     discountType: 'percent' | 'amount'
     setDiscountType: (type: 'percent' | 'amount') => void
     hasTrulyMissingRates: boolean
@@ -7192,7 +7194,7 @@ function MobileCart({
     getDisplayImageUrl, products, showCartStorageLabels, getCartStorageName, fallbackStorageId,
     getCartMinimumPriceViolation, hasMinimumSellingPriceViolation, convertPrice, openPriceEdit,
     clearNegotiatedPrice,
-    discountValue, setDiscountValue, discountType, setDiscountType,
+    discountValue, setDiscountValue, formatDiscountValue, discountType, setDiscountType,
     hasTrulyMissingRates, hasLoadingRates, isActivitiesCheckout, t,
     setDynamicUnitModal, setExactQuantity, unitRegistry,
     showOrderFreeBonus, onOpenFreeBonusEditor
@@ -7739,9 +7741,9 @@ function MobileCart({
                                     <Input
                                         type="text"
                                         inputMode="decimal"
-                                        onChange={(e) => handleTotalDiscountInputChange(e.target.value)}
+                                        onChange={(e) => setDiscountValue(e.target.value)}
                                         onFocus={(e) => e.target.select()}
-                                        value={formatNumberWithCommas(discountValue)}
+                                        value={formatDiscountValue(discountValue)}
                                         className="h-12 bg-transparent border-none shadow-none focus-visible:ring-0 text-lg font-black placeholder:text-muted-foreground/40"
                                         placeholder="0"
                                     />

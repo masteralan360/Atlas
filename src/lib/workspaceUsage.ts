@@ -114,14 +114,12 @@ export async function recordWorkspaceDataTransfer(
 }
 
 export async function getWorkspaceUsageStatus(workspaceId?: string, signal?: AbortSignal): Promise<WorkspaceUsageStatus | null> {
-    let request = supabase
-        .rpc('get_workspace_usage_status', {
-            p_workspace_id: workspaceId ?? null
-        })
-        .maybeSingle()
+    let request = supabase.rpc('get_workspace_usage_status', {
+        p_workspace_id: workspaceId ?? null
+    })
     if (signal) request = request.abortSignal(signal)
 
-    const { data, error } = await request
+    const { data, error } = await request.maybeSingle()
 
     if (error) {
         throw error
