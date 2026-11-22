@@ -2,6 +2,8 @@ negative delivery fee
 
 PWA Faster
 
+sidebar redesign mobile view
+
 Post Service Notification
 
 Product Live Recongnition on camera

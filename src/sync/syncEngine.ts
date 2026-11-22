@@ -1073,8 +1073,9 @@ export async function processMutationQueue(
       const leaseId = generateId();
       const claimed = await db.transaction('rw', db.offline_mutations, async () => {
         const current = await db.offline_mutations.get(mutation.id);
-        if (!current || current.stockCancelRequested || current.status === 'synced' || current.status === 'discarded'
-          || (current.status === 'syncing' && Date.parse(current.syncLeaseUntil ?? '')>Date.now())) return false;
+        const claimableStatus = current?.status === 'pending' || current?.status === 'syncing';
+        if (!current || current.stockCancelRequested || !claimableStatus
+          || (current.status === 'syncing' && Date.parse(current.syncLeaseUntil ?? '') > Date.now())) return false;
         await db.offline_mutations.update(mutation.id, { status: 'syncing', error: undefined, syncLeaseId: leaseId,
           syncLeaseUntil: new Date(Date.now()+60_000).toISOString() });
         return true;
@@ -1085,9 +1086,11 @@ export async function processMutationQueue(
         successCount++;
       } catch (error) {
         const code = String((error as { code?: string }).code ?? '');
+        const errorMessage = String((error as { message?: string }).message ?? '');
+        const conflict = code === '40001' || errorMessage.includes('offline_stock_count_changed');
         const transient = isRetriableWebRequestError(error) || ['40P01','55P03','57014'].includes(code);
         const message = transient ? i18n.t('inventory.offline.retryPending')
-          : i18n.t(code === '40001' ? 'inventory.offline.conflict' : 'inventory.offline.rejected');
+          : i18n.t(conflict ? 'inventory.offline.conflict' : 'inventory.offline.rejected');
         const current = await db.offline_mutations.get(mutation.id);
         if (!current || current.status === 'synced' || current.syncLeaseId !== leaseId) { reportCompleted(); continue; }
         const attempts = (current.attempts ?? 0)+1;

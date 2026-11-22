@@ -77,7 +77,7 @@ export function StockReservationDetails({ workspaceId, position, open, onOpenCha
         {result.isLoading ? <div className="flex justify-center gap-2 p-6" role="status"><Loader2 className="h-5 w-5 animate-spin" />{t('common.loading')}</div>
           : result.error ? <p role="alert">{t('stockReservations.loadFailed')}</p>
           : result.data?.rows.length ? result.data.rows.map(row => <div key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3">
-            <a href={`#${getPathWithLang(`/orders/${encodeURIComponent(row.id)}`, i18n.language)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 font-medium text-primary underline">
+            <a href={`#${getPathWithLang(`/orders/${encodeURIComponent(row.id)}`, i18n.language)}`} className="inline-flex items-center gap-2 font-medium text-primary underline">
               <bdi>{row.order_number}</bdi><ExternalLink className="h-4 w-4" />
             </a>
             <span><bdi>{t('stockReservations.reservedQuantity', { quantity: format(row.quantity) })}</bdi></span>

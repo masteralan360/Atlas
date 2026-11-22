@@ -4126,9 +4126,20 @@ async function preparePendingFinancedSalesOrderEdit(
         .where('[workspaceId+sourceType+sourceRecordId]')
         .equals([existing.workspaceId, 'sales_order', existing.id])
         .toArray()
-    const hasPaymentHistory = loanPayments.some((payment) => !payment.isDeleted)
-        || loanTransactions.some((payment) => !payment.isDeleted && payment.sourceModule === 'loans')
-        || orderTransactions.some((payment) => !payment.isDeleted)
+    const { getRemainingPaymentTransactions } = await awaitStockDependency(import('./payments'))
+    const remainingPaymentTransactions = getRemainingPaymentTransactions([
+        ...loanTransactions.filter((payment) => payment.sourceModule === 'loans'),
+        ...orderTransactions
+    ])
+    const hasPaymentHistory = loanPayments.some((payment) =>
+        !payment.isDeleted
+        && Math.max(
+            Math.abs(Number(payment.amount || 0)) - Math.abs(Number(payment.reversedAmount || 0)),
+            0
+        ) > ORDER_AMOUNT_EPSILON
+    ) || remainingPaymentTransactions.some((payment) =>
+        Math.abs(Number(payment.amount || 0)) > ORDER_AMOUNT_EPSILON
+    )
     if (hasPaymentHistory
         || Number(existing.initialPaymentAmount || 0) > ORDER_AMOUNT_EPSILON
         || Number(loan.totalPaidAmount || 0) > ORDER_AMOUNT_EPSILON

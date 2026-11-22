@@ -738,6 +738,143 @@ describe('order-linked financing', () => {
         })
     })
 
+    it('allows a pending loan sales order to edit terms after its repayment is fully reversed', async () => {
+        const customer = await createCustomer()
+        const { storage, product } = await createStockedSalesProduct(100)
+        const draft = await createSalesOrder(
+            WORKSPACE_ID,
+            salesOrderInput(customer.id, product, storage.id, { method: 'loan', total: 100 })
+        )
+        const pending = await updateSalesOrderStatus(draft.id, 'pending')
+        const loanId = pending.linkedLoanId!
+
+        await recordLoanPayment(WORKSPACE_ID, {
+            loanId,
+            amount: 25,
+            paymentMethod: 'cash',
+            paidAt: '2026-06-02T12:00:00.000Z'
+        })
+        const originalPayment = (await db.payment_transactions
+            .where('workspaceId')
+            .equals(WORKSPACE_ID)
+            .and((transaction) => transaction.sourceRecordId === loanId && !transaction.reversalOfTransactionId)
+            .toArray())[0]
+        expect(originalPayment).toBeDefined()
+
+        await reversePaymentTransaction(WORKSPACE_ID, originalPayment.id)
+
+        const paymentAuditRows = await db.payment_transactions
+            .where('workspaceId')
+            .equals(WORKSPACE_ID)
+            .and((transaction) => transaction.sourceRecordId === loanId)
+            .toArray()
+        expect(paymentAuditRows).toHaveLength(2)
+        expect(getRemainingPaymentTransactions(paymentAuditRows)).toEqual([])
+
+        const noteOnlySave = await updateSalesOrder(pending.id, {
+            notes: 'Unrelated order note after the repayment was reversed'
+        })
+        expect(noteOnlySave.notes).toBe('Unrelated order note after the repayment was reversed')
+
+        const saved = await updateSalesOrder(pending.id, {
+            firstDueDate: '2026-07-15'
+        })
+
+        expect(saved).toMatchObject({
+            status: 'pending',
+            firstDueDate: '2026-07-15',
+            notes: 'Unrelated order note after the repayment was reversed',
+            paymentStatus: 'unpaid',
+            paidAmount: 0,
+            balanceAmount: 100
+        })
+        expect(await db.loans.get(loanId)).toMatchObject({
+            totalPaidAmount: 0,
+            balanceAmount: 100,
+            firstDueDate: '2026-07-15'
+        })
+        expect(await db.payment_transactions
+            .where('workspaceId')
+            .equals(WORKSPACE_ID)
+            .and((transaction) => transaction.sourceRecordId === loanId)
+            .count()).toBe(2)
+    })
+
+    it('keeps a pending loan sales order locked while a repayment remains outstanding', async () => {
+        const customer = await createCustomer()
+        const { storage, product } = await createStockedSalesProduct(100)
+        const draft = await createSalesOrder(
+            WORKSPACE_ID,
+            salesOrderInput(customer.id, product, storage.id, { method: 'loan', total: 100 })
+        )
+        const pending = await updateSalesOrderStatus(draft.id, 'pending')
+
+        await recordLoanPayment(WORKSPACE_ID, {
+            loanId: pending.linkedLoanId!,
+            amount: 25,
+            paymentMethod: 'cash',
+            paidAt: '2026-06-02T12:00:00.000Z'
+        })
+
+        await expect(updateSalesOrder(pending.id, {
+            firstDueDate: '2026-07-15'
+        })).rejects.toThrow('Only draft or unpaid reserved sales orders can be edited')
+    })
+
+    it('keeps financing terms locked when a loan repayment is only partially reversed', async () => {
+        const customer = await createCustomer()
+        const { storage, product } = await createStockedSalesProduct(100)
+        const draft = await createSalesOrder(
+            WORKSPACE_ID,
+            salesOrderInput(customer.id, product, storage.id, { method: 'loan', total: 100 })
+        )
+        const pending = await updateSalesOrderStatus(draft.id, 'pending')
+        const loanId = pending.linkedLoanId!
+        const originalPaymentId = crypto.randomUUID()
+        const now = '2026-06-02T12:00:00.000Z'
+        const originalPayment = {
+            id: originalPaymentId,
+            workspaceId: WORKSPACE_ID,
+            sourceModule: 'loans' as const,
+            sourceType: 'simple_loan' as const,
+            sourceRecordId: loanId,
+            sourceSubrecordId: null,
+            direction: 'incoming' as const,
+            amount: 25,
+            currency: 'iqd' as const,
+            paymentMethod: 'cash' as const,
+            paidAt: now,
+            counterpartyName: pending.customerName,
+            referenceLabel: 'Loan repayment',
+            note: null,
+            createdBy: null,
+            reversalOfTransactionId: null,
+            metadata: null,
+            createdAt: now,
+            updatedAt: now,
+            syncStatus: 'synced' as const,
+            lastSyncedAt: now,
+            version: 1,
+            isDeleted: false
+        }
+        const partialReversal = {
+            ...originalPayment,
+            id: crypto.randomUUID(),
+            amount: -10,
+            reversalOfTransactionId: originalPaymentId
+        }
+        await db.payment_transactions.bulkPut([
+            originalPayment,
+            partialReversal
+        ])
+
+        expect(getRemainingPaymentTransactions([originalPayment, partialReversal]))
+            .toMatchObject([{ id: originalPaymentId, amount: 15 }])
+        await expect(updateSalesOrder(pending.id, {
+            firstDueDate: '2026-07-15'
+        })).rejects.toThrow('financed_order_has_payment_history')
+    })
+
     it('posts simple order-loan initial payments as loan repayments for sales and purchases', async () => {
         const customer = await createCustomer()
         const { storage, product } = await createStockedSalesProduct(100)
