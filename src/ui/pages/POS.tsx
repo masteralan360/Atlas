@@ -8,6 +8,7 @@ import {
     calculateStockBatchUnitCost,
     calculateStockBatchSourceAvailability,
     getStockBatchSalePlans,
+    getStockBatchSalePlansForWorkspace,
     getPrimaryStorageFromList,
     useBatchAwareInventoryProducts,
     useProductSelectionAccess,
@@ -520,6 +521,11 @@ export function POS() {
     })
     const isActivitiesStorage = selectedStorageId === ACTIVITIES_STORAGE_ID
     const isServicesStorage = selectedStorageId === SERVICES_VIRTUAL_STORAGE_ID
+    const hasRemoteStockAuthority = !!user?.workspaceId
+        && !isLocalMode
+        && !isActivitiesStorage
+        && !isServicesStorage
+        && isOnline(user.workspaceId)
     const priceBooksEnabled = hasCapability('priceBooks')
     // A Quick Order is still a Sales Order, so it requires the existing Orders
     // module in addition to the opt-in Quick Order capability.
@@ -2271,7 +2277,7 @@ export function POS() {
             : stockSource?.type === 'regular'
                 ? sourceAvailability?.regularQuantity ?? 0
                 : sourceAvailability?.inventoryQuantity ?? product.inventoryQuantity
-        const maxSellingQuantity = (isInfiniteActivity || isNonInventoryService)
+        const maxSellingQuantity = (isInfiniteActivity || isNonInventoryService || hasRemoteStockAuthority)
             ? ACTIVITY_POS_QUANTITY_LIMIT
             : inventoryQuantityToSellingAvailability(availableSourceQuantity, sellingFactor)
         if (!canSelectProduct(product)) {
@@ -2286,12 +2292,12 @@ export function POS() {
         const committedInventoryQuantity = cart
             .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
             .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
-        if (!isInfiniteActivity && !isNonInventoryService
+        if (!hasRemoteStockAuthority && !isInfiniteActivity && !isNonInventoryService
             && committedInventoryQuantity + sellingFactor > product.inventoryQuantity + 0.000001) {
             toastInsufficientStock(product, product.storageId)
             return false
         }
-        if (stockSource && !isInfiniteActivity && !isNonInventoryService
+        if (!hasRemoteStockAuthority && stockSource && !isInfiniteActivity && !isNonInventoryService
             && sellingFactor > availableSourceQuantity + 0.000001) {
             toast({
                 variant: 'destructive',
@@ -2348,7 +2354,7 @@ export function POS() {
             const committedInventoryQuantity = prev
                 .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
                 .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
-            if (!isInfiniteActivity && !isNonInventoryService
+            if (!hasRemoteStockAuthority && !isInfiniteActivity && !isNonInventoryService
                 && committedInventoryQuantity + sellingFactor > product.inventoryQuantity + 0.000001) return prev
             const latestSourceAvailability = stockSource && !isInfiniteActivity && !isNonInventoryService
                 ? getStockSourceAvailability(product, prev)
@@ -2358,7 +2364,7 @@ export function POS() {
                 : stockSource?.type === 'regular'
                     ? latestSourceAvailability?.regularQuantity ?? 0
                     : null
-            if (latestAvailableSourceQuantity !== null
+            if (!hasRemoteStockAuthority && latestAvailableSourceQuantity !== null
                 && sellingFactor > latestAvailableSourceQuantity + 0.000001) return prev
             if (existing) {
                 return prev.map((item) =>
@@ -2411,7 +2417,7 @@ export function POS() {
         })
         hapticTrigger('selection')
         return true
-    }, [canSelectProduct, cart, currencyConversionEnabled, features, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, getProductForStockSource, getStockSourceAvailability, t, toast, toastInsufficientStock, hapticTrigger])
+    }, [canSelectProduct, cart, currencyConversionEnabled, features, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, getProductForStockSource, getStockSourceAvailability, hasRemoteStockAuthority, t, toast, toastInsufficientStock, hapticTrigger])
 
     const addFreeOnlyProductToCart = useCallback((product: PosCatalogProduct) => {
         if (!canUseOrderFreeBonus || !quickOrderEnabled || isActivitiesStorage || product.isInfiniteActivity) return false
@@ -2442,7 +2448,7 @@ export function POS() {
             hapticTrigger('error')
             return false
         }
-        if (!isNonInventoryService && product.inventoryQuantity <= 0) return false
+        if (!hasRemoteStockAuthority && !isNonInventoryService && product.inventoryQuantity <= 0) return false
         if (cart.some((item) => getCartItemKey(item) === itemKey)) return false
         const activeDiscount = getActiveDiscountForProduct(product, effectivePrice, effectiveCurrency)
 
@@ -2452,7 +2458,7 @@ export function POS() {
                 .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
                 .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
             const coefficient = unitSelection?.factor ?? 1
-            if (!isNonInventoryService && committedInventoryQuantity + coefficient > product.inventoryQuantity + 0.000001) {
+            if (!hasRemoteStockAuthority && !isNonInventoryService && committedInventoryQuantity + coefficient > product.inventoryQuantity + 0.000001) {
                 return previous
             }
 
@@ -2472,7 +2478,7 @@ export function POS() {
                     discount_ends_at: activeDiscount?.endsAt,
                     quantity: 0,
                     freeBonusQuantity: 1,
-                    max_stock: isNonInventoryService
+                    max_stock: isNonInventoryService || hasRemoteStockAuthority
                         ? ACTIVITY_POS_QUANTITY_LIMIT
                         : inventoryQuantityToSellingAvailability(product.inventoryQuantity, unitSelection?.factor ?? 1),
                     imageUrl: product.imageUrl,
@@ -2497,7 +2503,7 @@ export function POS() {
         setPaymentAccount(null)
         hapticTrigger('success')
         return true
-    }, [canSelectProduct, canUseOrderFreeBonus, cart, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, getDefaultPosUnitSelection, hapticTrigger, isActivitiesStorage, quickOrderEnabled, t, toast])
+    }, [canSelectProduct, canUseOrderFreeBonus, cart, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, getDefaultPosUnitSelection, hasRemoteStockAuthority, hapticTrigger, isActivitiesStorage, quickOrderEnabled, t, toast])
 
     const addToCart = useCallback((product: PosCatalogProduct, stockSource?: PosStockSourceSelection | null) => {
         const options = !product.isInfiniteActivity && !isService(product) ? getProductUomOptions(product) : []
@@ -2506,7 +2512,7 @@ export function POS() {
                 .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
                 .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
             const availableQuantity = Math.max(0, product.inventoryQuantity - committedInventoryQuantity)
-            if (!options.some((option) => option.coefficient <= availableQuantity + 0.000001)) {
+            if (!hasRemoteStockAuthority && !options.some((option) => option.coefficient <= availableQuantity + 0.000001)) {
                 toastInsufficientStock(product, product.storageId)
                 return false
             }
@@ -2519,7 +2525,7 @@ export function POS() {
             options[0] ? buildPosUnitSelection(product, options[0], stockSource) : undefined,
             stockSource
         )
-    }, [addSelectedUnitToCart, buildPosUnitSelection, cart, getProductUomOptions, toastInsufficientStock])
+    }, [addSelectedUnitToCart, buildPosUnitSelection, cart, getProductUomOptions, hasRemoteStockAuthority, toastInsufficientStock])
 
     const selectCatalogProduct = useCallback((product: PosCatalogProduct) => {
         if (product.hasBatches && !product.isInfiniteActivity && !isService(product)) {
@@ -2554,12 +2560,12 @@ export function POS() {
             canUseOrderFreeBonus,
             quickOrderEnabled,
             alreadyInCart,
-            inventoryQuantity: product.inventoryQuantity,
+            inventoryQuantity: hasRemoteStockAuthority ? Math.max(1, product.inventoryQuantity) : product.inventoryQuantity,
             isInfiniteActivity: product.isInfiniteActivity === true
         })) return
 
         setMobileFreeOnlyProduct(product)
-    }, [canUseOrderFreeBonus, cart, quickOrderEnabled])
+    }, [canUseOrderFreeBonus, cart, hasRemoteStockAuthority, quickOrderEnabled])
 
     const confirmMobileFreeOnlyProduct = useCallback(async () => {
         if (!mobileFreeOnlyProduct || isAddingMobileFreeOnlyProduct) return
@@ -2637,9 +2643,11 @@ export function POS() {
                         : item.stock_source_type === 'regular'
                             ? sourceAvailability?.regularQuantity ?? 0
                             : product ? Math.max(0, product.inventoryQuantity - otherInventoryQuantity) : item.max_stock
-                    const maxStock = inventoryQuantityToSellingAvailability(sourceAvailableQuantity, item.unit_factor ?? 1)
+                    const maxStock = hasRemoteStockAuthority
+                        ? ACTIVITY_POS_QUANTITY_LIMIT
+                        : inventoryQuantityToSellingAvailability(sourceAvailableQuantity, item.unit_factor ?? 1)
                     const nextItem = { ...item, quantity: newQty, max_stock: maxStock }
-                    if (quantityDelta > 0 && product && (
+                    if (!hasRemoteStockAuthority && quantityDelta > 0 && product && (
                         otherInventoryQuantity + getCartInventoryQuantity(nextItem) > product.inventoryQuantity + 0.000001
                         || getCartInventoryQuantity(nextItem) > sourceAvailableQuantity + 0.000001
                     )) {
@@ -2676,9 +2684,11 @@ export function POS() {
                         : item.stock_source_type === 'regular'
                             ? sourceAvailability?.regularQuantity ?? 0
                             : product ? Math.max(0, product.inventoryQuantity - otherInventoryQuantity) : 0
-                    const maxStock = inventoryQuantityToSellingAvailability(sourceAvailableQuantity, item.unit_factor ?? 1)
+                    const maxStock = hasRemoteStockAuthority
+                        ? ACTIVITY_POS_QUANTITY_LIMIT
+                        : inventoryQuantityToSellingAvailability(sourceAvailableQuantity, item.unit_factor ?? 1)
                     const availableForLine = Math.max(0, maxStock - getOrderLineFreeBonusQuantity(item))
-                    const nextItem = { ...item, quantity: Math.max(0, Math.min(quantity, availableForLine)), max_stock: maxStock }
+                    const nextItem = { ...item, quantity: hasRemoteStockAuthority ? Math.max(0, quantity) : Math.max(0, Math.min(quantity, availableForLine)), max_stock: maxStock }
                     return shouldRemovePosCartItem(nextItem) ? null : nextItem
                 }
                 return item
@@ -2728,8 +2738,8 @@ export function POS() {
             : cartItem.stock_source_type === 'regular'
                 ? sourceAvailability?.regularQuantity ?? 0
                 : availableQuantity
-        if (otherInventoryQuantity + getCartInventoryQuantity(nextItem) > availableQuantity + 0.000001
-            || getCartInventoryQuantity(nextItem) > availableSourceQuantity + 0.000001) {
+        if (!hasRemoteStockAuthority && (otherInventoryQuantity + getCartInventoryQuantity(nextItem) > availableQuantity + 0.000001
+            || getCartInventoryQuantity(nextItem) > availableSourceQuantity + 0.000001)) {
             toast({
                 variant: 'destructive',
                 title: t('messages.error', { defaultValue: 'Error' }),
@@ -2747,6 +2757,7 @@ export function POS() {
 
             const updatedItem = {
                 ...item,
+                ...(hasRemoteStockAuthority ? { max_stock: ACTIVITY_POS_QUANTITY_LIMIT } : {}),
                 freeBonusQuantity: freeBonusQuantity || undefined,
                 freeBonusUnit: freeBonusQuantity > 0 && selectedDisplayUnit && selectedDisplayUnit !== productUnit
                     ? selectedDisplayUnit
@@ -3647,7 +3658,7 @@ export function POS() {
             const positionKey = `${item.product_id}:${storageId}`
             const requested = (stockRequestedByPosition.get(positionKey) ?? 0) + getCartInventoryQuantity(item)
             stockRequestedByPosition.set(positionKey, requested)
-            if (requested > product.inventoryQuantity + 0.000001) {
+            if (!hasRemoteStockAuthority && requested > product.inventoryQuantity + 0.000001) {
                 const storageName = storages.find((storage) => storage.id === storageId)?.name || t('pos.unknownStorage')
                 toast({
                     variant: 'destructive',
@@ -3691,7 +3702,7 @@ export function POS() {
         let batchSalePlans: Awaited<ReturnType<typeof getStockBatchSalePlans>>
         const physicalCart = cart.filter((item) => !isService(findStockProduct(item.product_id, item.storageId)))
         try {
-            batchSalePlans = await getStockBatchSalePlans(physicalCart.map((item) => {
+            batchSalePlans = await getStockBatchSalePlansForWorkspace(user.workspaceId, physicalCart.map((item) => {
                 const storageId = item.storageId || selectedStorageId
                 if (!storageId) {
                     throw new Error('Storage is required for batched sale items')
@@ -5611,7 +5622,10 @@ export function POS() {
                                 const inCart = cart.filter(item => item.product_id === unitSelectionProduct.id && item.storageId === unitSelectionProduct.storageId)
                                     .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
                                 const remainingInventoryQuantity = stock && !unitSelectionStock.error
-                                    ? Math.min(sourceRemainingQuantity, Math.max(0, stock.available - inCart)) : 0
+                                    ? hasRemoteStockAuthority
+                                        ? Math.max(0, stock.available - inCart)
+                                        : Math.min(sourceRemainingQuantity, Math.max(0, stock.available - inCart))
+                                    : 0
                                 return (
                                     <div className="space-y-3">
                                       <StockReservationInfo workspaceId={user?.workspaceId} productId={unitSelectionProduct.id} storageId={unitSelectionProduct.storageId} />
@@ -5693,7 +5707,7 @@ export function POS() {
                                         const price = unitSelection?.price ?? priceBookPricing?.price ?? pricingProduct.price
                                         const currency = unitSelection?.currency ?? priceBookPricing?.currency ?? pricingProduct.currency
                                         const displayQuantity = inventoryQuantityToSellingAvailability(quantity, unitFactor)
-                                        const canSelect = quantity > 0.000001
+                                        const canSelect = quantity > 0.000001 || hasRemoteStockAuthority
                                         const batch = selection.type === 'batch' ? selection.batch : null
 
                                         return (

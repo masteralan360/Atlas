@@ -17,6 +17,7 @@ import {
     roundQuantity
 } from '@/lib/quantity'
 import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
+import i18n from '@/i18n/config'
 import { queryKeys } from '@/query/queryKeys'
 import { recordWorkspaceDataFetch } from '@/workspace/workspaceDataFreshness'
 
@@ -27,6 +28,7 @@ import {
 } from './database'
 import { canReconcileCloudWorkspaceData } from './cloudReconciliation'
 import { getInventoryQuantityForProductStorage, useInventoryProducts, type InventoryProduct } from './inventory'
+import { fetchStockAvailability, stockPositionKey } from './stockReservationData'
 import { addToOfflineMutations } from './offlineMutations'
 import {
     assertCurrentUserCanAccessStorage,
@@ -751,8 +753,9 @@ export async function getStockBatchTransferPlan(
     })
 }
 
-export async function getStockBatchSalePlans(
-    requests: StockBatchSaleRequest[]
+async function buildStockBatchSalePlans(
+    requests: StockBatchSaleRequest[],
+    loadPosition: (request: StockBatchSaleRequest) => Promise<{ inventoryQuantity: number; activeBatches: StockBatch[] }>
 ): Promise<StockBatchSalePlan[]> {
     const normalizedRequests = requests.map((request) => {
         const quantity = Number(request.quantity)
@@ -790,10 +793,7 @@ export async function getStockBatchSalePlans(
             return
         }
 
-        const [inventoryQuantity, activeBatches] = await Promise.all([
-            getInventoryQuantityForProductStorage(request.productId, request.storageId),
-            getActiveBatchesForProductStorage(request.productId, request.storageId)
-        ])
+        const { inventoryQuantity, activeBatches } = await loadPosition(request)
         const sortedBatches = sortBatchesForConsumption(activeBatches)
         const batchQuantity = sortedBatches.reduce((sum, row) => sum + row.quantity, 0)
 
@@ -884,6 +884,77 @@ export async function getStockBatchSalePlans(
             batchQuantity: state.batchQuantity,
             sellableQuantity: state.sellableQuantity,
             allocations
+        }
+    })
+}
+
+export async function getStockBatchSalePlans(
+    requests: StockBatchSaleRequest[]
+): Promise<StockBatchSalePlan[]> {
+    return buildStockBatchSalePlans(requests, async (request) => {
+        const [inventoryQuantity, activeBatches] = await Promise.all([
+            getInventoryQuantityForProductStorage(request.productId, request.storageId),
+            getActiveBatchesForProductStorage(request.productId, request.storageId)
+        ])
+        return { inventoryQuantity, activeBatches }
+    })
+}
+
+/**
+ * Online sales must plan against current server stock and batches. Dexie is
+ * still used for Local, offline, and queued stock operations so their local
+ * projection remains in order.
+ */
+export async function getStockBatchSalePlansForWorkspace(
+    workspaceId: string,
+    requests: StockBatchSaleRequest[]
+): Promise<StockBatchSalePlan[]> {
+    if (requests.length === 0) return []
+    if (usesLocalStockExecution(workspaceId) || !isOnline(workspaceId)
+        || await needsOfflineStockOperation(workspaceId)) {
+        return getStockBatchSalePlans(requests)
+    }
+
+    const positions = [...new Map(requests.map((request) => {
+        const position = { productId: request.productId, storageId: request.storageId }
+        return [stockPositionKey(position), position] as const
+    })).values()]
+    const availability = await fetchStockAvailability(workspaceId, positions)
+    const availabilityByPosition = new Map(availability.map((row) => [stockPositionKey(row), row] as const))
+    const batchesByPosition = new Map<string, StockBatch[]>()
+    const requestedKeys = new Set(positions.map(stockPositionKey))
+    const productIds = [...new Set(positions.map((position) => position.productId))]
+    const storageIds = [...new Set(positions.map((position) => position.storageId))]
+    const client = getSupabaseClientForTable(TABLE_NAME)
+
+    for (let from = 0; ; from += STOCK_BATCH_FETCH_PAGE_SIZE) {
+        const { data, error } = await runSupabaseAction('stockBatches.salePlan.fetch', () => client
+            .from(TABLE_NAME)
+            .select('*')
+            .eq('workspace_id', workspaceId)
+            .eq('is_deleted', false)
+            .in('product_id', productIds)
+            .in('storage_id', storageIds)
+            .order('id', { ascending: true })
+            .range(from, from + STOCK_BATCH_FETCH_PAGE_SIZE - 1))
+        if (error || !data) throw normalizeSupabaseActionError(error ?? new Error('Stock batch data is unavailable.'))
+        for (const value of data as Record<string, unknown>[]) {
+            const batch = normalizeStockBatchPageRow(value, workspaceId)
+            if (!batch) continue
+            const key = stockPositionKey(batch)
+            if (!requestedKeys.has(key)) continue
+            batchesByPosition.set(key, [...(batchesByPosition.get(key) ?? []), batch])
+        }
+        if (data.length < STOCK_BATCH_FETCH_PAGE_SIZE) break
+    }
+
+    return buildStockBatchSalePlans(requests, async (request) => {
+        const key = stockPositionKey(request)
+        const stock = availabilityByPosition.get(key)
+        if (!stock) throw new Error(i18n.t('stockReservations.loadFailed'))
+        return {
+            inventoryQuantity: stock.onHand,
+            activeBatches: batchesByPosition.get(key) ?? []
         }
     })
 }
@@ -1775,6 +1846,41 @@ function normalizeStockBatchPageRow(value: unknown, workspaceId: string): StockB
         syncStatus: 'synced',
         lastSyncedAt: new Date().toISOString(),
     } as StockBatch
+}
+
+export async function fetchStockBatchesForPositionsFromSupabase(
+    workspaceId: string,
+    productIds: readonly string[],
+    storageIds: readonly string[],
+): Promise<StockBatch[]> {
+    const products = [...new Set(productIds.filter(Boolean))]
+    const storages = [...new Set(storageIds.filter(Boolean))]
+    if (!workspaceId || products.length === 0 || storages.length === 0) return []
+    if (!isOnline(workspaceId)) throw new Error(i18n.t('inventory.errors.onlineRequired'))
+
+    const client = getSupabaseClientForTable(TABLE_NAME)
+    const rows: StockBatch[] = []
+    for (let productOffset = 0; productOffset < products.length; productOffset += 200) {
+        const productChunk = products.slice(productOffset, productOffset + 200)
+        for (let from = 0; ; from += STOCK_BATCH_FETCH_PAGE_SIZE) {
+            const { data, error } = await runSupabaseAction('stockBatches.positions.fetch', () => client
+                .from(TABLE_NAME)
+                .select('*')
+                .eq('workspace_id', workspaceId)
+                .eq('is_deleted', false)
+                .in('product_id', productChunk)
+                .in('storage_id', storages)
+                .order('id', { ascending: true })
+                .range(from, from + STOCK_BATCH_FETCH_PAGE_SIZE - 1))
+            if (error || !data) throw normalizeSupabaseActionError(error ?? new Error('Stock batch data is unavailable.'))
+            for (const value of data as Record<string, unknown>[]) {
+                const batch = normalizeStockBatchPageRow(value, workspaceId)
+                if (batch && productChunk.includes(batch.productId) && storages.includes(batch.storageId)) rows.push(batch)
+            }
+            if (data.length < STOCK_BATCH_FETCH_PAGE_SIZE) break
+        }
+    }
+    return rows
 }
 
 async function cacheRemoteStockBatches(rows: readonly StockBatch[]) {

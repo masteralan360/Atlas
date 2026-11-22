@@ -98,7 +98,7 @@ import {
     calculateStockBatchUnitCost,
     commitStockBatchAllocations,
     createStockBatch,
-    getStockBatchSalePlans,
+    getStockBatchSalePlansForWorkspace,
     hydrateStockBatchesForPurchaseOrder,
     refreshStockBatchesFromSupabase,
     restoreStockBatchAllocations,
@@ -1506,7 +1506,7 @@ async function deductInventoryForSalesOrder(
         storageId,
         version: authoritativeVersions.get(buildInventoryReservationKey(productId, storageId)) ?? 0
     }))
-    const salePlans = await getStockBatchSalePlans(physicalItems.map(({ item }) => ({
+    const salePlans = await getStockBatchSalePlansForWorkspace(order.workspaceId, physicalItems.map(({ item }) => ({
         productId: item.productId,
         storageId: resolveSalesOrderItemStorageId(order, item) as string,
         quantity: getOrderLineInventoryQuantity(item),

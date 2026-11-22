@@ -2,6 +2,8 @@ negative delivery fee
 
 PWA Faster
 
+Product reservation page list
+
 sidebar redesign mobile view
 
 Post Service Notification

@@ -6,6 +6,8 @@ import { useTranslation } from 'react-i18next'
 import { formatCurrency, cn } from '@/lib/utils'
 import { isPositiveQuantity, roundQuantity } from '@/lib/quantity'
 import { getOrderLineUnitFactor } from '@/lib/orderLineItems'
+import { isOnline } from '@/lib/network'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import type { PaymentAccount, Product, Storage } from '@/local-db'
 import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
@@ -153,6 +155,7 @@ export function ProductExchangeModal({
     onSubmit,
 }: ProductExchangeModalProps) {
     const { t, i18n } = useTranslation()
+    const hasRemoteStockAuthority = !isLocalWorkspaceMode(workspaceId) && isOnline(workspaceId)
     const formatUnitQuantity = (quantity: number, unit?: string | null) => `${new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }).format(quantity)}${unit ? ` ${t(`products.units.${unit}`, { defaultValue: unit })}` : ''}`
     const [saleItemId, setSaleItemId] = useState('')
     const [returnQuantity, setReturnQuantity] = useState('')
@@ -169,10 +172,30 @@ export function ProductExchangeModal({
         () => saleItems.find((item) => item.id === saleItemId),
         [saleItemId, saleItems],
     )
-    const storageProducts = useMemo(
-        () => replacementProducts.filter((product) => product.storageId === storageId && isPositiveQuantity(product.availableQuantity)),
-        [replacementProducts, storageId],
-    )
+    const storageProducts = useMemo(() => {
+        const cachedForStorage = replacementProducts.filter((product) => product.storageId === storageId)
+        if (!hasRemoteStockAuthority || !storageId) {
+            return cachedForStorage.filter((product) => isPositiveQuantity(product.availableQuantity))
+        }
+
+        const cachedById = new Map(cachedForStorage.map((product) => [product.id, product] as const))
+        const settlement = settlementCurrency.toLowerCase()
+        return productCatalog.flatMap((product) => {
+            if (product.isDeleted || product.currency.toLowerCase() !== settlement) return []
+            const cached = cachedById.get(product.id)
+            return [cached ?? {
+                id: product.id,
+                storageId,
+                name: product.name,
+                sku: product.sku || null,
+                unit: product.unit || null,
+                unitPrice: Number(product.price || 0),
+                currency: product.currency,
+                replacementUnitAmount: Number(product.price || 0),
+                availableQuantity: 0,
+            }]
+        })
+    }, [hasRemoteStockAuthority, productCatalog, replacementProducts, settlementCurrency, storageId])
     const selectedReplacementProduct = useMemo(
         () => storageProducts.find((product) => product.id === replacementProductId),
         [replacementProductId, storageProducts],
@@ -194,7 +217,7 @@ export function ProductExchangeModal({
         && returnedQuantityValue <= selectedSaleItem.returnableQuantity
     const isReplacementQuantityValid = !!selectedReplacementProduct
         && isPositiveQuantity(replacementQuantityValue)
-        && replacementQuantityValue <= selectedReplacementProduct.availableQuantity
+        && (hasRemoteStockAuthority || replacementQuantityValue <= selectedReplacementProduct.availableQuantity)
     const returnedStockCredit = isReturnQuantityValid && selectedSaleItem?.productId === replacementProductId && selectedSaleItem.storageId === storageId
         ? returnedQuantityValue * getOrderLineUnitFactor(selectedSaleItem) : 0
     const replacementStockDemand = Math.max(0, replacementQuantityValue - returnedStockCredit)
@@ -261,13 +284,29 @@ export function ProductExchangeModal({
     }
 
     const selectReplacementProduct = (nextProductId: string, nextStorageId = storageId) => {
-        const product = replacementProducts.find((candidate) => (
+        const cached = replacementProducts.find((candidate) => (
             candidate.id === nextProductId && candidate.storageId === nextStorageId
         ))
+        const catalogProduct = hasRemoteStockAuthority
+            ? productCatalog.find((candidate) => candidate.id === nextProductId
+                && !candidate.isDeleted
+                && candidate.currency.toLowerCase() === settlementCurrency.toLowerCase())
+            : undefined
+        const product = cached ?? (catalogProduct ? {
+            id: catalogProduct.id,
+            storageId: nextStorageId,
+            name: catalogProduct.name,
+            sku: catalogProduct.sku || null,
+            unit: catalogProduct.unit || null,
+            unitPrice: Number(catalogProduct.price || 0),
+            currency: catalogProduct.currency,
+            replacementUnitAmount: Number(catalogProduct.price || 0),
+            availableQuantity: 0,
+        } : undefined)
         setStorageId(nextStorageId)
         setReplacementProductId(product?.id || '')
         setReplacementProductSearch(product?.name || '')
-        setReplacementQuantity(product ? initialQuantity(product.availableQuantity) : '')
+        setReplacementQuantity(product ? initialQuantity(hasRemoteStockAuthority ? 1 : product.availableQuantity) : '')
         setSubmitError('')
     }
 
@@ -281,6 +320,10 @@ export function ProductExchangeModal({
     }
 
     const productViewFilter = (catalog: Product[], selectedStorageId: string) => {
+        if (hasRemoteStockAuthority) {
+            const settlement = settlementCurrency.toLowerCase()
+            return catalog.filter((product) => !product.isDeleted && product.currency.toLowerCase() === settlement)
+        }
         const availableIds = new Set(
             replacementProducts
                 .filter((product) => product.storageId === selectedStorageId && isPositiveQuantity(product.availableQuantity))
@@ -449,7 +492,7 @@ export function ProductExchangeModal({
                                         label={`${t('sales.exchange.replacementQuantity', { defaultValue: 'Replacement quantity' })}${selectedReplacementProduct?.unit ? ` (${t(`products.units.${selectedReplacementProduct.unit}`, { defaultValue: selectedReplacementProduct.unit })})` : ''}`}
                                         value={replacementQuantity}
                                         onChange={setReplacementQuantity}
-                                        max={selectedReplacementProduct?.availableQuantity}
+                                        max={hasRemoteStockAuthority ? undefined : selectedReplacementProduct?.availableQuantity}
                                         disabled={!selectedReplacementProduct || isSubmitting}
                                         invalid={hasReplacementQuantityError}
                                         errorMessage={replacementQuantityError}

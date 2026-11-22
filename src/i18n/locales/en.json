@@ -6567,6 +6567,7 @@
     "selectTicket": "Select a ticket to begin.",
     "emptyTicket": "Add items to start this ticket.",
     "currencyWarning": "Ticket has mixed currencies. Checkout is disabled.",
+    "adjustQuantitiesToContinue": "Adjust item quantities to continue.",
     "currencyMismatch": "Instant POS supports one settlement currency per ticket.",
     "checkoutComplete": "Order closed",
     "checkoutCompleteDesc": "Sale recorded in Sales History.",

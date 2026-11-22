@@ -1,14 +1,13 @@
 import { needsOfflineStockOperation, runOfflineStockOperation } from '@/local-db/offlineStockOperations'
 import { isOnline } from '@/lib/network'
 import { useStockAvailability, useStockDemandGuard } from '@/local-db/stockReservations'
-import { StockReservationInfo, StockDemandNotice, SellableStockQuantity } from '@/ui/components/inventory/StockReservationInfo'
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Virtuoso } from 'react-virtuoso'
 import { useLocation, useRoute } from 'wouter'
 import { useAuth } from '@/auth'
 import { supabase } from '@/auth/supabase'
-import { addToOfflineMutations, adjustInventoryQuantity, assertStaffMinimumSellingPrices, calculateStockBatchUnitCost, commitStockBatchAllocations, generateLocalSaleSequenceId, getPrimaryStorageFromList, getStockBatchSalePlans, useActiveDiscountMap, useBatchAwareInventoryProducts, useCategories, useProductSelectionAccess, useProductUoms, useProducts, useStorages, useUnits } from '@/local-db'
+import { addToOfflineMutations, adjustInventoryQuantity, assertStaffMinimumSellingPrices, calculateStockBatchUnitCost, commitStockBatchAllocations, generateLocalSaleSequenceId, getPrimaryStorageFromList, getStockBatchSalePlans, getStockBatchSalePlansForWorkspace, useActiveDiscountMap, useBatchAwareInventoryProducts, useCategories, useProductSelectionAccess, useProductUoms, useProducts, useStorages, useUnits } from '@/local-db'
 import { isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { db } from '@/local-db/database'
 import type { CurrencyCode, PaymentAccount, UnitRef } from '@/local-db/models'
@@ -35,7 +34,7 @@ import {
   StorageSelector,
 } from '@/ui/components'
 import { PaymentAccountSelector } from '@/ui/components/payments/PaymentAccountSelector'
-import { AlertCircle, CheckCircle2, ChefHat, ChevronDown, ChevronRight, ChevronUp, Loader2, Menu, Minus, Package, Plus, Receipt, Search, ShoppingCart, StickyNote, Table2, Trash2, Wallet, X } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ChefHat, ChevronDown, ChevronRight, ChevronUp, Loader2, Menu, Minus, Package, Plus, Receipt, RefreshCw, Search, ShoppingCart, StickyNote, Table2, Trash2, Wallet, X } from 'lucide-react'
 import { UiAccessGate } from '@/context/UiAccessContext'
 import { useWorkspacePermissions } from '@/permissions'
 import { isRetriableWebRequestError, normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
@@ -415,6 +414,25 @@ function formatCountdown(ms: number, expiredLabel: string) {
     return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
+function StockCheckNotice({ guard }: { guard: ReturnType<typeof useStockDemandGuard> }) {
+    const { t } = useTranslation()
+    if (!guard.blocked) return null
+    const needsRefresh = !!guard.error || (guard.hasAvailabilityGap && !guard.isLoading)
+    return (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-sm" role="status">
+            {guard.isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+            <span className="min-w-0 flex-1">
+                {t(guard.isLoading ? 'stockReservations.checking' : needsRefresh ? 'stockReservations.loadFailed' : 'instantPos.adjustQuantitiesToContinue')}
+            </span>
+            {needsRefresh && (
+                <Button type="button" variant="outline" size="sm" disabled={guard.isFetching} onClick={() => void guard.refetch()}>
+                    <RefreshCw className="me-1 h-4 w-4" />{t('stockReservations.retry')}
+                </Button>
+            )}
+        </div>
+    )
+}
+
 interface MobileTicketPanelProps {
     activeTicket: InstantPosTicket
     activeTicketTotals: { total: number, hasMixedCurrency: boolean }
@@ -426,10 +444,7 @@ interface MobileTicketPanelProps {
     statusAction: { label: string, status: InstantPosStatus } | null
     activePendingTimeLeftMs: number | null
     isCheckoutLoading: boolean
-    reservationBlocked: boolean
-    reservationRequiredByPosition: ReadonlyMap<string, number>
-    workspaceId?: string
-    reservationNotice: React.ReactNode
+    stockGuard: ReturnType<typeof useStockDemandGuard>
     canPreprintReceipt: boolean
     isPreprinting: boolean
     isLoadingPreprintTemplate: boolean
@@ -458,7 +473,7 @@ interface MobileTicketPanelProps {
 
 function MobileTicketPanel({
     activeTicket, activeTicketTotals, minimumPriceViolations, settlementCurrency, features, t,
-    statusLabels, statusAction, activePendingTimeLeftMs, isCheckoutLoading, reservationBlocked, reservationRequiredByPosition, workspaceId, reservationNotice,
+    statusLabels, statusAction, activePendingTimeLeftMs, isCheckoutLoading, stockGuard,
     canPreprintReceipt, isPreprinting, isLoadingPreprintTemplate,
     canCookOrderTicket, isPrintingCookOrderTicket,
     getStorageLabel, checkoutTicket, handlePreprintReceipt, handleCookOrderTicket, setTicketStatus, extendPendingExpiry, clearActiveTicket,
@@ -555,7 +570,7 @@ function MobileTicketPanel({
                     <div className="w-12 h-1.5 bg-muted-foreground/20 rounded-full group-hover:bg-primary/30 transition-colors" />
                 </div>
 
-                {reservationNotice}
+                <StockCheckNotice guard={stockGuard} />
                 {/* Collapsed Header */}
                 <div className="flex items-center justify-between py-2 touch-none">
                     <div className="flex flex-col cursor-pointer" onClick={() => setIsExpanded(true)}>
@@ -634,7 +649,7 @@ function MobileTicketPanel({
                                 e.stopPropagation();
                                 checkoutTicket();
                             }}
-                            disabled={activeTicket.items.length === 0 || isCheckoutLoading || reservationBlocked || activeTicketTotals.hasMixedCurrency || minimumPriceViolations.size > 0}
+                            disabled={activeTicket.items.length === 0 || isCheckoutLoading || stockGuard.blocked || activeTicketTotals.hasMixedCurrency || minimumPriceViolations.size > 0}
                         >
                             {isCheckoutLoading ? <Loader2 className="animate-spin w-5 h-5" /> : (
                                 <div className="flex items-center gap-2">
@@ -754,7 +769,6 @@ function MobileTicketPanel({
                                                     </div>
                                                     <div>
                                                         <div className="text-sm font-semibold text-foreground">{item.name}</div>
-                                                        <StockReservationInfo workspaceId={workspaceId} productId={item.productId} storageId={item.storageId} required={reservationRequiredByPosition.get(`${item.productId}:${item.storageId}`)} sellingUnit={{ unitCode: item.sellingUnitCode, baseUnitCode: item.baseUnitCode, factor: getTicketItemFactor(item) }} />
                                                         {item.note && (
                                                             <div className="text-[10px] italic text-primary/80 font-medium">
                                                                 --{stylizeText(item.note)}
@@ -858,7 +872,7 @@ function MobileTicketPanel({
                                                 : <ChefHat className="h-5 w-5" />}
                                         </Button>
                                     )}
-                                    <Button className={cn("h-14 rounded-2xl font-black text-lg gap-2", !canCookOrderTicket && "col-start-2")} onClick={checkoutTicket} disabled={activeTicket.items.length === 0 || isCheckoutLoading || reservationBlocked || activeTicketTotals.hasMixedCurrency || minimumPriceViolations.size > 0}>
+                                    <Button className={cn("h-14 rounded-2xl font-black text-lg gap-2", !canCookOrderTicket && "col-start-2")} onClick={checkoutTicket} disabled={activeTicket.items.length === 0 || isCheckoutLoading || stockGuard.blocked || activeTicketTotals.hasMixedCurrency || minimumPriceViolations.size > 0}>
                                         {isCheckoutLoading ? <Loader2 className="animate-spin" /> : <><CheckCircle2 className="w-5 h-5" /> {t('instantPos.checkout')}</>}
                                     </Button>
                                     {canPreprintReceipt && (
@@ -912,6 +926,7 @@ export function InstantPOS() {
     const [, navigate] = useLocation()
     const [hasRestaurantTableRoute, restaurantTableRouteParams] = useRoute('/instant-pos/table/:tableNumber')
     const { features, hasFeature, isLocalMode } = useWorkspace()
+    const hasRemoteStockAuthority = !!user?.workspaceId && !isLocalMode && isOnline(user.workspaceId)
     const storages = useStorages(user?.workspaceId)
     const [selectedStorageId, setSelectedStorageId] = useState<string>(() => {
         return localStorage.getItem('instant_pos_selected_storage') || ''
@@ -1300,7 +1315,7 @@ export function InstantPOS() {
         return matches.length === 1 ? matches[0] : undefined
     }, [ticketProducts])
 
-    const reservationGuard = useStockDemandGuard(user?.workspaceId, (activeTicket?.items ?? []).filter(item => !isService(resolveTicketProduct(item)) && (item.storageId || resolveTicketProduct(item)?.storageId)).map(item => ({ productId: item.productId, storageId: (item.storageId || resolveTicketProduct(item)?.storageId)!, quantity: soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item)) })))
+    const stockDemandGuard = useStockDemandGuard(user?.workspaceId, (activeTicket?.items ?? []).filter(item => !isService(resolveTicketProduct(item)) && (item.storageId || resolveTicketProduct(item)?.storageId)).map(item => ({ productId: item.productId, storageId: (item.storageId || resolveTicketProduct(item)?.storageId)!, quantity: soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item)) })))
 
     const filteredProducts = useMemo(() => {
         const term = search.trim().toLowerCase()
@@ -1614,7 +1629,7 @@ export function InstantPOS() {
         const effectiveCost = selectedUom?.costPrice ?? (baseUnitCost == null
             ? null
             : baseUnitCost * (selectedUom?.coefficient ?? 1))
-        if (!isService(product) && product.quantity <= 0) {
+        if (!hasRemoteStockAuthority && !isService(product) && product.quantity <= 0) {
             toast({
                 title: t('common.error') || 'Error',
                 description: t('instantPos.outOfStock') || 'This product is out of stock.',
@@ -1689,7 +1704,7 @@ export function InstantPOS() {
                 const reservedByOtherUnits = ticket.items
                     .filter((item) => item.productId === product.id && item.storageId === product.storageId && item.uomId !== selectedUom?.id)
                     .reduce((sum, item) => sum + soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item)), 0)
-                if (!isService(product) && reservedByOtherUnits + soldQuantityToInventoryQuantity(existing.quantity + 1, existingFactor) > product.quantity) {
+                if (!hasRemoteStockAuthority && !isService(product) && reservedByOtherUnits + soldQuantityToInventoryQuantity(existing.quantity + 1, existingFactor) > product.quantity) {
                     toast({
                         title: t('common.error') || 'Error',
                         description: t('instantPos.outOfStock') || 'This product is out of stock.',
@@ -1995,7 +2010,7 @@ export function InstantPOS() {
             }
         }
 
-        try { await reservationGuard.assert() } catch (error) {
+        try { await stockDemandGuard.assert() } catch (error) {
             toast({ variant: 'destructive', title: t('common.error'), description: normalizeSupabaseActionError(error).message })
             setIsCheckoutLoading(false)
             return
@@ -2012,7 +2027,9 @@ export function InstantPOS() {
                 quantity: (current?.quantity ?? 0) + soldQuantityToInventoryQuantity(item.quantity, getTicketItemFactor(item))
             })
         }
-        const insufficientInventory = Array.from(inventoryDemandByProduct.values()).find(({ product, quantity }) => quantity > product.quantity)
+        const insufficientInventory = hasRemoteStockAuthority
+            ? undefined
+            : Array.from(inventoryDemandByProduct.values()).find(({ product, quantity }) => quantity > product.quantity)
         if (insufficientInventory) {
             toast({
                 title: t('common.error') || 'Error',
@@ -2026,7 +2043,7 @@ export function InstantPOS() {
         const physicalItems = activeTicket.items.filter((item) => !isService(resolveTicketProduct(item)))
         let batchSalePlans: Awaited<ReturnType<typeof getStockBatchSalePlans>>
         try {
-            batchSalePlans = await getStockBatchSalePlans(physicalItems.map((item) => {
+            batchSalePlans = await getStockBatchSalePlansForWorkspace(user.workspaceId, physicalItems.map((item) => {
                 const resolvedStorageId = item.storageId || resolveTicketProduct(item)?.storageId
                 if (!resolvedStorageId) {
                     throw new Error('Storage is required for batched sale items')
@@ -2312,7 +2329,7 @@ export function InstantPOS() {
             if (isLocalMode || queueStockCheckout || !isOnline(user.workspaceId) || isRetriableWebRequestError(normalized)) {
                 try {
                     const saleDataOffline = await runOfflineStockOperation(user.workspaceId, 'checkout', () => db.transaction('rw', db.tables, async () => {
-                    await reservationGuard.assert()
+                    await stockDemandGuard.assert()
                     const localSequenceId = isLocalMode ? await generateLocalSaleSequenceId(user.workspaceId) : undefined
                     const localReference = localSequenceId ? `#${String(localSequenceId).padStart(5, '0')}` : `LOCAL-${saleId}`
                     const localSaleItems = itemsWithMetadata.map((item) => ({
@@ -2866,7 +2883,7 @@ export function InstantPOS() {
                                         buildInstantPosItemKey(product.id, product.storageId)
                                     ) ?? 0
                                     const remainingQuantity = service ? null : Math.max(0, (product.quantity - inTicketQuantity) / (defaultUom?.coefficient ?? 1))
-                                    const isOutOfStock = !service && remainingQuantity === 0
+                                    const isOutOfStock = !hasRemoteStockAuthority && !service && remainingQuantity === 0
                                     return (
                                         <button
                                             key={buildInstantPosItemKey(product.id, product.storageId)}
@@ -2895,20 +2912,9 @@ export function InstantPOS() {
                                                         +{Number((inTicketQuantity / (defaultUom?.coefficient ?? 1)).toFixed(3))}
                                                     </div>
                                                 )}
-                                                {service ? (
+                                                {service && (
                                                     <div className="absolute right-2 top-2 rounded-full bg-primary/10 px-2 py-1 text-[10px] font-black uppercase text-primary">
                                                         {t('services.badge', { defaultValue: 'Service' })}
-                                                    </div>
-                                                ) : (
-                                                    <div className={cn(
-                                                        'absolute right-2 top-2 rounded-2xl px-2.5 py-1.5 text-[12px] font-black shadow-md',
-                                                        isOutOfStock
-                                                            ? 'bg-destructive text-destructive-foreground'
-                                                            : remainingQuantity !== null && remainingQuantity <= (product.minStockLevel || 5)
-                                                                ? 'bg-amber-400 text-amber-950'
-                                                                : 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 backdrop-blur-md'
-                                                    )}>
-                                                        <SellableStockQuantity workspaceId={user?.workspaceId} productId={product.id} storageId={product.storageId} inCart={inTicketQuantity} unitFactor={defaultUom?.coefficient ?? 1} unitCode={defaultUom?.unitCode ?? product.unit} isDynamic={defaultUom?.isDynamic ?? false} />
                                                     </div>
                                                 )}
                                                 {activeDiscount && (
@@ -2921,7 +2927,6 @@ export function InstantPOS() {
                                                 <div className="truncate text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground/60">
                                                     {product.sku || (service ? t('services.title', { defaultValue: 'Services' }) : '---')}
                                                 </div>
-                                                {!service && <StockReservationInfo workspaceId={user?.workspaceId} productId={product.id} storageId={product.storageId} interactive={false} sellingUnit={defaultUom ? { unitCode: defaultUom.unitCode, baseUnitCode: product.unit, factor: defaultUom.coefficient, isDynamic: defaultUom.isDynamic } : undefined} />}
                                                 <h3 className="line-clamp-2 text-sm font-bold leading-snug text-foreground transition-colors group-hover:text-primary">
                                                     {product.name}
                                                 </h3>
@@ -2964,10 +2969,7 @@ export function InstantPOS() {
                             statusAction={statusAction}
                             activePendingTimeLeftMs={activePendingTimeLeftMs}
                             isCheckoutLoading={isCheckoutLoading}
-                            reservationBlocked={reservationGuard.blocked}
-                            reservationRequiredByPosition={reservationGuard.requiredByPosition}
-                            workspaceId={user?.workspaceId}
-                            reservationNotice={<StockDemandNotice workspaceId={user?.workspaceId} guard={reservationGuard} />}
+                            stockGuard={stockDemandGuard}
                             canPreprintReceipt={canPreprintReceipt}
                             isPreprinting={isPreprinting}
                             isLoadingPreprintTemplate={isLoadingPreprintTemplate}
@@ -3104,7 +3106,6 @@ export function InstantPOS() {
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="min-w-0 flex-1">
                                                         <div className="truncate text-sm font-medium text-foreground">{item.name} {item.sellingUnitCode ? <span className="text-xs text-muted-foreground">· {item.sellingUnitCode}</span> : null}</div>
-                                                        {!isService(resolveTicketProduct(item)) && <StockReservationInfo workspaceId={user?.workspaceId} productId={item.productId} storageId={item.storageId || resolveTicketProduct(item)?.storageId} required={reservationGuard.requiredByPosition.get(`${item.productId}:${item.storageId || resolveTicketProduct(item)?.storageId}`)} sellingUnit={{ unitCode: item.sellingUnitCode, baseUnitCode: item.baseUnitCode, factor: getTicketItemFactor(item) }} />}
                                                         {item.note && (
                                                             <div className="text-[10px] italic text-primary/80 font-medium">
                                                                 --{stylizeText(item.note)}
@@ -3219,6 +3220,7 @@ export function InstantPOS() {
                                         <StickyNote className="h-4 w-4" />
                                     </Button>
                                 </div>
+                                <StockCheckNotice guard={stockDemandGuard} />
                                 <div className="flex gap-2">
                                     {canCookOrderTicket && (
                                         <Button
@@ -3235,14 +3237,13 @@ export function InstantPOS() {
                                                 : <ChefHat className="h-4 w-4" />}
                                         </Button>
                                     )}
-                                    <StockDemandNotice workspaceId={user?.workspaceId} guard={reservationGuard} />
                                     <Button
                                         className="h-11 flex-1 rounded-xl"
                                         onClick={checkoutTicket}
                                         disabled={
                                             isCheckoutLoading
                                             || activeTicket.items.length === 0
-                                            || reservationGuard.blocked
+                                            || stockDemandGuard.blocked
                                             || activeTicketTotals.hasMixedCurrency
                                             || minimumPriceViolations.size > 0
                                         }
@@ -3291,7 +3292,6 @@ export function InstantPOS() {
                     <AppDialogBody>
                         <div className="space-y-2">
                             <p className="text-sm text-muted-foreground">{unitPickerProduct?.name}</p>
-                            <StockReservationInfo workspaceId={user?.workspaceId} productId={unitPickerProduct?.id} storageId={unitPickerProduct?.storageId} />
                             {unitPickerOptions.map((uom) => {
                                 const stock = unitPickerStock.data?.find(row => row.productId === unitPickerProduct?.id && row.storageId === unitPickerProduct?.storageId)
                                 const remaining = stock && !unitPickerStock.error ? Math.max(0, stock.available - unitPickerUsedBaseQuantity) : 0

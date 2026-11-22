@@ -4664,6 +4664,7 @@
     "selectTicket": "اختر تذكرة للبدء.",
     "emptyTicket": "أضف عناصر لبدء هذه التذكرة.",
     "currencyWarning": "التذكرة تحتوي على عملات متعددة. الدفع معطل.",
+    "adjustQuantitiesToContinue": "عدّل كميات العناصر للمتابعة.",
     "currencyMismatch": "نقطة البيع الفورية تدعم عملة تسوية واحدة لكل تذكرة.",
     "checkoutComplete": "تم إغلاق الطلب",
     "checkoutCompleteDesc": "تم تسجيل البيع في سجل المبيعات.",

@@ -70,6 +70,7 @@ import { formatCurrency, formatNumericInput, generateId, sanitizeNumericInput } 
 import { useDateRange } from '@/context/DateRangeContext'
 import { getDateRangeBounds } from '@/lib/dateRangeFilters'
 import { isOnline } from '@/lib/network'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { STANDARD_PAYMENT_METHODS, type PaymentMethodOption } from '@/lib/paymentMethods'
 import { getLocalizedOrderError } from '@/lib/orderErrors'
 import { getCommerceOperationsPartnerLabels } from './commerceOperationsPartnerLabels'
@@ -848,8 +849,10 @@ function OrderIntakeForm({ active, channel, workspaceId, userId, userName, userR
     return stock
   }, [storageInventory])
   const isProductAvailable = useCallback(
-    (product: Product) => (stockByProductId.get(product.id) || 0) > 0,
-    [stockByProductId],
+    (product: Product) => workspaceId && !isLocalWorkspaceMode(workspaceId) && isOnline(workspaceId)
+      ? true
+      : (stockByProductId.get(product.id) || 0) > 0,
+    [stockByProductId, workspaceId],
   )
 
   const chosenPriceBookItem = (product: Product) => channel === 'wholesale' && priceBookId

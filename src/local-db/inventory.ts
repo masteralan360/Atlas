@@ -692,6 +692,35 @@ async function fetchProductsForInventoryRows(
     return rows
 }
 
+/** Read the current inventory positions and their visible products without
+ * treating the Dexie snapshot as authoritative. */
+export async function fetchInventoryStorageSnapshotFromSupabase(workspaceId: string, storageId: string) {
+    const normalizedStorageId = storageId.trim()
+    if (!workspaceId || !normalizedStorageId || isLocalWorkspaceMode(workspaceId) || !isOnline(workspaceId)) {
+        throw new Error(i18n.t('inventory.errors.onlineRequired'))
+    }
+    const remoteInventory = await fetchPagedWorkspaceRows('inventory', workspaceId, (query) => query.eq('storage_id', normalizedStorageId))
+    if (!remoteInventory) throw new Error(i18n.t('inventory.errors.authoritativeReadFailed'))
+    const remoteProducts = await fetchProductsForInventoryRows(workspaceId, remoteInventory, { storageId: normalizedStorageId })
+    if (!remoteProducts) throw new Error(i18n.t('inventory.errors.authoritativeReadFailed'))
+    const fetchedAt = new Date().toISOString()
+    const inventory = remoteInventory.map((row) => ({
+        ...(toCamelCase(row) as unknown as Inventory),
+        syncStatus: 'synced' as const,
+        lastSyncedAt: fetchedAt,
+    }))
+    const products = remoteProducts.map((row) => {
+        const product = toCamelCase(row) as unknown as Product
+        return {
+            ...product,
+            skuKey: normalizeProductSku(product.sku),
+            syncStatus: 'synced' as const,
+            lastSyncedAt: fetchedAt,
+        }
+    })
+    return { inventory, products }
+}
+
 async function fetchInventoryWorkspaceFromSupabaseInternal(
     workspaceId: string,
     options: InventoryWorkspaceFetchOptions

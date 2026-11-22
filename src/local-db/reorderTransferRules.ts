@@ -1,6 +1,8 @@
 import { v5 as uuidv5 } from 'uuid'
 import { fetchInventoryTransferBatchDetails } from './inventoryTransferBatches'
 import { currentStockOperation } from './offlineStockContext'
+import { fetchStockAvailability, stockPositionKey } from './stockReservationData'
+import { needsOfflineStockOperation } from './offlineStockOperations'
 import { useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 
@@ -275,14 +277,30 @@ export async function evaluateReorderTransferRule(ruleId: string, triggerId?: st
             return false
         }
 
-        const destinationQuantity = await getInventoryQuantityForProductStorage(rule.productId, rule.destinationStorageId)
-        if (destinationQuantity >= rule.minStockLevel) {
-            return false
-        }
-
-        const sourceQuantity = await getInventoryQuantityForProductStorage(rule.productId, rule.sourceStorageId)
-        if (sourceQuantity < rule.transferQuantity) {
-            return false
+        const useRemoteStock = !isLocalWorkspaceMode(rule.workspaceId)
+            && isOnline(rule.workspaceId)
+            && !await needsOfflineStockOperation(rule.workspaceId)
+        if (useRemoteStock) {
+            let stock: Awaited<ReturnType<typeof fetchStockAvailability>>
+            try {
+                stock = await fetchStockAvailability(rule.workspaceId, [
+                    { productId: rule.productId, storageId: rule.sourceStorageId },
+                    { productId: rule.productId, storageId: rule.destinationStorageId },
+                ])
+            } catch (error) {
+                console.error('[ReorderTransferRules] Could not read current stock:', error)
+                return false
+            }
+            const stockByPosition = new Map(stock.map((row) => [stockPositionKey(row), row] as const))
+            const source = stockByPosition.get(stockPositionKey({ productId: rule.productId, storageId: rule.sourceStorageId }))
+            const destination = stockByPosition.get(stockPositionKey({ productId: rule.productId, storageId: rule.destinationStorageId }))
+            if (!source || !destination) return false
+            if (destination.onHand >= rule.minStockLevel || source.available < rule.transferQuantity) return false
+        } else {
+            const destinationQuantity = await getInventoryQuantityForProductStorage(rule.productId, rule.destinationStorageId)
+            if (destinationQuantity >= rule.minStockLevel) return false
+            const sourceQuantity = await getInventoryQuantityForProductStorage(rule.productId, rule.sourceStorageId)
+            if (sourceQuantity < rule.transferQuantity) return false
         }
 
         const now = new Date().toISOString()

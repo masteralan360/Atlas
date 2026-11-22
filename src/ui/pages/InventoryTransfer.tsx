@@ -4,6 +4,8 @@ import { useUnitRegistry, getQuantityStep } from '@/ui/components/unitRegistry';
 import { getProductUnitLabel } from '@/lib/productUnitPresentation';
 import {
   db,
+  fetchInventoryStorageSnapshotFromSupabase,
+  fetchStockBatchesForPositionsFromSupabase,
   fetchInventoryWorkspaceFromSupabase,
   refreshStockBatchesFromSupabase,
   createReorderTransferRule,
@@ -16,6 +18,9 @@ import {
   useStockBatches,
   useStorages,
 } from "@/local-db";
+import { needsOfflineStockOperation } from "@/local-db/offlineStockOperations";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
+import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 import type {
   InventoryTransaction,
   InventoryTransferBatch,
@@ -563,6 +568,10 @@ export default function InventoryTransfer() {
     [i18n.language, i18n.resolvedLanguage],
   );
   const { activeWorkspace, branchInfo, features, workspaceName } = useWorkspace();
+  const networkOnline = useNetworkStatus();
+  const canReadRemoteSourceStock = !!activeWorkspace?.id
+    && !isLocalWorkspaceMode(activeWorkspace.id)
+    && networkOnline;
   const storages = useStorages(activeWorkspace?.id);
   const inventory = useInventory(activeWorkspace?.id);
   const products = useProducts(activeWorkspace?.id);
@@ -584,6 +593,46 @@ export default function InventoryTransfer() {
   const transferTargetsLoadedWorkspaceIdRef = useRef<string | null>(null);
   const transferTargetsInFlightWorkspaceIdRef = useRef<string | null>(null);
   const [sourceStorageId, setSourceStorageId] = useState<string>("");
+  const sourceSnapshotKey = `${activeWorkspace?.id ?? ""}:${sourceStorageId}`;
+  const [remoteSourceSnapshot, setRemoteSourceSnapshot] = useState<{
+    key: string;
+    status: "loading" | "remote" | "local" | "error";
+    inventory?: Awaited<ReturnType<typeof fetchInventoryStorageSnapshotFromSupabase>>["inventory"];
+    products?: Awaited<ReturnType<typeof fetchInventoryStorageSnapshotFromSupabase>>["products"];
+    stockBatches?: Awaited<ReturnType<typeof fetchStockBatchesForPositionsFromSupabase>>;
+  } | null>(null);
+  useEffect(() => {
+    if (!activeWorkspace?.id || !sourceStorageId || !canReadRemoteSourceStock) {
+      setRemoteSourceSnapshot(null);
+      return;
+    }
+
+    const key = `${activeWorkspace.id}:${sourceStorageId}`;
+    let cancelled = false;
+    setRemoteSourceSnapshot({ key, status: "loading" });
+    void (async () => {
+      try {
+        if (await needsOfflineStockOperation(activeWorkspace.id)) {
+          if (!cancelled) setRemoteSourceSnapshot({ key, status: "local" });
+          return;
+        }
+        const snapshot = await fetchInventoryStorageSnapshotFromSupabase(activeWorkspace.id, sourceStorageId);
+        const stockBatches = await fetchStockBatchesForPositionsFromSupabase(
+          activeWorkspace.id,
+          snapshot.inventory.map((row) => row.productId),
+          [sourceStorageId],
+        );
+        if (!cancelled) setRemoteSourceSnapshot({ key, status: "remote", ...snapshot, stockBatches });
+      } catch {
+        if (!cancelled) setRemoteSourceSnapshot({ key, status: "error" });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeWorkspace?.id, canReadRemoteSourceStock, sourceStorageId]);
+  const currentRemoteSourceSnapshot = remoteSourceSnapshot?.key === sourceSnapshotKey
+    ? remoteSourceSnapshot
+    : null;
+  const hasRemoteStockAuthority = canReadRemoteSourceStock && currentRemoteSourceSnapshot?.status === "remote";
   const [targetWorkspaceId, setTargetWorkspaceId] = useState<string>("");
   const [targetStorageId, setTargetStorageId] = useState<string>("");
   const sourceStorageCardRef = useRef<HTMLDivElement>(null);
@@ -610,8 +659,11 @@ export default function InventoryTransfer() {
   const [deletingRuleId, setDeletingRuleId] = useState<string | null>(null);
 
   const productsById = useMemo(
-    () => new Map(products.map((product) => [product.id, product] as const)),
-    [products],
+    () => new Map([
+      ...products.map((product) => [product.id, product] as const),
+      ...(hasRemoteStockAuthority ? (currentRemoteSourceSnapshot?.products ?? []).map((product) => [product.id, product] as const) : []),
+    ]),
+    [currentRemoteSourceSnapshot, hasRemoteStockAuthority, products],
   );
 
   const storagesById = useMemo(
@@ -723,7 +775,10 @@ export default function InventoryTransfer() {
   const sourceProducts = useMemo(
     () => {
       const batchesByProductId = new Map<string, StockBatch[]>();
-      for (const batch of stockBatches) {
+      const sourceBatchRows = canReadRemoteSourceStock && currentRemoteSourceSnapshot?.status !== "local"
+        ? currentRemoteSourceSnapshot?.stockBatches ?? []
+        : stockBatches;
+      for (const batch of sourceBatchRows) {
         if (
           batch.storageId !== sourceStorageId ||
           batch.isDeleted ||
@@ -747,10 +802,19 @@ export default function InventoryTransfer() {
         );
       }
 
-      return inventory
+      const shouldUseRemoteSnapshot = canReadRemoteSourceStock && currentRemoteSourceSnapshot?.status !== "local";
+      const sourceInventory = shouldUseRemoteSnapshot
+        ? currentRemoteSourceSnapshot?.inventory ?? []
+        : inventory.filter((row) => row.storageId === sourceStorageId && row.quantity > 0);
+      const sourceProductsById = new Map([
+        ...products.map((product) => [product.id, product] as const),
+        ...(shouldUseRemoteSnapshot ? (currentRemoteSourceSnapshot?.products ?? []).map((product) => [product.id, product] as const) : []),
+      ]);
+
+      return sourceInventory
         .filter((row) => row.storageId === sourceStorageId && row.quantity > 0)
         .map((row) => {
-          const product = products.find((entry) => entry.id === row.productId);
+          const product = sourceProductsById.get(row.productId);
           if (!product || product.isDeleted) {
             return null;
           }
@@ -774,7 +838,7 @@ export default function InventoryTransfer() {
         )
         .sort((left, right) => left.name.localeCompare(right.name));
     },
-    [inventory, products, sourceStorageId, stockBatches],
+    [canReadRemoteSourceStock, currentRemoteSourceSnapshot, inventory, products, sourceStorageId, stockBatches],
   );
 
   const filteredSourceProducts = useMemo(() => {
@@ -1361,6 +1425,15 @@ export default function InventoryTransfer() {
       });
     }
 
+    if (canReadRemoteSourceStock && (!currentRemoteSourceSnapshot || currentRemoteSourceSnapshot.status === "loading")) {
+      return t("common.loading", { defaultValue: "Loading..." });
+    }
+    if (canReadRemoteSourceStock && currentRemoteSourceSnapshot?.status === "error") {
+      return t("inventory.errors.authoritativeReadFailed", {
+        defaultValue: "Could not verify current inventory. Refresh and try again.",
+      });
+    }
+
     const currentStockKeys = new Set(sourceStockLines.map((line) => line.key));
     const unavailableKey = Array.from(selectedStockKeys).find(
       (key) => !currentStockKeys.has(key),
@@ -1401,7 +1474,7 @@ export default function InventoryTransfer() {
       const productName = product?.name ?? line.productId;
       const unit = product?.unit ?? "";
       const unitLabel = getProductUnitLabel(unit, t);
-      if (line.availableQuantity <= QUANTITY_EPSILON) {
+      if (!hasRemoteStockAuthority && line.availableQuantity <= QUANTITY_EPSILON) {
         return t(
           line.selectionType === "batch"
             ? "inventoryTransfer.selectedStockUnavailable"
@@ -1438,7 +1511,7 @@ export default function InventoryTransfer() {
           defaultValue: "Transfer quantity for {{product}} must be greater than zero.",
         });
       }
-      if (quantity - line.availableQuantity > QUANTITY_EPSILON) {
+      if (!hasRemoteStockAuthority && quantity - line.availableQuantity > QUANTITY_EPSILON) {
         if (line.selectionType === "batch" && line.batch) {
           return t("inventoryTransfer.batchQuantityExceedsStock", {
             batch: line.batch.batchNumber,
@@ -1457,7 +1530,7 @@ export default function InventoryTransfer() {
     }
 
     for (const item of selectedTransferItems) {
-      if (item.quantity - item.availableQuantity > QUANTITY_EPSILON) {
+      if (!hasRemoteStockAuthority && item.quantity - item.availableQuantity > QUANTITY_EPSILON) {
         const unitLabel = getProductUnitLabel(item.unit, t);
         return t("inventoryTransfer.productQuantityExceedsStock", {
           product: item.productName,

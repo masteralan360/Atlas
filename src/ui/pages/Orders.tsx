@@ -170,6 +170,7 @@ import {
     useOptionalCommissionFeatureData
 } from '@/ui/components/commissions/useCommissionAgentDirectory'
 import { getWorkspaceDataMode } from '@/workspace/workspaceMode'
+import { isOnline } from '@/lib/network'
 
 type OrderTab = 'sales' | 'purchase'
 type StatusFilter = 'all' | 'draft' | 'pending' | 'ordered' | 'received' | 'completed' | 'cancelled'
@@ -1073,6 +1074,10 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
         return items.some((item) => item.storageId) ? multipleStoragesLabel : t('orders.form.selectStorage', { defaultValue: 'Select Storage' })
     }
     const getSalesProductOptions = (storageId: string, selectedProductId: string) => {
+        const dataMode = getWorkspaceDataMode(workspaceId)
+        if (dataMode !== 'local' && dataMode !== 'demo' && isOnline(workspaceId)) {
+            return products
+        }
         const availableIds = availableSalesProductIdsByStorage.get(storageId) ?? new Set<string>()
         return products.filter((product) => product.id === selectedProductId || availableIds.has(product.id))
     }

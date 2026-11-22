@@ -17,12 +17,14 @@ import {
 } from './storagePermissions'
 import {
   assertInventoryMutationConnectivity,
+  fetchInventoryStorageSnapshotFromSupabase,
   hydrateInventoryProductStoragesFromSupabase,
   syncProductStockSnapshot,
 } from './inventory'
 import { buildInventoryMovementTransactionId } from './inventoryTransactions'
 import {
   planStockBatchTransfer,
+  fetchStockBatchesForPositionsFromSupabase,
   refreshStockBatchesFromSupabase,
   type StockBatchTransferSelection,
 } from './stockBatches'
@@ -569,6 +571,11 @@ interface StockBatchChange {
   row: StockBatch
 }
 
+interface TransferAuthoritativeStockSnapshot {
+  inventory: Inventory[]
+  stockBatches: StockBatch[]
+}
+
 function getPositionRow(rows: Inventory[], workspaceId: string) {
   return rows.find((row) => row.workspaceId === workspaceId && !row.isDeleted)
     ?? rows.find((row) => row.workspaceId === workspaceId)
@@ -634,21 +641,26 @@ async function prepareStockBatchChanges(
   destinationStorageId: string,
   items: PlannedItem[],
   timestamp: string,
+  authoritativeStockBatches?: StockBatch[],
 ) {
   const changesByBatchId = new Map<string, StockBatchChange>()
   const destinationBatchByKey = new Map<string, StockBatch>()
 
   for (const item of items) {
-    const sourceBatches = await db.stock_batches
-      .where('[productId+storageId]')
-      .equals([item.productId, sourceStorageId])
-      .and((batch) => batch.workspaceId === workspaceId && !batch.isDeleted)
-      .toArray()
-    const destinationBatches = await db.stock_batches
-      .where('[productId+storageId]')
-      .equals([item.productId, destinationStorageId])
-      .and((batch) => batch.workspaceId === workspaceId)
-      .toArray()
+    const sourceBatches = authoritativeStockBatches
+      ? authoritativeStockBatches.filter((batch) => batch.productId === item.productId && batch.storageId === sourceStorageId && !batch.isDeleted)
+      : await db.stock_batches
+        .where('[productId+storageId]')
+        .equals([item.productId, sourceStorageId])
+        .and((batch) => batch.workspaceId === workspaceId && !batch.isDeleted)
+        .toArray()
+    const destinationBatches = authoritativeStockBatches
+      ? authoritativeStockBatches.filter((batch) => batch.productId === item.productId && batch.storageId === destinationStorageId)
+      : await db.stock_batches
+        .where('[productId+storageId]')
+        .equals([item.productId, destinationStorageId])
+        .and((batch) => batch.workspaceId === workspaceId)
+        .toArray()
 
     for (const batch of destinationBatches) {
       const key = `${item.productId}:${batch.batchNumber.trim().toLocaleLowerCase()}`
@@ -747,24 +759,32 @@ async function prepareItems(
   destinationStorageId: string,
   items: InventoryTransferBatchItemInput[],
   timestamp: string,
+  authoritativeSnapshot?: TransferAuthoritativeStockSnapshot,
 ) {
   const plannedItems: PlannedItem[] = []
   for (const input of items) {
-    const [sourceInventoryRow, destinationInventoryRow] = await Promise.all([
-      getInventoryPosition(workspaceId, input.productId, sourceStorageId),
-      getInventoryPosition(workspaceId, input.productId, destinationStorageId),
-    ])
+    const [sourceInventoryRow, destinationInventoryRow] = authoritativeSnapshot
+      ? [
+          getPositionRow(authoritativeSnapshot.inventory.filter((row) => row.productId === input.productId && row.storageId === sourceStorageId), workspaceId),
+          getPositionRow(authoritativeSnapshot.inventory.filter((row) => row.productId === input.productId && row.storageId === destinationStorageId), workspaceId),
+        ] as const
+      : await Promise.all([
+          getInventoryPosition(workspaceId, input.productId, sourceStorageId),
+          getInventoryPosition(workspaceId, input.productId, destinationStorageId),
+        ])
     const sourcePreviousQuantity = sourceInventoryRow && !sourceInventoryRow.isDeleted
       ? roundQuantity(sourceInventoryRow.quantity)
       : 0
     const destinationPreviousQuantity = destinationInventoryRow && !destinationInventoryRow.isDeleted
       ? roundQuantity(destinationInventoryRow.quantity)
       : 0
-    const batches = await db.stock_batches
-      .where('[productId+storageId]')
-      .equals([input.productId, sourceStorageId])
-      .and((batch) => batch.workspaceId === workspaceId && !batch.isDeleted)
-      .toArray()
+    const batches = authoritativeSnapshot
+      ? authoritativeSnapshot.stockBatches.filter((batch) => batch.productId === input.productId && batch.storageId === sourceStorageId && !batch.isDeleted)
+      : await db.stock_batches
+        .where('[productId+storageId]')
+        .equals([input.productId, sourceStorageId])
+        .and((batch) => batch.workspaceId === workspaceId && !batch.isDeleted)
+        .toArray()
     const plan = planStockBatchTransfer({
       inventoryQuantity: sourcePreviousQuantity,
       batches,
@@ -790,6 +810,7 @@ async function prepareItems(
     destinationStorageId,
     plannedItems,
     timestamp,
+    authoritativeSnapshot?.stockBatches,
   )
   return { plannedItems, stockBatchChanges }
 }
@@ -1078,12 +1099,27 @@ async function createRemoteTransferBatch(input: CreateInventoryTransferBatchInpu
   )))
   await refreshStockBatchesFromSupabase(workspaceId)
 
+  const [sourceSnapshot, destinationSnapshot] = await Promise.all([
+    fetchInventoryStorageSnapshotFromSupabase(workspaceId, sourceStorageId),
+    fetchInventoryStorageSnapshotFromSupabase(workspaceId, destinationStorageId),
+  ])
+  const productIds = items.map((item) => item.productId)
+  const authoritativeStockBatches = await fetchStockBatchesForPositionsFromSupabase(
+    workspaceId,
+    productIds,
+    [sourceStorageId, destinationStorageId],
+  )
+
   const { plannedItems, stockBatchChanges } = await prepareItems(
     workspaceId,
     sourceStorageId,
     destinationStorageId,
     items,
     timestamp,
+    {
+      inventory: [...sourceSnapshot.inventory, ...destinationSnapshot.inventory],
+      stockBatches: authoritativeStockBatches,
+    },
   )
   const [sourceStorage, destinationStorage, workspace] = await Promise.all([
     db.storages.get(sourceStorageId),
