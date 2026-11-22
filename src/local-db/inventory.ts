@@ -6,6 +6,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import i18n from '@/i18n/config'
 import { assertLocalStockDemands } from './stockReservationData'
+import { normalizeStockReservationError } from '@/lib/stockReservationConflict'
 import { isOnline } from '@/lib/network'
 import { QUANTITY_EPSILON, isPositiveQuantity, quantitiesEqual, roundQuantity } from '@/lib/quantity'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
@@ -444,6 +445,8 @@ export async function syncInventoryRowsBestEffort(
 
     const processResponse = async () => {
     if (response.error) {
+        const reservationError = normalizeStockReservationError(response.error)
+        if (reservationError) throw reservationError
         if ((response.error as { code?: string }).code === '40001') {
             const conflictReason: InventorySnapshotConflictReason = (
                 (response.error as { message?: string }).message ?? ''

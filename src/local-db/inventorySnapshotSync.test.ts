@@ -97,6 +97,7 @@ const CONFLICT_OPERATION_ID = '20000000-0000-5000-8000-000000000006'
 const COMPLETION_OPERATION_ID = '20000000-0000-5000-8000-000000000009'
 const COMPLETION_CONFLICT_OPERATION_ID = '20000000-0000-5000-8000-000000000010'
 const COMPLETION_ORDER_CONFLICT_OPERATION_ID = '20000000-0000-5000-8000-000000000011'
+const STOCK_RESERVATION_CONFLICT_OPERATION_ID = '20000000-0000-5000-8000-000000000012'
 
 function inventoryRow(version: number): Inventory {
     return {
@@ -434,6 +435,47 @@ describe('authoritative inventory snapshot sync', () => {
             p_expected_order_version: 2,
             p_operation_id: COMPLETION_CONFLICT_OPERATION_ID
         }))
+    })
+
+    it('turns an authoritative reservation rejection into the localized stock conflict', async () => {
+        const orderId = '20000000-0000-4000-8000-000000000017'
+        const conflictStorageId = '20000000-0000-4000-8000-000000000018'
+        const conflict = {
+            workspaceId: WORKSPACE_ID,
+            productId: PRODUCT_ID,
+            storageId: conflictStorageId,
+            onHand: 15,
+            reserved: 15,
+            required: 1,
+            available: 0
+        }
+        supabaseMock.rpc.mockResolvedValue({
+            data: null,
+            error: {
+                code: '23514',
+                message: 'stock_reserved',
+                details: JSON.stringify(conflict)
+            }
+        })
+
+        await expect(syncInventoryRowsBestEffort(
+            [{ ...inventoryRow(8), storageId: conflictStorageId }],
+            WORKSPACE_ID,
+            {
+                operationId: STOCK_RESERVATION_CONFLICT_OPERATION_ID,
+                operationKind: 'sales_order_completion',
+                expectedVersions: [{ productId: PRODUCT_ID, storageId: conflictStorageId, version: 7 }],
+                salesOrderCompletion: {
+                    orderId,
+                    expectedOrderVersion: 2,
+                    items: [{ id: 'line-1', productId: PRODUCT_ID, storageId: conflictStorageId, quantity: 1 }],
+                    actualDeliveryDate: '2026-09-18T09:00:00.000Z'
+                }
+            }
+        )).rejects.toMatchObject({
+            name: 'StockReservationConflictError',
+            conflict
+        })
     })
 
     it('surfaces a sales-order version conflict envelope and suppresses an immediate replay', async () => {

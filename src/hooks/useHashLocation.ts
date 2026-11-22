@@ -28,6 +28,7 @@ export const useHashLocation = () => {
         };
 
         window.addEventListener("hashchange", handler);
+        handler();
         return () => window.removeEventListener("hashchange", handler);
     }, []);
 

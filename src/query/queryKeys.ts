@@ -10,6 +10,11 @@ import type {
 } from '@/local-db/beauty3AppointmentReminders'
 
 export const queryKeys = {
+  sivaPublicVisit: {
+    configuration: (workspaceId: string) => [
+      'atlas', 'public', 'siva-visit', workspaceId, 'configuration',
+    ] as const,
+  },
   notificationInbox: {
     all: (workspaceId?: string, userId?: string | null) => [
       'atlas', 'workspace', workspaceId ?? 'unscoped', 'notification-inbox', userId ?? null,

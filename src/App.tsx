@@ -155,6 +155,9 @@ const Logs = lazy(() =>
 const Beauty3AppointmentReminders = lazy(() =>
   import("@/ui/pages/Beauty3AppointmentReminders").then((m) => ({ default: m.Beauty3AppointmentReminders })),
 );
+const SivaPublicVisit = lazy(() =>
+  import("@/ui/pages/SivaPublicVisit").then((m) => ({ default: m.SivaPublicVisit })),
+);
 const MutationQueue = lazy(() =>
   import("@/ui/pages/MutationQueue").then((m) => ({ default: m.MutationQueue })),
 );
@@ -1501,6 +1504,9 @@ function App() {
                       <Router hook={useHashLocation}>
                         <Switch>
                       {/* Guest Routes */}
+                      <Route path="/siva">
+                        <SivaPublicVisit />
+                      </Route>
                       <Route path="/login">
                         <GuestRoute>
                           <Login />

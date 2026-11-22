@@ -89,9 +89,10 @@ Deno.serve(async (req) => {
 
         const [discountResults, resolvedLogoUrl] = await Promise.all([
             Promise.all(visibleProducts.marketplaceStorageIds.map((storageId) =>
-                adminClient.rpc('get_active_discounts_for_marketplace_storage', {
+                adminClient.rpc('get_active_discounts_for_storefront_storage', {
                     p_workspace_id: context.workspace.id,
-                    p_storage_id: storageId
+                    p_storage_id: storageId,
+                    p_price_book_id: mode === 'wholesale' ? context.config.wholesale_price_book_id : null
                 })
             )),
             (async () => resolvePublicAssetUrl(context.workspace.logo_url)

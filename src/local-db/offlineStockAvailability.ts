@@ -4,7 +4,7 @@ import { getOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import { roundQuantity } from '@/lib/quantity'
 import { db } from './database'
 import { currentStockOperation, type StockOperationEffect } from './offlineStockContext'
-import type { StockAvailability, StockPosition } from './stockReservations'
+import type { StockAvailability, StockPosition } from './stockReservationData'
 import type { OfflineStockOperation } from './offlineStockOperations'
 
 function key(workspaceId: string, position: StockPosition, excludeOrderId?: string) {

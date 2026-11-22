@@ -29,8 +29,6 @@ User Plan Control in Billing
 
 #
 
-Make Quick Orders Faster
-
 Maintenence Mode
 
 prompt manager with admin, staff options

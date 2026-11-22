@@ -1,8 +1,6 @@
 import { useMemo } from 'react'
-import { currentStockOperation } from './offlineStockContext'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
-import { isOnline } from '@/lib/network'
-import { cacheOfflineStockAvailability, readOfflineStockAvailability } from './offlineStockAvailability'
+import { readOfflineStockAvailability } from './offlineStockAvailability'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/auth/supabase'
@@ -11,19 +9,16 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { isVirtualStorageId } from '@/lib/catalogItem'
 import { getOrderLineInventoryQuantity } from '@/lib/orderLineItems'
 import { QUANTITY_EPSILON, roundQuantity } from '@/lib/quantity'
-import { reportStockReservationConflict } from '@/lib/stockReservationConflict'
-import { readLocalStockAvailability } from './stockReservationData'
+import { assertStockDemands, fetchStockAvailability, readLocalStockAvailability, stockPositionKey } from './stockReservationData'
+import type { StockAvailability, StockDemand, StockPosition } from './stockReservationData'
+export { assertStockDemands, fetchStockAvailability, stockPositionKey } from './stockReservationData'
+export type { StockAvailability, StockDemand, StockPosition } from './stockReservationData'
 import { queryKeys } from '@/query/queryKeys'
 import { db } from './database'
 import i18n from '@/i18n/config'
 import { canAccessOrderForStorageAccess, getCurrentStorageAccess, useStorageAccess } from './storagePermissions'
 import { useOptionalWorkspacePermissions } from '@/permissions/workspacePermissionsState'
 import { useViewOwnRecordScope } from '@/permissions/useViewOwnRecordScope'
-
-export interface StockPosition { productId: string; storageId: string }
-export interface StockAvailability extends StockPosition { onHand: number; reserved: number; available: number }
-export interface StockDemand extends StockPosition { quantity: number }
-export const stockPositionKey = (position: StockPosition) => `${position.productId}:${position.storageId}`
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -52,50 +47,6 @@ function isNonRetryableStockAvailabilityError(error: unknown): boolean {
   const code = error.code
   return typeof code === 'string'
     && (code.startsWith('22') || code.startsWith('23') || code.startsWith('42') || code === 'P0001' || code.startsWith('PGRST'))
-}
-
-export async function fetchStockAvailability(workspaceId: string, positions: readonly StockPosition[], excludeOrderId?: string, signal?: AbortSignal): Promise<StockAvailability[]> {
-  const stockPositions = stockPositionsExcludingVirtual(positions)
-  if (!stockPositions.length) return []
-  if (isLocalWorkspaceMode(workspaceId)) return readLocalStockAvailability(workspaceId, stockPositions, excludeOrderId)
-  if (!isOnline(workspaceId) || currentStockOperation(workspaceId)) return readOfflineStockAvailability(workspaceId, stockPositions, excludeOrderId)
-  if (stockPositions.some(position => !isValidStockPosition(position))) throw new InvalidStockPositionError()
-  const rows: StockAvailability[] = []
-  for (let offset = 0; offset < stockPositions.length; offset += 200) {
-    let request = supabase.rpc('get_stock_reservation_availability', {
-      p_workspace_id: workspaceId, p_positions: stockPositions.slice(offset, offset + 200), p_exclude_order_id: excludeOrderId || null,
-    })
-    if (signal) request = request.abortSignal(signal)
-    const { data, error } = await request
-    if (error) throw error
-    if (!Array.isArray(data)) throw new Error('Invalid stock availability response')
-    for (const row of data) {
-      if (!row || typeof row.productId !== 'string' || typeof row.storageId !== 'string'
-        || ![row.onHand, row.reserved, row.available].every((value: unknown) => typeof value === 'number' && Number.isFinite(value))) {
-        throw new Error('Invalid stock availability row')
-      }
-      rows.push(row as StockAvailability)
-    }
-  }
-  await cacheOfflineStockAvailability(workspaceId, rows, excludeOrderId)
-  return readOfflineStockAvailability(workspaceId, stockPositions, excludeOrderId)
-}
-
-export async function assertStockDemands(workspaceId: string, demands: readonly StockDemand[], excludeOrderId?: string) {
-  const grouped = new Map<string, StockDemand>()
-  for (const demand of demands) {
-    if (!demand.productId || !demand.storageId || isVirtualStockPosition(demand)) continue
-    const key = stockPositionKey(demand)
-    grouped.set(key, { ...demand, quantity: roundQuantity((grouped.get(key)?.quantity ?? 0) + demand.quantity) })
-  }
-  const positions = await fetchStockAvailability(workspaceId, [...grouped.values()], excludeOrderId)
-  if ([...grouped.keys()].some(key => !positions.some(position => stockPositionKey(position) === key))) throw new Error(i18n.t('stockReservations.loadFailed'))
-  for (const stock of positions) {
-    const required = grouped.get(stockPositionKey(stock))!.quantity
-    if (required > stock.onHand - stock.reserved + QUANTITY_EPSILON) {
-      throw reportStockReservationConflict({ ...stock, required, workspaceId })
-    }
-  }
 }
 
 /** Coalesce simultaneously mounted catalog cards into bounded remote requests. */

@@ -106,6 +106,7 @@ import {
     syncStockBatchesBestEffort,
     splitStockBatchAllocationsForReturn
 } from './stockBatches'
+import { assertStockDemands } from './stockReservationData'
 import type {
     Customer,
     CurrencyCode,
@@ -1301,6 +1302,24 @@ async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: str
     if (requirementsToValidate.length === 0) return
 
     assertInventoryMutationConnectivity(order.workspaceId)
+
+    // Cloud and Hybrid workspaces use the server-backed availability snapshot
+    // while online. The local Dexie/SQLite mirror can lag behind another
+    // device, so it must not reject a valid reservation or completion.
+    if (shouldUseCloudBusinessData(order.workspaceId)
+        && isOnline(order.workspaceId)
+        && !currentStockOperation(order.workspaceId)) {
+        await assertStockDemands(
+            order.workspaceId,
+            requirementsToValidate.map(({ productId, storageId, quantity }) => ({
+                productId,
+                storageId,
+                quantity
+            })),
+            excludeOrderId
+        )
+        return
+    }
 
     const [reservations, inventoryRows] = await Promise.all([
         getReservedQuantityMaps(order.workspaceId, productMap, excludeOrderId),

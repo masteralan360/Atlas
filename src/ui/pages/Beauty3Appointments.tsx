@@ -112,6 +112,7 @@ import type {
   PaymentObligation,
   PaymentTransaction,
   WorkspacePaymentMethod,
+  ClinicalPreset,
 } from '@/local-db/models'
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50]
@@ -1160,7 +1161,12 @@ export function Beauty3Appointments() {
   )
 }
 
-function Beauty3AppointmentInlineEntry({
+type Beauty3FormProcedurePreset = Pick<
+  ClinicalPreset,
+  'id' | 'name' | 'displayName' | 'consultationFee' | 'isActive' | 'faceMapAreas'
+>
+
+export function Beauty3AppointmentInlineEntry({
   workspaceId,
   viewerUserId,
   defaultCurrency,
@@ -1168,14 +1174,18 @@ function Beauty3AppointmentInlineEntry({
   onCancel,
   onManageProcedures,
   onSave,
+  publicMode = false,
+  procedurePresetOverrides,
 }: {
   workspaceId: string
   viewerUserId?: string | null
   defaultCurrency: CurrencyCode
   iqdPreference: IQDDisplayPreference
-  onCancel: () => void
-  onManageProcedures: () => void
-  onSave: (draft: Beauty3AppointmentDraft) => Promise<boolean>
+  onCancel?: () => void
+  onManageProcedures?: () => void
+  onSave: (draft: Beauty3AppointmentDraft, honeypot?: string) => Promise<boolean>
+  publicMode?: boolean
+  procedurePresetOverrides?: readonly Beauty3FormProcedurePreset[]
 }) {
   const { t } = useTranslation()
   const { toast } = useToast()
@@ -1184,7 +1194,7 @@ function Beauty3AppointmentInlineEntry({
     initialBeauty3ClientSelectionState,
   )
   const [clientOptionsOpen, setClientOptionsOpen] = useState(false)
-  const [isNewClient, setIsNewClient] = useState(false)
+  const [isNewClient, setIsNewClient] = useState(publicMode)
   const [name, setName] = useState('')
   const [ageText, setAgeText] = useState('')
   const [maritalStatus, setMaritalStatus] = useState<Beauty3Appointment['maritalStatus'] | ''>('')
@@ -1197,10 +1207,11 @@ function Beauty3AppointmentInlineEntry({
   const [appointmentTotalText, setAppointmentTotalText] = useState('')
   const [totalProfitText, setTotalProfitText] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [honeypot, setHoneypot] = useState('')
   const clientQuery = useBeauty3ClientSearch({
-    workspaceId,
+    workspaceId: publicMode ? '' : workspaceId,
     search: clientSelection.search,
-    sourceMode: isLocalWorkspaceMode(workspaceId) || isDemoWorkspaceMode(workspaceId) ? 'local' : 'remote',
+    sourceMode: !publicMode && (isLocalWorkspaceMode(workspaceId) || isDemoWorkspaceMode(workspaceId)) ? 'local' : 'remote',
   }, viewerUserId)
   const { search: clientSearch, selectedClient, selectedUnavailable: selectedClientUnavailable } = clientSelection
   useEffect(() => {
@@ -1208,10 +1219,11 @@ function Beauty3AppointmentInlineEntry({
     else if (clientQuery.error) dispatchClientSelection({ type: 'options-error' })
     else dispatchClientSelection({ type: 'options-loaded', clients: clientQuery.clients })
   }, [clientQuery.clients, clientQuery.error, clientQuery.isLoading])
-  const customProcedurePresets = useClinicalPresetsByCategory(
-    workspaceId,
+  const cachedProcedurePresets = useClinicalPresetsByCategory(
+    publicMode ? undefined : workspaceId,
     BEAUTY3_PROCEDURE_PRESET_CATEGORY,
   )
+  const customProcedurePresets = procedurePresetOverrides ?? cachedProcedurePresets
   const customProcedures = (customProcedurePresets ?? []).filter((preset) => (
     preset.isActive && !isBeauty3BuiltInProcedureType(preset.name)
   ))
@@ -1326,7 +1338,7 @@ function Beauty3AppointmentInlineEntry({
         totalProfit: parsedProfit,
         currency: defaultCurrency,
       }
-      const saved = await onSave(draft)
+      const saved = await onSave(draft, honeypot)
       if (!saved) return
     } catch (error) {
       console.error('[Beauty3Appointments] Failed to add visit:', error)
@@ -1344,24 +1356,28 @@ function Beauty3AppointmentInlineEntry({
             <Plus className="size-5 text-primary" />
             {t('beauty3Appointments.addVisit')}
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">{t('beauty3Appointments.inlineEntryDescription')}</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t(publicMode ? 'beauty3Appointments.formDescription' : 'beauty3Appointments.inlineEntryDescription')}
+          </p>
         </div>
-        <Button type="button" variant="ghost" size="icon" onClick={onCancel} disabled={isSaving} aria-label={t('common.cancel')}>
-          <X className="size-4" />
-        </Button>
+        {!publicMode ? (
+          <Button type="button" variant="ghost" size="icon" onClick={onCancel} disabled={isSaving} aria-label={t('common.cancel')}>
+            <X className="size-4" />
+          </Button>
+        ) : null}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <div className="space-y-3 rounded-lg border bg-background p-3">
           <div className="flex items-center justify-between gap-2">
             <Label htmlFor="beauty3-inline-client">{t('beauty3Appointments.client')} *</Label>
-            {isNewClient ? (
+            {isNewClient && !publicMode ? (
               <Button type="button" variant="ghost" size="sm" onClick={() => { setIsNewClient(false); setName('') }} disabled={isSaving}>
                 {t('beauty3Appointments.chooseExistingClient')}
               </Button>
             ) : null}
           </div>
-          {!isNewClient ? (
+          {!isNewClient && !publicMode ? (
             <>
               <AutocompletePopover
                 open={clientOptionsOpen && !selectedClient}
@@ -1547,11 +1563,15 @@ function Beauty3AppointmentInlineEntry({
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
-            <Button type="button" variant="ghost" size="sm" onClick={onManageProcedures} disabled={isSaving}>
-              <FolderCog className="me-2 size-4" />{t('beauty3Appointments.manageProcedure')}
-            </Button>
-            <div className="flex items-center gap-2">
-              <Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>{t('common.cancel')}</Button>
+            {!publicMode && onManageProcedures ? (
+              <Button type="button" variant="ghost" size="sm" onClick={onManageProcedures} disabled={isSaving}>
+                <FolderCog className="me-2 size-4" />{t('beauty3Appointments.manageProcedure')}
+              </Button>
+            ) : null}
+            <div className={`flex items-center gap-2${publicMode ? ' ms-auto' : ''}`}>
+              {!publicMode ? (
+                <Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>{t('common.cancel')}</Button>
+              ) : null}
               <Button type="submit" disabled={!isValid || isSaving}>
                 {isSaving ? <Loader2 className="me-2 size-4 animate-spin" /> : <Save className="me-2 size-4" />}
                 {isSaving ? t('beauty3Appointments.saving') : t('beauty3Appointments.saveVisit')}
@@ -1560,6 +1580,17 @@ function Beauty3AppointmentInlineEntry({
           </div>
         </div>
       </div>
+      {publicMode ? (
+        <Input
+          aria-hidden="true"
+          className="pointer-events-none absolute -left-[10000px] h-px w-px overflow-hidden"
+          name="website"
+          value={honeypot}
+          onChange={(event) => setHoneypot(event.target.value)}
+          tabIndex={-1}
+          autoComplete="off"
+        />
+      ) : null}
     </form>
   )
 }

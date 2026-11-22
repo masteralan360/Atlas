@@ -1,7 +1,8 @@
 import 'fake-indexeddb/auto'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n/config'
+import { setNetworkStatus } from '@/lib/network'
 import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/workspace/workspaceMode'
 
 import { db } from './database'
@@ -395,6 +396,7 @@ describe('order-linked financing', () => {
     beforeEach(async () => {
         await db.delete()
         await db.open()
+        setNetworkStatus(false)
         writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'local' })
         const now = '2026-06-01T00:00:00.000Z'
         await db.products.put({
@@ -421,6 +423,7 @@ describe('order-linked financing', () => {
     })
 
     afterEach(() => {
+        setNetworkStatus(false)
         clearWorkspaceModeSnapshot(WORKSPACE_ID)
     })
 
@@ -1360,6 +1363,77 @@ describe('order-linked financing', () => {
             version: (before?.version ?? 0) + 1
         })
         expect((await db.products.get(product.id))?.quantity).toBe(3)
+    })
+
+    it('uses live availability instead of stale Hybrid inventory when completing a sales order', async () => {
+        const customer = await createCustomer()
+        const { storage, product } = await createStockedSalesProduct(100)
+        const draft = await createSalesOrder(
+            WORKSPACE_ID,
+            salesOrderInput(customer.id, product, storage.id, { method: 'cash', total: 100 })
+        )
+        await recordOrderPayment(WORKSPACE_ID, {
+            orderType: 'sales',
+            orderId: draft.id,
+            amount: 100,
+            paymentMethod: 'cash',
+            paidAt: '2026-09-13T12:00:00.000Z'
+        })
+        const pending = await updateSalesOrderStatus(draft.id, 'pending')
+
+        const inventory = await db.inventory
+            .where('[productId+storageId]')
+            .equals([product.id, storage.id])
+            .first()
+        expect(inventory).toBeDefined()
+        await db.inventory.put({ ...inventory!, quantity: 9 })
+
+        await db.sales_orders.bulkPut([6, 1, 1, 6].map((quantity, index) => ({
+            ...pending,
+            id: crypto.randomUUID(),
+            orderNumber: `SO-CACHED-${index + 1}`,
+            items: pending.items.map(item => ({
+                ...item,
+                id: crypto.randomUUID(),
+                quantity,
+                inventoryQuantity: quantity
+            }))
+        })))
+
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'hybrid' })
+        setNetworkStatus(true)
+        const stockReservationData = await import('./stockReservationData')
+        const minimumSellingPrice = await import('./minimumSellingPrice')
+        const stockBatches = await import('./stockBatches')
+        const liveAvailabilityGuard = vi.spyOn(stockReservationData, 'assertStockDemands')
+            .mockResolvedValueOnce()
+        const minimumSellingPriceGuard = vi.spyOn(minimumSellingPrice, 'assertStaffMinimumSellingPrices')
+            .mockResolvedValue()
+        const stockBatchRefresh = vi.spyOn(stockBatches, 'refreshStockBatchesFromSupabase')
+            .mockRejectedValue(new Error('stop after live availability check'))
+
+        try {
+            await expect(updateSalesOrderStatus(pending.id, 'completed'))
+                .rejects.toThrow('stop after live availability check')
+
+            expect(liveAvailabilityGuard).toHaveBeenCalledTimes(1)
+            expect(liveAvailabilityGuard).toHaveBeenCalledWith(WORKSPACE_ID, [{
+                productId: product.id,
+                storageId: storage.id,
+                quantity: 1
+            }], pending.id)
+            expect(stockBatchRefresh).toHaveBeenCalledOnce()
+            expect(await db.sales_orders.get(pending.id)).toMatchObject({ status: 'pending' })
+            expect((await db.inventory
+                .where('[productId+storageId]')
+                .equals([product.id, storage.id])
+                .first())?.quantity).toBe(9)
+        } finally {
+            liveAvailabilityGuard.mockRestore()
+            minimumSellingPriceGuard.mockRestore()
+            stockBatchRefresh.mockRestore()
+            setNetworkStatus(false)
+        }
     })
 
     it('rejects the aggregate of duplicate lines before inventory can go negative', async () => {
