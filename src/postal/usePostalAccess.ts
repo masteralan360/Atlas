@@ -9,6 +9,7 @@ import { supabase } from '@/auth/supabase'
 import { queryClient } from '@/query/queryClient'
 import { queryKeys } from '@/query/queryKeys'
 import { postalQrErrorKey } from '@/local-db/postalQrBatches'
+import { retryPendingShipmentAttachmentCleanup } from './shipmentAttachments'
 
 export function usePostalScope(): PostalScope {
   const { user } = useAuth()
@@ -23,6 +24,7 @@ export function usePostalScope(): PostalScope {
   const userId = user?.id ?? ''
   useEffect(() => {
     if (!workspaceId || !userId) return
+    void retryPendingShipmentAttachmentCleanup(workspaceId)
     let timer: ReturnType<typeof setTimeout> | undefined
     const refresh = () => {
       clearTimeout(timer)
@@ -39,6 +41,7 @@ export function usePostalScope(): PostalScope {
       'postal_transfers',
       'postal_cod_records',
       'postal_delivery_fee_records',
+      'postal_shipment_attachments',
       'postal_branches',
       'postal_organizations',
       'postal_memberships',

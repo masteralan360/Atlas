@@ -18,6 +18,7 @@ import {
   Copy,
   Loader2,
   MapPin,
+  Images,
   PackageCheck,
   Pencil,
   Phone,
@@ -31,7 +32,7 @@ import {
   Wallet,
   Warehouse,
 } from 'lucide-react'
-import { Button, Card, CardContent } from '@/ui/components'
+import { Badge, Button, Card, CardContent, useToast } from '@/ui/components'
 import {
   SmallDialog,
   SmallDialogContent,
@@ -81,6 +82,8 @@ import { ShipmentRestoreDialog } from '@/postal/ShipmentRestoreDialog'
 import { OperationDialog } from '@/postal/OperationDialog'
 import { CodPaymentDialog } from '@/postal/CodPaymentDialog'
 import { ShipmentQr } from '@/postal/ShipmentLabel'
+import { ShipmentAttachmentsDialog } from '@/ui/components/postal/ShipmentAttachmentsDialog'
+import { cleanupDeletedShipmentAttachments } from '@/postal/shipmentAttachments'
 
 function PostalAmountMetric({
   label,
@@ -118,6 +121,7 @@ export default function PostalShipmentPage({
   shipmentId: string
 }) {
   const { t, i18n } = useTranslation()
+  const { toast } = useToast()
   const scope = usePostalScope()
   const locationCatalogQuery = usePostalLocationCatalog(scope)
   const locationCatalog = locationCatalogQuery.data ?? emptyPostalLocationCatalog
@@ -135,6 +139,7 @@ export default function PostalShipmentPage({
   const [deleting, setDeleting] = useState(false)
   const [print, setPrint] = useState(false)
   const [qr, setQr] = useState(false)
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false)
   const [contact, setContact] = useState(false)
   const [archiveTarget, setArchiveTarget] = useState<boolean | null>(null)
   const [restoreOpen, setRestoreOpen] = useState(false)
@@ -157,7 +162,7 @@ export default function PostalShipmentPage({
   if (detail.isPending) return <PostalLoading />
   if (detail.error || !detail.data)
     return <PostalError retry={() => void detail.refetch()} />
-  const { shipment, transfer, summary, organizationName, organizationPhoneNumber } = detail.data
+  const { shipment, transfer, summary, organizationName, organizationPhoneNumber, attachmentCount } = detail.data
   const cod = codHistory.data?.pages.flat() ?? []
   const deliveryFeeRecords = deliveryFeeHistory.data?.pages.flat() ?? []
   const operations = availableOperations(shipment, transfer, scope.role)
@@ -300,6 +305,16 @@ export default function PostalShipmentPage({
         <Button variant="outline" onClick={() => setQr(true)}>
           <QrCode className="me-2 h-4 w-4" />
           {t('postal.shipmentQr')}
+        </Button>
+        <Button
+          variant="outline"
+          className="gap-2"
+          disabled={attachmentCount === 0}
+          onClick={() => setAttachmentsOpen(true)}
+        >
+          <Images className="h-4 w-4" aria-hidden="true" />
+          {t('postal.attachments.view')}
+          <Badge variant="secondary" className="tabular-nums">{attachmentCount}</Badge>
         </Button>
         <Button
           variant="outline"
@@ -779,10 +794,24 @@ export default function PostalShipmentPage({
                 { id: shipment.id, revision: shipment.revision },
                 request,
               )
+              const cleaned = await cleanupDeletedShipmentAttachments(scope.workspaceId, shipment.id)
+              if (!cleaned) {
+                toast({
+                  title: t('common.error'),
+                  description: t('postal.attachments.errors.cleanupFailed'),
+                  variant: 'destructive',
+                })
+              }
               navigate('/post-service')
             },
           )
         }
+      />
+      <ShipmentAttachmentsDialog
+        open={attachmentsOpen}
+        onOpenChange={setAttachmentsOpen}
+        workspaceId={scope.workspaceId}
+        shipmentId={shipment.id}
       />
       {scope.role === 'admin' && (
         <ShipmentArchiveDialog

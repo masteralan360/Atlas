@@ -8,7 +8,7 @@ import { r2Service } from '@/services/r2Service'
 export type MediaUploadErrorCode = 'cloud_required' | 'upload_failed'
 
 export class MediaUploadError extends Error {
-    constructor(public readonly code: MediaUploadErrorCode) {
+    constructor(public readonly code: MediaUploadErrorCode, public readonly objectKey?: string) {
         super(code)
         this.name = 'MediaUploadError'
     }
@@ -49,7 +49,9 @@ class MediaUploadService {
         if (normalizedFolder.split('/')[0] !== IMAGE_UPLOAD_STORAGE_ROOTS[artifact.source]) {
             throw new MediaUploadError('upload_failed')
         }
-        const relativePath = `${normalizedFolder}/${workspaceId}/${artifact.file.name}`
+        const relativePath = artifact.source === 'shipment-attachment'
+            ? `${normalizedFolder}/${artifact.file.name}`
+            : `${normalizedFolder}/${workspaceId}/${artifact.file.name}`
         const r2Key = `${workspaceId}/${normalizedFolder}/${artifact.file.name}`
         const localOnly = isLocalWorkspaceMode(workspaceId) || isDemoWorkspaceMode(workspaceId)
 
@@ -72,9 +74,10 @@ class MediaUploadService {
         try {
             await r2Service.uploadCompressedImage(r2Key, artifact)
         } catch (error) {
+            await r2Service.delete(r2Key).catch(() => undefined)
             if (localPath) await platformService.removeFile(localPath).catch(() => false)
             console.error('[MediaUploadService] Compressed image upload failed:', error)
-            throw new MediaUploadError('upload_failed')
+            throw new MediaUploadError('upload_failed', r2Key)
         }
         return { path: localPath || relativePath, r2Key, artifact }
     }

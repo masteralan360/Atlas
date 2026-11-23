@@ -9,6 +9,7 @@ export type ImageUploadSource =
     | 'print-attachment'
     | 'print-watermark'
     | 'clinical-attachment'
+    | 'shipment-attachment'
     | 'generic-upload'
 
 export interface ImageUploadProfile {
@@ -55,6 +56,7 @@ export const IMAGE_UPLOAD_PROFILES: Readonly<Record<ImageUploadSource, ImageUplo
     'print-attachment': profile('print-attachment', { maxDimension: 2560, startQuality: 0.92, minimumQuality: 0.88, qualityStep: 0.02, softTargetBytes: 1536 * KIB }),
     'print-watermark': profile('print-watermark', { maxDimension: 2560, startQuality: 0.92, minimumQuality: 0.88, qualityStep: 0.02, softTargetBytes: 1536 * KIB }),
     'clinical-attachment': profile('clinical-attachment', { maxDimension: 2560, startQuality: 0.92, minimumQuality: 0.88, qualityStep: 0.02, softTargetBytes: 1536 * KIB }),
+    'shipment-attachment': profile('shipment-attachment', { maxDimension: 2560, startQuality: 0.92, minimumQuality: 0.88, qualityStep: 0.02, softTargetBytes: 1536 * KIB }),
     'generic-upload': profile('generic-upload', { maxDimension: 2560, startQuality: 0.92, minimumQuality: 0.88, qualityStep: 0.02, softTargetBytes: 1536 * KIB }),
 }
 
@@ -69,6 +71,7 @@ export const IMAGE_UPLOAD_STORAGE_ROOTS: Readonly<Record<ImageUploadSource, stri
     'print-attachment': 'attached-images',
     'print-watermark': 'attached-images',
     'clinical-attachment': 'clinic-attachments',
+    'shipment-attachment': 'shipment-attachments',
     'generic-upload': 'uploads',
 }
 

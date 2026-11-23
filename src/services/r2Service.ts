@@ -415,7 +415,9 @@ class R2Service {
         if (!this.workerUrl) return null;
 
         const url = this.getMeteredRequestUrl(path);
-        const response = this.usesWebUsageGateway
+        const normalizedPath = path.replace(/^\/+/, '').split('/');
+        const isPrivateShipmentAttachment = normalizedPath[1] === 'shipment-attachments';
+        const response = this.usesWebUsageGateway || isPrivateShipmentAttachment
             ? await this.fetchPrivileged(url, { method: 'GET' })
             : await fetch(url);
 

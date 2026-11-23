@@ -28,6 +28,7 @@ const FIXTURE_BY_SOURCE: Record<ImageUploadSource, FixtureKind> = {
     'print-attachment': 'print',
     'print-watermark': 'logo',
     'clinical-attachment': 'print',
+    'shipment-attachment': 'print',
     'generic-upload': 'print',
 }
 

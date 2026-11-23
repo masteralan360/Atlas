@@ -10,10 +10,11 @@ function createCorsHeaders() {
 const MAX_PRODUCT_IMAGE_IMPORT_BYTES = 10 * 1024 * 1024;
 const MAX_PRODUCT_IMAGE_IMPORT_REQUEST_BYTES = 4096;
 const MAX_PRODUCT_IMAGE_REDIRECTS = 3;
+const MAX_SHIPMENT_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const ATLAS_IMAGE_SOURCES = new Set([
   "product-primary", "product-additional", "product-variant", "service-image",
   "activity-image", "workspace-logo", "profile-image", "print-attachment",
-  "print-watermark", "clinical-attachment", "generic-upload",
+  "print-watermark", "clinical-attachment", "shipment-attachment", "generic-upload",
 ]);
 const ATLAS_IMAGE_FOLDERS = {
   "product-primary": "product-images",
@@ -26,6 +27,7 @@ const ATLAS_IMAGE_FOLDERS = {
   "print-attachment": "attached-images",
   "print-watermark": "attached-images",
   "clinical-attachment": "clinic-attachments",
+  "shipment-attachment": "shipment-attachments",
   "generic-upload": "uploads",
 };
 
@@ -372,6 +374,93 @@ function isUuid(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value || "");
 }
 
+function parseShipmentAttachmentObjectPath(path) {
+  const parts = path.replace(/^\/+/, "").split("/");
+  if (parts.length !== 4 || parts[1] !== "shipment-attachments"
+      || !isUuid(parts[0]) || !isUuid(parts[2])
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}--atlas-shipment-attachment-v1\.webp$/i.test(parts[3])) {
+    return null;
+  }
+  return { workspaceId: parts[0], shipmentId: parts[2], objectKey: parts.join("/") };
+}
+
+function parseShipmentAttachmentPrefix(prefix) {
+  if (typeof prefix !== "string" || !prefix.endsWith("/")) return null;
+  const parts = prefix.slice(0, -1).replace(/^\/+/, "").split("/");
+  if (parts.length !== 3 || parts[1] !== "shipment-attachments"
+      || !isUuid(parts[0]) || !isUuid(parts[2])) return null;
+  return { workspaceId: parts[0], shipmentId: parts[2] };
+}
+
+function isShipmentAttachmentPath(path) {
+  return path.replace(/^\/+/, "").split("/")[1] === "shipment-attachments";
+}
+
+async function authorizeShipmentAttachmentRecord(request, env, authResult, record) {
+  if (!authResult?.user) return false;
+  const config = getSupabaseConfig(env);
+  if (!config) {
+    return jsonResponse(
+      { error: "R2 attachment authorization is not configured" },
+      { status: 500, headers: createCorsHeaders() },
+    );
+  }
+
+  const url = new URL(`${config.supabaseUrl}/rest/v1/${record.table}`);
+  url.searchParams.set("select", "id");
+  url.searchParams.set("workspace_id", `eq.${record.workspaceId}`);
+  url.searchParams.set("limit", "1");
+  if (record.objectKey) {
+    url.searchParams.set("shipment_id", `eq.${record.shipmentId}`);
+    url.searchParams.set("object_key", `eq.${record.objectKey}`);
+  } else {
+    url.searchParams.set("id", `eq.${record.shipmentId}`);
+  }
+  if (record.requireDraft) {
+    url.searchParams.set("state", "eq.draft");
+    url.searchParams.set("deleted_at", "is.null");
+  }
+
+  try {
+    const response = await fetch(url, {
+      headers: {
+        apikey: config.supabaseAnonKey,
+        Authorization: request.headers.get("Authorization") || "",
+      },
+    });
+    if (!response.ok) {
+      const status = response.status >= 500 ? 502 : 404;
+      return jsonResponse(
+        { error: "Shipment attachment is unavailable" },
+        { status, headers: createCorsHeaders() },
+      );
+    }
+    const rows = await response.json();
+    return Array.isArray(rows) && rows.length > 0;
+  } catch {
+    return jsonResponse(
+      { error: "Shipment attachment authorization failed" },
+      { status: 502, headers: createCorsHeaders() },
+    );
+  }
+}
+
+async function authorizeShipmentAttachmentDelete(request, env, authResult, attachmentPath) {
+  const shipmentAccess = await authorizeShipmentAttachmentRecord(request, env, authResult, {
+    table: "postal_shipments",
+    workspaceId: attachmentPath.workspaceId,
+    shipmentId: attachmentPath.shipmentId,
+  });
+  if (shipmentAccess instanceof Response || shipmentAccess) return shipmentAccess;
+
+  return authorizeShipmentAttachmentRecord(request, env, authResult, {
+    table: "postal_shipment_attachment_cleanup",
+    workspaceId: attachmentPath.workspaceId,
+    shipmentId: attachmentPath.shipmentId,
+    objectKey: attachmentPath.objectKey,
+  });
+}
+
 function parseContentLength(value) {
   if (!value) return null;
   const parsed = Number(value);
@@ -540,6 +629,20 @@ export default {
           );
         }
 
+        if (isShipmentAttachmentPath(prefix)) {
+          const attachmentPrefix = parseShipmentAttachmentPrefix(prefix);
+          if (!attachmentPrefix) {
+            return new Response("Object Not Found", { status: 404, headers: corsHeaders });
+          }
+          const authorized = await authorizeShipmentAttachmentRecord(request, env, authResult, {
+            table: "postal_shipments",
+            workspaceId: attachmentPrefix.workspaceId,
+            shipmentId: attachmentPrefix.shipmentId,
+          });
+          if (authorized instanceof Response) return authorized;
+          if (!authorized) return new Response("Object Not Found", { status: 404, headers: corsHeaders });
+        }
+
         try {
           let cursor = undefined;
           const keys = [];
@@ -563,6 +666,23 @@ export default {
         }
       }
 
+      if (isShipmentAttachmentPath(path)) {
+        const attachmentPath = parseShipmentAttachmentObjectPath(path);
+        if (!attachmentPath) {
+          return new Response("Object Not Found", { status: 404, headers: corsHeaders });
+        }
+        const authResult = await requireAuthenticatedUser(request, env, corsHeaders);
+        if (authResult.response) return authResult.response;
+        const authorized = await authorizeShipmentAttachmentRecord(request, env, authResult, {
+          table: "postal_shipment_attachments",
+          workspaceId: attachmentPath.workspaceId,
+          shipmentId: attachmentPath.shipmentId,
+          objectKey: attachmentPath.objectKey,
+        });
+        if (authorized instanceof Response) return authorized;
+        if (!authorized) return new Response("Object Not Found", { status: 404, headers: corsHeaders });
+      }
+
       const object = await env.MY_BUCKET.get(path);
       if (object === null) {
         return new Response("Object Not Found", {
@@ -581,7 +701,9 @@ export default {
       object.writeHttpMetadata(headers);
       headers.set("etag", object.httpEtag);
       headers.set("Content-Length", String(object.size));
-      if (/\/printed-invoices\/versions\//i.test(`/${path}`)) {
+      if (isShipmentAttachmentPath(path)) {
+        headers.set("Cache-Control", "private, no-store");
+      } else if (/\/printed-invoices\/versions\//i.test(`/${path}`)) {
         headers.set("Cache-Control", "public, max-age=31536000, immutable");
       } else if (/\/printed-invoices\/(A4|receipts)\//i.test(`/${path}`)) {
         // Stable QR aliases always represent the latest saved version.
@@ -604,7 +726,37 @@ export default {
           throw new UploadValidationError("Upload Content-Length is required");
         }
         const workspaceId = getWorkspaceIdFromPath(path);
+        const shipmentAttachmentPath = isShipmentAttachmentPath(path);
+        const parsedAttachmentPath = shipmentAttachmentPath
+          ? parseShipmentAttachmentObjectPath(path)
+          : null;
+        if (shipmentAttachmentPath && (!parsedAttachmentPath || contentLength < 1
+            || contentLength > MAX_SHIPMENT_ATTACHMENT_BYTES)) {
+          throw new UploadValidationError("Invalid shipment attachment upload");
+        }
         const imageMetadata = getCompressedImageMetadata(request, path);
+        if (shipmentAttachmentPath) {
+          if (!imageMetadata || imageMetadata.source !== "shipment-attachment"
+              || Number(imageMetadata.width) > 2560 || Number(imageMetadata.height) > 2560) {
+            throw new UploadValidationError("Shipment attachments must use the validated WebP image pipeline");
+          }
+          const authorized = await authorizeShipmentAttachmentRecord(request, env, authResult, {
+            table: "postal_shipments",
+            workspaceId: parsedAttachmentPath.workspaceId,
+            shipmentId: parsedAttachmentPath.shipmentId,
+            requireDraft: true,
+          });
+          if (authorized instanceof Response) return authorized;
+          if (!authorized) return new Response("Shipment attachment is unavailable", { status: 404, headers: corsHeaders });
+          const existingObjects = await env.MY_BUCKET.list({
+            prefix: `${parsedAttachmentPath.workspaceId}/shipment-attachments/${parsedAttachmentPath.shipmentId}/`,
+            limit: 6,
+          });
+          const alreadyUploaded = (existingObjects.objects || []).some((object) => object?.key === path);
+          if (!alreadyUploaded && (existingObjects.truncated || (existingObjects.objects || []).length >= 5)) {
+            throw new UploadValidationError("A shipment can have no more than five attachments");
+          }
+        }
         const validatedBody = createValidatedUploadStream(request.body, request, path, env);
         // TransformStream output no longer carries the request body's known
         // length. R2 requires a fixed-length stream, so restore that contract
@@ -645,6 +797,16 @@ export default {
     if (request.method === "DELETE") {
       const authResult = await requireAuthenticatedUser(request, env, corsHeaders);
       if (authResult.response) return authResult.response;
+
+      if (isShipmentAttachmentPath(path)) {
+        const attachmentPath = parseShipmentAttachmentObjectPath(path);
+        if (!attachmentPath) {
+          return new Response("Object Not Found", { status: 404, headers: corsHeaders });
+        }
+        const authorized = await authorizeShipmentAttachmentDelete(request, env, authResult, attachmentPath);
+        if (authorized instanceof Response) return authorized;
+        if (!authorized) return new Response("Object Not Found", { status: 404, headers: corsHeaders });
+      }
 
       await env.MY_BUCKET.delete(path);
       return jsonResponse({ success: true }, { headers: corsHeaders });

@@ -579,7 +579,7 @@ export function usePostalDetail(scope: PostalScope, shipmentId: string) {
             .single(),
         () => 1,
       )
-      const [organization, transfers, summary] = await Promise.all([
+      const [organization, transfers, summary, attachmentCount] = await Promise.all([
         tracked<{ id: string; name: string; phone: string | null }>(
           scope,
           'postal_organizations',
@@ -624,6 +624,21 @@ export function usePostalDetail(scope: PostalScope, shipmentId: string) {
               .abortSignal(signal),
           () => 1,
         ),
+        tracked<number>(
+          scope,
+          'postal_shipment_attachments',
+          signal,
+          async () => {
+            const { count, error } = await supabase
+              .from('postal_shipment_attachments')
+              .select('id', { count: 'exact', head: true })
+              .eq('workspace_id', scope.workspaceId)
+              .eq('shipment_id', shipment.id)
+              .abortSignal(signal)
+            return { data: count ?? 0, error }
+          },
+          () => 1,
+        ),
       ])
       return {
         shipment: normalizeShipment(shipment as PostalShipment),
@@ -635,6 +650,7 @@ export function usePostalDetail(scope: PostalScope, shipmentId: string) {
           settled: Number(summary.settled),
           deliveryFeeCollected: Number(summary.delivery_fee_collected ?? 0),
         },
+        attachmentCount,
       }
     },
   })
