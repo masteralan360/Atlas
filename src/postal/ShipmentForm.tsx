@@ -2,6 +2,7 @@ import { usePostalAction } from "./usePostalAccess";
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Camera,
   CircleHelp,
   PackagePlus,
   Loader2,
@@ -11,6 +12,7 @@ import {
   Link2,
   ImagePlus,
   Images,
+  RefreshCw,
   X,
 } from "lucide-react";
 import {
@@ -31,8 +33,18 @@ import {
 import { detectSupportedImageMime } from "@/lib/imageCompression";
 import { getImageUploadProfile } from "@/lib/imageUploadProfiles";
 import { mediaUploadService, getMediaUploadErrorCode, MediaUploadError } from "@/services/mediaUploadService";
-import { savePostalShipmentAttachments, fetchPostalShipmentAttachments } from "@/local-db/postalAttachments";
-import { cleanupDeletedShipmentAttachments, deleteShipmentAttachmentUploads } from "./shipmentAttachments";
+import {
+  addPostalShipmentAttachments,
+  fetchPostalShipmentAttachments,
+  savePostalShipmentAttachments,
+  type NewPostalShipmentAttachment,
+  type PostalShipmentAttachment,
+} from "@/local-db/postalAttachments";
+import {
+  cleanupDeletedShipmentAttachments,
+  deleteShipmentAttachmentObjects,
+  deleteShipmentAttachmentUploads,
+} from "./shipmentAttachments";
 import {
   copyShipment,
   findPostalTariff,
@@ -54,6 +66,7 @@ import {
 import { LocationPicker } from "./shared";
 import { OrganizationAutoCompleteInput } from "./OrganizationAutoCompleteInput";
 import { ShipmentTariffSelector } from "./ShipmentTariffSelector";
+import { ShipmentAttachmentsDialog } from "@/ui/components/postal/ShipmentAttachmentsDialog";
 
 const validationFields = {
   recipient_name: ["shipment-recipient_name", "postal.recipient_name"],
@@ -75,6 +88,7 @@ interface ShipmentAttachmentDraft {
   file: File;
   previewUrl: string;
   status: "selected" | "uploading" | "uploaded" | "failed";
+  metadata?: NewPostalShipmentAttachment;
 }
 
 export function ShipmentForm({
@@ -204,9 +218,18 @@ export function ShipmentForm({
   >({});
   const action = usePostalAction();
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const previewUrls = useRef(new Set<string>());
   const createdShipment = useRef<PostalShipment>();
+  const editRevision = useRef(source?.revision);
+  const pendingEditUploadKeys = useRef(new Set<string>());
   const [attachments, setAttachments] = useState<ShipmentAttachmentDraft[]>([]);
+  const [existingAttachments, setExistingAttachments] = useState<PostalShipmentAttachment[]>([]);
+  const [existingAttachmentState, setExistingAttachmentState] = useState<"loading" | "ready" | "failed">(
+    editing && source ? "loading" : "ready",
+  );
+  const [attachmentLoadAttempt, setAttachmentLoadAttempt] = useState(0);
+  const [attachmentsDialogOpen, setAttachmentsDialogOpen] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [attachmentStage, setAttachmentStage] = useState<"idle" | "uploading" | "saving">("idle");
   const [attachmentAttempt, setAttachmentAttempt] = useState(0);
@@ -214,6 +237,36 @@ export function ShipmentForm({
   const isProcessing = action.busy || closingProvisional;
   const completedAttachmentUploads = attachments.filter((item) => item.status === "uploaded").length;
   const attachmentProfile = getImageUploadProfile("shipment-attachment");
+  const canManageAttachments = !editing || source?.state === "draft";
+  const attachmentCount = existingAttachments.length + attachments.length;
+  const attachmentSelectionDisabled = isProcessing || !canManageAttachments ||
+    (editing && existingAttachmentState !== "ready") ||
+    attachmentCount >= MAX_SHIPMENT_ATTACHMENTS;
+  useEffect(() => {
+    editRevision.current = source?.revision;
+  }, [source?.id, source?.revision]);
+  useEffect(() => {
+    if (!editing || !source) {
+      setExistingAttachments([]);
+      setExistingAttachmentState("ready");
+      return;
+    }
+    let cancelled = false;
+    setExistingAttachmentState("loading");
+    void fetchPostalShipmentAttachments(scope.workspaceId, source.id)
+      .then((items) => {
+        if (cancelled) return;
+        setExistingAttachments(items);
+        setExistingAttachmentState("ready");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setExistingAttachmentState("failed");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachmentLoadAttempt, editing, scope.workspaceId, source?.id]);
   useEffect(() => () => {
     for (const url of previewUrls.current) URL.revokeObjectURL(url);
     previewUrls.current.clear();
@@ -221,6 +274,29 @@ export function ShipmentForm({
 
   const closeForm = async () => {
     if (isProcessing) return;
+    if (editing && source && pendingEditUploadKeys.current.size > 0) {
+      setClosingProvisional(true);
+      try {
+        const linked = await fetchPostalShipmentAttachments(scope.workspaceId, source.id);
+        const linkedKeys = new Set(linked.map((item) => item.object_key));
+        const unlinkedKeys = [...pendingEditUploadKeys.current].filter((key) => !linkedKeys.has(key));
+        if (unlinkedKeys.length > 0 && !(await deleteShipmentAttachmentObjects(
+          scope.workspaceId,
+          source.id,
+          unlinkedKeys,
+        ))) {
+          setAttachmentError("cleanupFailed");
+          return;
+        }
+        pendingEditUploadKeys.current.clear();
+        onClose();
+      } catch {
+        setAttachmentError("saveFailed");
+      } finally {
+        setClosingProvisional(false);
+      }
+      return;
+    }
     const pendingShipment = createdShipment.current;
     if (!pendingShipment) {
       onClose();
@@ -257,7 +333,7 @@ export function ShipmentForm({
     event.target.value = "";
     setAttachmentError(null);
     if (selectedFiles.length === 0) return;
-    const remaining = MAX_SHIPMENT_ATTACHMENTS - attachments.length;
+    const remaining = Math.max(0, MAX_SHIPMENT_ATTACHMENTS - existingAttachments.length - attachments.length);
     if (selectedFiles.length > remaining) setAttachmentError("limit");
     const next: ShipmentAttachmentDraft[] = [];
     for (const file of selectedFiles.slice(0, Math.max(0, remaining))) {
@@ -284,6 +360,114 @@ export function ShipmentForm({
     }
     setAttachments((current) => current.filter((item) => item.id !== id));
     setAttachmentError(null);
+  };
+  const clearSelectedAttachments = () => {
+    for (const item of attachments) {
+      if (previewUrls.current.delete(item.previewUrl)) URL.revokeObjectURL(item.previewUrl);
+    }
+    setAttachments([]);
+  };
+  const uploadEditAttachments = async (shipmentId: string) => {
+    if (attachments.length === 0) return;
+    if (!source || source.state !== "draft") throw new Error("postal_attachment_shipment_locked");
+
+    const metadataById = new Map<string, NewPostalShipmentAttachment>();
+    for (const item of attachments) {
+      if (item.metadata) metadataById.set(item.id, item.metadata);
+    }
+    let activeAttachmentId: string | undefined;
+    setAttachmentError(null);
+    setAttachmentStage("uploading");
+    try {
+      for (const item of attachments) {
+        if (metadataById.has(item.id)) continue;
+        activeAttachmentId = item.id;
+        setAttachments((current) => current.map((draft) =>
+          draft.id === item.id ? { ...draft, status: "uploading" } : draft,
+        ));
+        const stored = await mediaUploadService.storeImageFile(
+          item.file,
+          scope.workspaceId,
+          `shipment-attachments/${shipmentId}`,
+          "shipment-attachment",
+        );
+        if (!stored.r2Key) throw new MediaUploadError("cloud_required");
+        const metadata: NewPostalShipmentAttachment = {
+          object_key: stored.r2Key,
+          content_type: "image/webp",
+          size_bytes: stored.artifact.outputBytes,
+          width: stored.artifact.width,
+          height: stored.artifact.height,
+        };
+        pendingEditUploadKeys.current.add(stored.r2Key);
+        metadataById.set(item.id, metadata);
+        setAttachments((current) => current.map((draft) =>
+          draft.id === item.id ? { ...draft, status: "uploaded", metadata } : draft,
+        ));
+      }
+
+      setAttachmentStage("saving");
+      const metadata = attachments.map((item) => metadataById.get(item.id));
+      if (metadata.some((item) => !item)) throw new Error("postal_attachment_invalid_result");
+      const added = metadata as NewPostalShipmentAttachment[];
+      const saved = await addPostalShipmentAttachments(scope, shipmentId, added);
+      setExistingAttachments(saved);
+      for (const item of added) pendingEditUploadKeys.current.delete(item.object_key);
+      clearSelectedAttachments();
+      setAttachmentStage("idle");
+      return;
+    } catch (error) {
+      setAttachmentStage("idle");
+      if (activeAttachmentId) {
+        setAttachments((current) => current.map((draft) =>
+          draft.id === activeAttachmentId ? { ...draft, status: "failed" } : draft,
+        ));
+      }
+      const failedUploadKey = error instanceof MediaUploadError ? error.objectKey : undefined;
+      if (failedUploadKey) pendingEditUploadKeys.current.add(failedUploadKey);
+
+      let currentAttachments: PostalShipmentAttachment[];
+      try {
+        currentAttachments = await fetchPostalShipmentAttachments(scope.workspaceId, shipmentId);
+      } catch {
+        setAttachmentError("saveFailed");
+        throw error;
+      }
+      setExistingAttachments(currentAttachments);
+      const linkedKeys = new Set(currentAttachments.map((item) => item.object_key));
+      const allSelectedPhotosLinked = attachments.length > 0 && attachments.every((item) => {
+        const metadata = metadataById.get(item.id);
+        return Boolean(metadata && linkedKeys.has(metadata.object_key));
+      });
+      if (allSelectedPhotosLinked) {
+        for (const item of metadataById.values()) pendingEditUploadKeys.current.delete(item.object_key);
+        clearSelectedAttachments();
+        setAttachmentError(null);
+        return;
+      }
+
+      const unlinkedKeys = [...pendingEditUploadKeys.current].filter((key) => !linkedKeys.has(key));
+      const cleanupSucceeded = unlinkedKeys.length === 0 || await deleteShipmentAttachmentObjects(
+        scope.workspaceId,
+        shipmentId,
+        unlinkedKeys,
+      );
+      if (cleanupSucceeded) {
+        for (const key of unlinkedKeys) pendingEditUploadKeys.current.delete(key);
+      }
+      setAttachments((current) => current
+        .filter((item) => !item.metadata || !linkedKeys.has(item.metadata.object_key))
+        .map((item) => ({ ...item, status: "selected", metadata: undefined })));
+
+      const code = getMediaUploadErrorCode(error);
+      setAttachmentError(!cleanupSucceeded ? "cleanupFailed"
+        : code === "image_too_large" ? "fileTooLarge"
+          : code === "unsupported_image" || code === "animated_image" ? "invalidType"
+            : String(error).includes("attachment_limit") ? "limit"
+              : String(error).includes("cleanup") ? "cleanupFailed"
+                : metadataById.size > 0 ? "saveFailed" : "uploadFailed");
+      throw error;
+    }
   };
   const signed = signedIqd(amount, negative);
   const payload = {
@@ -360,6 +544,7 @@ export function ShipmentForm({
     ? Number(deliveryFee).toLocaleString("en-US")
     : "";
   return (
+    <>
     <AppDialog
       open
       onOpenChange={(open) => {
@@ -411,9 +596,13 @@ export function ShipmentForm({
                 const shipment = await postalCommand<PostalShipment>(
                   scope,
                   "edit_shipment",
-                  { ...commandPayload, id: source?.id, revision: source?.revision },
+                  { ...commandPayload, id: source?.id, revision: editRevision.current ?? source?.revision },
                   request,
                 );
+                editRevision.current = shipment.revision;
+                if (attachments.length > 0 && source) {
+                  await uploadEditAttachments(shipment.id);
+                }
                 onSaved(shipment);
                 return;
               }
@@ -874,98 +1063,165 @@ export function ShipmentForm({
                 onChange={setSelectedTariff}
               />
             )}
-            {!editing && (
-              <section aria-labelledby="shipment-attachments-heading" className="space-y-3 rounded-xl border bg-muted/10 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 id="shipment-attachments-heading" className="flex items-center gap-2 font-semibold">
-                    <Images className="h-4 w-4 text-primary" aria-hidden="true" />
-                    {t("postal.attachments.title")}
-                  </h3>
+            <section aria-labelledby="shipment-attachments-heading" className="space-y-3 rounded-xl border bg-muted/10 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 id="shipment-attachments-heading" className="flex items-center gap-2 font-semibold">
+                  <Images className="h-4 w-4 text-primary" aria-hidden="true" />
+                  {t("postal.attachments.title")}
+                </h3>
+                {(!editing || existingAttachmentState === "ready") && (
                   <Badge variant="secondary" className="tabular-nums">
-                    {t("postal.attachments.counter", { count: attachments.length, max: MAX_SHIPMENT_ATTACHMENTS })}
+                    {t("postal.attachments.counter", { count: attachmentCount, max: MAX_SHIPMENT_ATTACHMENTS })}
                   </Badge>
+                )}
+              </div>
+              {editing && existingAttachmentState === "loading" ? (
+                <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  {t("postal.attachments.loading")}
+                </p>
+              ) : editing && existingAttachmentState === "failed" ? (
+                <div className="flex flex-wrap items-center justify-between gap-3" role="alert">
+                  <p className="text-sm text-destructive">{t("postal.attachments.loadFailed")}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    disabled={isProcessing}
+                    onClick={() => setAttachmentLoadAttempt((current) => current + 1)}
+                  >
+                    <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                    {t("postal.retry")}
+                  </Button>
                 </div>
-                <p className="text-sm text-muted-foreground">{t("postal.attachments.hint")}</p>
-                <input
-                  ref={attachmentInputRef}
-                  type="file"
-                  multiple
-                  accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
-                  className="sr-only"
-                  disabled={isProcessing || attachments.length >= MAX_SHIPMENT_ATTACHMENTS}
-                  onChange={(event) => void handleAttachmentSelection(event)}
-                  aria-label={t("postal.attachments.select")}
-                />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {editing
+                    ? canManageAttachments
+                      ? t("postal.attachments.editHint", { count: MAX_SHIPMENT_ATTACHMENTS - existingAttachments.length })
+                      : t("postal.attachments.draftOnly")
+                    : t("postal.attachments.hint")}
+                </p>
+              )}
+              {editing && existingAttachmentState === "ready" && existingAttachments.length > 0 && (
                 <Button
                   type="button"
                   variant="outline"
                   className="gap-2"
-                  disabled={isProcessing || attachments.length >= MAX_SHIPMENT_ATTACHMENTS}
-                  onClick={() => attachmentInputRef.current?.click()}
+                  disabled={isProcessing}
+                  onClick={() => setAttachmentsDialogOpen(true)}
                 >
-                  <ImagePlus className="h-4 w-4" aria-hidden="true" />
-                  {t("postal.attachments.select")}
+                  <Images className="h-4 w-4" aria-hidden="true" />
+                  {t("postal.attachments.view")}
+                  <Badge variant="secondary" className="ms-1 tabular-nums">{existingAttachments.length}</Badge>
                 </Button>
-                {attachments.length > 0 && (
-                  <div className="space-y-3">
-                    {attachmentStage !== "idle" && (
-                      <div className="space-y-2" aria-live="polite">
-                        <div className="flex justify-between gap-3 text-xs text-muted-foreground">
-                          <span>{t(attachmentStage === "uploading" ? "postal.attachments.uploading" : "postal.attachments.saving")}</span>
-                          <span dir="ltr" className="tabular-nums">
-                            {completedAttachmentUploads}/{attachments.length}
-                          </span>
-                        </div>
-                        <Progress
-                          value={completedAttachmentUploads / attachments.length * 100}
-                          indeterminate={attachmentStage === "saving" || completedAttachmentUploads < attachments.length}
-                          aria-label={t("postal.attachments.uploadProgress")}
-                        />
-                      </div>
-                    )}
-                    <ul className="grid gap-2 sm:grid-cols-2" aria-label={t("postal.attachments.selectedPhotos")}>
-                      {attachments.map((item) => (
-                        <li key={item.id} className="flex min-w-0 items-center gap-3 rounded-lg border bg-background p-2">
-                          <img
-                            src={item.previewUrl}
-                            alt={t("postal.attachments.photoPreview", { name: item.file.name })}
-                            className="h-16 w-16 shrink-0 rounded-md bg-muted object-cover"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium" title={item.file.name}>{item.file.name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {item.status === "uploading" ? (
-                                <span className="inline-flex items-center gap-1">
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                  {t("postal.attachments.uploading")}
-                                </span>
-                              ) : t(item.status === "uploaded" ? "postal.attachments.uploaded" : item.status === "failed" ? "postal.attachments.failed" : "postal.attachments.ready")}
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 shrink-0"
-                            disabled={isProcessing}
-                            aria-label={t("postal.attachments.remove", { name: item.file.name })}
-                            onClick={() => removeAttachment(item.id)}
-                          >
-                            <X className="h-4 w-4" aria-hidden="true" />
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
+              )}
+              {canManageAttachments && (
+                <>
+                  <input
+                    ref={attachmentInputRef}
+                    type="file"
+                    multiple
+                    accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
+                    className="sr-only"
+                    disabled={attachmentSelectionDisabled}
+                    onChange={(event) => void handleAttachmentSelection(event)}
+                    aria-label={t("postal.attachments.select")}
+                  />
+                  <input
+                    ref={cameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="sr-only"
+                    disabled={attachmentSelectionDisabled}
+                    onChange={(event) => void handleAttachmentSelection(event)}
+                    aria-label={t("products.form.camera")}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="gap-2"
+                      disabled={attachmentSelectionDisabled}
+                      onClick={() => attachmentInputRef.current?.click()}
+                    >
+                      <ImagePlus className="h-4 w-4" aria-hidden="true" />
+                      {t("postal.attachments.select")}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="gap-2"
+                      disabled={attachmentSelectionDisabled}
+                      onClick={() => cameraInputRef.current?.click()}
+                    >
+                      <Camera className="h-4 w-4" aria-hidden="true" />
+                      {t("products.form.camera")}
+                    </Button>
                   </div>
-                )}
-                {attachmentError && (
-                  <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
-                    <CircleHelp className="h-4 w-4 shrink-0" aria-hidden="true" />
-                    {t(`postal.attachments.errors.${attachmentError}`)}
-                  </p>
-                )}
-              </section>
-            )}
+                </>
+              )}
+              {attachments.length > 0 && (
+                <div className="space-y-3">
+                  {attachmentStage !== "idle" && (
+                    <div className="space-y-2" aria-live="polite">
+                      <div className="flex justify-between gap-3 text-xs text-muted-foreground">
+                        <span>{t(attachmentStage === "uploading" ? "postal.attachments.uploading" : "postal.attachments.saving")}</span>
+                        <span dir="ltr" className="tabular-nums">
+                          {completedAttachmentUploads}/{attachments.length}
+                        </span>
+                      </div>
+                      <Progress
+                        value={completedAttachmentUploads / attachments.length * 100}
+                        indeterminate={attachmentStage === "saving" || completedAttachmentUploads < attachments.length}
+                        aria-label={t("postal.attachments.uploadProgress")}
+                      />
+                    </div>
+                  )}
+                  <ul className="grid gap-2 sm:grid-cols-2" aria-label={t("postal.attachments.selectedPhotos")}>
+                    {attachments.map((item) => (
+                      <li key={item.id} className="flex min-w-0 items-center gap-3 rounded-lg border bg-background p-2">
+                        <img
+                          src={item.previewUrl}
+                          alt={t("postal.attachments.photoPreview", { name: item.file.name })}
+                          className="h-16 w-16 shrink-0 rounded-md bg-muted object-cover"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium" title={item.file.name}>{item.file.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {item.status === "uploading" ? (
+                              <span className="inline-flex items-center gap-1">
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                                {t("postal.attachments.uploading")}
+                              </span>
+                            ) : t(item.status === "uploaded" ? "postal.attachments.uploaded" : item.status === "failed" ? "postal.attachments.failed" : "postal.attachments.ready")}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          disabled={isProcessing || Boolean(item.metadata)}
+                          aria-label={t("postal.attachments.remove", { name: item.file.name })}
+                          onClick={() => removeAttachment(item.id)}
+                        >
+                          <X className="h-4 w-4" aria-hidden="true" />
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {attachmentError && (
+                <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
+                  <CircleHelp className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  {t(`postal.attachments.errors.${attachmentError}`)}
+                </p>
+              )}
+            </section>
             {tariffRequirementMissing && (
               <p className="text-sm text-destructive" role="alert">
                 {t("postal.validation.deliveryFeeOrSizeRequired")}
@@ -993,5 +1249,14 @@ export function ShipmentForm({
         </form>
       </AppDialogContent>
     </AppDialog>
+    {editing && source && (
+      <ShipmentAttachmentsDialog
+        open={attachmentsDialogOpen}
+        onOpenChange={setAttachmentsDialogOpen}
+        workspaceId={scope.workspaceId}
+        shipmentId={source.id}
+      />
+    )}
+    </>
   );
 }

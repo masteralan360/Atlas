@@ -80,6 +80,8 @@ import { PostalDashboardCards } from '@/postal/PostalDashboardCards'
 import { ShipmentArchiveDialog } from '@/postal/ShipmentArchiveDialog'
 import { ShipmentRestoreDialog } from '@/postal/ShipmentRestoreDialog'
 import { OperationDialog } from '@/postal/OperationDialog'
+import { ShipmentAttachmentMosaic } from '@/ui/components/postal/ShipmentAttachmentMosaic'
+import type { PostalShipmentAttachment } from '@/local-db/postalAttachments'
 import {
   postalStates,
   locationLabel,
@@ -125,7 +127,10 @@ import {
 import type { StoredCustomTemplateRow } from '@/lib/customTemplates'
 import { useWorkspacePermissions } from '@/permissions'
 
-type PostalShipmentPageRow = PostalShipment & { organization_name?: string | null }
+type PostalShipmentPageRow = PostalShipment & {
+  organization_name?: string | null
+  attachmentMosaic?: PostalShipmentAttachment[]
+}
 type Row = PostalShipmentPageRow | PostalBranch | PostalOrganization | PostalCodRecord
 type PostalServiceTab = keyof typeof postalTables | 'addAreas'
 const SINGLE = ['single'] as const
@@ -686,11 +691,21 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
         {
           id: 'shipmentId',
           header: t('postal.shipmentId'),
-          cell: ({ row }) => (
-            <span className="font-mono" dir="ltr">
-              {formatPostalShipmentId(row.original as PostalShipment)}
-            </span>
-          ),
+          cell: ({ row }) => {
+            const shipment = row.original as PostalShipmentPageRow
+            return (
+              <div className="flex min-w-[11rem] items-center gap-3">
+                <ShipmentAttachmentMosaic
+                  workspaceId={scope.workspaceId}
+                  shipmentId={shipment.id}
+                  attachments={shipment.attachmentMosaic ?? []}
+                />
+                <span className="font-mono" dir="ltr">
+                  {formatPostalShipmentId(shipment)}
+                </span>
+              </div>
+            )
+          },
         },
         ...(scope.role === 'admin'
           ? [

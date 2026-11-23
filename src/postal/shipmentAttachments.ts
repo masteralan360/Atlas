@@ -12,6 +12,28 @@ function shipmentAttachmentPrefix(workspaceId: string, shipmentId: string) {
   return `${workspaceId}/shipment-attachments/${shipmentId}/`
 }
 
+/** Deletes only the supplied, uncommitted objects; existing shipment photos are untouched. */
+export async function deleteShipmentAttachmentObjects(
+  workspaceId: string,
+  shipmentId: string,
+  objectKeys: string[],
+): Promise<boolean> {
+  const prefix = shipmentAttachmentPrefix(workspaceId, shipmentId)
+  const keys = [...new Set(objectKeys.filter((key) => key.startsWith(prefix)))]
+  if (keys.length === 0) return true
+
+  const results = await Promise.allSettled(keys.map((key) => r2Service.delete(key)))
+  const deletesSucceeded = results.every((result) => result.status === 'fulfilled')
+  if (!deletesSucceeded) {
+    try {
+      await queuePostalShipmentAttachmentCleanup(workspaceId, shipmentId, keys)
+    } catch {
+      // Keep the caller informed so it can retry cleanup before closing the form.
+    }
+  }
+  return deletesSucceeded
+}
+
 export async function deleteShipmentAttachmentUploads(
   workspaceId: string,
   shipmentId: string,

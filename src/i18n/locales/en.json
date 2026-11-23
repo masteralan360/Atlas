@@ -11788,6 +11788,8 @@
     "attachments": {
       "title": "Attachments",
       "hint": "Optionally add up to 5 photos. Supported images can be up to 25 MB each.",
+      "editHint": "This draft can have up to {{count}} more photos.",
+      "draftOnly": "Photos can only be added while a shipment is a draft.",
       "counter": "{{count}}/{{max}}",
       "select": "Select photos",
       "selectedPhotos": "Selected shipment photos",
@@ -11808,6 +11810,7 @@
       "gallery": "Shipment photo gallery",
       "openPreview": "Open photo {{count}} at full size",
       "photoAlt": "Shipment photo {{count}}",
+      "mosaicButtonLabel": "View shipment photos ({{count}})",
       "enlarge": "Enlarge photo",
       "imageUnavailable": "This photo could not be loaded.",
       "previewTitle": "Photo Preview",

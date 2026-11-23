@@ -67,6 +67,38 @@ export async function fetchPostalShipmentAttachments(
   )
 }
 
+/** Fetches only the four preview references needed for the currently loaded shipment page. */
+export async function fetchPostalShipmentAttachmentMosaics(
+  workspaceId: string,
+  shipmentIds: string[],
+  signal?: AbortSignal,
+): Promise<Record<string, PostalShipmentAttachment[]>> {
+  const ids = [...new Set(shipmentIds.filter(Boolean))]
+  if (!workspaceId || ids.length === 0) return {}
+
+  const { data, error } = await supabase
+    .from('postal_shipment_attachments')
+    .select('id,workspace_id,shipment_id,object_key,content_type,size_bytes,width,height,created_at')
+    .eq('workspace_id', workspaceId)
+    .in('shipment_id', ids)
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+    .abortSignal(signal ?? new AbortController().signal)
+  if (error) throw error
+
+  const mosaics: Record<string, PostalShipmentAttachment[]> = {}
+  for (const row of data ?? []) {
+    const shipmentId = (row as Partial<PostalShipmentAttachment>).shipment_id
+    if (typeof shipmentId !== 'string') throw new Error('postal_attachment_invalid_result')
+    const attachments = mosaics[shipmentId] ?? (mosaics[shipmentId] = [])
+    if (attachments.length >= 4) continue
+    attachments.push(
+      normalizeAttachment(row as Partial<PostalShipmentAttachment>, workspaceId, shipmentId),
+    )
+  }
+  return mosaics
+}
+
 export async function savePostalShipmentAttachments(
   scope: PostalScope,
   shipmentId: string,
@@ -87,6 +119,37 @@ export async function savePostalShipmentAttachments(
   const rows = data.map((row) =>
     normalizeAttachment(row as Partial<PostalShipmentAttachment>, scope.workspaceId, shipmentId),
   )
+  await queryClient.invalidateQueries({
+    queryKey: queryKeys.postal.detail(scope, shipmentId),
+  })
+  return rows
+}
+
+/** Adds photos to a draft shipment without replacing its existing attachments. */
+export async function addPostalShipmentAttachments(
+  scope: PostalScope,
+  shipmentId: string,
+  attachments: NewPostalShipmentAttachment[],
+): Promise<PostalShipmentAttachment[]> {
+  if (attachments.length < 1 || attachments.length > 5) {
+    throw new Error('postal_attachment_limit')
+  }
+  const { data, error } = await supabase.rpc('postal_add_shipment_attachments', {
+    p_workspace_id: scope.workspaceId,
+    p_shipment_id: shipmentId,
+    p_attachments: attachments,
+  })
+  if (error) throw error
+  if (!Array.isArray(data) || data.length < attachments.length || data.length > 5) {
+    throw new Error('postal_attachment_invalid_result')
+  }
+  const rows = data.map((row) =>
+    normalizeAttachment(row as Partial<PostalShipmentAttachment>, scope.workspaceId, shipmentId),
+  )
+  const savedKeys = new Set(rows.map((row) => row.object_key))
+  if (attachments.some((attachment) => !savedKeys.has(attachment.object_key))) {
+    throw new Error('postal_attachment_invalid_result')
+  }
   await queryClient.invalidateQueries({
     queryKey: queryKeys.postal.detail(scope, shipmentId),
   })

@@ -1,5 +1,6 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { supabase } from '@/auth/supabase'
+import { fetchPostalShipmentAttachmentMosaics } from './postalAttachments'
 import { db } from './database'
 import { toCamelCase } from '@/lib/utils'
 import type { PaymentTransaction, BusinessPartner } from './models'
@@ -419,14 +420,32 @@ export function usePostalPage<T>(input: PostalPageInput, enabled = true) {
                   p_end: input.end ?? null,
                 }).abortSignal(signal)
             if (error) return { data: null, error }
+            const page = normalizePostalShipmentPage(data) as PostalPage<T>
+            const shipmentRows = page.rows as Array<T & PostalShipment>
+            let attachmentMosaics: Record<string, import('./postalAttachments').PostalShipmentAttachment[]> = {}
+            try {
+              attachmentMosaics = await fetchPostalShipmentAttachmentMosaics(
+                input.workspaceId,
+                shipmentRows.map((shipment) => shipment.id),
+                signal,
+              )
+            } catch (attachmentError) {
+              if (signal.aborted) throw attachmentError
+            }
             return {
-              data: normalizePostalShipmentPage(data) as PostalPage<T>,
+              data: {
+                ...page,
+                rows: shipmentRows.map((shipment) => ({
+                  ...shipment,
+                  attachmentMosaic: attachmentMosaics[shipment.id] ?? [],
+                })),
+              },
               error: null,
             }
           },
           (result, trackedTable) => trackedTable === 'postal_organizations'
             ? new Set(
-                (result.rows as Array<PostalShipment & { organization_name: string | null }>)
+                (result.rows as Array<Pick<PostalShipment, 'organization_id'>>)
                   .map((shipment) => shipment.organization_id),
               ).size
             : result.rows.length,
