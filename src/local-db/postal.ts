@@ -908,6 +908,34 @@ export async function setPostalShipmentArchived(
   return shipment
 }
 
+export async function restorePostalShipmentToDraft(
+  scope: PostalScope,
+  shipmentId: string,
+  expectedRevision: number,
+  requestId: string,
+): Promise<PostalShipment> {
+  const { data, error } = await supabase.rpc('postal_restore_shipment_to_draft', {
+    p_workspace_id: scope.workspaceId,
+    p_shipment_id: shipmentId,
+    p_expected_revision: expectedRevision,
+    p_request_id: requestId,
+  })
+  if (error) throw error
+  if (!data || typeof data !== 'object') throw new Error('postal_invalid_result')
+  const shipment = normalizeShipment(data as PostalShipment)
+  if (
+    shipment.id !== shipmentId ||
+    shipment.state !== 'draft' ||
+    shipment.is_archive
+  ) {
+    throw new Error('postal_restore_conflict')
+  }
+  await queryClient.invalidateQueries({
+    queryKey: queryKeys.postal.all(scope.workspaceId),
+  })
+  return shipment
+}
+
 export async function postalSaveBranch(
   scope: PostalScope,
   payload: object,

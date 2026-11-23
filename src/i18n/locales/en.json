@@ -12046,6 +12046,7 @@
       "postpone_delivery": "Delivery Postponed",
       "deliver": "Delivered",
       "cancel": "Shipment Cancelled",
+      "restore_to_draft": "Shipment Restored to Draft",
       "cod_recorded": "Recipient Payment Recorded",
       "delivery_fee_recorded": "Delivery Fee Payment Recorded",
       "merchant_account_updated": "Merchant Account Updated"
@@ -12098,6 +12099,18 @@
       "notFound": "This shipment could not be found. Refresh the data and try again.",
       "notAllowed": "Only cancelled shipments can be archived.",
       "conflict": "This shipment changed before the action completed. Refresh the data and try again."
+    },
+    "restoreDraft": {
+      "action": "Restore to draft",
+      "title": "Restore this shipment to draft?",
+      "description": "The shipment will return to the regular list. Its branch and driver assignments will be cleared, and its history will remain available.",
+      "restoring": "Restoring to draft…",
+      "success": "Shipment restored to draft.",
+      "failed": "Could not restore this shipment to draft. Refresh the data and try again.",
+      "notFound": "This shipment could not be found. Refresh the data and try again.",
+      "notAllowed": "Only cancelled shipments can be restored to draft.",
+      "conflict": "This shipment changed before the action completed. Refresh the data and try again.",
+      "financialActivity": "This shipment has payment records and cannot be restored to draft."
     }
   },
   "stockReservations": {

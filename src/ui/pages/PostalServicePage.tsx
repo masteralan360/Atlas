@@ -78,6 +78,7 @@ import {
 } from '@/local-db/postal'
 import { PostalDashboardCards } from '@/postal/PostalDashboardCards'
 import { ShipmentArchiveDialog } from '@/postal/ShipmentArchiveDialog'
+import { ShipmentRestoreDialog } from '@/postal/ShipmentRestoreDialog'
 import { OperationDialog } from '@/postal/OperationDialog'
 import {
   postalStates,
@@ -180,6 +181,7 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
     shipment: PostalShipment
     isArchive: boolean
   } | null>(null)
+  const [restoreTarget, setRestoreTarget] = useState<PostalShipment | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<PostalShipment | null>(null)
   const [scanner, setScanner] = useState(false)
   const scannedId = useRef<string | null>(null)
@@ -723,6 +725,15 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
           },
         },
         {
+          accessorKey: 'primary_phone',
+          header: t('postal.recipientPhoneNumber'),
+          cell: ({ row }) => (
+            <bdi className="whitespace-nowrap" dir="ltr">
+              {(row.original as PostalShipment).primary_phone}
+            </bdi>
+          ),
+        },
+        {
           id: 'status',
           header: t('postal.status'),
           cell: ({ row }) => {
@@ -767,6 +778,18 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
                   <Eye className="me-2 h-4 w-4" />
                   {t('postal.view')}
                 </Button>
+                {scope.role === 'admin' && shipment.state === 'cancelled' && !shipment.is_archive && (
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0"
+                    aria-label={t('postal.restoreDraft.action')}
+                    title={t('postal.restoreDraft.action')}
+                    onClick={() => setRestoreTarget(shipment)}
+                  >
+                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                )}
                 {scope.role === 'admin' && shipment.state === 'cancelled' && !shipment.is_archive && (
                   <Button
                     variant="outline"
@@ -1382,6 +1405,14 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
                     <RotateCcw className="h-4 w-4" />
                     {t('postal.archive.unarchiveAction')}
                   </Button>
+                  <Button
+                    variant="outline"
+                    className="shrink-0 gap-2"
+                    onClick={() => setRestoreTarget(shipment)}
+                  >
+                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                    {t('postal.restoreDraft.action')}
+                  </Button>
                 </div>
               ))}
             </AppDialogBody>
@@ -1399,6 +1430,13 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
         isArchive={archiveTarget?.isArchive ?? true}
         onClose={() => setArchiveTarget(null)}
       />
+      {scope.role === 'admin' && (
+        <ShipmentRestoreDialog
+          scope={scope}
+          shipment={restoreTarget}
+          onClose={() => setRestoreTarget(null)}
+        />
+      )}
       <DeleteConfirmationDialog
         isOpen={deleteTarget !== null}
         isLoading={shipmentAction.busy}

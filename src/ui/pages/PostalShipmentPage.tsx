@@ -77,6 +77,7 @@ import { ShipmentForm } from '@/postal/ShipmentForm'
 import { CreateShipmentFlow } from '@/postal/CreateShipmentFlow'
 import { ShipmentTimeline } from '@/postal/ShipmentTimeline'
 import { ShipmentArchiveDialog } from '@/postal/ShipmentArchiveDialog'
+import { ShipmentRestoreDialog } from '@/postal/ShipmentRestoreDialog'
 import { OperationDialog } from '@/postal/OperationDialog'
 import { CodPaymentDialog } from '@/postal/CodPaymentDialog'
 import { ShipmentQr } from '@/postal/ShipmentLabel'
@@ -136,6 +137,7 @@ export default function PostalShipmentPage({
   const [qr, setQr] = useState(false)
   const [contact, setContact] = useState(false)
   const [archiveTarget, setArchiveTarget] = useState<boolean | null>(null)
+  const [restoreOpen, setRestoreOpen] = useState(false)
   const [operation, setOperation] = useState('')
   const [payment, setPayment] = useState<
     'collection' | 'settlement' | 'delivery_fee' | null
@@ -271,6 +273,12 @@ export default function PostalShipmentPage({
               <Archive className="me-2 h-4 w-4" />
             )}
             {t(`postal.archive.${shipment.is_archive ? 'unarchiveAction' : 'archiveAction'}`)}
+          </Button>
+        )}
+        {scope.role === 'admin' && shipment.state === 'cancelled' && (
+          <Button variant="outline" onClick={() => setRestoreOpen(true)}>
+            <RotateCcw className="me-2 h-4 w-4" aria-hidden="true" />
+            {t('postal.restoreDraft.action')}
           </Button>
         )}
         {canEdit && (
@@ -782,6 +790,13 @@ export default function PostalShipmentPage({
           shipment={archiveTarget !== null ? shipment : null}
           isArchive={archiveTarget ?? true}
           onClose={() => setArchiveTarget(null)}
+        />
+      )}
+      {scope.role === 'admin' && (
+        <ShipmentRestoreDialog
+          scope={scope}
+          shipment={restoreOpen ? shipment : null}
+          onClose={() => setRestoreOpen(false)}
         />
       )}
       <PrintSelectionModal

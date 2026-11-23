@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Wallet,
   History,
+  RotateCcw,
   ShieldCheck,
   CalendarClock,
 } from 'lucide-react'
@@ -25,6 +26,7 @@ const icons: Record<string, typeof Circle> = {
   merchant_account_updated: Wallet,
   cod_recorded: Wallet,
   delivery_fee_recorded: Wallet,
+  restore_to_draft: RotateCcw,
   admin_correction: ShieldCheck,
 }
 export function ShipmentTimeline({
