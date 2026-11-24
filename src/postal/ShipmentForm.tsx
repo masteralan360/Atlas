@@ -237,8 +237,11 @@ export function ShipmentForm({
   const isProcessing = action.busy || closingProvisional;
   const completedAttachmentUploads = attachments.filter((item) => item.status === "uploaded").length;
   const attachmentProfile = getImageUploadProfile("shipment-attachment");
-  const canManageAttachments = !editing || source?.state === "draft";
+  const canManageAttachments = !editing || source?.state === "draft" ||
+    (scope.role === "admin" && source?.state !== "cancelled");
   const attachmentCount = existingAttachments.length + attachments.length;
+  const attachmentRequirementMet = attachmentCount > 0 &&
+    (!editing || existingAttachmentState === "ready");
   const attachmentSelectionDisabled = isProcessing || !canManageAttachments ||
     (editing && existingAttachmentState !== "ready") ||
     attachmentCount >= MAX_SHIPMENT_ATTACHMENTS;
@@ -369,7 +372,10 @@ export function ShipmentForm({
   };
   const uploadEditAttachments = async (shipmentId: string) => {
     if (attachments.length === 0) return;
-    if (!source || source.state !== "draft") throw new Error("postal_attachment_shipment_locked");
+    if (!source || (source.state !== "draft" &&
+      (scope.role !== "admin" || source.state === "cancelled"))) {
+      throw new Error("postal_attachment_shipment_locked");
+    }
 
     const metadataById = new Map<string, NewPostalShipmentAttachment>();
     for (const item of attachments) {
@@ -499,7 +505,8 @@ export function ShipmentForm({
     !organizationInvalid &&
     !deliveryFeeInvalid &&
     !deliveryFeeRequired &&
-    !tariffRequirementMissing;
+    !tariffRequirementMissing &&
+    attachmentRequirementMet;
   const showNegativePrefix = negative && amount.length > 0;
   const fieldError = (field: ValidationField) => {
     if (!touched[field] || !errors[field]) return null;
@@ -1067,7 +1074,7 @@ export function ShipmentForm({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 id="shipment-attachments-heading" className="flex items-center gap-2 font-semibold">
                   <Images className="h-4 w-4 text-primary" aria-hidden="true" />
-                  {t("postal.attachments.title")}
+                  {t("postal.attachments.title")} *
                 </h3>
                 {(!editing || existingAttachmentState === "ready") && (
                   <Badge variant="secondary" className="tabular-nums">
@@ -1102,6 +1109,12 @@ export function ShipmentForm({
                       ? t("postal.attachments.editHint", { count: MAX_SHIPMENT_ATTACHMENTS - existingAttachments.length })
                       : t("postal.attachments.draftOnly")
                     : t("postal.attachments.hint")}
+                </p>
+              )}
+              {attachmentCount === 0 && (!editing || existingAttachmentState === "ready") && (
+                <p className="flex items-center gap-2 text-sm text-destructive" role="alert">
+                  <CircleHelp className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  {t("postal.attachments.requiredError")}
                 </p>
               )}
               {editing && existingAttachmentState === "ready" && existingAttachments.length > 0 && (

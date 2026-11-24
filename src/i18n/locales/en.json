@@ -11787,8 +11787,9 @@
     "shipmentDetails": "Shipment Details",
     "attachments": {
       "title": "Attachments",
-      "hint": "Optionally add up to 5 photos. Supported images can be up to 25 MB each.",
-      "editHint": "This draft can have up to {{count}} more photos.",
+      "hint": "At least one photo is required. Add up to 5 photos, up to 25 MB each.",
+      "editHint": "At least one photo is required. This shipment can have up to {{count}} more photos.",
+      "requiredError": "Attach at least one photo before saving the shipment.",
       "draftOnly": "Photos can only be added while a shipment is a draft.",
       "counter": "{{count}}/{{max}}",
       "select": "Select photos",

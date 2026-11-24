@@ -48,6 +48,17 @@ function normalizeAttachment(
   return { ...row, size_bytes: size, width, height } as PostalShipmentAttachment
 }
 
+async function invalidateShipmentAttachmentQueries(scope: PostalScope, shipmentId: string) {
+  await Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.postal.detail(scope, shipmentId),
+    }),
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.postal.pageRoot(scope.workspaceId),
+    }),
+  ])
+}
+
 export async function fetchPostalShipmentAttachments(
   workspaceId: string,
   shipmentId: string,
@@ -119,9 +130,7 @@ export async function savePostalShipmentAttachments(
   const rows = data.map((row) =>
     normalizeAttachment(row as Partial<PostalShipmentAttachment>, scope.workspaceId, shipmentId),
   )
-  await queryClient.invalidateQueries({
-    queryKey: queryKeys.postal.detail(scope, shipmentId),
-  })
+  await invalidateShipmentAttachmentQueries(scope, shipmentId)
   return rows
 }
 
@@ -150,9 +159,7 @@ export async function addPostalShipmentAttachments(
   if (attachments.some((attachment) => !savedKeys.has(attachment.object_key))) {
     throw new Error('postal_attachment_invalid_result')
   }
-  await queryClient.invalidateQueries({
-    queryKey: queryKeys.postal.detail(scope, shipmentId),
-  })
+  await invalidateShipmentAttachmentQueries(scope, shipmentId)
   return rows
 }
 
