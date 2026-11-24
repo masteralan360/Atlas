@@ -457,6 +457,31 @@ export function PartnerAccountStatementTemplateDialog({
                         />
                       </div>
                     </div>
+                    <div className="rounded-xl bg-muted/30 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <label htmlFor="partner-template-hide-returned-sales-orders" className="text-sm font-medium">
+                            {t('businessPartners.accountStatement.hideReturnedSalesOrders', {
+                              defaultValue: 'Hide returned sales orders and return rows'
+                            })}
+                          </label>
+                          <p className="text-xs text-muted-foreground">
+                            {t('businessPartners.accountStatement.hideReturnedSalesOrdersDescription', {
+                              defaultValue: 'When a sales order has a posted return, hide its order row and all related return rows, and exclude them from statement balances and printout.'
+                            })}
+                          </p>
+                        </div>
+                        <Switch
+                          id="partner-template-hide-returned-sales-orders"
+                          checked={draftConfiguration.hideReturnedSalesOrders}
+                          onCheckedChange={(hideReturnedSalesOrders) => setDraftConfiguration((current) => ({
+                            ...current,
+                            hideReturnedSalesOrders
+                          }))}
+                          disabled={isProcessing}
+                        />
+                      </div>
+                    </div>
                   </div>
                 </section>
 

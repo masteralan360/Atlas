@@ -74,6 +74,8 @@ export type PartnerAccountStatementData = {
   itemizeSalesOrders?: boolean
   /** Expands active POS-sale loans into their original sold product lines. */
   itemizePosSaleLoans?: boolean
+  /** Hides each returned sales order together with its posted return rows. */
+  hideReturnedSalesOrders?: boolean
   /** Enables product-commission columns on an eligible agent statement. */
   isAgentCommissionStatement?: boolean
   /** Marks Seller mode so its activity table can show sales totals without account-balance columns. */
@@ -624,6 +626,10 @@ function createOrderEntries(data: PartnerAccountStatementData): PartnerAccountSt
       continue
     }
 
+    if (data.hideReturnedSalesOrders === true && (returnsByOrderId.get(order.id)?.length || 0) > 0) {
+      continue
+    }
+
     // Agent sales accounts must show each sold/returned product. Ordinary
     // business-partner statements retain their original document-level
     // presentation unless the user explicitly enables item detail.
@@ -1143,6 +1149,12 @@ function createLoanEntries(data: PartnerAccountStatementData): PartnerAccountSta
     const isOrderSaleLoan = loan.source === 'order' && !isOrderPurchaseLoan
       && (loan.orderType === 'sales' || linkedSalesOrder != null)
     const linkedOrder = isOrderPurchaseLoan ? linkedPurchaseOrder : linkedSalesOrder
+    if (
+      data.hideReturnedSalesOrders === true
+      && isOrderSaleLoan
+      && linkedSalesOrder
+      && (returnsByOrderId.get(linkedSalesOrder.id)?.length || 0) > 0
+    ) continue
     const paymentMethod = loan.source === 'order'
       ? linkedOrder?.paymentMethod || 'loan'
       : undefined
@@ -1374,29 +1386,41 @@ function createInstallmentSaleEntries(data: PartnerAccountStatementData): Partne
 function createAgentCreatedSalesActivityEntries(
   data: PartnerAccountStatementData
 ): PartnerAccountStatementEntry[] {
-  return (data.agentCreatedSalesActivities || []).map((activity) => {
-    const descriptions: Record<PartnerAccountStatementAgentSaleActivity['descriptionKey'], string> = {
-      sellerCreatedSalesOrder: 'Sales order created by Seller',
-      sellerCreatedPosSale: 'POS sale created by Seller',
-      sellerCreatedInstallmentSale: 'Installment sale created by Seller',
-      sellerReturnedSalesOrder: 'Sales order returned by Seller',
-      sellerReturnedPosSale: 'POS sale returned by Seller'
-    }
-    return {
-      id: `agent-sales-activity:${activity.saleKind}:${activity.id}`,
-      date: activity.date,
-      reference: activity.reference,
-      kind: 'agent_sales_activity',
-      description: descriptions[activity.descriptionKey],
-      descriptionKey: activity.descriptionKey,
-      relatedReturnId: activity.relatedReturnId,
-      returnReason: activity.returnReason,
-      currency: activity.currency,
-      delta: 0,
-      salesActivityAmount: Number(activity.amount || 0),
-      source: activity.source
-    }
-  })
+  const returnedSalesOrderIds = data.hideReturnedSalesOrders === true
+    ? new Set((data.salesOrderReturns || [])
+      .filter((orderReturn) => !orderReturn.isDeleted && orderReturn.status === 'posted')
+      .map((orderReturn) => orderReturn.orderId))
+    : null
+  return (data.agentCreatedSalesActivities || [])
+    .filter((activity) => !(
+      returnedSalesOrderIds
+      && activity.saleKind === 'sales_order'
+      && activity.source.recordType === 'order'
+      && returnedSalesOrderIds.has(activity.source.recordId)
+    ))
+    .map((activity) => {
+      const descriptions: Record<PartnerAccountStatementAgentSaleActivity['descriptionKey'], string> = {
+        sellerCreatedSalesOrder: 'Sales order created by Seller',
+        sellerCreatedPosSale: 'POS sale created by Seller',
+        sellerCreatedInstallmentSale: 'Installment sale created by Seller',
+        sellerReturnedSalesOrder: 'Sales order returned by Seller',
+        sellerReturnedPosSale: 'POS sale returned by Seller'
+      }
+      return {
+        id: `agent-sales-activity:${activity.saleKind}:${activity.id}`,
+        date: activity.date,
+        reference: activity.reference,
+        kind: 'agent_sales_activity',
+        description: descriptions[activity.descriptionKey],
+        descriptionKey: activity.descriptionKey,
+        relatedReturnId: activity.relatedReturnId,
+        returnReason: activity.returnReason,
+        currency: activity.currency,
+        delta: 0,
+        salesActivityAmount: Number(activity.amount || 0),
+        source: activity.source
+      }
+    })
 }
 
 /**

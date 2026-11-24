@@ -21,6 +21,7 @@ type StatementRequest = {
   period?: unknown
   itemizeSalesOrders?: unknown
   itemizePosSaleLoans?: unknown
+  hideReturnedSalesOrders?: unknown
 }
 
 type SupabaseClient = ReturnType<typeof createRequestClient>
@@ -273,7 +274,8 @@ async function loadPartnerStatement(
   partnerId: string,
   period: PartnerAccountStatementPeriod,
   itemizeSalesOrders: boolean,
-  itemizePosSaleLoans: boolean
+  itemizePosSaleLoans: boolean,
+  hideReturnedSalesOrders: boolean
 ) {
   const crm = "crm"
   const [partnerResult, agentsRaw, salesByPartner, salesByCustomer, purchasesByPartner, purchasesBySupplier, loansRaw, installmentSalesRaw, settlementOperationsRaw, storageAccess] = await Promise.all([
@@ -696,6 +698,7 @@ async function loadPartnerStatement(
     period,
     itemizeSalesOrders,
     itemizePosSaleLoans,
+    hideReturnedSalesOrders,
     isAgentCommissionStatement: agents.length > 0,
     isSellerAgentStatement: agents.some((agent) => agent.agentType === "seller"),
     salesOrders: allSalesOrders as unknown as PartnerAccountStatementData["salesOrders"],
@@ -768,7 +771,8 @@ Deno.serve(async (req) => {
       input.partnerId,
       period,
       input.itemizeSalesOrders === true,
-      input.itemizePosSaleLoans === true
+      input.itemizePosSaleLoans === true,
+      input.hideReturnedSalesOrders === true
     )
     if (!result) return errorResponse("Business partner was not found or is not visible", 404)
     return jsonResponse(result)

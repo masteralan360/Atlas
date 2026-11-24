@@ -31,6 +31,7 @@ export type PartnerAccountStatementTemplateConfiguration = {
   showOrderItems: boolean
   showPosSaleItems: boolean
   groupSettlementOperations: boolean
+  hideReturnedSalesOrders: boolean
   dueFromBalanceColor: string
   dueToBalanceColor: string
 }
@@ -91,6 +92,7 @@ export const DEFAULT_PARTNER_ACCOUNT_STATEMENT_TEMPLATE_CONFIGURATION: PartnerAc
   showOrderItems: false,
   showPosSaleItems: false,
   groupSettlementOperations: false,
+  hideReturnedSalesOrders: false,
   ...DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS
 }
 
@@ -138,6 +140,7 @@ export function normalizePartnerAccountStatementTemplateConfiguration(
     showOrderItems: candidate.showOrderItems === true,
     showPosSaleItems: candidate.showPosSaleItems === true,
     groupSettlementOperations: candidate.groupSettlementOperations === true,
+    hideReturnedSalesOrders: candidate.hideReturnedSalesOrders === true,
     dueFromBalanceColor: isValidPartnerAccountStatementBalanceColor(candidate.dueFromBalanceColor)
       ? candidate.dueFromBalanceColor
       : DEFAULT_PARTNER_ACCOUNT_STATEMENT_BALANCE_COLORS.dueFromBalanceColor,

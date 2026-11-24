@@ -61,6 +61,7 @@ export function usePartnerAccountStatementPeriod(
     enabled: boolean
     itemizeSalesOrders: boolean
     itemizePosSaleLoans: boolean
+    hideReturnedSalesOrders?: boolean
     refreshToken?: string | number
   }
 ) {
@@ -79,10 +80,12 @@ export function usePartnerAccountStatementPeriod(
     period,
     itemizeSalesOrders: options.itemizeSalesOrders,
     itemizePosSaleLoans: options.itemizePosSaleLoans,
+    hideReturnedSalesOrders: options.hideReturnedSalesOrders === true,
     refreshToken: options.refreshToken
   }), [
     options.itemizePosSaleLoans,
     options.itemizeSalesOrders,
+    options.hideReturnedSalesOrders,
     options.refreshToken,
     partnerId,
     period,
@@ -108,7 +111,8 @@ export function usePartnerAccountStatementPeriod(
           partnerId,
           period,
           itemizeSalesOrders: options.itemizeSalesOrders,
-          itemizePosSaleLoans: options.itemizePosSaleLoans
+          itemizePosSaleLoans: options.itemizePosSaleLoans,
+          hideReturnedSalesOrders: options.hideReturnedSalesOrders === true
         },
         signal: controller.signal,
         timeout: STATEMENT_REQUEST_TIMEOUT_MS
@@ -146,6 +150,7 @@ export function usePartnerAccountStatementPeriod(
   }, [
     options.itemizePosSaleLoans,
     options.itemizeSalesOrders,
+    options.hideReturnedSalesOrders,
     partnerId,
     period,
     requestKey,
@@ -160,13 +165,14 @@ export function usePartnerAccountStatementPeriod(
       period,
       itemizeSalesOrders: options.itemizeSalesOrders,
       itemizePosSaleLoans: options.itemizePosSaleLoans,
+      hideReturnedSalesOrders: options.hideReturnedSalesOrders === true,
       isAgentCommissionStatement: response.isAgentCommissionStatement,
       isSellerAgentStatement: response.isSellerAgentStatement === true,
       salesOrders: [],
       purchaseOrders: [],
       precomputedLedgers: response.ledgers
     }
-  }, [options.itemizePosSaleLoans, options.itemizeSalesOrders, period, response])
+  }, [options.hideReturnedSalesOrders, options.itemizePosSaleLoans, options.itemizeSalesOrders, period, response])
 
   const isLoading = Boolean(requestKey && (
     state.key !== requestKey || state.status === 'loading'

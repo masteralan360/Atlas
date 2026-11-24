@@ -569,7 +569,8 @@ export function AccountStatements() {
         {
             enabled: useScopedRemoteStatement,
             itemizeSalesOrders: activeStatementTemplate.configuration.showOrderItems,
-            itemizePosSaleLoans: activeStatementTemplate.configuration.showPosSaleItems
+            itemizePosSaleLoans: activeStatementTemplate.configuration.showPosSaleItems,
+            hideReturnedSalesOrders: activeStatementTemplate.configuration.hideReturnedSalesOrders
         }
     )
     const useLegacyStatement = !useScopedRemoteStatement || remoteStatement.fallbackRequired
@@ -621,8 +622,13 @@ export function AccountStatements() {
         showSellerTotalColumn: isSellerAgentStatement
     })
     const statementDataForDisplay = useMemo(
-        () => statementData ? { ...statementData, itemizeSalesOrders, itemizePosSaleLoans } : null,
-        [itemizePosSaleLoans, itemizeSalesOrders, statementData]
+        () => statementData ? {
+            ...statementData,
+            itemizeSalesOrders,
+            itemizePosSaleLoans,
+            hideReturnedSalesOrders: activeStatementTemplate.configuration.hideReturnedSalesOrders
+        } : null,
+        [activeStatementTemplate.configuration.hideReturnedSalesOrders, itemizePosSaleLoans, itemizeSalesOrders, statementData]
     )
     const ledgers = useMemo(
         () => statementDataForDisplay ? buildPartnerAccountStatementLedger(statementDataForDisplay) : [],

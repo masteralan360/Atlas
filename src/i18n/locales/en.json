@@ -3002,6 +3002,8 @@
       "showPosSaleItemsDescription": "Expand active POS sale loans into their original product rows in this statement and its printout.",
       "groupSettlementOperations": "Group settlement operations",
       "groupSettlementOperationsDescription": "Show transactions from one Settle Balance action as a single row in the statement and printout.",
+      "hideReturnedSalesOrders": "Hide returned sales orders and return rows",
+      "hideReturnedSalesOrdersDescription": "When a sales order has a posted return, hide its order row and all related return rows, and exclude them from statement balances and printout.",
       "sourceViewUnavailable": "No source view is available",
       "settlementAllocations": "{{count}} allocations",
       "templatesTitle": "Partner Account Statement Templates",

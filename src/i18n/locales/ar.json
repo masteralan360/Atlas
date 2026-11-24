@@ -6902,6 +6902,8 @@
       "showPosSaleItemsDescription": "وسّع قروض مبيعات نقاط البيع النشطة إلى صفوف الأصناف الأصلية في كشف الحساب وطباعته.",
       "groupSettlementOperations": "تجميع عمليات التسوية",
       "groupSettlementOperationsDescription": "اعرض المعاملات الناتجة عن إجراء واحد لتسوية الرصيد في صف واحد في الكشف ونسخته المطبوعة.",
+      "hideReturnedSalesOrders": "إخفاء أوامر البيع المرتجعة وصفوف المرتجعات",
+      "hideReturnedSalesOrdersDescription": "عند وجود مرتجع مُرحّل لأمر بيع، أخفِ صف الأمر وجميع صفوف المرتجعات المرتبطة به، واستبعدها من أرصدة الكشف وطباعته.",
       "sourceViewUnavailable": "لا تتوفر صفحة عرض للمصدر",
       "settlementAllocations": "{{count}} تخصيصات",
       "templatesTitle": "قوالب كشف حساب الشريك",
