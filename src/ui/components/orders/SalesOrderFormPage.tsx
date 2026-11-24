@@ -62,6 +62,7 @@ import {
     useSalesOrderAgentAssignments,
     useSalesOrder,
     useStockBatches,
+    useStockBatchSourceAvailability,
     useStorages,
     type BusinessPartner,
     type CurrencyCode,
@@ -74,7 +75,8 @@ import {
     type PaymentObligation,
     type WorkspacePaymentMethod,
     type StockBatch,
-    type StockBatchAllocation
+    type StockBatchAllocation,
+    SelectedStockBatchInsufficientError
 } from '@/local-db'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useOrderEditorLiveData } from '@/hooks/useOrderEditorLiveData'
@@ -553,6 +555,17 @@ export function SalesOrderFormPage({
         if (editingOrder) return mapExistingOrderItems(editingOrder)
         return [createEmptyItem(defaultStorageId)]
     })
+    const stockSourcePositions = useMemo(() => [...new Map(items
+        .filter((item) => item.productId && item.storageId
+            && !isService(products.find((product) => product.id === item.productId)))
+        .map((item) => {
+            const position = { productId: item.productId, storageId: item.storageId }
+            return [`${position.productId}:${position.storageId}`, position] as const
+        })).values()], [items, products])
+    const stockSourceAvailability = useStockBatchSourceAvailability(workspaceId, stockSourcePositions, editingOrderId)
+    const stockSourceAvailabilityByPosition = useMemo(() => new Map(
+        (stockSourceAvailability.data ?? []).map((row) => [`${row.productId}:${row.storageId}`, row] as const)
+    ), [stockSourceAvailability.data])
     const displayedItems = useMemo(() => getSalesOrderLinesNewestFirst(items), [items])
     const requiresApprovalRequest = user?.role === 'staff' && permissionKeys.includes('orders.requireSalesOrderRequest')
     const canUseFreeBonus = hasCapability('orderFreeBonus')
@@ -757,12 +770,23 @@ export function SalesOrderFormPage({
         [stockBatchesByPosition])
 
     const getRegularStockQuantity = useCallback((productId: string, storageId: string) =>
-        Math.max(
-            getAvailableQuantity(productId, storageId)
-            - getBatchesForPosition(productId, storageId).reduce((sum, batch) => sum + batch.quantity, 0),
-            0
-        ),
-        [getAvailableQuantity, getBatchesForPosition])
+        stockSourceAvailabilityByPosition.get(`${productId}:${storageId}`)?.regularAvailableQuantity
+            ?? Math.max(
+                getAvailableQuantity(productId, storageId)
+                - getBatchesForPosition(productId, storageId).reduce((sum, batch) => sum + batch.quantity, 0),
+                0
+            ),
+        [getAvailableQuantity, getBatchesForPosition, stockSourceAvailabilityByPosition])
+
+    const getBatchAvailableQuantity = useCallback((batch: StockBatch) =>
+        stockSourceAvailabilityByPosition.get(`${batch.productId}:${batch.storageId}`)?.batches
+            .find((source) => source.id === batch.id)?.availableQuantity ?? batch.quantity,
+        [stockSourceAvailabilityByPosition])
+
+    const getBatchReservedQuantity = useCallback((batch: StockBatch) =>
+        stockSourceAvailabilityByPosition.get(`${batch.productId}:${batch.storageId}`)?.batches
+            .find((source) => source.id === batch.id)?.reservedQuantity ?? 0,
+        [stockSourceAvailabilityByPosition])
 
     const getPriceBookItemForPartner = useCallback((partner: Pick<BusinessPartner, 'priceBookId'> | null | undefined, productId: string) =>
         findPartnerProductPriceBookItem(
@@ -1512,8 +1536,8 @@ export function SalesOrderFormPage({
         beginSaveProgressToast()
         try {
             let usesPriceBookPricing = false
-            const explicitlySelectedBatchItems = items.flatMap((item) => {
-                if (!item.productId || !item.storageId || !item.batchId || item.batchId === PRODUCT_STOCK_SELECTION) return []
+            const stockSourceItems = items.flatMap((item) => {
+                if (!item.productId || !item.storageId) return []
                 const product = products.find((entry) => entry.id === item.productId)
                 if (!product || isService(product)) return []
                 const unitOption = getFormUnitOption(item, product)
@@ -1521,22 +1545,29 @@ export function SalesOrderFormPage({
                 const quantity = soldQuantityToInventoryQuantity(Number(item.quantity) || 0, unitOption.factor)
                     + soldQuantityToInventoryQuantity(canUseFreeBonus ? Number(item.freeBonusQuantity) || 0 : 0, unitOption.factor)
                 if (!isPositiveQuantity(quantity)) return []
-                return [{ item, quantity }]
+                return [{
+                    item,
+                    quantity,
+                    selectedBatchAllocations: item.batchId && item.batchId !== PRODUCT_STOCK_SELECTION
+                        ? [{ batchId: item.batchId, quantity }]
+                        : []
+                }]
             })
-            const selectedBatchPlans = explicitlySelectedBatchItems.length > 0
-                ? await getStockBatchSalePlansForWorkspace(workspaceId, explicitlySelectedBatchItems.map(({ item, quantity }) => ({
+            const selectedBatchPlans = stockSourceItems.length > 0
+                ? await getStockBatchSalePlansForWorkspace(workspaceId, stockSourceItems.map(({ item, quantity, selectedBatchAllocations }) => ({
+                    requestId: item.clientId,
                     productId: item.productId,
                     storageId: item.storageId,
                     quantity,
-                    selectedBatchAllocations: [{ batchId: item.batchId, quantity }],
-                })))
+                    selectedBatchAllocations,
+                })), editingOrderId)
                 : []
-            const selectedBatchAllocationByClientId = new Map<string, StockBatchAllocation>(
-                explicitlySelectedBatchItems.map(({ item }, index) => [
-                    item.clientId,
-                    selectedBatchPlans[index]?.allocations.find((allocation) => allocation.batchId === item.batchId)!
-                ])
-            )
+            const selectedBatchAllocationByClientId = new Map<string, StockBatchAllocation>()
+            stockSourceItems.forEach(({ item }, index) => {
+                if (!item.batchId || item.batchId === PRODUCT_STOCK_SELECTION) return
+                const allocation = selectedBatchPlans[index]?.allocations.find((entry) => entry.batchId === item.batchId)
+                if (allocation) selectedBatchAllocationByClientId.set(item.clientId, allocation)
+            })
             const orderItems: SalesOrderItem[] = items
                 .filter((item) => item.productId && hasOrderLineInventoryQuantity(item))
                 .map((item) => {
@@ -1654,9 +1685,9 @@ export function SalesOrderFormPage({
                         settlementCurrency: currency,
                         costPrice: sourceCostPrice,
                         convertedCostPrice,
-                        ...(service || item.batchId === ''
+                        ...(service
                             ? { batchAllocations: null }
-                            : item.batchId === PRODUCT_STOCK_SELECTION
+                            : item.batchId === '' || item.batchId === PRODUCT_STOCK_SELECTION
                                 ? { batchAllocations: [] }
                                 : {
                                     batchAllocations: [{
@@ -1841,12 +1872,46 @@ export function SalesOrderFormPage({
                 finishSavedOrder(savedOrder.id)
             }
         } catch (error: any) {
+            const selectedBatchShortage = error instanceof SelectedStockBatchInsufficientError
+                ? error
+                : null
+            const selectedBatchLine = selectedBatchShortage
+                ? items.find((item) => selectedBatchShortage.requestId
+                    ? item.clientId === selectedBatchShortage.requestId
+                    : item.productId === selectedBatchShortage.productId
+                        && item.storageId === selectedBatchShortage.storageId
+                        && item.batchId === selectedBatchShortage.batchId)
+                : undefined
+            const selectedBatchProduct = selectedBatchShortage
+                ? products.find((product) => product.id === selectedBatchShortage.productId)
+                : undefined
+            if (selectedBatchShortage) {
+                console.warn('[SalesOrderForm] Selected stock batch is below the requested quantity', {
+                    productId: selectedBatchShortage.productId,
+                    storageId: selectedBatchShortage.storageId,
+                    batchNumber: selectedBatchShortage.batchNumber,
+                    requestedQuantity: selectedBatchShortage.requestedQuantity,
+                    availableQuantity: selectedBatchShortage.availableQuantity
+                })
+            }
+            const selectedBatchShortageMessage = selectedBatchShortage && selectedBatchProduct
+                ? t('orders.form.errors.selectedBatchInsufficient', {
+                    lineNumber: selectedBatchLine?.seq ?? '',
+                    sourceName: `${t('orders.form.batch', { defaultValue: 'Batch' })} ${selectedBatchShortage.batchNumber}`,
+                    productName: selectedBatchProduct.name,
+                    available: formatProductAvailability(selectedBatchProduct.id, selectedBatchShortage.availableQuantity),
+                    required: formatProductAvailability(selectedBatchProduct.id, selectedBatchShortage.requestedQuantity),
+                    defaultValue: 'Line {{lineNumber}}: {{sourceName}} for {{productName}} has {{available}} available; {{required}} is required. Choose another source or reduce the quantity.'
+                })
+                : null
             const message = isRemoteOrderSaveConfirmationError(error)
                 ? t('orders.form.errors.remoteSaveFailed')
                 : error?.message === ORDER_SUMMARY_RECOVERY_PERSISTENCE_ERROR
                     ? t('orders.form.errors.summaryRecoveryFailed')
                 : isOrderUnitConfigurationError(error)
                     ? t('orders.form.errors.unitConfigurationChanged')
+                : selectedBatchShortageMessage
+                    ? selectedBatchShortageMessage
                 : error?.message === 'agent_sales_accounts_not_enabled'
                 ? t('agentSalesAccounts.notEnabled')
                 : error?.message === 'agent_sales_account_unavailable'
@@ -1857,7 +1922,7 @@ export function SalesOrderFormPage({
                 title: t('common.error') || 'Error',
                 description: message,
                 variant: 'destructive',
-                action: (
+                action: selectedBatchShortage ? undefined : (
                     <ToastAction altText={t('orders.form.saveProgressRetry')} onClick={() => void submitOrder()}>
                         {t('orders.form.saveProgressRetry')}
                     </ToastAction>
@@ -2197,9 +2262,13 @@ export function SalesOrderFormPage({
                                             : null
                                         const batchSelectionValue = item.batchId || PRODUCT_STOCK_SELECTION
                                         const regularStockQuantity = getRegularStockQuantity(item.productId, item.storageId)
-                                        const selectedSourceQuantity = selectedBatch?.quantity ?? regularStockQuantity
-                                        const selectedSourceExceeded = !hasRemoteStockAuthority
-                                            && Boolean(item.productId && item.storageId && inventoryQuantity > selectedSourceQuantity)
+                                        const selectedSourceQuantity = selectedBatch ? getBatchAvailableQuantity(selectedBatch) : regularStockQuantity
+                                        const selectedSourceReservedQuantity = selectedBatch
+                                            ? getBatchReservedQuantity(selectedBatch)
+                                            : stockSourceAvailabilityByPosition.get(`${item.productId}:${item.storageId}`)?.regularReservedQuantity ?? 0
+                                        const hasSourceReservationData = stockSourceAvailabilityByPosition.has(`${item.productId}:${item.storageId}`)
+                                        const selectedSourceExceeded = Boolean(item.productId && item.storageId && inventoryQuantity > selectedSourceQuantity)
+                                            && (hasSourceReservationData || !hasRemoteStockAuthority)
                                         const canOpenProductsView = Boolean(item.storageId)
                                             && !(priceBooksEnabled && (!isPriceBookCatalogReady || !selectedCustomer))
 
@@ -2289,12 +2358,15 @@ export function SalesOrderFormPage({
                                                             <Select value={batchSelectionValue} onValueChange={(value) => updateItem(item.clientId, { batchId: value })}>
                                                                 <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
                                                                 <SelectContent>
-                                                                    <SelectItem value={PRODUCT_STOCK_SELECTION} disabled={!hasRemoteStockAuthority && regularStockQuantity <= 0 && lineBatches.length > 0}>
+                                                                    <SelectItem value={PRODUCT_STOCK_SELECTION} disabled={regularStockQuantity <= 0 && lineBatches.length > 0 && batchSelectionValue !== PRODUCT_STOCK_SELECTION}>
                                                                          {t('orders.form.productStock', { defaultValue: 'Product stock' })} · {formatProductAvailability(item.productId, regularStockQuantity)} {t('orders.form.available', { defaultValue: 'available' })}
+                                                                        {selectedSourceReservedQuantity > 0 && !selectedBatch ? ` · ${t('stockReservations.reservedQuantity', { quantity: formatProductAvailability(item.productId, selectedSourceReservedQuantity) })}` : ''}
                                                                     </SelectItem>
                                                                     {lineBatches.map((batch) => (
-                                                                        <SelectItem key={batch.id} value={batch.id}>
-                                                                             {t('orders.form.batch', { defaultValue: 'Batch' })} {batch.batchNumber} · {formatProductAvailability(item.productId, batch.quantity)} · {formatCurrency(
+                                                                        <SelectItem key={batch.id} value={batch.id} disabled={getBatchAvailableQuantity(batch) <= 0 && batchSelectionValue !== batch.id}>
+                                                                             {t('orders.form.batch', { defaultValue: 'Batch' })} {batch.batchNumber} · {formatProductAvailability(item.productId, getBatchAvailableQuantity(batch))} {t('orders.form.available', { defaultValue: 'available' })}
+                                                                            {getBatchReservedQuantity(batch) > 0 ? ` · ${t('stockReservations.reservedQuantity', { quantity: formatProductAvailability(item.productId, getBatchReservedQuantity(batch)) })}` : ''}
+                                                                            {' · '}{formatCurrency(
                                                                                 convertCurrencyAmountWithLiveRates(batch.price, batch.currency, currency, liveRates),
                                                                                 currency,
                                                                                 features.iqd_display_preference
@@ -2305,8 +2377,8 @@ export function SalesOrderFormPage({
                                                             </Select>
                                                             <p className={cn('text-xs', selectedSourceExceeded ? 'text-destructive' : 'text-muted-foreground')}>
                                                                 {selectedBatch
-                                                                     ? `${t('orders.form.batch', { defaultValue: 'Batch' })} ${selectedBatch.batchNumber}: ${formatProductAvailability(item.productId, selectedBatch.quantity)} ${t('orders.form.available', { defaultValue: 'available' })}`
-                                                                     : `${t('orders.form.productStock', { defaultValue: 'Product stock' })}: ${formatProductAvailability(item.productId, regularStockQuantity)} ${t('orders.form.available', { defaultValue: 'available' })}`}
+                                                                     ? `${t('orders.form.batch', { defaultValue: 'Batch' })} ${selectedBatch.batchNumber}: ${formatProductAvailability(item.productId, selectedSourceQuantity)} ${t('orders.form.available', { defaultValue: 'available' })}${selectedSourceReservedQuantity > 0 ? ` · ${t('stockReservations.reservedQuantity', { quantity: formatProductAvailability(item.productId, selectedSourceReservedQuantity) })}` : ''}`
+                                                                     : `${t('orders.form.productStock', { defaultValue: 'Product stock' })}: ${formatProductAvailability(item.productId, regularStockQuantity)} ${t('orders.form.available', { defaultValue: 'available' })}${selectedSourceReservedQuantity > 0 ? ` · ${t('stockReservations.reservedQuantity', { quantity: formatProductAvailability(item.productId, selectedSourceReservedQuantity) })}` : ''}`}
                                                                 {selectedSourceExceeded ? ` — ${t('orders.form.errors.batchQuantityExceeded', {
                                                                     productName: product?.name || '',
                                                                     defaultValue: 'Selected source does not have enough stock.'

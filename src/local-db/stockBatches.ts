@@ -1,5 +1,5 @@
-import { needsOfflineStockOperation, runOfflineStockOperation } from './offlineStockOperations'
-import { currentStockOperation, usesLocalStockExecution } from './offlineStockContext'
+import { needsOfflineStockOperation, runOfflineStockOperation, type OfflineStockOperation } from './offlineStockOperations'
+import { currentStockOperation, usesLocalStockExecution, type StockOperationEffect } from './offlineStockContext'
 import Dexie from 'dexie'
 import { useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
@@ -7,6 +7,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { getActiveBusinessUserId, getActiveBusinessUserRole, isOnline } from '@/lib/network'
+import { getOrderLineInventoryQuantity } from '@/lib/orderLineItems'
+import { useOptionalWorkspacePermissions } from '@/permissions/workspacePermissionsState'
 import { getSupabaseClientForTable } from '@/lib/supabaseSchema'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
 import {
@@ -20,6 +22,7 @@ import { generateId, toCamelCase, toSnakeCase } from '@/lib/utils'
 import i18n from '@/i18n/config'
 import { queryKeys } from '@/query/queryKeys'
 import { recordWorkspaceDataFetch } from '@/workspace/workspaceDataFreshness'
+import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 
 import {
     db,
@@ -88,6 +91,7 @@ export interface StockBatchSalePlan {
 }
 
 export interface StockBatchSaleRequest {
+    requestId?: string
     productId: string
     storageId: string
     quantity: number
@@ -97,6 +101,36 @@ export interface StockBatchSaleRequest {
      * are used for the line.
      */
     selectedBatchAllocations?: StockBatchTransferSelection[]
+}
+
+export class SelectedStockBatchInsufficientError extends Error {
+    readonly requestId?: string
+    readonly productId: string
+    readonly storageId: string
+    readonly batchId: string
+    readonly batchNumber: string
+    readonly requestedQuantity: number
+    readonly availableQuantity: number
+
+    constructor(details: {
+        requestId?: string
+        productId: string
+        storageId: string
+        batchId: string
+        batchNumber: string
+        requestedQuantity: number
+        availableQuantity: number
+    }) {
+        super('The selected stock batch does not have enough inventory.')
+        this.name = 'SelectedStockBatchInsufficientError'
+        this.requestId = details.requestId
+        this.productId = details.productId
+        this.storageId = details.storageId
+        this.batchId = details.batchId
+        this.batchNumber = details.batchNumber
+        this.requestedQuantity = details.requestedQuantity
+        this.availableQuantity = details.availableQuantity
+    }
 }
 
 export interface StockBatchSourceCommitment {
@@ -109,6 +143,17 @@ export interface StockBatchSourceAvailability {
     inventoryQuantity: number
     regularQuantity: number
     batches: Array<StockBatch & { availableQuantity: number }>
+}
+
+export interface StockBatchSourcePositionAvailability {
+    productId: string
+    storageId: string
+    inventoryQuantity: number
+    inventoryAvailableQuantity: number
+    regularQuantity: number
+    regularReservedQuantity: number
+    regularAvailableQuantity: number
+    batches: Array<{ id: string; quantity: number; reservedQuantity: number; availableQuantity: number }>
 }
 
 export interface StockBatchTransferSelection {
@@ -276,7 +321,7 @@ function compareOptionalDate(left?: string | null, right?: string | null) {
     return left.localeCompare(right)
 }
 
-function sortBatchesForConsumption(batches: StockBatch[]) {
+function sortBatchesForConsumption<T extends StockBatch>(batches: T[]): T[] {
     return [...batches].sort((left, right) => {
         const expiryComparison = compareOptionalDate(left.expiryDate, right.expiryDate)
         if (expiryComparison !== 0) {
@@ -509,6 +554,310 @@ export function calculateStockBatchSourceAvailability(
         inventoryQuantity: remainingInventory,
         regularQuantity: Math.max(0, remainingInventory - remainingBatchQuantity),
         batches: availableBatches
+    }
+}
+
+function stockSourceCacheKey(workspaceId: string, position: { productId: string; storageId: string }, excludeOrderId?: string) {
+    return `stock-batch-source:v1:${workspaceId}:${getActiveBusinessUserId() ?? ''}:${position.productId}:${position.storageId}:${excludeOrderId ?? ''}`
+}
+
+type SourceReservationCommitment = StockBatchSourceCommitment & { batchId?: string | null }
+
+function getOrderSourceCommitments(order: Record<string, unknown> | null, position: { productId: string; storageId: string }): SourceReservationCommitment[] {
+    if (!order || order.status !== 'pending' || order.isDeleted || !Array.isArray(order.items)) return []
+    const commitments: SourceReservationCommitment[] = []
+    for (const value of order.items) {
+        if (!value || typeof value !== 'object') continue
+        const item = value as Record<string, unknown>
+        if (item.productId !== position.productId) continue
+        const itemStorageId = (item.storageId as string | null | undefined) || (order.sourceStorageId as string | null | undefined)
+        if (itemStorageId && itemStorageId !== position.storageId) continue
+        const quantity = getOrderLineInventoryQuantity(item as never)
+        if (!isPositiveQuantity(quantity)) continue
+        if (Array.isArray(item.batchAllocations)) {
+            let batchTotal = 0
+            for (const allocationValue of item.batchAllocations) {
+                if (!allocationValue || typeof allocationValue !== 'object') continue
+                const allocation = allocationValue as Record<string, unknown>
+                const batchId = typeof allocation.batchId === 'string' ? allocation.batchId : ''
+                const allocationQuantity = Number(allocation.quantity)
+                if (!batchId || !isPositiveQuantity(allocationQuantity)) continue
+                batchTotal = roundQuantity(batchTotal + allocationQuantity)
+                commitments.push({ sourceType: 'batch', batchId, quantity: allocationQuantity })
+            }
+            const regularQuantity = roundQuantity(Math.max(0, quantity - batchTotal))
+            if (regularQuantity > QUANTITY_EPSILON) commitments.push({ sourceType: 'regular', quantity: regularQuantity })
+            continue
+        }
+        if (item.stockSourceType === 'regular') {
+            commitments.push({ sourceType: 'regular', quantity })
+        } else if (item.stockSourceType === 'batch' && typeof item.stockSourceBatchId === 'string') {
+            commitments.push({ sourceType: 'batch', batchId: item.stockSourceBatchId, quantity })
+        } else {
+            // Legacy lines use the same FEFO source order as fulfillment.
+            commitments.push({ quantity })
+        }
+    }
+    return commitments
+}
+
+function applySourceCommitmentDelta(
+    row: StockBatchSourcePositionAvailability,
+    order: Record<string, unknown> | null,
+    direction: 1 | -1,
+    excludeOrderId?: string
+) {
+    if (!order || order.id === excludeOrderId) return
+    for (const commitment of getOrderSourceCommitments(order, row)) {
+        const quantity = Number(commitment.quantity) * direction
+        row.inventoryAvailableQuantity = Math.max(0, Math.min(
+            row.inventoryQuantity,
+            roundQuantity(row.inventoryAvailableQuantity - quantity)
+        ))
+        if (commitment.sourceType === 'batch' && commitment.batchId) {
+            const batch = row.batches.find((candidate) => candidate.id === commitment.batchId)
+            if (!batch) continue
+            batch.reservedQuantity = Math.max(0, roundQuantity(batch.reservedQuantity + quantity))
+            batch.availableQuantity = Math.max(0, roundQuantity(batch.quantity - batch.reservedQuantity))
+        } else if (commitment.sourceType === 'regular') {
+            row.regularReservedQuantity = Math.max(0, roundQuantity(row.regularReservedQuantity + quantity))
+            row.regularAvailableQuantity = Math.max(0, roundQuantity(row.regularQuantity - row.regularReservedQuantity))
+        } else if (direction > 0) {
+            // The server source projection is authoritative for existing legacy
+            // lines. Offline-created legacy changes are conservatively held from
+            // regular stock until they can be reconciled online.
+            row.regularReservedQuantity = roundQuantity(row.regularReservedQuantity + quantity)
+            row.regularAvailableQuantity = Math.max(0, roundQuantity(row.regularQuantity - row.regularReservedQuantity))
+        }
+    }
+}
+
+function applyInventoryEffectToSourceAvailability(row: StockBatchSourcePositionAvailability, effect: StockOperationEffect) {
+    const record = effect.after ?? effect.before
+    if (record?.productId !== row.productId || record?.storageId !== row.storageId) return
+    const previous = effect.before && !effect.before.isDeleted ? Number(effect.before.quantity) || 0 : 0
+    const next = effect.after && !effect.after.isDeleted ? Number(effect.after.quantity) || 0 : 0
+    const delta = roundQuantity(next - previous)
+    row.inventoryQuantity = Math.max(0, roundQuantity(row.inventoryQuantity + delta))
+    row.inventoryAvailableQuantity = Math.max(0, Math.min(
+        row.inventoryQuantity,
+        roundQuantity(row.inventoryAvailableQuantity + delta)
+    ))
+    row.regularQuantity = Math.max(0, roundQuantity(row.inventoryQuantity - row.batches.reduce((sum, batch) => sum + batch.quantity, 0)))
+    row.regularAvailableQuantity = Math.max(0, roundQuantity(row.regularQuantity - row.regularReservedQuantity))
+}
+
+function applyBatchEffectToSourceAvailability(row: StockBatchSourcePositionAvailability, effect: StockOperationEffect) {
+    const record = effect.after ?? effect.before
+    if (record?.productId !== row.productId || record?.storageId !== row.storageId) return
+    const nextQuantity = effect.after && !effect.after.isDeleted ? Math.max(0, Number(effect.after.quantity) || 0) : 0
+    const existing = row.batches.find((batch) => batch.id === effect.id)
+    if (existing) {
+        existing.quantity = nextQuantity
+        existing.availableQuantity = Math.max(0, roundQuantity(existing.quantity - existing.reservedQuantity))
+        if (existing.quantity <= QUANTITY_EPSILON && existing.reservedQuantity <= QUANTITY_EPSILON) {
+            row.batches = row.batches.filter((batch) => batch.id !== effect.id)
+        }
+    } else if (nextQuantity > QUANTITY_EPSILON) {
+        row.batches.push({ id: effect.id, quantity: nextQuantity, reservedQuantity: 0, availableQuantity: nextQuantity })
+    }
+    const batchQuantity = row.batches.reduce((sum, batch) => sum + batch.quantity, 0)
+    row.regularQuantity = Math.max(0, roundQuantity(row.inventoryQuantity - batchQuantity))
+    row.regularAvailableQuantity = Math.max(0, roundQuantity(row.regularQuantity - row.regularReservedQuantity))
+}
+
+async function readLocalStockBatchSourceAvailability(
+    workspaceId: string,
+    positions: readonly { productId: string; storageId: string }[],
+    excludeOrderId?: string
+): Promise<StockBatchSourcePositionAvailability[]> {
+    if (positions.length === 0) return []
+    const byKey = new Map<string, { inventoryQuantity: number; batches: StockBatch[]; commitments: StockBatchSourceCommitment[] }>()
+    for (const position of positions) {
+        const [inventoryQuantity, batches] = await Promise.all([
+            getInventoryQuantityForProductStorage(position.productId, position.storageId),
+            db.stock_batches.where('[productId+storageId]').equals([position.productId, position.storageId])
+                .filter((batch) => batch.workspaceId === workspaceId && !batch.isDeleted).toArray()
+        ])
+        byKey.set(stockPositionKey(position), { inventoryQuantity, batches, commitments: [] })
+    }
+    const orders: Array<Record<string, unknown>> = []
+    await db.sales_orders.where('[workspaceId+status]').equals([workspaceId, 'pending']).each((order) => {
+        if (order.isDeleted || order.id === excludeOrderId) return
+        const needsPosition = order.items.some((item) => positions.some((position) =>
+            item.productId === position.productId
+            && (!(item.storageId || order.sourceStorageId) || (item.storageId || order.sourceStorageId) === position.storageId)
+        ))
+        if (needsPosition) orders.push(order as unknown as Record<string, unknown>)
+    })
+    orders.sort((left, right) => String(left.createdAt ?? '').localeCompare(String(right.createdAt ?? ''))
+        || String(left.id ?? '').localeCompare(String(right.id ?? '')))
+    for (const order of orders) {
+        for (const position of positions) {
+            const state = byKey.get(stockPositionKey(position))
+            if (!state) continue
+            state.commitments.push(...getOrderSourceCommitments(order, position))
+        }
+    }
+    return positions.flatMap((position) => {
+        const state = byKey.get(stockPositionKey(position))
+        if (!state) return []
+        const calculated = calculateStockBatchSourceAvailability(state.inventoryQuantity, state.batches, state.commitments)
+        const regularQuantity = roundQuantity(Math.max(0, state.inventoryQuantity - state.batches.reduce((sum, batch) => sum + batch.quantity, 0)))
+        return [{
+            ...position,
+            inventoryQuantity: state.inventoryQuantity,
+            inventoryAvailableQuantity: calculated.inventoryQuantity,
+            regularQuantity,
+            regularReservedQuantity: roundQuantity(Math.max(0, regularQuantity - calculated.regularQuantity)),
+            regularAvailableQuantity: calculated.regularQuantity,
+            batches: calculated.batches.map((batch) => ({
+                id: batch.id,
+                quantity: batch.quantity,
+                reservedQuantity: roundQuantity(Math.max(0, batch.quantity - batch.availableQuantity)),
+                availableQuantity: batch.availableQuantity
+            }))
+        }]
+    })
+}
+
+async function readOfflineStockBatchSourceAvailability(
+    workspaceId: string,
+    positions: readonly { productId: string; storageId: string }[],
+    excludeOrderId?: string
+): Promise<StockBatchSourcePositionAvailability[]> {
+    const operations = await db.offline_mutations.where('workspaceId').equals(workspaceId)
+        .filter((row) => row.entityType === 'stock_operations' && row.status !== 'synced' && row.status !== 'discarded').toArray()
+    const effects: StockOperationEffect[] = operations.flatMap((row) => (row.payload as unknown as OfflineStockOperation).effects)
+    effects.push(...(currentStockOperation(workspaceId)?.effects.values() ?? []))
+    const rows: StockBatchSourcePositionAvailability[] = []
+    for (const position of positions) {
+        let stored = await db.app_settings.get(stockSourceCacheKey(workspaceId, position, excludeOrderId))
+        if (!stored && excludeOrderId) stored = await db.app_settings.get(stockSourceCacheKey(workspaceId, position))
+        if (!stored) throw new Error(i18n.t('inventory.offline.prepareRequired'))
+        let row: StockBatchSourcePositionAvailability
+        try { row = JSON.parse(stored.value) as StockBatchSourcePositionAvailability }
+        catch { throw new Error(i18n.t('inventory.offline.prepareRequired')) }
+        if (!Array.isArray(row.batches) || ![row.inventoryQuantity,row.inventoryAvailableQuantity,row.regularQuantity,row.regularReservedQuantity,row.regularAvailableQuantity].every(Number.isFinite)) {
+            throw new Error(i18n.t('inventory.offline.prepareRequired'))
+        }
+        row = { ...row, batches: row.batches.map((batch) => ({ ...batch })) }
+        if (excludeOrderId && stored.key !== stockSourceCacheKey(workspaceId, position, excludeOrderId)) {
+            const ownOrder = await db.sales_orders.get(excludeOrderId)
+            applySourceCommitmentDelta(row, ownOrder as unknown as Record<string, unknown> | null, -1)
+        }
+        for (const effect of effects) {
+            if (effect.table === 'inventory') {
+                applyInventoryEffectToSourceAvailability(row, effect)
+                continue
+            }
+            if (effect.table === 'stock_batches') {
+                applyBatchEffectToSourceAvailability(row, effect)
+                continue
+            }
+            if (effect.table !== 'sales_orders' || effect.id === excludeOrderId) continue
+            if (effect.before?.workspaceId !== workspaceId && effect.after?.workspaceId !== workspaceId) continue
+            applySourceCommitmentDelta(row, effect.before, -1, excludeOrderId)
+            applySourceCommitmentDelta(row, effect.after, 1, excludeOrderId)
+        }
+        rows.push(row)
+    }
+    return rows
+}
+
+export async function fetchStockBatchSourceAvailability(
+    workspaceId: string,
+    positions: readonly { productId: string; storageId: string }[],
+    excludeOrderId?: string,
+    signal?: AbortSignal
+): Promise<StockBatchSourcePositionAvailability[]> {
+    const uniquePositions = [...new Map(positions.map((position) => [stockPositionKey(position), position] as const)).values()]
+    if (!uniquePositions.length) return []
+    if (isLocalWorkspaceMode(workspaceId)) return readLocalStockBatchSourceAvailability(workspaceId, uniquePositions, excludeOrderId)
+    if (!isOnline(workspaceId) || currentStockOperation(workspaceId)) return readOfflineStockBatchSourceAvailability(workspaceId, uniquePositions, excludeOrderId)
+    const client = getSupabaseClientForTable(TABLE_NAME)
+    const rows: StockBatchSourcePositionAvailability[] = []
+    const aggregateRows = await fetchStockAvailability(workspaceId, uniquePositions, excludeOrderId, signal)
+    const aggregateByPosition = new Map(aggregateRows.map((row) => [stockPositionKey(row), row] as const))
+    for (let offset = 0; offset < uniquePositions.length; offset += 200) {
+        let request = client.rpc('get_stock_batch_source_availability', {
+            p_workspace_id: workspaceId,
+            p_positions: uniquePositions.slice(offset, offset + 200),
+            p_exclude_order_id: excludeOrderId || null
+        })
+        if (signal) request = request.abortSignal(signal)
+        const { data, error } = await request
+        if (error) throw normalizeSupabaseActionError(error)
+        if (!Array.isArray(data)) throw new Error('Invalid stock source availability response')
+        for (const value of data as Record<string, unknown>[]) {
+            if (typeof value.productId !== 'string' || typeof value.storageId !== 'string'
+                || ![value.regularQuantity,value.regularReserved,value.regularAvailable].every((entry) => typeof entry === 'number')
+                || !Array.isArray(value.batches)) throw new Error('Invalid stock source availability response')
+            const aggregate = aggregateByPosition.get(stockPositionKey({ productId: value.productId, storageId: value.storageId }))
+            if (!aggregate) continue
+            rows.push({
+                productId: value.productId,
+                storageId: value.storageId,
+                inventoryQuantity: aggregate.onHand,
+                inventoryAvailableQuantity: aggregate.available,
+                regularQuantity: value.regularQuantity as number,
+                regularReservedQuantity: value.regularReserved as number,
+                regularAvailableQuantity: value.regularAvailable as number,
+                batches: (value.batches as Array<Record<string, unknown>>).flatMap((batch) =>
+                    typeof batch.batchId === 'string' && typeof batch.quantity === 'number' && typeof batch.reserved === 'number' && typeof batch.available === 'number'
+                        ? [{ id: batch.batchId, quantity: batch.quantity, reservedQuantity: batch.reserved, availableQuantity: batch.available }]
+                        : []
+                )
+            })
+        }
+    }
+    await db.app_settings.bulkPut(rows.map((row) => ({
+        workspaceId,
+        key: stockSourceCacheKey(workspaceId, row, excludeOrderId),
+        value: JSON.stringify({ ...row, confirmedAt: new Date().toISOString() })
+    })))
+    if (await needsOfflineStockOperation(workspaceId)) {
+        return readOfflineStockBatchSourceAvailability(workspaceId, uniquePositions, excludeOrderId)
+    }
+    return rows
+}
+
+export function useStockBatchSourceAvailability(
+    workspaceId: string | undefined,
+    positions: readonly { productId: string; storageId: string }[],
+    excludeOrderId?: string
+) {
+    const online = useNetworkStatus()
+    const access = useStorageAccess(workspaceId)
+    const permissions = useOptionalWorkspacePermissions()
+    const signature = JSON.stringify([...new Map(positions.filter((position) => position.productId && position.storageId)
+        .map((position) => [stockPositionKey(position), position] as const)).values()]
+        .sort((left, right) => stockPositionKey(left).localeCompare(stockPositionKey(right))))
+    const scopedPositions = useMemo(() => JSON.parse(signature) as Array<{ productId: string; storageId: string }>, [signature])
+    const local = !!workspaceId && (isLocalWorkspaceMode(workspaceId) || !online || !!currentStockOperation(workspaceId))
+    const localResult = useLiveQuery(async () => {
+        if (!workspaceId || !local || scopedPositions.length === 0) return { rows: [] as StockBatchSourcePositionAvailability[], error: null }
+        try {
+            const rows = isLocalWorkspaceMode(workspaceId)
+                ? await readLocalStockBatchSourceAvailability(workspaceId, scopedPositions, excludeOrderId)
+                : await readOfflineStockBatchSourceAvailability(workspaceId, scopedPositions, excludeOrderId)
+            return { rows, error: null }
+        } catch (error) {
+            return { rows: undefined, error: error instanceof Error ? error : new Error(i18n.t('inventory.offline.prepareRequired')) }
+        }
+    }, [workspaceId, local, signature, excludeOrderId])
+    const query = useQuery({
+        queryKey: [...queryKeys.stockReservations.sourceAvailability(workspaceId, scopedPositions, excludeOrderId, getActiveBusinessUserId() ?? undefined, getActiveBusinessUserRole() ?? undefined), `${access.signature}:${permissions?.permissionKeys.join(',') ?? ''}`],
+        queryFn: ({ signal }) => fetchStockBatchSourceAvailability(workspaceId!, scopedPositions, excludeOrderId, signal),
+        enabled: !!workspaceId && !local && scopedPositions.length > 0,
+        staleTime: 5000,
+        refetchInterval: 15000
+    })
+    return {
+        ...query,
+        data: local ? localResult?.rows : query.data,
+        error: local ? localResult?.error ?? null : query.error,
+        isLoading: local ? localResult === undefined || localResult.rows === undefined : query.isLoading
     }
 }
 
@@ -755,7 +1104,12 @@ export async function getStockBatchTransferPlan(
 
 async function buildStockBatchSalePlans(
     requests: StockBatchSaleRequest[],
-    loadPosition: (request: StockBatchSaleRequest) => Promise<{ inventoryQuantity: number; activeBatches: StockBatch[] }>
+    loadPosition: (request: StockBatchSaleRequest) => Promise<{
+        inventoryQuantity: number
+        inventoryAvailableQuantity?: number
+        regularAvailableQuantity?: number
+        activeBatches: Array<StockBatch & { availableQuantity?: number }>
+    }>
 ): Promise<StockBatchSalePlan[]> {
     const normalizedRequests = requests.map((request) => {
         const quantity = Number(request.quantity)
@@ -763,6 +1117,7 @@ async function buildStockBatchSalePlans(
             throw new Error('Sale quantity must be greater than zero')
         }
         return {
+            requestId: request.requestId,
             productId: request.productId,
             storageId: request.storageId,
             quantity: roundQuantity(quantity),
@@ -779,9 +1134,11 @@ async function buildStockBatchSalePlans(
     )))
     const positionState = new Map<string, {
         inventoryQuantity: number
+        inventoryAvailableQuantity: number
         remainingInventory: number
         batchQuantity: number
         sellableQuantity: number
+        regularRemainingQuantity: number
         batches: Array<StockBatch & { remainingQuantity: number }>
     }>()
 
@@ -793,18 +1150,22 @@ async function buildStockBatchSalePlans(
             return
         }
 
-        const { inventoryQuantity, activeBatches } = await loadPosition(request)
+        const { inventoryQuantity, inventoryAvailableQuantity, regularAvailableQuantity, activeBatches } = await loadPosition(request)
         const sortedBatches = sortBatchesForConsumption(activeBatches)
         const batchQuantity = sortedBatches.reduce((sum, row) => sum + row.quantity, 0)
+        const availableInventory = Math.max(0, inventoryAvailableQuantity ?? inventoryQuantity)
+        const regularAvailable = Math.max(0, regularAvailableQuantity ?? (inventoryQuantity - batchQuantity))
 
         positionState.set(positionKey, {
             inventoryQuantity,
-            remainingInventory: inventoryQuantity,
+            inventoryAvailableQuantity: availableInventory,
+            remainingInventory: availableInventory,
             batchQuantity,
-            sellableQuantity: getSellableQuantity(inventoryQuantity, sortedBatches),
+            sellableQuantity: getSellableQuantity(availableInventory, sortedBatches),
+            regularRemainingQuantity: regularAvailable,
             batches: sortedBatches.map((batch) => ({
                 ...batch,
-                remainingQuantity: batch.quantity
+                remainingQuantity: batch.availableQuantity ?? batch.quantity
             }))
         })
     }))
@@ -812,11 +1173,15 @@ async function buildStockBatchSalePlans(
     return normalizedRequests.map((request) => {
         const positionKey = `${request.productId}:${request.storageId}`
         const state = positionState.get(positionKey)
-        if (!state || request.quantity - state.remainingInventory > QUANTITY_EPSILON) {
+        if (!state) {
             throw new Error('Insufficient inventory for this product')
         }
-
+        const hasExplicitBatchSelection = request.selectedBatchAllocations?.some((selection) => Boolean(selection.batchId?.trim())) ?? false
+        if (!hasExplicitBatchSelection && request.quantity - state.remainingInventory > QUANTITY_EPSILON) {
+            throw new Error('Insufficient inventory for this product')
+        }
         const allocations: StockBatchAllocation[] = []
+        let regularQuantity = 0
         if (request.selectedBatchAllocations === undefined) {
             let remaining = request.quantity
             for (const batch of state.batches) {
@@ -833,6 +1198,10 @@ async function buildStockBatchSalePlans(
                 batch.remainingQuantity = roundQuantity(batch.remainingQuantity - allocatedQuantity)
                 remaining = roundQuantity(remaining - allocatedQuantity)
             }
+            if (remaining - state.regularRemainingQuantity > QUANTITY_EPSILON) {
+                throw new Error('Insufficient regular stock in source storage')
+            }
+            regularQuantity = remaining
         } else {
             const requestedByBatchId = new Map<string, number>()
             for (const selection of request.selectedBatchAllocations) {
@@ -858,23 +1227,35 @@ async function buildStockBatchSalePlans(
                     throw new Error('One or more selected batches are no longer available')
                 }
                 if (quantity - batch.remainingQuantity > QUANTITY_EPSILON) {
-                    throw new Error(`Batch ${batch.batchNumber} does not have enough stock`)
+                    throw new SelectedStockBatchInsufficientError({
+                        requestId: request.requestId,
+                        productId: request.productId,
+                        storageId: request.storageId,
+                        batchId,
+                        batchNumber: batch.batchNumber,
+                        requestedQuantity: quantity,
+                        availableQuantity: batch.remainingQuantity
+                    })
                 }
 
                 allocations.push(toBatchAllocation(batch, quantity))
                 batch.remainingQuantity = roundQuantity(batch.remainingQuantity - quantity)
             }
 
-            const regularQuantity = roundQuantity(request.quantity - selectedQuantity)
-            const regularAvailable = roundQuantity(Math.max(
-                state.remainingInventory - state.batches.reduce((sum, batch) => sum + batch.remainingQuantity, 0),
-                0
-            ))
-            if (regularQuantity - regularAvailable > QUANTITY_EPSILON) {
+            regularQuantity = roundQuantity(request.quantity - selectedQuantity)
+            if (regularQuantity - state.regularRemainingQuantity > QUANTITY_EPSILON) {
                 throw new Error('Insufficient regular stock in source storage')
             }
         }
 
+        // For an explicitly selected batch, report its source-level shortage
+        // before the aggregate position shortage so the user sees the batch and
+        // the exact available/required quantities.
+        if (request.quantity - state.remainingInventory > QUANTITY_EPSILON) {
+            throw new Error('Insufficient inventory for this product')
+        }
+
+        state.regularRemainingQuantity = roundQuantity(Math.max(0, state.regularRemainingQuantity - regularQuantity))
         state.remainingInventory = roundQuantity(state.remainingInventory - request.quantity)
         return {
             productId: request.productId,
@@ -891,6 +1272,10 @@ async function buildStockBatchSalePlans(
 export async function getStockBatchSalePlans(
     requests: StockBatchSaleRequest[]
 ): Promise<StockBatchSalePlan[]> {
+    const workspaceId = requests[0]?.productId ? (await db.products.get(requests[0].productId))?.workspaceId : undefined
+    if (workspaceId) {
+        return getStockBatchSalePlansForWorkspace(workspaceId, requests)
+    }
     return buildStockBatchSalePlans(requests, async (request) => {
         const [inventoryQuantity, activeBatches] = await Promise.all([
             getInventoryQuantityForProductStorage(request.productId, request.storageId),
@@ -907,20 +1292,44 @@ export async function getStockBatchSalePlans(
  */
 export async function getStockBatchSalePlansForWorkspace(
     workspaceId: string,
-    requests: StockBatchSaleRequest[]
+    requests: StockBatchSaleRequest[],
+    excludeOrderId?: string
 ): Promise<StockBatchSalePlan[]> {
     if (requests.length === 0) return []
-    if (usesLocalStockExecution(workspaceId) || !isOnline(workspaceId)
-        || await needsOfflineStockOperation(workspaceId)) {
-        return getStockBatchSalePlans(requests)
-    }
-
     const positions = [...new Map(requests.map((request) => {
         const position = { productId: request.productId, storageId: request.storageId }
         return [stockPositionKey(position), position] as const
     })).values()]
-    const availability = await fetchStockAvailability(workspaceId, positions)
-    const availabilityByPosition = new Map(availability.map((row) => [stockPositionKey(row), row] as const))
+    const hasQueuedStockOperations = await needsOfflineStockOperation(workspaceId)
+    const localPlanning = isLocalWorkspaceMode(workspaceId) || usesLocalStockExecution(workspaceId)
+        || !isOnline(workspaceId) || hasQueuedStockOperations
+    const sourceAvailability = localPlanning
+        ? (isLocalWorkspaceMode(workspaceId)
+            ? await readLocalStockBatchSourceAvailability(workspaceId, positions, excludeOrderId)
+            : !isOnline(workspaceId) || currentStockOperation(workspaceId) || hasQueuedStockOperations
+                ? await readOfflineStockBatchSourceAvailability(workspaceId, positions, excludeOrderId)
+                : await readLocalStockBatchSourceAvailability(workspaceId, positions, excludeOrderId))
+        : await fetchStockBatchSourceAvailability(workspaceId, positions, excludeOrderId)
+    const availabilityByPosition = new Map(sourceAvailability.map((row) => [stockPositionKey(row), row] as const))
+
+    if (localPlanning) {
+        return buildStockBatchSalePlans(requests, async (request) => {
+            const position = availabilityByPosition.get(stockPositionKey(request))
+            if (!position) throw new Error(i18n.t('stockReservations.loadFailed'))
+            const activeBatches = await getActiveBatchesForProductStorage(request.productId, request.storageId)
+            const availableByBatch = new Map(position.batches.map((batch) => [batch.id, batch.availableQuantity] as const))
+            return {
+                inventoryQuantity: position.inventoryQuantity,
+                inventoryAvailableQuantity: position.inventoryAvailableQuantity,
+                regularAvailableQuantity: position.regularAvailableQuantity,
+                activeBatches: activeBatches.map((batch) => ({
+                    ...batch,
+                    availableQuantity: availableByBatch.get(batch.id) ?? 0
+                }))
+            }
+        })
+    }
+
     const batchesByPosition = new Map<string, StockBatch[]>()
     const requestedKeys = new Set(positions.map(stockPositionKey))
     const productIds = [...new Set(positions.map((position) => position.productId))]
@@ -952,9 +1361,15 @@ export async function getStockBatchSalePlansForWorkspace(
         const key = stockPositionKey(request)
         const stock = availabilityByPosition.get(key)
         if (!stock) throw new Error(i18n.t('stockReservations.loadFailed'))
+        const availableByBatch = new Map(stock.batches.map((batch) => [batch.id, batch.availableQuantity] as const))
         return {
-            inventoryQuantity: stock.onHand,
-            activeBatches: batchesByPosition.get(key) ?? []
+            inventoryQuantity: stock.inventoryQuantity,
+            inventoryAvailableQuantity: stock.inventoryAvailableQuantity,
+            regularAvailableQuantity: stock.regularAvailableQuantity,
+            activeBatches: (batchesByPosition.get(key) ?? []).map((batch) => ({
+                ...batch,
+                availableQuantity: availableByBatch.get(batch.id) ?? 0
+            }))
         }
     })
 }
@@ -2011,6 +2426,7 @@ export function useStockBatchPagesChanged(workspaceId?: string) {
             const changedWorkspaceIds = (event as CustomEvent<{ workspaceIds?: string[] }>).detail?.workspaceIds
             if (!changedWorkspaceIds?.includes(workspaceId)) return
             void queryClient.invalidateQueries({ queryKey: queryKeys.stockBatches.all(workspaceId) })
+            void queryClient.invalidateQueries({ queryKey: queryKeys.stockReservations.all(workspaceId) })
         }
         window.addEventListener(STOCK_BATCHES_CHANGED_EVENT, handleChanged)
         return () => window.removeEventListener(STOCK_BATCHES_CHANGED_EVENT, handleChanged)

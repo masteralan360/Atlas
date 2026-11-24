@@ -3120,6 +3120,7 @@
         "stockReservationEntry": "{{orderNumber}} ({{quantity}})",
         "batchNotAvailable": "بار هەڵبژێردراو بۆ {{productName}} چیتر بەردەست نییە.",
         "batchQuantityExceeded": "سەرچاوەی هەڵبژێردراو بۆ {{productName}} کۆگای بەسەری نییە.",
+        "selectedBatchInsufficient": "هێڵی {{lineNumber}}: {{sourceName}} بۆ {{productName}} تەنها {{available}}ی بەردەستە؛ {{required}} پێویستە. سەرچاوەیەکی تر هەڵبژێرە یان بڕەکە کەم بکەرەوە.",
         "non_financed_order_must_be_paid": "پێش تەرخانکردنی ئەم داواکارییە، دەبێت پارەکەی بە تەواوی بدرێت. بۆ تەرخانکردنی لەگەڵ بڕی ماوە، قەرز یان قیست وەک شێوازی پارەدان هەڵبژێرە.",
         "salesOrderReturnNotAllowed": "دەسەڵاتی گەڕاندنەوەی ئەم داواکارییەی فرۆشتنت نییە.",
         "firstInstallmentDueDateRequired": "یەکەم بەرواری وادەی قیست هەڵبژێرە.",

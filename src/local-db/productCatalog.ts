@@ -173,6 +173,8 @@ const EMPTY_PAGE: ProductCatalogPage = {
   pageCount: 1
 }
 
+const pendingProductCatalogPageRequests = new Map<string, Promise<ProductCatalogPage>>()
+
 const PRODUCT_CURRENCY_CODES: CurrencyCode[] = ['usd', 'eur', 'iqd', 'try']
 
 function normalizeCatalogCurrencies(value: unknown): CurrencyCode[] {
@@ -796,10 +798,34 @@ async function loadProductCatalogPage(query: ProductCatalogPageQuery, trace?: Cr
 }
 
 export function fetchProductCatalogPage(query: ProductCatalogPageQuery): Promise<ProductCatalogPage> {
-  if (!query.workspaceId || !isCrudDebuggerEnabled()) return loadProductCatalogPage(query)
-  return runCrudOperation({ action: 'read', entityKey: 'product', workspaceId: query.workspaceId }, (trace) => (
-    loadProductCatalogPage(query, trace)
-  ))
+  if (!query.workspaceId) return loadProductCatalogPage(query)
+
+  // StrictMode can replay the catalog effect in development. Share the active
+  // request for the same page so the replay does not issue another RPC. Keep
+  // refreshKey in the key so an explicit refresh can supersede an older read.
+  const requestKey = JSON.stringify({ ...query, enabled: undefined })
+  const pendingRequest = pendingProductCatalogPageRequests.get(requestKey)
+  if (pendingRequest) return pendingRequest
+
+  const request = isCrudDebuggerEnabled()
+    ? runCrudOperation({ action: 'read', entityKey: 'product', workspaceId: query.workspaceId }, (trace) => (
+        loadProductCatalogPage(query, trace)
+      ))
+    : loadProductCatalogPage(query)
+  pendingProductCatalogPageRequests.set(requestKey, request)
+  void request.then(
+    () => {
+      if (pendingProductCatalogPageRequests.get(requestKey) === request) {
+        pendingProductCatalogPageRequests.delete(requestKey)
+      }
+    },
+    () => {
+      if (pendingProductCatalogPageRequests.get(requestKey) === request) {
+        pendingProductCatalogPageRequests.delete(requestKey)
+      }
+    }
+  )
+  return request
 }
 
 async function fetchAllProductCatalogData(

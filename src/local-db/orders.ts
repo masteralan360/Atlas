@@ -1516,7 +1516,7 @@ async function deductInventoryForSalesOrder(
                 batchId: allocation.batchId,
                 quantity: allocation.quantity
             }))
-    })))
+    })), order.id)
 
     await db.transaction(
         'rw',

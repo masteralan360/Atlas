@@ -548,7 +548,9 @@ export function Products() {
         page: pagination.currentPage,
         pageSize: pagination.pageSize,
         refreshKey: catalogRefreshKey,
-        enabled: remoteCatalogPageEnabled
+        // Wait for the storage permission snapshot before requesting a page.
+        // This avoids an initial broad read followed by a permission refresh.
+        enabled: remoteCatalogPageEnabled && storageAccess.isReady
     })
     // Keep the full Dexie collection for offline screens and explicit bulk
     // workflows. Online browsing reads only the server page unless a local
@@ -573,14 +575,25 @@ export function Products() {
         })
     }, [productCatalogPage.error, t, toast])
     const useRemoteCatalogPage = remoteCatalogPageEnabled && !productCatalogPage.error
-    const previousStorageAccessSignature = useRef(storageAccess.signature)
+    const previousStorageAccess = useRef<{ workspaceId: string; signature: string } | null>(
+        storageAccess.isReady && workspaceId
+            ? { workspaceId, signature: storageAccess.signature }
+            : null
+    )
     useEffect(() => {
-        if (previousStorageAccessSignature.current === storageAccess.signature) return
-        previousStorageAccessSignature.current = storageAccess.signature
-        if (isRemoteCatalogBrowse) {
+        if (!storageAccess.isReady || !workspaceId) return
+
+        const previous = previousStorageAccess.current
+        previousStorageAccess.current = { workspaceId, signature: storageAccess.signature }
+        if (
+            previous
+            && previous.workspaceId === workspaceId
+            && previous.signature !== storageAccess.signature
+            && isRemoteCatalogBrowse
+        ) {
             setCatalogRefreshKey((current) => current + 1)
         }
-    }, [isRemoteCatalogBrowse, storageAccess.signature])
+    }, [isRemoteCatalogBrowse, storageAccess.isReady, storageAccess.signature, workspaceId])
     const draftProductCatalogPreview = useProductCatalogPage({
         workspaceId,
         search: deferredSearch,
@@ -596,7 +609,10 @@ export function Products() {
         sort: draftFilters.sort,
         page: 1,
         pageSize: 1,
-        enabled: isRemoteCatalogBrowse && isFilterDialogOpen && draftFilters.stockStorage.length > 0
+        enabled: isRemoteCatalogBrowse
+            && storageAccess.isReady
+            && isFilterDialogOpen
+            && draftFilters.stockStorage.length > 0
     })
     const localStockProductIds = useInventoryProductIdsInStorages(
         workspaceId,
