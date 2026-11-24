@@ -391,6 +391,7 @@ function StatementContent({ scope }: { scope: PostalScope }) {
         features={features}
         workspaceName={workspaceName}
         module="global"
+        allowTemplateFieldEditing
         showSaveButton={false}
         showStandardPdfActions
         allowA4Document

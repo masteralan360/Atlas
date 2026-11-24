@@ -1,3 +1,4 @@
+import { Fragment } from 'react'
 import { useTranslation } from 'react-i18next'
 import { platformService } from '@/services/platformService'
 import { emptyPostalLocationCatalog, formatPostalShipmentId, locationLabel, type PostalLocationCatalog } from './domain'
@@ -6,8 +7,31 @@ import type {
   PostalStatementPrintData,
   PostalStatementPrintPageData,
 } from '@/local-db/postalStatementPrint'
+import type { TemplatePreviewVisibilityField } from '@/lib/printPreviewEditorStore'
 
 const MAX_PRINT_ROWS_PER_PAGE = 8
+
+export const POSTAL_ACCOUNT_STATEMENT_PRINT_COLUMNS = [
+  { key: 'row_number', label: '#', width: 3 },
+  { key: 'organization', label: 'postal.statement.partyLabel', width: 7 },
+  { key: 'recipient_phone', label: 'postal.recipientPhoneNumber', width: 6 },
+  { key: 'recipient', label: 'directTransactions.voucher.recipient', width: 5 },
+  { key: 'destination', label: 'postal.destination', width: 8 },
+  { key: 'receipt_number', label: 'postal.statement.receiptNumber', width: 8 },
+  { key: 'cod_amount', label: 'postal.codAmount', width: 7 },
+  { key: 'delivery_fee', label: 'postal.deliveryFee', width: 5 },
+  { key: 'cash_movement', label: 'postal.statement.cashMovement', width: 8 },
+  { key: 'debit', label: 'postal.statement.debit', width: 6 },
+  { key: 'credit', label: 'postal.statement.credit', width: 6 },
+  { key: 'balance', label: 'postal.statement.balance', width: 7 },
+  { key: 'pieces', label: 'postal.pieces', width: 4 },
+  { key: 'status', label: 'postal.status', width: 7 },
+  { key: 'notes', label: 'postal.notes', width: 7 },
+  { key: 'transaction_date', label: 'postal.statement.transactionDate', width: 6 },
+] as const
+
+export const POSTAL_ACCOUNT_STATEMENT_VISIBILITY_FIELDS: TemplatePreviewVisibilityField[] =
+  POSTAL_ACCOUNT_STATEMENT_PRINT_COLUMNS.map(({ key, label }) => ({ key, label }))
 
 function resolveWorkspaceLogoSrc(logoUrl?: string | null) {
   if (!logoUrl) return null
@@ -54,12 +78,14 @@ export function PostalStatementPrintPage({
   printLang,
   logoUrl,
   locationCatalog = emptyPostalLocationCatalog,
+  hiddenFields = {},
 }: {
   data: PostalStatementPrintPageData
   workspaceName?: string | null
   printLang: string
   logoUrl?: string | null
   locationCatalog?: PostalLocationCatalog
+  hiddenFields?: Record<string, boolean>
 }) {
   const { i18n } = useTranslation()
   const t = i18n.getFixedT(printLang)
@@ -69,14 +95,98 @@ export function PostalStatementPrintPage({
   const periodLabel = startDate || endDate
     ? `${startDate || '…'} - ${endDate || '…'}`
     : t('postal.statement.allDates')
+  const isRtlPrintLanguage = printLang.startsWith('ar') || printLang.startsWith('ku')
   const resolvedLogoUrl = resolveWorkspaceLogoSrc(logoUrl)
   const fillPageHeight = data.entries.length >= 6
   const cell = 'border border-slate-300 px-1 py-1 align-middle text-start'
+  const headerCell = 'border border-slate-300 px-1 py-1 align-middle'
   const numericCell = `${cell} text-end tabular-nums whitespace-nowrap`
+  const visibleColumns = POSTAL_ACCOUNT_STATEMENT_PRINT_COLUMNS.filter((column) => !hiddenFields[column.key])
+  const visibleColumnWidthTotal = visibleColumns.reduce((total, column) => total + column.width, 0)
+  const columnCell = (key: typeof POSTAL_ACCOUNT_STATEMENT_PRINT_COLUMNS[number]['key'], entry: PostalStatementPrintData['entries'][number], index: number) => {
+    const shipmentId = formatPostalShipmentId({ shipment_number: entry.shipment_number, created_at: entry.shipment_created_at })
+    const destination = [
+      locationLabel(entry.shipment.governorate, printLang, undefined, locationCatalog),
+      locationLabel(entry.shipment.area, printLang, entry.shipment.governorate, locationCatalog),
+      entry.shipment.address,
+    ].filter(Boolean).join(' · ')
+    const movementLabel = entry.kind === 'settlement' && BigInt(entry.signed_amount) < 0n
+      ? t('postal.statement.printSettlementReceiveFromParty')
+      : t(entry.kind === 'delivery_accrual'
+        ? 'postal.statement.printDeliveryAccrual'
+        : entry.kind === 'delivery_fee'
+          ? 'postal.deliveryFeeCollection'
+          : `postal.statement.${entry.kind}`)
+
+    switch (key) {
+      case 'row_number':
+        return <td className={`${cell} text-center tabular-nums`}>{new Intl.NumberFormat(printLang).format(data.rowOffset + index + 1)}</td>
+      case 'organization':
+        return <td className={`${cell} font-medium`}><bdi>{data.organization.name}</bdi></td>
+      case 'recipient_phone':
+        return <td className={`${cell} whitespace-nowrap`}><bdi dir="ltr">{entry.primary_phone}</bdi></td>
+      case 'recipient':
+        return <td className={cell}>
+          <div className="line-clamp-2 font-semibold"><bdi>{entry.recipient_name}</bdi></div>
+        </td>
+      case 'destination':
+        return <td className={cell}>
+          <div className="line-clamp-2 font-semibold"><bdi>{destination || '—'}</bdi></div>
+        </td>
+      case 'receipt_number':
+        return <td className={`${cell} text-center`}>
+          <bdi dir="ltr" className="block whitespace-nowrap font-mono text-[6px]">{shipmentId}</bdi>
+          <div className="mx-auto mt-0.5 h-[9mm] w-[9mm] bg-white p-0.5"><ShipmentQr qrId={entry.shipment.qr_id} size={160} /></div>
+        </td>
+      case 'cod_amount':
+        return <td className={numericCell}>{money(entry.shipment.cod_amount, printLang)}</td>
+      case 'delivery_fee':
+        return <td className={numericCell}>{entry.shipment.delivery_fee === null ? '—' : money(entry.shipment.delivery_fee, printLang)}</td>
+      case 'cash_movement':
+        return <td className={`${numericCell} whitespace-normal`}>
+          {entry.kind === 'delivery_accrual' ? <span className="font-normal text-slate-500">{t('postal.statement.noCashMovement')}</span> : money(entry.signed_amount, printLang)}
+        </td>
+      case 'debit':
+        return <td className={numericCell}>{BigInt(entry.debit) === 0n ? '—' : money(entry.debit, printLang)}</td>
+      case 'credit':
+        return <td className={numericCell}>{BigInt(entry.credit) === 0n ? '—' : money(entry.credit, printLang)}</td>
+      case 'balance':
+        return <td className={`${numericCell} font-semibold`}>{money(entry.balance, printLang)}</td>
+      case 'pieces':
+        return <td className={`${cell} text-center tabular-nums`}>{entry.shipment.pieces === null ? '—' : new Intl.NumberFormat(printLang).format(entry.shipment.pieces)}</td>
+      case 'status':
+        return <td className={cell}>
+          <div className="line-clamp-2 font-medium">{t(`postal.states.${entry.shipment_state}`)}</div>
+          <div className="mt-0.5 line-clamp-2 text-[6px] text-slate-600">{movementLabel}</div>
+        </td>
+      case 'notes':
+        return <td className={`${cell} line-clamp-3 break-words text-[6px] text-slate-600`}><bdi>{entry.notes || '—'}</bdi></td>
+      case 'transaction_date':
+        return <td className={`${cell} whitespace-nowrap text-[6px]`}><bdi dir="ltr">{dateOnly(entry.created_at, printLang)}</bdi></td>
+    }
+  }
+  const renderSummaryCells = (kind: 'opening' | 'closing') => {
+    return visibleColumns.map((column, index) => {
+      const value = column.key === 'debit'
+        ? money(data.summary.debit_total, printLang)
+        : column.key === 'credit'
+          ? money(data.summary.credit_total, printLang)
+          : column.key === 'balance'
+            ? money(kind === 'opening' ? data.summary.opening_balance : data.summary.closing_balance, printLang)
+            : null
+      const isBalance = column.key === 'balance'
+      const isFirst = index === 0
+      const label = kind === 'opening' ? t('postal.statement.openingBalance') : t('postal.statement.periodTotals')
+      const content = value
+        ? <>{isFirst ? <span className="mb-0.5 block text-[6px]">{label}</span> : null}{value}{isBalance ? ` ${t('postal.iqd')}` : null}</>
+        : isFirst ? label : null
+      return <td key={column.key} className={value ? numericCell : cell}>{content}</td>
+    })
+  }
 
   return (
     <section
-      dir={printLang.startsWith('ar') || printLang.startsWith('ku') ? 'rtl' : 'ltr'}
+      dir={isRtlPrintLanguage ? 'rtl' : 'ltr'}
       data-order-print-page
       data-postal-account-statement-page
       data-page-width-mm="297"
@@ -124,88 +234,29 @@ export function PostalStatementPrintPage({
         <p className="col-span-3 text-[6px] leading-3 text-slate-600">{t('postal.statement.printSummaryHint')}</p>
       </div>
 
-      <table data-pdf-page-chunk className={`mt-2 w-full table-fixed border-collapse text-[7px] leading-[1.2] ${fillPageHeight ? 'min-h-0 flex-1' : ''}`}>
+      {visibleColumns.length > 0 ? <table dir={isRtlPrintLanguage ? 'rtl' : 'ltr'} data-pdf-page-chunk className={`mt-2 w-full table-fixed border-collapse text-[7px] leading-[1.2] ${fillPageHeight ? 'min-h-0 flex-1' : ''}`}>
         <colgroup>
-          {[3, 7, 6, 13, 8, 7, 5, 8, 6, 6, 7, 4, 7, 7, 6].map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}
+          {visibleColumns.map((column) => <col key={column.key} style={{ width: `${(column.width / visibleColumnWidthTotal) * 100}%` }} />)}
         </colgroup>
         <thead>
           <tr className="bg-slate-200 font-bold">
-            <th className={`${cell} text-center`}>#</th>
-            <th className={cell}>{t('postal.statement.partyLabel')}</th>
-            <th className={cell}>{t('postal.recipientPhoneNumber')}</th>
-            <th className={cell}>{t('postal.statement.recipientAndAddress')}</th>
-            <th className={`${cell} text-center`}>{t('postal.statement.receiptNumber')}</th>
-            <th className={numericCell}>{t('postal.codAmount')}</th>
-            <th className={numericCell}>{t('postal.deliveryFee')}</th>
-            <th className={numericCell}>{t('postal.statement.cashMovement')}</th>
-            <th className={numericCell}>{t('postal.statement.debit')}</th>
-            <th className={numericCell}>{t('postal.statement.credit')}</th>
-            <th className={numericCell}>{t('postal.statement.balance')}</th>
-            <th className={`${cell} text-center`}>{t('postal.pieces')}</th>
-            <th className={cell}>{t('postal.status')}</th>
-            <th className={cell}>{t('postal.notes')}</th>
-            <th className={cell}>{t('postal.statement.transactionDate')}</th>
+            {visibleColumns.map((column) => {
+              const isCentered = ['row_number', 'receipt_number', 'pieces'].includes(column.key)
+              const isNumeric = ['cod_amount', 'delivery_fee', 'cash_movement', 'debit', 'credit', 'balance'].includes(column.key)
+              const alignment = isCentered ? 'text-center' : isNumeric ? 'text-right' : isRtlPrintLanguage ? 'text-right' : 'text-left'
+              return <th key={column.key} dir={isRtlPrintLanguage ? 'rtl' : 'ltr'} className={`${headerCell} ${alignment}`}>{column.key === 'row_number' ? '#' : t(column.label)}</th>
+            })}
           </tr>
         </thead>
         <tbody>
-          {data.isFirstPage ? <tr className="bg-slate-50 font-semibold" data-pdf-keep-together>
-            <td className={cell} colSpan={10}>{t('postal.statement.openingBalance')}</td>
-            <td className={numericCell}>{money(data.summary.opening_balance, printLang)}</td>
-            <td className={cell} colSpan={4}>{t('postal.iqd')}</td>
-          </tr> : null}
-          {data.entries.length === 0 ? <tr><td className={`${cell} py-4 text-center text-slate-500`} colSpan={15}>{t('postal.empty')}</td></tr> : null}
-          {data.entries.map((entry, index) => {
-            const shipmentId = formatPostalShipmentId({ shipment_number: entry.shipment_number, created_at: entry.shipment_created_at })
-            const destination = [
-              locationLabel(entry.shipment.governorate, printLang, undefined, locationCatalog),
-              locationLabel(entry.shipment.area, printLang, entry.shipment.governorate, locationCatalog),
-              entry.shipment.address,
-            ].filter(Boolean).join(' · ')
-            const movementLabel = entry.kind === 'settlement' && BigInt(entry.signed_amount) < 0n
-              ? t('postal.statement.printSettlementReceiveFromParty')
-              : t(entry.kind === 'delivery_accrual'
-                ? 'postal.statement.printDeliveryAccrual'
-                : entry.kind === 'delivery_fee'
-                  ? 'postal.deliveryFeeCollection'
-                  : `postal.statement.${entry.kind}`)
-            return <tr key={`${entry.kind}:${entry.id}`} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'} data-pdf-keep-together>
-              <td className={`${cell} text-center tabular-nums`}>{new Intl.NumberFormat(printLang).format(data.rowOffset + index + 1)}</td>
-              <td className={`${cell} font-medium`}><bdi>{data.organization.name}</bdi></td>
-              <td className={`${cell} whitespace-nowrap`}><bdi dir="ltr">{entry.primary_phone}</bdi></td>
-              <td className={cell}>
-                <div className="line-clamp-2 font-semibold"><bdi>{entry.recipient_name}</bdi></div>
-                <div className="mt-0.5 line-clamp-2 text-[6px] text-slate-600"><bdi>{destination || '—'}</bdi></div>
-              </td>
-              <td className={`${cell} text-center`}>
-                <bdi dir="ltr" className="block whitespace-nowrap font-mono text-[6px]">{shipmentId}</bdi>
-                <div className="mx-auto mt-0.5 h-[9mm] w-[9mm] bg-white p-0.5"><ShipmentQr qrId={entry.shipment.qr_id} size={160} /></div>
-              </td>
-              <td className={numericCell}>{money(entry.shipment.cod_amount, printLang)}</td>
-              <td className={numericCell}>{entry.shipment.delivery_fee === null ? '—' : money(entry.shipment.delivery_fee, printLang)}</td>
-              <td className={`${numericCell} whitespace-normal`}>
-                {entry.kind === 'delivery_accrual' ? <span className="font-normal text-slate-500">{t('postal.statement.noCashMovement')}</span> : money(entry.signed_amount, printLang)}
-              </td>
-              <td className={numericCell}>{BigInt(entry.debit) === 0n ? '—' : money(entry.debit, printLang)}</td>
-              <td className={numericCell}>{BigInt(entry.credit) === 0n ? '—' : money(entry.credit, printLang)}</td>
-              <td className={`${numericCell} font-semibold`}>{money(entry.balance, printLang)}</td>
-              <td className={`${cell} text-center tabular-nums`}>{entry.shipment.pieces === null ? '—' : new Intl.NumberFormat(printLang).format(entry.shipment.pieces)}</td>
-              <td className={cell}>
-                <div className="line-clamp-2 font-medium">{t(`postal.states.${entry.shipment_state}`)}</div>
-                <div className="mt-0.5 line-clamp-2 text-[6px] text-slate-600">{movementLabel}</div>
-              </td>
-              <td className={`${cell} line-clamp-3 break-words text-[6px] text-slate-600`}><bdi>{entry.notes || '—'}</bdi></td>
-              <td className={`${cell} whitespace-nowrap text-[6px]`}><bdi dir="ltr">{dateTime(entry.created_at, printLang)}</bdi></td>
-            </tr>
-          })}
-          {data.isLastPage ? <tr className="bg-slate-200 font-bold" data-pdf-keep-together>
-            <td className={cell} colSpan={8}>{t('postal.statement.periodTotals')}</td>
-            <td className={numericCell}>{money(data.summary.debit_total, printLang)}</td>
-            <td className={numericCell}>{money(data.summary.credit_total, printLang)}</td>
-            <td className={numericCell}>{money(data.summary.closing_balance, printLang)}</td>
-            <td className={cell} colSpan={4}>{t('postal.iqd')}</td>
-          </tr> : null}
+          {data.isFirstPage ? <tr className="bg-slate-50 font-semibold" data-pdf-keep-together>{renderSummaryCells('opening')}</tr> : null}
+          {data.entries.length === 0 ? <tr><td className={`${cell} py-4 text-center text-slate-500`} colSpan={visibleColumns.length}>{t('postal.empty')}</td></tr> : null}
+          {data.entries.map((entry, index) => <tr key={`${entry.kind}:${entry.id}`} className={index % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'} data-pdf-keep-together>
+            {visibleColumns.map((column) => <Fragment key={column.key}>{columnCell(column.key, entry, index)}</Fragment>)}
+          </tr>)}
+          {data.isLastPage ? <tr className="bg-slate-200 font-bold" data-pdf-keep-together>{renderSummaryCells('closing')}</tr> : null}
         </tbody>
-      </table>
+      </table> : <p className="mt-2 border border-dashed border-slate-300 py-4 text-center text-[8px] text-slate-500">{t('postal.statement.noVisibleColumns')}</p>}
 
       <div className="mt-auto pt-2">
         {data.isLastPage ? <div className="grid grid-cols-2 gap-12 pb-2 text-[8px]" data-pdf-keep-together>
@@ -227,12 +278,14 @@ export function PostalAccountStatementPrintTemplate({
   printLang,
   logoUrl,
   locationCatalog = emptyPostalLocationCatalog,
+  hiddenFields = {},
 }: {
   data: PostalStatementPrintData | PostalStatementPrintPageData
   workspaceName?: string | null
   printLang: string
   logoUrl?: string | null
   locationCatalog?: PostalLocationCatalog
+  hiddenFields?: Record<string, boolean>
 }) {
   const pages = 'pageNumber' in data ? [data] : paginatePostalStatementPrintData(data)
   return <>{pages.map((page) => <PostalStatementPrintPage
@@ -242,5 +295,6 @@ export function PostalAccountStatementPrintTemplate({
     printLang={printLang}
     logoUrl={logoUrl}
     locationCatalog={locationCatalog}
+    hiddenFields={hiddenFields}
   />)}</>
 }

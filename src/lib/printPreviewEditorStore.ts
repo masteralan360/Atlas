@@ -29,6 +29,11 @@ export type TemplatePreviewDataKey = {
     description?: string
 }
 
+export type TemplatePreviewVisibilityField = {
+    key: string
+    label: string
+}
+
 export type TemplatePreviewRenderOptions = {
     editableFields?: boolean
     editableComponents?: boolean
@@ -65,6 +70,10 @@ export type TemplatePreviewMovableComponent = {
 
 export type TemplatePreview = {
     fields: TemplatePreviewField[]
+    /** Fields that can be shown or hidden from the editor's Editable Fields panel. */
+    visibilityFields?: TemplatePreviewVisibilityField[]
+    /** Translation key for the visibility field group heading. */
+    visibilityFieldsTitle?: string
     dataKeys?: TemplatePreviewDataKey[]
     movableComponents?: TemplatePreviewMovableComponent[]
     /** Ignores a small measured overflow caused by pixel rounding for fixed-size previews. */

@@ -1906,7 +1906,7 @@
       "discountValue": "Enter a valid discount value.",
       "dateRange": "Choose a valid date and time range.",
       "stockThreshold": "Stock threshold must be zero or greater.",
-      "activeProductConflict": "This product already has an active discount.",
+      "activeProductConflict": "Another active discount already covers one or more of these price sources. Choose a different scope or edit that discount.",
       "activeCategoryConflict": "This category already has an active discount.",
       "priceBookRequired": "Select at least one Price Book.",
       "fixedDiscountCurrency": "A fixed discount can only target prices in one currency. Use a percentage discount or narrow the Price Book scope."
@@ -11745,6 +11745,8 @@
       "printTemplateName": "Organization Account Statement",
       "printTemplateDescription": "Landscape account statement with shipment QR codes and signature lines.",
       "savedTemplateDescription": "Use this saved organization account statement layout.",
+      "printColumns": "Statement columns",
+      "noVisibleColumns": "All statement columns are hidden.",
       "partyName": "Organization name",
       "partyPhone": "Organization phone number",
       "partyCode": "Organization code",

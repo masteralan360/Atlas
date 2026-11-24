@@ -1,7 +1,7 @@
 import { type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Virtuoso } from 'react-virtuoso'
-import { ArrowLeft, Printer, Loader2, Edit3, X, ZoomIn, ZoomOut, Maximize, ImagePlus, Trash2, PenTool, Brush, Palette, Eraser, Hand, Type, RotateCw, Scaling, Move, Languages, Check, Shapes, Download, Share2 } from 'lucide-react'
+import { ArrowLeft, Printer, Loader2, Edit3, X, ZoomIn, ZoomOut, Maximize, ImagePlus, Trash2, PenTool, Brush, Palette, Eraser, Hand, Type, RotateCw, Scaling, Move, Languages, Check, Shapes, Download, Share2, Eye, EyeOff } from 'lucide-react'
 import {
     A4_PAGE_HEIGHT_MM,
     getPrintPreviewEditorSource,
@@ -2296,7 +2296,7 @@ export function PrintPreviewEditorPage() {
                     </div>
 
                     <div className="order-2 flex shrink-0 items-center gap-1 2xl:order-none 2xl:justify-self-end 2xl:gap-2">
-                        {(templatePreview.fields.length > 0 || templatePreview.supportsBackgroundEdit) && canEditTemplateFields && (
+                        {(templatePreview.fields.length > 0 || templatePreview.visibilityFields?.length || templatePreview.supportsBackgroundEdit) && canEditTemplateFields && (
                             <button
                                 className="inline-flex items-center justify-center rounded-md h-8 w-8 px-0 text-xs font-medium transition-colors gap-1.5 bg-secondary text-secondary-foreground hover:bg-secondary/80 md:w-auto md:px-3"
                                 onClick={() => setEditPanelOpen(o => !o)}
@@ -3108,6 +3108,40 @@ export function PrintPreviewEditorPage() {
                                 </div>
                                 )
                             })}
+                            {templatePreview.visibilityFields?.length ? (
+                                <div className="space-y-2 border-t pt-3">
+                                    <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                        {t(templatePreview.visibilityFieldsTitle || 'common.fields', {
+                                            defaultValue: templatePreview.visibilityFieldsTitle || 'Editable Fields'
+                                        })}
+                                    </h4>
+                                    <div className="space-y-1.5">
+                                        {templatePreview.visibilityFields.map((field) => {
+                                            const hidden = Boolean(templateHiddenFields[field.key])
+                                            const label = t(field.label, { defaultValue: field.label })
+                                            return (
+                                                <button
+                                                    key={field.key}
+                                                    type="button"
+                                                    role="switch"
+                                                    aria-checked={!hidden}
+                                                    aria-label={label}
+                                                    onClick={() => handleTemplateHiddenFieldChange(field.key, !hidden)}
+                                                    className={cn(
+                                                        'flex w-full items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-start text-xs transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50',
+                                                        hidden && 'text-muted-foreground'
+                                                    )}
+                                                >
+                                                    <span className={cn('font-medium', hidden && 'line-through')}>{label}</span>
+                                                    {hidden
+                                                        ? <EyeOff className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                                                        : <Eye className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                </div>
+                            ) : null}
                         </div>
                     )}
                 </div>

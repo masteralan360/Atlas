@@ -87,6 +87,26 @@ export function getProductDiscountPriceScope(discount: ProductDiscount) {
     return discount.priceScope ?? 'all'
 }
 
+/** Returns whether two active product-discount rules can affect the same price source. */
+export function doProductDiscountPriceScopesOverlap(
+    left: Pick<ProductDiscount, 'priceScope' | 'priceBookIds'>,
+    right: Pick<ProductDiscount, 'priceScope' | 'priceBookIds'>
+) {
+    const leftScope = left.priceScope ?? 'all'
+    const rightScope = right.priceScope ?? 'all'
+
+    if (leftScope === 'all' || rightScope === 'all') {
+        return true
+    }
+
+    if (leftScope === 'native_only' || rightScope === 'native_only') {
+        return leftScope === 'native_only' && rightScope === 'native_only'
+    }
+
+    const rightPriceBookIds = new Set(right.priceBookIds ?? [])
+    return (left.priceBookIds ?? []).some((priceBookId) => rightPriceBookIds.has(priceBookId))
+}
+
 export function doesProductDiscountApplyToPriceContext(
     discount: ProductDiscount,
     priceBookId: string | null | undefined,

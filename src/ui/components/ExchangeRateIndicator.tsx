@@ -47,7 +47,7 @@ function CurrencyOfflineRow({ currency, isMobile }: { currency: 'USD' | 'EUR' | 
             <div className="flex flex-col items-start gap-1">
                 <span className="text-amber-600 flex items-center gap-1.5">
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    {currency}/IQD: {t('exchange.sourceOffline', 'Source Offline')}
+                    {currency}/IQD
                 </span>
                 <span className="text-[10px] text-amber-600/70">{t('exchange.addManualFallback', 'Add a rate manually')}</span>
             </div>
@@ -64,7 +64,7 @@ function CurrencyOfflineRow({ currency, isMobile }: { currency: 'USD' | 'EUR' | 
     )
 }
 
-export function ExchangeRateList({ isMobile = false }: { isMobile?: boolean }) {
+export function ExchangeRateList({ isMobile = false, showSecondaryRates = true }: { isMobile?: boolean; showSecondaryRates?: boolean }) {
     const { exchangeData, eurRates, tryRates, status, currencyStatus, lastUpdated, allRates } = useExchangeRate()
     const { features } = useWorkspace()
     const { t } = useTranslation()
@@ -122,29 +122,24 @@ export function ExchangeRateList({ isMobile = false }: { isMobile?: boolean }) {
                                     <span className="text-[10px] text-muted-foreground">{t('exchange.marketAverage')}: {allRates.usd_iqd.average.toLocaleString()}</span>
                                 )}
                             </div>
-                            <div className="flex items-center gap-2">
-                                <span className="text-[10px] opacity-70 font-normal uppercase">
-                                    {exchangeData.source === 'manual' ? t('exchange.manual') : exchangeData.source}
-                                </span>
-                                {isMobile && (
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8 rounded-full"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            window.dispatchEvent(new CustomEvent('open-manual-rate-editor', { detail: { currency: 'USD' } }));
-                                        }}
-                                    >
-                                        <Pencil className="w-3.5 h-3.5" />
-                                    </Button>
-                                )}
-                            </div>
+                            {isMobile && (
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8 rounded-full"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        window.dispatchEvent(new CustomEvent('open-manual-rate-editor', { detail: { currency: 'USD' } }));
+                                    }}
+                                >
+                                    <Pencil className="w-3.5 h-3.5" />
+                                </Button>
+                            )}
                         </div>
                     )}
 
                     {/* EUR/IQD Section */}
-                    {features.allowed_currencies.includes('eur') && (
+                    {showSecondaryRates && features.allowed_currencies.includes('eur') && (
                         currencyStatus.eur === 'error' ? (
                             <CurrencyOfflineRow currency="EUR" isMobile={isMobile} />
                         ) : eurRates.eur_iqd && (
@@ -156,30 +151,25 @@ export function ExchangeRateList({ isMobile = false }: { isMobile?: boolean }) {
                                         <span className="text-[10px] text-muted-foreground">{t('exchange.marketAverage')}: {allRates.eur_iqd.average.toLocaleString()}</span>
                                     )}
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-[10px] opacity-70 font-normal uppercase">
-                                        {eurRates.eur_iqd.source === 'manual' ? t('exchange.manual') : eurRates.eur_iqd.source}
-                                    </span>
-                                    {isMobile && (
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 rounded-full"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                window.dispatchEvent(new CustomEvent('open-manual-rate-editor', { detail: { currency: 'EUR' } }));
-                                            }}
-                                        >
-                                            <Pencil className="w-3.5 h-3.5" />
-                                        </Button>
-                                    )}
-                                </div>
+                                {isMobile && (
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 rounded-full"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            window.dispatchEvent(new CustomEvent('open-manual-rate-editor', { detail: { currency: 'EUR' } }));
+                                        }}
+                                    >
+                                        <Pencil className="w-3.5 h-3.5" />
+                                    </Button>
+                                )}
                             </div>
                         )
                     )}
 
                     {/* TRY/IQD Section */}
-                    {features.allowed_currencies.includes('try') && (
+                    {showSecondaryRates && features.allowed_currencies.includes('try') && (
                         currencyStatus.try === 'error' ? (
                             <CurrencyOfflineRow currency="TRY" isMobile={isMobile} />
                         ) : tryRates.try_iqd && (
@@ -191,24 +181,19 @@ export function ExchangeRateList({ isMobile = false }: { isMobile?: boolean }) {
                                         <span className="text-[10px] text-muted-foreground">{t('exchange.marketAverage')}: {allRates.try_iqd.average.toLocaleString()}</span>
                                     )}
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-[10px] opacity-70 font-normal uppercase">
-                                        {tryRates.try_iqd.source === 'manual' ? t('exchange.manual') : tryRates.try_iqd.source}
-                                    </span>
-                                    {isMobile && (
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 rounded-full"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                window.dispatchEvent(new CustomEvent('open-manual-rate-editor', { detail: { currency: 'TRY' } }));
-                                            }}
-                                        >
-                                            <Pencil className="w-3.5 h-3.5" />
-                                        </Button>
-                                    )}
-                                </div>
+                                {isMobile && (
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 rounded-full"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            window.dispatchEvent(new CustomEvent('open-manual-rate-editor', { detail: { currency: 'TRY' } }));
+                                        }}
+                                    >
+                                        <Pencil className="w-3.5 h-3.5" />
+                                    </Button>
+                                )}
                             </div>
                         )
                     )}
@@ -279,7 +264,7 @@ export function ExchangeRateIndicator({ compact = false }: { compact?: boolean }
 
                     <SmallDialogTrigger asChild>
                         <div className="cursor-pointer hover:opacity-80 transition-opacity">
-                            <ExchangeRateList />
+                            <ExchangeRateList showSecondaryRates={false} />
                         </div>
                     </SmallDialogTrigger>
 

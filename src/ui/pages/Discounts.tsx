@@ -27,7 +27,7 @@ import {
     useProductDiscounts,
     type ProductDiscountPriceScope
 } from '@/local-db'
-import { buildInventoryTotalsByProduct, computeDiscountPrice, getDiscountStatus, type DiscountLifecycleStatus } from '@/lib/discounts'
+import { buildInventoryTotalsByProduct, computeDiscountPrice, doProductDiscountPriceScopesOverlap, getDiscountStatus, type DiscountLifecycleStatus } from '@/lib/discounts'
 import { cn, formatCurrency, formatDateTime } from '@/lib/utils'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { ProductAutocompleteInput } from '@/ui/components/orders/ProductAutocompleteInput'
@@ -351,14 +351,6 @@ export function Discounts() {
         return map
     }, [products])
 
-    const activeProductTargetIds = useMemo<Set<string>>(() => {
-        return new Set(
-            productDiscounts
-                .filter((discount: ProductDiscount) => discount.isActive && !discount.isDeleted)
-                .map((discount: ProductDiscount) => discount.productId)
-        )
-    }, [productDiscounts])
-
     const activeCategoryTargetIds = useMemo<Set<string>>(() => {
         return new Set(
             categoryDiscounts
@@ -452,12 +444,9 @@ export function Discounts() {
 
     const productDiscountTargets = useMemo(() => {
         return products
-            .filter((product: Product) => {
-                const isTaken = activeProductTargetIds.has(product.id) && (editingDiscount as ProductDiscount | null)?.productId !== product.id
-                return !isTaken
-            })
+            .filter((product: Product) => !product.isDeleted)
             .sort((left: Product, right: Product) => left.name.localeCompare(right.name))
-    }, [activeProductTargetIds, editingDiscount, products])
+    }, [products])
 
     const targetOptions = useMemo<TargetOption[]>(() => {
         const query = targetSearch.trim().toLowerCase()
@@ -586,7 +575,14 @@ export function Discounts() {
                 !discount.isDeleted &&
                 discount.isActive &&
                 discount.productId === form.targetId &&
-                discount.id !== editingDiscount?.id
+                discount.id !== editingDiscount?.id &&
+                doProductDiscountPriceScopesOverlap(
+                    { priceScope: discount.priceScope, priceBookIds: discount.priceBookIds },
+                    {
+                        priceScope: form.priceScope,
+                        priceBookIds: form.priceScope === 'specific_price_books' ? form.priceBookIds : []
+                    }
+                )
             )
 
             if (conflict) {
@@ -687,9 +683,12 @@ export function Discounts() {
             setTargetSearch('')
             setProductSearch('')
         } catch (error: any) {
+            const isScopeConflict = error?.message?.includes('active_product_discount_scope_conflict')
             toast({
                 title: t('common.error'),
-                description: error?.message || t('discounts.messages.saveError'),
+                description: isScopeConflict
+                    ? t('discounts.validation.activeProductConflict')
+                    : error?.message || t('discounts.messages.saveError'),
                 variant: 'destructive'
             })
         } finally {
@@ -812,6 +811,22 @@ export function Discounts() {
     const isPriceScopeValid = activeTab !== 'products'
         || form.priceScope !== 'specific_price_books'
         || form.priceBookIds.length > 0
+    const hasActiveProductDiscountConflict = activeTab === 'products'
+        && form.isActive
+        && !!form.targetId
+        && productDiscounts.some((discount: ProductDiscount) => (
+            !discount.isDeleted
+            && discount.isActive
+            && discount.productId === form.targetId
+            && discount.id !== editingDiscount?.id
+            && doProductDiscountPriceScopesOverlap(
+                { priceScope: discount.priceScope, priceBookIds: discount.priceBookIds },
+                {
+                    priceScope: form.priceScope,
+                    priceBookIds: form.priceScope === 'specific_price_books' ? form.priceBookIds : []
+                }
+            )
+        ))
     const parsedStartsAt = form.startsAt
     const parsedEndsAt = form.endsAt
     const parsedDiscountValue = Number(form.discountValue)
@@ -819,7 +834,7 @@ export function Discounts() {
     const isDiscountValueValid = Number.isFinite(parsedDiscountValue) && parsedDiscountValue > 0
     const isMinStockThresholdValid = parsedMinStockThreshold === null || (Number.isFinite(parsedMinStockThreshold) && parsedMinStockThreshold >= 0)
     const isDateRangeValid = !!parsedStartsAt && !!parsedEndsAt && parsedStartsAt < parsedEndsAt
-    const isFormInvalid = !form.targetId || !isDiscountValueValid || !isMinStockThresholdValid || !isDateRangeValid || !isPriceScopeValid || !isFixedDiscountScopeCurrencyValid
+    const isFormInvalid = !form.targetId || !isDiscountValueValid || !isMinStockThresholdValid || !isDateRangeValid || !isPriceScopeValid || !isFixedDiscountScopeCurrencyValid || hasActiveProductDiscountConflict
 
     function selectProductDiscountTarget(product: Product) {
         const hasActivePriceBookOverride = priceBooksEnabled && priceBookItems.some((item) => (
@@ -1538,6 +1553,12 @@ export function Discounts() {
                                                 </p>
                                             ) : null}
                                         </div>
+                                    ) : null}
+
+                                    {hasActiveProductDiscountConflict ? (
+                                        <p role="alert" className="text-sm text-destructive">
+                                            {t('discounts.validation.activeProductConflict')}
+                                        </p>
                                     ) : null}
 
                                     <div className="grid gap-4 md:grid-cols-2">

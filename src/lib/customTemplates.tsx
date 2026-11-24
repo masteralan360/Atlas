@@ -102,7 +102,11 @@ import { LABEL_PRINT_TEMPLATE_KEY, type LabelPrintPageSize } from '@/lib/labelPr
 import { EmptyShipmentLabel, EmptyShipmentQrLabel } from '@/postal/EmptyShipmentLabel'
 import { ShipmentLabel, SmallShipmentLabel } from '@/postal/ShipmentLabel'
 import type { PostalLocationCatalog, PostalShipment } from '@/postal/domain'
-import { PostalAccountStatementPrintTemplate, paginatePostalStatementPrintData } from '@/postal/OrganizationAccountStatementPrintTemplate'
+import {
+    PostalAccountStatementPrintTemplate,
+    POSTAL_ACCOUNT_STATEMENT_VISIBILITY_FIELDS,
+    paginatePostalStatementPrintData
+} from '@/postal/OrganizationAccountStatementPrintTemplate'
 import type { PostalStatementPrintData, PostalStatementPrintPageData } from '@/local-db/postalStatementPrint'
 import { ModernA4InvoiceTemplate, MODERN_A4_MOVABLE_COMPONENT_KEYS } from '@/ui/components/ModernA4InvoiceTemplate'
 import {
@@ -596,6 +600,11 @@ export function readCustomTemplateLayout(row?: StoredCustomTemplateRow | null): 
             Object.entries(layout.hiddenFields).filter(([, value]) => typeof value === 'boolean')
         )
         : {}
+    if (row.module_type_key === POSTAL_ACCOUNT_STATEMENT_TEMPLATE_KEY && hiddenFields.recipient_address === true) {
+        hiddenFields.recipient = true
+        hiddenFields.destination = true
+        delete hiddenFields.recipient_address
+    }
     const fieldOrders = layout.fieldOrders && typeof layout.fieldOrders === 'object'
         ? Object.fromEntries(
             Object.entries(layout.fieldOrders)
@@ -2449,16 +2458,19 @@ function createPostalAccountStatementPreview(
 
     return {
         fields: [],
+        visibilityFields: POSTAL_ACCOUNT_STATEMENT_VISIBILITY_FIELDS,
+        visibilityFieldsTitle: 'postal.statement.printColumns',
         movableComponents: [],
         page: target.page,
         fixedPrintLang,
-        createElement: (_values, _effectiveId, printLangOverride) => (
+        createElement: (_values, _effectiveId, printLangOverride, renderOptions) => (
             <PostalAccountStatementPrintTemplate
                 data={data}
                 workspaceName={options.workspaceName}
                 printLang={printLangOverride || fixedPrintLang}
                 logoUrl={options.features?.logo_url}
                 locationCatalog={options.postalLocationCatalog}
+                hiddenFields={renderOptions?.hiddenFields}
             />
         ),
         buildPdf: (_element, printLangOverride) => buildCustomTemplateLayoutPdf({
