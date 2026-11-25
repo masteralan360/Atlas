@@ -9,6 +9,7 @@ import {
     calculateStockBatchSourceAvailability,
     getStockBatchSalePlans,
     getStockBatchSalePlansForWorkspace,
+    useStockBatchSourceAvailability,
     getPrimaryStorageFromList,
     useBatchAwareInventoryProducts,
     useProductSelectionAccess,
@@ -40,7 +41,8 @@ import {
     type SalesOrder,
     type SalesOrderItem,
     type ProductUom,
-    type StockBatch
+    type StockBatch,
+    type StockBatchSourcePositionAvailability
 } from '@/local-db'
 import { ACTIVITIES_VIRTUAL_STORAGE_ID, isService, SERVICES_VIRTUAL_STORAGE_ID } from '@/lib/catalogItem'
 import { getPersistedSalesOrderItemStorageId } from '@/lib/salesOrderLineStorage'
@@ -297,8 +299,6 @@ type PosStockSourceSelection =
 type PosProductCardStockDisplay = {
     inventoryQuantity: number
     batch: StockBatch | null
-    batchAvailableQuantity: number
-    batchCartQuantity: number
 }
 
 function addBarcodeLookupCode(map: Map<string, string>, code: string | undefined | null, productId: string, prefer = false) {
@@ -656,6 +656,27 @@ export function POS() {
         ? [{ productId: unitSelectionProduct.id, storageId: unitSelectionProduct.storageId }] : [])
     const [unitSelectionStockSource, setUnitSelectionStockSource] = useState<PosStockSourceSelection | null>(null)
     const [stockSourceSelectionProduct, setStockSourceSelectionProduct] = useState<PosCatalogProduct | null>(null)
+    const sourceAvailabilityProduct = stockSourceSelectionProduct ?? (unitSelectionStockSource ? unitSelectionProduct : null)
+    const sourceAvailabilityPositions = useMemo(() => {
+        const positions = new Map<string, { productId: string; storageId: string }>()
+        if (sourceAvailabilityProduct?.storageId) {
+            const position = { productId: sourceAvailabilityProduct.id, storageId: sourceAvailabilityProduct.storageId }
+            positions.set(`${position.productId}:${position.storageId}`, position)
+        }
+        for (const item of cart) {
+            if (!item.stock_source_type || !item.storageId || item.is_service) continue
+            const position = { productId: item.product_id, storageId: item.storageId }
+            positions.set(`${position.productId}:${position.storageId}`, position)
+        }
+        return [...positions.values()]
+    }, [cart, sourceAvailabilityProduct])
+    const sourceAvailabilityQuery = useStockBatchSourceAvailability(user?.workspaceId, sourceAvailabilityPositions)
+    const sourceAvailabilityByPosition = useMemo(() => new Map<string, StockBatchSourcePositionAvailability>(
+        (sourceAvailabilityQuery.data ?? []).map((row) => [`${row.productId}:${row.storageId}`, row] as const)
+    ), [sourceAvailabilityQuery.data])
+    const sourceAvailabilityForSelection = sourceAvailabilityProduct?.storageId
+        ? sourceAvailabilityByPosition.get(`${sourceAvailabilityProduct.id}:${sourceAvailabilityProduct.storageId}`)
+        : undefined
     const pendingCameraScannerAdd = useRef<{ productId: string; resolve: (succeeded: boolean) => void } | null>(null)
     useEffect(() => () => {
         const pending = pendingCameraScannerAdd.current
@@ -966,18 +987,41 @@ export function POS() {
 
     const getStockSourceAvailability = useCallback((
         product: PosCatalogProduct,
-        cartItems: CartItem[] = cart
-    ) => calculateStockBatchSourceAvailability(
-        product.inventoryQuantity,
-        product.stockBatches,
-        cartItems
-            .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
-            .map((item) => ({
-                quantity: getCartInventoryQuantity(item),
-                sourceType: item.stock_source_type,
-                batchId: item.stock_source_batch_id
-            }))
-    ), [cart])
+        cartItems: CartItem[] = cart,
+        reservedSources?: StockBatchSourcePositionAvailability
+    ) => {
+        const sourceReservation = reservedSources ?? sourceAvailabilityByPosition.get(`${product.id}:${product.storageId}`)
+        const reservedBatchById = new Map((sourceReservation?.batches ?? []).map((batch) => [batch.id, batch] as const))
+        const reservedCommitments = sourceReservation ? [
+            ...(sourceReservation.regularReservedQuantity > 0
+                ? [{ sourceType: 'regular' as const, quantity: sourceReservation.regularReservedQuantity }]
+                : []),
+            ...sourceReservation.batches
+                .filter((batch) => batch.reservedQuantity > 0)
+                .map((batch) => ({ sourceType: 'batch' as const, batchId: batch.id, quantity: batch.reservedQuantity }))
+        ] : []
+        const batches = sourceReservation
+            ? product.stockBatches.flatMap((batch) => {
+                const source = reservedBatchById.get(batch.id)
+                return source ? [{ ...batch, quantity: source.quantity }] : []
+            })
+            : product.stockBatches
+
+        return calculateStockBatchSourceAvailability(
+            sourceReservation?.inventoryQuantity ?? product.inventoryQuantity,
+            batches,
+            [
+                ...reservedCommitments,
+                ...cartItems
+                    .filter((item) => item.product_id === product.id && item.storageId === product.storageId)
+                    .map((item) => ({
+                        quantity: getCartInventoryQuantity(item),
+                        sourceType: item.stock_source_type,
+                        batchId: item.stock_source_batch_id
+                    }))
+            ]
+        )
+    }, [cart, sourceAvailabilityByPosition])
 
     const getProductCardStockDisplay = useCallback((
         product: PosCatalogProduct,
@@ -1000,15 +1044,7 @@ export function POS() {
 
         return {
             inventoryQuantity: availability.inventoryQuantity,
-            batch,
-            batchAvailableQuantity: batch
-                ? availability.batches.find((candidate) => candidate.id === batch.id)?.availableQuantity ?? 0
-                : 0,
-            batchCartQuantity: batch
-                ? productCartItems
-                    .filter((item) => item.stock_source_type === 'batch' && item.stock_source_batch_id === batch.id)
-                    .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
-                : 0
+            batch
         }
     }, [getStockSourceAvailability])
 
@@ -2269,6 +2305,8 @@ export function POS() {
         const effectiveCurrency = (unitSelection?.currency ?? priceBookPricing?.currency ?? pricingProduct.currency) as CurrencyCode
         const effectiveCostPrice = unitSelection?.costPrice ?? priceBookPricing?.costPrice ?? pricingProduct.costPrice
         const sellingFactor = unitSelection?.factor ?? 1
+        const sourcePosition = `${product.id}:${product.storageId}`
+        const sourceReservation = sourceAvailabilityByPosition.get(sourcePosition)
         const sourceAvailability = !isInfiniteActivity && !isNonInventoryService
             ? getStockSourceAvailability(product)
             : null
@@ -2278,6 +2316,7 @@ export function POS() {
                 ? sourceAvailability?.regularQuantity ?? 0
                 : sourceAvailability?.inventoryQuantity ?? product.inventoryQuantity
         const maxSellingQuantity = (isInfiniteActivity || isNonInventoryService || hasRemoteStockAuthority)
+            && !(stockSource && product.hasBatches)
             ? ACTIVITY_POS_QUANTITY_LIMIT
             : inventoryQuantityToSellingAvailability(availableSourceQuantity, sellingFactor)
         if (!canSelectProduct(product)) {
@@ -2297,7 +2336,15 @@ export function POS() {
             toastInsufficientStock(product, product.storageId)
             return false
         }
-        if (!hasRemoteStockAuthority && stockSource && !isInfiniteActivity && !isNonInventoryService
+        if (stockSource && product.hasBatches && (!sourceReservation || sourceAvailabilityQuery.error)) {
+            toast({
+                variant: 'destructive',
+                title: t('messages.error'),
+                description: t('stockReservations.loadFailed')
+            })
+            return false
+        }
+        if (stockSource && !isInfiniteActivity && !isNonInventoryService
             && sellingFactor > availableSourceQuantity + 0.000001) {
             toast({
                 variant: 'destructive',
@@ -2503,7 +2550,7 @@ export function POS() {
         setPaymentAccount(null)
         hapticTrigger('success')
         return true
-    }, [canSelectProduct, canUseOrderFreeBonus, cart, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, getDefaultPosUnitSelection, hasRemoteStockAuthority, hapticTrigger, isActivitiesStorage, quickOrderEnabled, t, toast])
+    }, [canSelectProduct, canUseOrderFreeBonus, cart, getActiveDiscountForProduct, getCartItemKey, getPriceBookPricing, getDefaultPosUnitSelection, getProductForStockSource, getStockSourceAvailability, hasRemoteStockAuthority, hapticTrigger, isActivitiesStorage, quickOrderEnabled, sourceAvailabilityByPosition, sourceAvailabilityQuery.error, t, toast])
 
     const addToCart = useCallback((product: PosCatalogProduct, stockSource?: PosStockSourceSelection | null) => {
         const options = !product.isInfiniteActivity && !isService(product) ? getProductUomOptions(product) : []
@@ -2621,6 +2668,11 @@ export function POS() {
         const step = modifiers?.ctrlKey ? 10 : modifiers?.shiftKey ? 5 : 1
         const quantityDelta = delta * step
         const currentItem = cart.find((item) => getCartItemKey(item) === itemKey)
+        if (currentItem?.stock_source_type
+            && (sourceAvailabilityQuery.error || !sourceAvailabilityByPosition.has(`${currentItem.product_id}:${currentItem.storageId}`))) {
+            toast({ variant: 'destructive', title: t('messages.error'), description: t('stockReservations.loadFailed') })
+            return
+        }
         if (currentItem && quantityDelta < 0 && !canSetPosPaidQuantity(currentItem, currentItem.quantity + quantityDelta)) {
             showPaidQuantityRequiresFreeBonus()
             return
@@ -2643,13 +2695,14 @@ export function POS() {
                         : item.stock_source_type === 'regular'
                             ? sourceAvailability?.regularQuantity ?? 0
                             : product ? Math.max(0, product.inventoryQuantity - otherInventoryQuantity) : item.max_stock
-                    const maxStock = hasRemoteStockAuthority
+                    const maxStock = hasRemoteStockAuthority && !item.stock_source_type
                         ? ACTIVITY_POS_QUANTITY_LIMIT
                         : inventoryQuantityToSellingAvailability(sourceAvailableQuantity, item.unit_factor ?? 1)
                     const nextItem = { ...item, quantity: newQty, max_stock: maxStock }
-                    if (!hasRemoteStockAuthority && quantityDelta > 0 && product && (
-                        otherInventoryQuantity + getCartInventoryQuantity(nextItem) > product.inventoryQuantity + 0.000001
-                        || getCartInventoryQuantity(nextItem) > sourceAvailableQuantity + 0.000001
+                    if (quantityDelta > 0 && (
+                        (!hasRemoteStockAuthority && product
+                            && otherInventoryQuantity + getCartInventoryQuantity(nextItem) > product.inventoryQuantity + 0.000001)
+                        || (item.stock_source_type && getCartInventoryQuantity(nextItem) > sourceAvailableQuantity + 0.000001)
                     )) {
                         return { ...item, max_stock: maxStock }
                     }
@@ -2664,6 +2717,11 @@ export function POS() {
 
     const setExactQuantity = (itemKey: string, quantity: number) => {
         const currentItem = cart.find((item) => getCartItemKey(item) === itemKey)
+        if (currentItem?.stock_source_type
+            && (sourceAvailabilityQuery.error || !sourceAvailabilityByPosition.has(`${currentItem.product_id}:${currentItem.storageId}`))) {
+            toast({ variant: 'destructive', title: t('messages.error'), description: t('stockReservations.loadFailed') })
+            return
+        }
         if (currentItem && !canSetPosPaidQuantity(currentItem, quantity)) {
             showPaidQuantityRequiresFreeBonus()
             return
@@ -2684,11 +2742,11 @@ export function POS() {
                         : item.stock_source_type === 'regular'
                             ? sourceAvailability?.regularQuantity ?? 0
                             : product ? Math.max(0, product.inventoryQuantity - otherInventoryQuantity) : 0
-                    const maxStock = hasRemoteStockAuthority
+                    const maxStock = hasRemoteStockAuthority && !item.stock_source_type
                         ? ACTIVITY_POS_QUANTITY_LIMIT
                         : inventoryQuantityToSellingAvailability(sourceAvailableQuantity, item.unit_factor ?? 1)
                     const availableForLine = Math.max(0, maxStock - getOrderLineFreeBonusQuantity(item))
-                    const nextItem = { ...item, quantity: hasRemoteStockAuthority ? Math.max(0, quantity) : Math.max(0, Math.min(quantity, availableForLine)), max_stock: maxStock }
+                    const nextItem = { ...item, quantity: hasRemoteStockAuthority && !item.stock_source_type ? Math.max(0, quantity) : Math.max(0, Math.min(quantity, availableForLine)), max_stock: maxStock }
                     return shouldRemovePosCartItem(nextItem) ? null : nextItem
                 }
                 return item
@@ -2724,6 +2782,11 @@ export function POS() {
         }
 
         const product = findStockProduct(cartItem.product_id, cartItem.storageId)
+        if (cartItem.stock_source_type
+            && (sourceAvailabilityQuery.error || !sourceAvailabilityByPosition.has(`${cartItem.product_id}:${cartItem.storageId}`))) {
+            toast({ variant: 'destructive', title: t('messages.error'), description: t('stockReservations.loadFailed') })
+            return
+        }
         const nextItem = { ...cartItem, freeBonusQuantity }
         const otherItems = cart.filter((item) => getCartItemKey(item) !== freeBonusEditorItemKey)
         const otherInventoryQuantity = otherItems
@@ -2738,8 +2801,8 @@ export function POS() {
             : cartItem.stock_source_type === 'regular'
                 ? sourceAvailability?.regularQuantity ?? 0
                 : availableQuantity
-        if (!hasRemoteStockAuthority && (otherInventoryQuantity + getCartInventoryQuantity(nextItem) > availableQuantity + 0.000001
-            || getCartInventoryQuantity(nextItem) > availableSourceQuantity + 0.000001)) {
+        if ((!hasRemoteStockAuthority && otherInventoryQuantity + getCartInventoryQuantity(nextItem) > availableQuantity + 0.000001)
+            || (cartItem.stock_source_type && getCartInventoryQuantity(nextItem) > availableSourceQuantity + 0.000001)) {
             toast({
                 variant: 'destructive',
                 title: t('messages.error', { defaultValue: 'Error' }),
@@ -4613,25 +4676,10 @@ export function POS() {
                                                     <SellableStockQuantity workspaceId={user?.workspaceId} productId={product.id} storageId={product.storageId} inCart={inCartQuantity} /> <span className="text-[10px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
                                                 </div>}
 
-                                                {displayBatch && (
-                                                    <div
-                                                        className="absolute bottom-2 left-2 bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/20 backdrop-blur-md px-2.5 py-1.5 rounded-2xl text-[12px] font-black uppercase tracking-tighter shadow-md z-10"
-                                                        data-testid="pos-product-batch-quantity"
-                                                        data-batch-id={displayBatch.id}
-                                                    >
-                                                        {cardStockDisplay?.batchAvailableQuantity ?? 0} <span className="text-[10px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
-                                                        {(cardStockDisplay?.batchCartQuantity ?? 0) > 0 && (
-                                                            <span className="ml-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-black text-emerald-700 dark:text-emerald-300">
-                                                                +{cardStockDisplay?.batchCartQuantity}
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                )}
-
                                                 {activeDiscount && (
                                                     <div className={cn(
                                                         "absolute left-2 rounded-2xl bg-emerald-500 px-2.5 py-1 text-[11px] font-black text-white shadow-md z-10",
-                                                        displayBatch ? "bottom-12" : "bottom-2"
+                                                        "bottom-2"
                                                     )}>
                                                         {formatDiscountBadge(activeDiscount, priceCurrency, features.iqd_display_preference)}
                                                     </div>
@@ -5612,7 +5660,12 @@ export function POS() {
                             {(() => {
                                 if (!unitSelectionProduct) return null
                                 const options = getProductUomOptions(unitSelectionProduct)
-                                const sourceAvailability = getStockSourceAvailability(unitSelectionProduct)
+                                const requiresSourceAvailability = Boolean(unitSelectionStockSource && unitSelectionProduct.hasBatches)
+                                const sourceAvailability = getStockSourceAvailability(
+                                    unitSelectionProduct,
+                                    cart,
+                                    sourceAvailabilityForSelection
+                                )
                                 const sourceRemainingQuantity = unitSelectionStockSource?.type === 'batch'
                                     ? sourceAvailability.batches.find((batch) => batch.id === unitSelectionStockSource.batch.id)?.availableQuantity ?? 0
                                     : unitSelectionStockSource?.type === 'regular'
@@ -5622,13 +5675,15 @@ export function POS() {
                                 const inCart = cart.filter(item => item.product_id === unitSelectionProduct.id && item.storageId === unitSelectionProduct.storageId)
                                     .reduce((sum, item) => sum + getCartInventoryQuantity(item), 0)
                                 const remainingInventoryQuantity = stock && !unitSelectionStock.error
-                                    ? hasRemoteStockAuthority
-                                        ? Math.max(0, stock.available - inCart)
-                                        : Math.min(sourceRemainingQuantity, Math.max(0, stock.available - inCart))
+                                    && (!requiresSourceAvailability || (sourceAvailabilityForSelection && !sourceAvailabilityQuery.error))
+                                    ? Math.min(sourceRemainingQuantity, Math.max(0, stock.available - inCart))
                                     : 0
                                 return (
                                     <div className="space-y-3">
                                       <StockReservationInfo workspaceId={user?.workspaceId} productId={unitSelectionProduct.id} storageId={unitSelectionProduct.storageId} />
+                                      {requiresSourceAvailability && sourceAvailabilityQuery.error && (
+                                          <p className="text-sm text-destructive" role="status">{t('stockReservations.loadFailed')}</p>
+                                      )}
                                       <div className="grid gap-3 sm:grid-cols-2">
                                         {options.map((uom) => {
                                             const selection = buildPosUnitSelection(unitSelectionProduct, uom, unitSelectionStockSource)
@@ -5674,31 +5729,50 @@ export function POS() {
                     <SmallDialogBody>
                         {stockSourceSelectionProduct && (() => {
                             const product = stockSourceSelectionProduct
-                            const availability = getStockSourceAvailability(product)
+                            const sourcePosition = sourceAvailabilityForSelection
+                            const availability = getStockSourceAvailability(product, cart, sourcePosition)
+                            const sourceAvailabilityReady = Boolean(sourcePosition) && !sourceAvailabilityQuery.error
+                            const regularReservedQuantity = sourcePosition?.regularReservedQuantity ?? 0
                             const regularSource: PosStockSourceSelection = { type: 'regular' }
                             const sources: Array<{
                                 key: string
                                 selection: PosStockSourceSelection
                                 quantity: number
+                                reservedQuantity: number
                                 label: string
                             }> = [
                                 {
                                     key: 'regular',
                                     selection: regularSource,
                                     quantity: availability.regularQuantity,
+                                    reservedQuantity: regularReservedQuantity,
                                     label: t('pos.stockSource.regular')
                                 },
                                 ...availability.batches.map((batch) => ({
                                     key: batch.id,
                                     selection: { type: 'batch' as const, batch },
                                     quantity: batch.availableQuantity,
+                                    reservedQuantity: sourcePosition?.batches.find((source) => source.id === batch.id)?.reservedQuantity ?? 0,
                                     label: t('pos.stockSource.batch', { batch: batch.batchNumber })
                                 }))
                             ]
 
                             return (
-                                <div className="grid gap-3 sm:grid-cols-2">
-                                    {sources.map(({ key, selection, quantity, label }) => {
+                                <div className="space-y-3">
+                                    {!sourceAvailabilityReady && (
+                                        <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 p-3 text-sm text-muted-foreground" role="status">
+                                            {sourceAvailabilityQuery.error
+                                                ? <span className="flex-1">{t('stockReservations.loadFailed')}</span>
+                                                : <span className="flex-1">{t('stockReservations.checking')}</span>}
+                                            {sourceAvailabilityQuery.error && (
+                                                <Button type="button" variant="outline" size="sm" onClick={() => void sourceAvailabilityQuery.refetch()}>
+                                                    {t('stockReservations.retry')}
+                                                </Button>
+                                            )}
+                                        </div>
+                                    )}
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                    {sources.map(({ key, selection, quantity, reservedQuantity, label }) => {
                                         const unitSelection = getDefaultPosUnitSelection(product, selection)
                                         const pricingProduct = getProductForStockSource(product, selection)
                                         const priceBookPricing = getPriceBookPricing(product)
@@ -5707,7 +5781,8 @@ export function POS() {
                                         const price = unitSelection?.price ?? priceBookPricing?.price ?? pricingProduct.price
                                         const currency = unitSelection?.currency ?? priceBookPricing?.currency ?? pricingProduct.currency
                                         const displayQuantity = inventoryQuantityToSellingAvailability(quantity, unitFactor)
-                                        const canSelect = quantity > 0.000001 || hasRemoteStockAuthority
+                                        const displayReservedQuantity = inventoryQuantityToSellingAvailability(reservedQuantity, unitFactor)
+                                        const canSelect = sourceAvailabilityReady && quantity > 0.000001
                                         const batch = selection.type === 'batch' ? selection.batch : null
 
                                         return (
@@ -5724,11 +5799,22 @@ export function POS() {
                                                     {formatCurrency(price, currency, features.iqd_display_preference)}
                                                 </div>
                                                 <div className="mt-2 text-xs text-muted-foreground">
-                                                    {t('pos.stockSource.availableQuantity', {
-                                                        quantity: new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }).format(displayQuantity),
-                                                        unit: t(`products.units.${unitCode}`, { defaultValue: unitCode })
-                                                    })}
+                                                    {sourceAvailabilityReady
+                                                        ? t('pos.stockSource.availableQuantity', {
+                                                            quantity: new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }).format(displayQuantity),
+                                                            unit: t(`products.units.${unitCode}`, { defaultValue: unitCode })
+                                                        })
+                                                        : sourceAvailabilityQuery.error
+                                                            ? t('stockReservations.loadFailed')
+                                                            : t('stockReservations.checking')}
                                                 </div>
+                                                {sourceAvailabilityReady && reservedQuantity > 0.000001 && (
+                                                    <div className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-300">
+                                                        {t('stockReservations.reservedQuantity', {
+                                                            quantity: `${new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }).format(displayReservedQuantity)} ${t(`products.units.${unitCode}`, { defaultValue: unitCode })}`
+                                                        })}
+                                                    </div>
+                                                )}
                                                 {batch?.expiryDate && (
                                                     <div className="mt-1 text-xs text-muted-foreground">
                                                         {t('pos.stockSource.expiry', {
@@ -5739,6 +5825,7 @@ export function POS() {
                                             </button>
                                         )
                                     })}
+                                    </div>
                                 </div>
                             )
                         })()}
@@ -7020,25 +7107,10 @@ function MobileGrid({ workspaceId, t, search, setSearch, setIsSkuModalOpen, setI
                                     <SellableStockQuantity workspaceId={workspaceId} productId={product.id} storageId={product.storageId} inCart={inCartQuantity} /> <span className="text-[9px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
                                 </div>}
 
-                                {displayBatch && (
-                                    <div
-                                        className="absolute bottom-2 left-2 backdrop-blur-md px-2.5 py-1 rounded-xl text-[10px] font-black border border-sky-500/20 bg-sky-500/10 text-sky-700 dark:text-sky-300 transition-colors duration-300"
-                                        data-testid="pos-product-batch-quantity"
-                                        data-batch-id={displayBatch.id}
-                                    >
-                                        {cardStockDisplay?.batchAvailableQuantity ?? 0} <span className="text-[9px] opacity-70 ml-0.5">{t(`products.units.${product.unit}`, product.unit).toUpperCase()}</span>
-                                        {(cardStockDisplay?.batchCartQuantity ?? 0) > 0 && (
-                                            <span className="ml-1 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-black text-emerald-700 dark:text-emerald-300">
-                                                +{cardStockDisplay?.batchCartQuantity}
-                                            </span>
-                                        )}
-                                    </div>
-                                )}
-
                                 {activeDiscount && (
                                     <div className={cn(
                                         "absolute left-2 rounded-xl bg-emerald-500 px-2 py-1 text-[10px] font-black text-white shadow-sm z-10",
-                                        displayBatch ? "bottom-10" : "bottom-2"
+                                        "bottom-2"
                                     )}>
                                         {formatDiscountBadge(activeDiscount, priceCurrency, features.iqd_display_preference)}
                                     </div>

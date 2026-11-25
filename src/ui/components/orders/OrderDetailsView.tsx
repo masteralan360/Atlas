@@ -74,6 +74,7 @@ import {
     useSalesOrderLookup,
     useSalesOrderReturnItems,
     useSalesOrderReturns,
+    useStockBatchSourceAvailability,
     useStorages,
     useWorkspaceContacts,
     type PaymentObligation,
@@ -472,6 +473,81 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
             return storageId && !orderProducts.find(product => product.id === item.productId)?.isService
                 ? [{ productId: item.productId, storageId, quantity: getOrderLineInventoryQuantity(item) }] : []
         }) : [], salesOrder?.id)
+    const batchReservationPositions = useMemo(() => {
+        if (!salesOrder || salesOrder.status !== 'pending') return []
+        return [...new Map(salesOrder.items.flatMap((item) => {
+            const storageId = item.storageId || salesOrder.sourceStorageId
+            if (!storageId || orderProducts.find((product) => product.id === item.productId)?.isService) return []
+            const position = { productId: item.productId, storageId }
+            return [[`${position.productId}:${position.storageId}`, position] as const]
+        })).values()]
+    }, [orderProducts, salesOrder])
+    const batchReservationAvailability = useStockBatchSourceAvailability(workspaceId, batchReservationPositions)
+    const batchReservationAvailabilityByPosition = useMemo(() => new Map(
+        (batchReservationAvailability.data ?? []).map((row) => [`${row.productId}:${row.storageId}`, row] as const)
+    ), [batchReservationAvailability.data])
+    const renderBatchAllocations = (item: SalesOrderItem, storageId?: string | null) => {
+        const allocations = item.batchAllocations?.filter((allocation) => allocation.batchId && allocation.quantity > 0) ?? []
+        const sourceBatchAllocations = allocations.length > 0
+            ? allocations
+            : item.stockSourceType === 'batch' && item.stockSourceBatchId
+                ? [{
+                    batchId: item.stockSourceBatchId,
+                    batchNumber: item.stockSourceBatchNumber || item.stockSourceBatchId,
+                    quantity: getOrderLineInventoryQuantity(item)
+                }]
+                : []
+        if (sourceBatchAllocations.length === 0) return null
+
+        const sourceAvailability = storageId
+            ? batchReservationAvailabilityByPosition.get(`${item.productId}:${storageId}`)
+            : undefined
+        const baseUnitCode = item.baseUnitRef?.startsWith('custom:')
+            ? item.baseUnitNameSnapshot || item.baseUnitCode
+            : item.baseUnitCode || item.unit
+        const baseUnitLabel = baseUnitCode
+            ? t(`products.units.${baseUnitCode}`, { defaultValue: baseUnitCode })
+            : t('stockReservations.baseUnits')
+        const formatSourceQuantity = (quantity: number) => `${new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }).format(quantity)} ${baseUnitLabel}`
+
+        return (
+            <div className="mt-1 space-y-1 text-xs" data-testid="order-batch-reservation-details">
+                {sourceBatchAllocations.map((allocation) => {
+                    const liveBatch = sourceAvailability?.batches.find((batch) => batch.id === allocation.batchId)
+                    return (
+                        <div key={allocation.batchId} className="rounded-lg border border-sky-500/20 bg-sky-500/5 px-2 py-1.5">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <span className="font-medium text-primary">
+                                    {t('orders.form.batch', { defaultValue: 'Batch' })}: {allocation.batchNumber} ({formatSourceQuantity(allocation.quantity)})
+                                </span>
+                                {salesOrder?.status === 'pending' && (
+                                    <span className="rounded border border-amber-500/40 px-1.5 py-0.5 text-amber-800 dark:text-amber-200">
+                                        {t('stockReservations.ownReservationQuantity', { quantity: formatSourceQuantity(allocation.quantity) })}
+                                    </span>
+                                )}
+                            </div>
+                            {salesOrder?.status === 'pending' && liveBatch && (
+                                <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-muted-foreground">
+                                    <span>{t('stockReservations.onHandQuantity', { quantity: formatSourceQuantity(liveBatch.quantity) })}</span>
+                                    <span>{t('stockReservations.reservedQuantity', { quantity: formatSourceQuantity(liveBatch.reservedQuantity) })}</span>
+                                    <span>{t('stockReservations.availableQuantity', { quantity: formatSourceQuantity(liveBatch.availableQuantity) })}</span>
+                                </div>
+                            )}
+                            {salesOrder?.status === 'pending' && !liveBatch && (
+                                <div className="mt-1 text-muted-foreground" role="status">
+                                    {batchReservationAvailability.error
+                                        ? t('stockReservations.loadFailed')
+                                        : batchReservationAvailability.isLoading
+                                            ? t('stockReservations.checking')
+                                            : t('stockReservations.loadFailed')}
+                                </div>
+                            )}
+                        </div>
+                    )
+                })}
+            </div>
+        )
+    }
     const productUnits = useMemo(() => orderProducts.reduce<Record<string, string>>((units, product) => {
         const unit = normalizeUnitCode(product.unit)
         if (unit) units[product.id] = unit
@@ -2267,11 +2343,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                     <div>
                                                         <div className="text-lg font-semibold">{item.productName}</div>
                                                         <div className="text-xs text-muted-foreground">{item.productSku || 'N/A'}</div>
-                                                        {isSales && salesItem.batchAllocations?.length ? (
-                                                            <div className="mt-1 text-xs font-medium text-primary">
-                                                                {t('orders.form.batch', { defaultValue: 'Batch' })}: {salesItem.batchAllocations.map((allocation) => `${allocation.batchNumber} (${allocation.quantity})`).join(', ')}
-                                                            </div>
-                                                        ) : null}
+                                                        {isSales ? renderBatchAllocations(salesItem, item.storageId || (order as SalesOrder).sourceStorageId) : null}
                                                     </div>
                                                     <div className={cn(
                                                         'rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em]',
@@ -2428,11 +2500,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                                                     <div className={cn('font-semibold', isItemFullyReturned && 'line-through opacity-50')}>{item.productName}</div>
                                                                     {isSales && order.status === 'pending' && <StockReservationInfo workspaceId={workspaceId} productId={item.productId} storageId={item.storageId || (order as SalesOrder).sourceStorageId} required={reservationGuard.requiredByPosition.get(`${item.productId}:${item.storageId || (order as SalesOrder).sourceStorageId}`) ?? inventoryQuantity} excludeOrderId={order.id} sellingUnit={{ unitCode: item.unitRef?.startsWith('custom:') ? item.unitNameSnapshot || item.unit : item.unit, baseUnitCode: item.baseUnitRef?.startsWith('custom:') ? item.baseUnitNameSnapshot || item.baseUnitCode : item.baseUnitCode, factor: getOrderLineUnitFactor(item) }} />}
                                                                     <div className="text-xs text-muted-foreground">{item.productSku || 'N/A'}</div>
-                                                                    {isSales && salesItem.batchAllocations?.length ? (
-                                                                        <div className="mt-1 text-xs font-medium text-primary">
-                                                                            {t('orders.form.batch', { defaultValue: 'Batch' })}: {salesItem.batchAllocations.map((allocation) => `${allocation.batchNumber} (${allocation.quantity})`).join(', ')}
-                                                                        </div>
-                                                                    ) : null}
+                                                                    {isSales ? renderBatchAllocations(salesItem, item.storageId || (order as SalesOrder).sourceStorageId) : null}
                                                                 </div>
                                                             </div>
                                                         </TableCell>
