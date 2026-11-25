@@ -2349,6 +2349,7 @@
       "sku": "SKU (کۆدی بەرهەم)",
       "price": "نرخی فرۆشتن",
       "stock": "کۆگا",
+      "reservations": "حیجزەکان",
       "category": "جۆر",
       "status": "دۆخ",
       "inStock": "لە کۆگایە",

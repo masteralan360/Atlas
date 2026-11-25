@@ -2373,6 +2373,7 @@
       "sku": "SKU",
       "price": "Price",
       "stock": "Stock",
+      "reservations": "Reservations",
       "category": "Category",
       "status": "Status",
       "inStock": "In Stock",

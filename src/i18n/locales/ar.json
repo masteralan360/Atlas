@@ -2346,6 +2346,7 @@
       "sku": "رمز المنتج (SKU)",
       "price": "السعر",
       "stock": "المخزون",
+      "reservations": "الحجوزات",
       "category": "الفئة",
       "status": "الحالة",
       "inStock": "في المخزن",

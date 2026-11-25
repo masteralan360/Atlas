@@ -52,6 +52,7 @@ import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { useHideCosts, useWorkspacePermissions } from '@/permissions'
 import { hasValidProductCost } from '@/lib/productCost'
 import { isService } from '@/lib/catalogItem'
+import { fetchStockAvailability, stockPositionKey, type StockAvailability, type StockPosition } from '@/local-db/stockReservationData'
 import { findProductByOrderBarcode } from '@/lib/orderBarcodeScan'
 import { UiAccessGate, useUiAccess } from '@/context/UiAccessContext'
 import { getBarcodeLabelData, isProductSelectableForBarcodePrint } from '@/lib/barcodeLabel'
@@ -73,6 +74,7 @@ import { ProductImportPreviewModal } from '@/ui/components/ProductImportPreviewM
 import { ProductCategoryManagerDialog } from '@/ui/components/products/ProductCategoryManagerDialog'
 import { CameraBarcodeScannerModal, type CameraBarcodeScanMode, type CameraBarcodeScannerTabOption } from '@/ui/components/pos/CameraBarcodeScannerModal'
 import { ProductAvatar } from '@/ui/components/ProductAvatars'
+import { StockReservationDetails } from '@/ui/components/inventory/StockReservationInfo'
 import { useProductQuantityPresentation } from '@/ui/hooks/useProductQuantityFormatter'
 import { DeleteConfirmationModal } from '@/ui/components/DeleteConfirmationModal'
 import { Input } from '@/ui/components/input'
@@ -201,6 +203,14 @@ type ProductTableRow = {
     isContinuation: boolean
     continuationParentName?: string
 }
+
+type ProductReservationCheck = {
+    scopeKey: string
+    pendingPositionKeys: Set<string>
+    reservedByPosition: Map<string, StockAvailability>
+}
+
+const PRODUCT_RESERVATION_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function paginateProductGroups(
     groups: ProductListGroup[],
@@ -462,6 +472,8 @@ export function Products() {
     const [showZeroStockImagesInColor, setShowZeroStockImagesInColor] = useState(false)
     const [adjustmentDialogOpen, setAdjustmentDialogOpen] = useState(false)
     const [selectedProductForStock, setSelectedProductForStock] = useState<string | undefined>()
+    const [selectedReservationPosition, setSelectedReservationPosition] = useState<StockPosition | null>(null)
+    const [productReservationCheck, setProductReservationCheck] = useState<ProductReservationCheck | null>(null)
     const [stockQuantityOverrides, setStockQuantityOverrides] = useState<
         Record<string, { quantity: number; previousUpdatedAt?: string }>
     >({})
@@ -1580,6 +1592,145 @@ export function Products() {
             ]
         })
     }, [collapsedPrimaryProductIds, paginatedProductGroups, variantsByParentId, viewMode])
+
+    const productReservationPositionsByProduct = useMemo(() => {
+        const positionsByProduct = new Map<string, StockPosition[]>()
+        for (const { product } of tableProductRows) {
+            if (isService(product)) continue
+            const positions = new Map<string, StockPosition>()
+            for (const entry of productStorageMap.get(product.id) ?? []) {
+                if (!storageAccess.canAccessStorage(entry.storageId)) continue
+                if (
+                    filters.stockQuantitySelectedStorageOnly
+                    && filters.stockStorage.length > 0
+                    && !filters.stockStorage.includes(entry.storageId)
+                ) continue
+                if (!PRODUCT_RESERVATION_UUID_PATTERN.test(product.id)
+                    || !PRODUCT_RESERVATION_UUID_PATTERN.test(entry.storageId)) continue
+                const position = { productId: product.id, storageId: entry.storageId }
+                positions.set(stockPositionKey(position), position)
+            }
+            positionsByProduct.set(product.id, Array.from(positions.values()))
+        }
+        return positionsByProduct
+    }, [filters.stockQuantitySelectedStorageOnly, filters.stockStorage, productStorageMap, storageAccess, tableProductRows])
+    const productReservationPositionsSignature = JSON.stringify(
+        Array.from(productReservationPositionsByProduct.values())
+            .flat()
+            .sort((left, right) => stockPositionKey(left).localeCompare(stockPositionKey(right)))
+            .map(({ productId, storageId }) => ({ productId, storageId }))
+    )
+    const productReservationPositions = useMemo(
+        () => JSON.parse(productReservationPositionsSignature) as StockPosition[],
+        [productReservationPositionsSignature]
+    )
+    const productReservationCheckEnabled = Boolean(workspaceId)
+        && storageAccess.isReady !== false
+        && (!useRemoteCatalogPage || productCatalogPage.isReady)
+    const productReservationNumberFormatter = useMemo(
+        () => new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 }),
+        [i18n.language]
+    )
+    const productReservationScopeKey = useMemo(() => JSON.stringify({
+        workspaceId,
+        storageAccess: storageAccess.signature,
+        isRemoteCatalogBrowse,
+        useRemoteCatalogPage,
+        pageReady: productReservationCheckEnabled,
+        search: deferredSearch,
+        catalogType,
+        filters,
+        page: pagination.currentPage,
+        pageSize: pagination.pageSize,
+        refreshKey: catalogRefreshKey,
+        productIds: tableProductRows.map(({ product }) => product.id),
+        positions: productReservationPositions.map(stockPositionKey)
+    }), [
+        catalogRefreshKey,
+        catalogType,
+        deferredSearch,
+        filters,
+        isRemoteCatalogBrowse,
+        pagination.currentPage,
+        pagination.pageSize,
+        productReservationCheckEnabled,
+        productReservationPositions,
+        storageAccess,
+        tableProductRows,
+        useRemoteCatalogPage,
+        workspaceId
+    ])
+
+    useEffect(() => {
+        const controller = new AbortController()
+        let isCurrent = true
+
+        if (!productReservationCheckEnabled || productReservationPositions.length === 0) {
+            setProductReservationCheck({
+                scopeKey: productReservationScopeKey,
+                pendingPositionKeys: new Set(),
+                reservedByPosition: new Map()
+            })
+            return () => {
+                isCurrent = false
+                controller.abort()
+            }
+        }
+
+        setProductReservationCheck({
+            scopeKey: productReservationScopeKey,
+            pendingPositionKeys: new Set(productReservationPositions.map(stockPositionKey)),
+            reservedByPosition: new Map()
+        })
+
+        const batchSize = 50
+        const batches: StockPosition[][] = []
+        for (let offset = 0; offset < productReservationPositions.length; offset += batchSize) {
+            batches.push(productReservationPositions.slice(offset, offset + batchSize))
+        }
+
+        void Promise.all(batches.map(async (batch) => {
+            try {
+                const rows = await fetchStockAvailability(workspaceId, batch, undefined, controller.signal)
+                if (!isCurrent) return
+                setProductReservationCheck((current) => {
+                    if (!current || current.scopeKey !== productReservationScopeKey) return current
+                    const pendingPositionKeys = new Set(current.pendingPositionKeys)
+                    const reservedByPosition = new Map(current.reservedByPosition)
+                    const requestedPositionKeys = new Set(batch.map(stockPositionKey))
+                    for (const position of batch) pendingPositionKeys.delete(stockPositionKey(position))
+                    for (const row of rows) {
+                        const key = stockPositionKey(row)
+                        if (requestedPositionKeys.has(key) && row.reserved > 0) reservedByPosition.set(key, row)
+                    }
+                    return { ...current, pendingPositionKeys, reservedByPosition }
+                })
+            } catch {
+                // Reservation visibility is secondary to the product list. A failed batch settles as empty.
+                if (!isCurrent) return
+                setProductReservationCheck((current) => {
+                    if (!current || current.scopeKey !== productReservationScopeKey) return current
+                    const pendingPositionKeys = new Set(current.pendingPositionKeys)
+                    for (const position of batch) pendingPositionKeys.delete(stockPositionKey(position))
+                    return { ...current, pendingPositionKeys }
+                })
+            }
+        }))
+
+        return () => {
+            isCurrent = false
+            controller.abort()
+        }
+    }, [productReservationCheckEnabled, productReservationPositions, productReservationScopeKey, workspaceId])
+
+    const currentProductReservationCheck = productReservationCheck?.scopeKey === productReservationScopeKey
+        ? productReservationCheck
+        : null
+    const showProductReservationsColumn = Boolean(currentProductReservationCheck?.reservedByPosition.size)
+
+    useEffect(() => {
+        setSelectedReservationPosition(null)
+    }, [productReservationScopeKey])
 
     const isPrimaryProduct = (product: Product) => (variantsByParentId.get(product.id)?.length ?? 0) > 0
 
@@ -2905,6 +3056,9 @@ export function Products() {
                                                             )}
                                                         </span>
                                                     </TableHead>
+                                                    {showProductReservationsColumn && (
+                                                        <TableHead>{t('products.table.reservations', { defaultValue: 'Reservations' })}</TableHead>
+                                                    )}
                                                     <TableHead
                                                         className="text-right cursor-pointer select-none group/sort"
                                                         onClick={() => {
@@ -3016,6 +3170,44 @@ export function Products() {
                                                                 <TableCell className="text-right">
                                                                     {formatCurrency(product.price, product.currency, features.iqd_display_preference)}
                                                                 </TableCell>
+                                                                {showProductReservationsColumn && (() => {
+                                                                    const positions = productReservationPositionsByProduct.get(product.id) ?? []
+                                                                    const reservedPositions = positions.filter((position) =>
+                                                                        currentProductReservationCheck?.reservedByPosition.has(stockPositionKey(position))
+                                                                    )
+                                                                    const hasPendingPosition = positions.some((position) =>
+                                                                        currentProductReservationCheck?.pendingPositionKeys.has(stockPositionKey(position))
+                                                                    )
+                                                                    return (
+                                                                        <TableCell>
+                                                                            <div className="flex items-center gap-1">
+                                                                                {reservedPositions.map((position) => {
+                                                                                    const storageName = getStorageName(position.storageId)
+                                                                                    const reservedQuantity = currentProductReservationCheck?.reservedByPosition.get(stockPositionKey(position))?.reserved
+                                                                                    if (reservedQuantity === undefined) return null
+                                                                                    const formattedQuantity = productReservationNumberFormatter.format(reservedQuantity)
+                                                                                    return (
+                                                                                        <Button
+                                                                                            key={stockPositionKey(position)}
+                                                                                            type="button"
+                                                                                            variant="ghost"
+                                                                                            size="sm"
+                                                                                            className="h-8 min-w-8 px-2 font-semibold tabular-nums text-amber-700 hover:bg-amber-500/10 hover:text-amber-800 dark:text-amber-300 dark:hover:text-amber-200"
+                                                                                            aria-label={`${t('stockReservations.detailsTitle')}: ${formattedQuantity}${storageName ? ` · ${storageName}` : ''}`}
+                                                                                            title={storageName ? `${storageName}: ${formattedQuantity}` : formattedQuantity}
+                                                                                            onClick={() => setSelectedReservationPosition(position)}
+                                                                                        >
+                                                                                            {formattedQuantity}
+                                                                                        </Button>
+                                                                                    )
+                                                                                })}
+                                                                                {hasPendingPosition && (
+                                                                                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" role="status" aria-label={t('stockReservations.checking')} />
+                                                                                )}
+                                                                            </div>
+                                                                        </TableCell>
+                                                                    )
+                                                                })()}
                                                                 <TableCell className="text-right">
                                                                     <span className={cn(
                                                                         !isService(product) && getDisplayedStockQuantity(product) <= 0
@@ -3091,6 +3283,17 @@ export function Products() {
                     )}
                 </CardContent>
             </Card>
+
+            {selectedReservationPosition && workspaceId && (
+                <StockReservationDetails
+                    workspaceId={workspaceId}
+                    position={selectedReservationPosition}
+                    open={true}
+                    onOpenChange={(open) => {
+                        if (!open) setSelectedReservationPosition(null)
+                    }}
+                />
+            )}
 
             <CameraBarcodeScannerModal
                 open={isCameraSearchScannerOpen}
