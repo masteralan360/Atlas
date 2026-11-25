@@ -290,6 +290,9 @@ export const queryKeys = {
     ] as const,
   },
   orders: {
+    details: (workspaceId: string) => ['atlas', 'workspace', workspaceId, 'order-details'] as const,
+    detail: (workspaceId: string, orderId: string, scope: string) =>
+      [...queryKeys.orders.details(workspaceId), orderId, scope] as const,
     all: (workspaceId: string | undefined, orderType: OrdersListPageQuery['orderType']) =>
       ['atlas', 'workspace', workspaceId ?? 'unscoped', 'orders', orderType] as const,
     page: (query: OrdersListPageQuery, viewer?: { isRestricted?: boolean; isCoachOwnOnly?: boolean; userId?: string }) => {

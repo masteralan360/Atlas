@@ -100,6 +100,7 @@ const supabaseMock = vi.hoisted(() => {
         const response = { data, error: null }
         const query = {
             eq: () => query,
+            in: () => query,
             order: () => query,
             range: () => query,
             then: <TResult1 = typeof response, TResult2 = never>(
@@ -1248,6 +1249,16 @@ describe('atomic POS Quick Order completion', () => {
             if (name === 'sync_customer' || name === 'sync_business_partner') {
                 return { data: null, error: null }
             }
+            if (name === 'get_visible_products_for_current_user') {
+                const product = await db.products.get(PRODUCT_ID)
+                return { data: product ? [{ id: PRODUCT_ID, product: toSnakeCase({ ...product }) }] : [], error: null }
+            }
+            if (name === 'get_stock_reservation_availability') {
+                return { data: [{ productId: PRODUCT_ID, storageId: STORAGE_ID, onHand: 5, reserved: 0, available: 5 }], error: null }
+            }
+            if (name === 'get_stock_batch_source_availability') {
+                return { data: [{ productId: PRODUCT_ID, storageId: STORAGE_ID, regularQuantity: 5, regularReserved: 0, regularAvailable: 5, batches: [] }], error: null }
+            }
             if (name !== 'complete_sales_order_with_inventory') {
                 return { data: null, error: new Error(`Unexpected RPC: ${name}`) }
             }
@@ -1275,13 +1286,13 @@ describe('atomic POS Quick Order completion', () => {
                         is_deleted: false
                     }],
                     inventory_transactions: [],
+                    stock_batches: [],
                     conflict: false
                 },
                 error: null
             }
         })
         supabaseMock.select
-            .mockImplementationOnce(() => supabaseMock.createSelectQuery())
             .mockImplementationOnce(() => supabaseMock.createSelectQuery([{
                 id: INVENTORY_ID,
                 workspace_id: WORKSPACE_ID,
@@ -1307,7 +1318,7 @@ describe('atomic POS Quick Order completion', () => {
         )
         expect(supabaseMock.rpc).toHaveBeenCalledWith(
             'complete_sales_order_with_inventory',
-            expect.objectContaining({ p_workspace_id: WORKSPACE_ID, p_order_id: completed.id })
+            expect.objectContaining({ p_workspace_id: WORKSPACE_ID, p_order_id: completed.id, p_batch_versions: [] })
         )
         expect(supabaseMock.upsert).toHaveBeenCalled()
         expect(await db.payment_transactions.where('sourceRecordId').equals(completed.id).count()).toBe(0)

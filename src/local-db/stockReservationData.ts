@@ -36,11 +36,14 @@ function stockPositionsExcludingVirtual(positions: readonly StockPosition[]): St
   return positions.filter(position => position.productId && position.storageId && !isVirtualStockPosition(position))
 }
 
-export async function fetchStockAvailability(workspaceId: string, positions: readonly StockPosition[], excludeOrderId?: string, signal?: AbortSignal): Promise<StockAvailability[]> {
+export async function fetchStockAvailability(workspaceId: string, positions: readonly StockPosition[], excludeOrderId?: string, signal?: AbortSignal, requireAuthoritative = false): Promise<StockAvailability[]> {
   const stockPositions = stockPositionsExcludingVirtual(positions)
   if (!stockPositions.length) return []
   if (isLocalWorkspaceMode(workspaceId)) return readLocalStockAvailability(workspaceId, stockPositions, excludeOrderId)
-  if (!isOnline(workspaceId) || currentStockOperation(workspaceId)) return readOfflineStockAvailability(workspaceId, stockPositions, excludeOrderId)
+  if (!isOnline(workspaceId) || currentStockOperation(workspaceId)) {
+    if (requireAuthoritative) throw new Error(i18n.t('inventory.errors.onlineRequired'))
+    return readOfflineStockAvailability(workspaceId, stockPositions, excludeOrderId)
+  }
   if (stockPositions.some(position => !isValidStockPosition(position))) throw new InvalidStockPositionError()
   const rows: StockAvailability[] = []
   for (let offset = 0; offset < stockPositions.length; offset += 200) {
@@ -60,17 +63,17 @@ export async function fetchStockAvailability(workspaceId: string, positions: rea
     }
   }
   await cacheOfflineStockAvailability(workspaceId, rows, excludeOrderId)
-  return readOfflineStockAvailability(workspaceId, stockPositions, excludeOrderId)
+  return requireAuthoritative ? rows : readOfflineStockAvailability(workspaceId, stockPositions, excludeOrderId)
 }
 
-export async function assertStockDemands(workspaceId: string, demands: readonly StockDemand[], excludeOrderId?: string) {
+export async function assertStockDemands(workspaceId: string, demands: readonly StockDemand[], excludeOrderId?: string, requireAuthoritative = false) {
   const grouped = new Map<string, StockDemand>()
   for (const demand of demands) {
     if (!demand.productId || !demand.storageId || isVirtualStockPosition(demand)) continue
     const key = stockPositionKey(demand)
     grouped.set(key, { ...demand, quantity: roundQuantity((grouped.get(key)?.quantity ?? 0) + demand.quantity) })
   }
-  const positions = await fetchStockAvailability(workspaceId, [...grouped.values()], excludeOrderId)
+  const positions = await fetchStockAvailability(workspaceId, [...grouped.values()], excludeOrderId, undefined, requireAuthoritative)
   if ([...grouped.keys()].some(key => !positions.some(position => stockPositionKey(position) === key))) throw new Error(i18n.t('stockReservations.loadFailed'))
   for (const stock of positions) {
     const required = grouped.get(stockPositionKey(stock))!.quantity

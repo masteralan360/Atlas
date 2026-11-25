@@ -88,6 +88,7 @@ export interface StockBatchSalePlan {
     batchQuantity: number
     sellableQuantity: number
     allocations: StockBatchAllocation[]
+    batchVersions: Array<{ id: string; version: number }>
 }
 
 export interface StockBatchSaleRequest {
@@ -769,15 +770,19 @@ export async function fetchStockBatchSourceAvailability(
     workspaceId: string,
     positions: readonly { productId: string; storageId: string }[],
     excludeOrderId?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    requireAuthoritative = false
 ): Promise<StockBatchSourcePositionAvailability[]> {
     const uniquePositions = [...new Map(positions.map((position) => [stockPositionKey(position), position] as const)).values()]
     if (!uniquePositions.length) return []
     if (isLocalWorkspaceMode(workspaceId)) return readLocalStockBatchSourceAvailability(workspaceId, uniquePositions, excludeOrderId)
-    if (!isOnline(workspaceId) || currentStockOperation(workspaceId)) return readOfflineStockBatchSourceAvailability(workspaceId, uniquePositions, excludeOrderId)
+    if (!isOnline(workspaceId) || currentStockOperation(workspaceId)) {
+        if (requireAuthoritative) throw new Error(i18n.t('inventory.errors.onlineRequired'))
+        return readOfflineStockBatchSourceAvailability(workspaceId, uniquePositions, excludeOrderId)
+    }
     const client = getSupabaseClientForTable(TABLE_NAME)
     const rows: StockBatchSourcePositionAvailability[] = []
-    const aggregateRows = await fetchStockAvailability(workspaceId, uniquePositions, excludeOrderId, signal)
+    const aggregateRows = await fetchStockAvailability(workspaceId, uniquePositions, excludeOrderId, signal, requireAuthoritative)
     const aggregateByPosition = new Map(aggregateRows.map((row) => [stockPositionKey(row), row] as const))
     for (let offset = 0; offset < uniquePositions.length; offset += 200) {
         let request = client.rpc('get_stock_batch_source_availability', {
@@ -816,7 +821,7 @@ export async function fetchStockBatchSourceAvailability(
         key: stockSourceCacheKey(workspaceId, row, excludeOrderId),
         value: JSON.stringify({ ...row, confirmedAt: new Date().toISOString() })
     })))
-    if (await needsOfflineStockOperation(workspaceId)) {
+    if (!requireAuthoritative && await needsOfflineStockOperation(workspaceId)) {
         return readOfflineStockBatchSourceAvailability(workspaceId, uniquePositions, excludeOrderId)
     }
     return rows
@@ -1257,6 +1262,7 @@ async function buildStockBatchSalePlans(
 
         state.regularRemainingQuantity = roundQuantity(Math.max(0, state.regularRemainingQuantity - regularQuantity))
         state.remainingInventory = roundQuantity(state.remainingInventory - request.quantity)
+        const allocatedIds = new Set(allocations.map((allocation) => allocation.batchId))
         return {
             productId: request.productId,
             storageId: request.storageId,
@@ -1264,7 +1270,9 @@ async function buildStockBatchSalePlans(
             inventoryQuantity: state.inventoryQuantity,
             batchQuantity: state.batchQuantity,
             sellableQuantity: state.sellableQuantity,
-            allocations
+            allocations,
+            batchVersions: state.batches.filter((batch) => allocatedIds.has(batch.id))
+                .map(({ id, version }) => ({ id, version }))
         }
     })
 }
@@ -1293,23 +1301,24 @@ export async function getStockBatchSalePlans(
 export async function getStockBatchSalePlansForWorkspace(
     workspaceId: string,
     requests: StockBatchSaleRequest[],
-    excludeOrderId?: string
+    excludeOrderId?: string,
+    requireAuthoritative = false
 ): Promise<StockBatchSalePlan[]> {
     if (requests.length === 0) return []
     const positions = [...new Map(requests.map((request) => {
         const position = { productId: request.productId, storageId: request.storageId }
         return [stockPositionKey(position), position] as const
     })).values()]
-    const hasQueuedStockOperations = await needsOfflineStockOperation(workspaceId)
-    const localPlanning = isLocalWorkspaceMode(workspaceId) || usesLocalStockExecution(workspaceId)
-        || !isOnline(workspaceId) || hasQueuedStockOperations
+    const hasQueuedStockOperations = !requireAuthoritative && await needsOfflineStockOperation(workspaceId)
+    const localPlanning = !requireAuthoritative && (isLocalWorkspaceMode(workspaceId) || usesLocalStockExecution(workspaceId)
+        || !isOnline(workspaceId) || hasQueuedStockOperations)
     const sourceAvailability = localPlanning
         ? (isLocalWorkspaceMode(workspaceId)
             ? await readLocalStockBatchSourceAvailability(workspaceId, positions, excludeOrderId)
             : !isOnline(workspaceId) || currentStockOperation(workspaceId) || hasQueuedStockOperations
                 ? await readOfflineStockBatchSourceAvailability(workspaceId, positions, excludeOrderId)
                 : await readLocalStockBatchSourceAvailability(workspaceId, positions, excludeOrderId))
-        : await fetchStockBatchSourceAvailability(workspaceId, positions, excludeOrderId)
+        : await fetchStockBatchSourceAvailability(workspaceId, positions, excludeOrderId, undefined, requireAuthoritative)
     const availabilityByPosition = new Map(sourceAvailability.map((row) => [stockPositionKey(row), row] as const))
 
     if (localPlanning) {

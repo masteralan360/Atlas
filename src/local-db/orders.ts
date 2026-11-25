@@ -3,7 +3,7 @@ import { currentStockOperation, usesLocalStockExecution } from './offlineStockCo
 import { needsOfflineStockOperation, runOfflineStockOperation } from './offlineStockOperations'
 import { invalidatePartnerSummaries, stripPartnerSummaryFields } from './partnerSummaryState'
 import { useEffect, useRef } from 'react'
-import Dexie from 'dexie'
+import Dexie, { type InsertType, type Table } from 'dexie'
 import { normalizeStockReservationError } from '@/lib/stockReservationConflict'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { v5 as uuidv5 } from 'uuid'
@@ -86,7 +86,7 @@ import {
 } from './inventory'
 import { addToOfflineMutations, fetchTableFromSupabase } from './hooks'
 import { resolveReturnStorageId } from './storageUtils'
-import { readOrderReturnStockProductIds } from './orderReturnCatalog'
+import { readOrderCatalogProducts, readOrderReturnStockProductIds } from './orderReturnCatalog'
 import {
     canAccessOrderForStorageAccess,
     getCurrentStorageAccess,
@@ -288,13 +288,14 @@ function measureSalesOrderStage<T>(
 
 async function assertSalesOrderMinimumPrices(
     order: Pick<SalesOrder, 'workspaceId' | 'items' | 'exchangeRates'>,
-    options?: Pick<OrderFormSaveOptions, 'actingUserRole' | 'minimumPriceValidationItems'>
+    options?: Pick<OrderFormSaveOptions, 'actingUserRole' | 'minimumPriceValidationItems'>,
+    catalog?: ReadonlyMap<string, Product>
 ) {
     const productIds = Array.from(new Set(order.items.map((item) => item.productId)))
-    const products = options?.minimumPriceValidationItems
+    const products = catalog || options?.minimumPriceValidationItems
         ? []
         : await db.products.bulkGet(productIds)
-    const productMap = new Map(products.filter((product): product is Product => !!product).map((product) => [product.id, product]))
+    const productMap = catalog ?? new Map(products.filter((product): product is Product => !!product).map((product) => [product.id, product]))
     const items = options?.minimumPriceValidationItems ?? order.items.map((item) => {
         const product = productMap.get(item.productId)
         if (!product) return null
@@ -1238,13 +1239,13 @@ function formatOrderInventoryQuantity(quantity: number, unitLabel: string) {
     return unitLabel ? `${formattedQuantity} ${unitLabel}` : formattedQuantity
 }
 
-async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: string, previousOrder?: SalesOrder) {
+async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: string, previousOrder?: SalesOrder, catalog?: ReadonlyMap<string, Product>) {
     const productIds = Array.from(new Set([
         ...order.items.map((item) => item.productId),
         ...(previousOrder?.items.map((item) => item.productId) ?? [])
     ]))
-    const products = await db.products.where('id').anyOf(productIds).toArray()
-    const productMap = new Map(products.map((product) => [product.id, product]))
+    const productMap = catalog ?? new Map((await db.products.bulkGet(productIds))
+        .filter((product): product is Product => !!product).map((product) => [product.id, product]))
     const previousQuantityByPosition = new Map<string, number>()
     if (previousOrder) {
         for (const item of previousOrder.items) {
@@ -1316,7 +1317,8 @@ async function assertSalesStockAvailable(order: SalesOrder, excludeOrderId?: str
                 storageId,
                 quantity
             })),
-            excludeOrderId
+            excludeOrderId,
+            !!catalog
         )
         return
     }
@@ -1395,9 +1397,9 @@ async function assertSalesOrderServiceAccess(order: SalesOrder, products?: Array
     }
 }
 
-async function assertSalesOrderProductsAvailable(order: SalesOrder) {
+async function assertSalesOrderProductsAvailable(order: SalesOrder, catalog?: ReadonlyMap<string, Product>) {
     const productIds = Array.from(new Set(order.items.map((item) => item.productId)))
-    const products = await db.products.bulkGet(productIds)
+    const products = catalog ? [...catalog.values()] : await db.products.bulkGet(productIds)
     const productMap = new Map(products.filter((product): product is Product => !!product).map((product) => [product.id, product]))
     await assertSalesOrderServiceAccess(order, products)
 
@@ -1445,21 +1447,21 @@ function waitForInventoryConflictRetry(retryAfterMs: number) {
 async function deductInventoryForSalesOrder(
     order: SalesOrder,
     conflictRetryCount = 0,
-    completeExistingPendingOrder = false
+    completionCatalog?: ReadonlyMap<string, Product>
 ) {
     const now = new Date().toISOString()
     const changedInventoryRows: Inventory[] = []
     const changedBatches: StockBatch[] = []
     const updatedItems = [...order.items]
-    const products = await db.products.where('id').anyOf(order.items.map((item) => item.productId)).toArray()
-    const productMap = new Map(products.map((product) => [product.id, product]))
+    const productMap = completionCatalog ?? new Map((await db.products.where('id')
+        .anyOf(order.items.map((item) => item.productId)).toArray()).map((product) => [product.id, product]))
+    const completeRemotely = !!completionCatalog
     const physicalItems = order.items
         .map((item, index) => ({ item, index, product: productMap.get(item.productId) }))
         .filter((entry) => entry.product && !entry.product.isDeleted && !isService(entry.product))
     const inventoryDeductions = new Map<string, {
         productId: string
         storageId: string
-        productName: string
         quantity: number
     }>()
 
@@ -1473,7 +1475,6 @@ async function deductInventoryForSalesOrder(
         inventoryDeductions.set(positionKey, {
             productId: item.productId,
             storageId,
-            productName: item.productName,
             quantity: roundQuantity(
                 (existingDeduction?.quantity ?? 0) + getOrderLineInventoryQuantity(item)
             )
@@ -1484,105 +1485,83 @@ async function deductInventoryForSalesOrder(
     // that transaction intentionally does not include the member mirror stores.
     await assertOrderStorageAccess(order)
 
-    await refreshStockBatchesFromSupabase(order.workspaceId)
-    const authoritativeInventoryRows = await Promise.all(Array.from(inventoryDeductions.values()).map(async ({ productId, storageId }) =>
+    if (!completeRemotely) await refreshStockBatchesFromSupabase(order.workspaceId)
+    const authoritativeInventoryRows = (await Promise.all(Array.from(inventoryDeductions.values()).map(({ productId, storageId }) =>
         hydrateInventoryProductStoragesFromSupabase(
             order.workspaceId,
             productId,
             [storageId],
-            { requireAuthoritative: true }
+            { requireAuthoritative: true, cache: !completeRemotely }
         )
-    ))
-    const authoritativeVersions = new Map(
-        authoritativeInventoryRows
-            .flat()
-            .map((row) => [
-                buildInventoryReservationKey(row.productId, row.storageId),
-                Math.max(0, Math.trunc(Number(row.version) || 0))
-            ])
-    )
+    ))).flat()
+    const authoritativePositions = new Map(authoritativeInventoryRows.map((row) => [
+        buildInventoryReservationKey(row.productId, row.storageId), row
+    ]))
     const expectedVersions = Array.from(inventoryDeductions.values()).map(({ productId, storageId }) => ({
         productId,
         storageId,
-        version: authoritativeVersions.get(buildInventoryReservationKey(productId, storageId)) ?? 0
+        version: authoritativePositions.get(buildInventoryReservationKey(productId, storageId))?.version ?? 0
     }))
     const salePlans = await getStockBatchSalePlansForWorkspace(order.workspaceId, physicalItems.map(({ item }) => ({
         productId: item.productId,
         storageId: resolveSalesOrderItemStorageId(order, item) as string,
         quantity: getOrderLineInventoryQuantity(item),
-        selectedBatchAllocations: item.batchAllocations == null
-            ? undefined
-            : item.batchAllocations.map((allocation) => ({
-                batchId: allocation.batchId,
-                quantity: allocation.quantity
-            }))
-    })), order.id)
+        selectedBatchAllocations: item.batchAllocations?.map((allocation) => ({
+            batchId: allocation.batchId,
+            quantity: allocation.quantity
+        })) ?? (item.stockSourceType === 'regular' ? [] : item.stockSourceType === 'batch' && item.stockSourceBatchId
+            ? [{ batchId: item.stockSourceBatchId, quantity: getOrderLineInventoryQuantity(item) }]
+            : undefined)
+    })), order.id, completeRemotely)
 
-    await db.transaction(
+    for (const [index, { item, index: itemIndex }] of physicalItems.entries()) {
+        const plan = salePlans[index]
+        const costPrice = calculateStockBatchUnitCost(
+            plan.allocations,
+            item.costPrice,
+            item.originalCurrency,
+            (amount, from, to) => convertCurrencyAmountWithSnapshot(amount, from, to, order.exchangeRates),
+            plan.requestedQuantity
+        )
+        const convertedCostPrice = calculateStockBatchUnitCost(
+            plan.allocations,
+            item.convertedCostPrice,
+            order.currency,
+            (amount, from, to) => convertCurrencyAmountWithSnapshot(amount, from, to, order.exchangeRates),
+            plan.requestedQuantity
+        )
+        updatedItems[itemIndex] = {
+            ...item,
+            reservedQuantity: plan.requestedQuantity,
+            fulfilledQuantity: plan.requestedQuantity,
+            costPrice,
+            convertedCostPrice,
+            batchAllocations: plan.allocations.length > 0
+                ? plan.allocations
+                : item.stockSourceType === 'regular' ? [] : null
+        }
+    }
+
+    if (completeRemotely) {
+        for (const [key, deduction] of inventoryDeductions) {
+            const current = authoritativePositions.get(key)
+            if (!current || current.isDeleted) throw new InventorySnapshotConflictError()
+            const quantity = roundQuantity(current.quantity - deduction.quantity)
+            changedInventoryRows.push({ ...current, quantity, isDeleted: quantity <= 0 })
+        }
+    } else await db.transaction(
         'rw',
         [db.inventory, db.inventory_transactions, db.products, db.storages, db.stock_batches],
         async () => {
-            for (const [physicalItemIndex, { item, index: itemIndex }] of physicalItems.entries()) {
-                const product = productMap.get(item.productId)
-                if (!product || product.isDeleted) {
-                    throw new Error(`Product not found: ${item.productName}`)
-                }
-
-                const storageId = resolveSalesOrderItemStorageId(order, item)
-                if (!storageId) {
-                    throw new Error(`Select a source storage for ${item.productName}`)
-                }
-
-                const salePlan = salePlans[physicalItemIndex]
-                const costPrice = calculateStockBatchUnitCost(
-                    salePlan.allocations,
-                    item.costPrice,
-                    item.originalCurrency,
-                    (amount, from, to) => convertCurrencyAmountWithSnapshot(
-                        amount,
-                        from,
-                        to,
-                        order.exchangeRates
-                    ),
-                    salePlan.requestedQuantity
-                )
-                const convertedCostPrice = calculateStockBatchUnitCost(
-                    salePlan.allocations,
-                    item.convertedCostPrice,
-                    order.currency,
-                    (amount, from, to) => convertCurrencyAmountWithSnapshot(
-                        amount,
-                        from,
-                        to,
-                        order.exchangeRates
-                    ),
-                    salePlan.requestedQuantity
-                )
-
+            for (const plan of salePlans) {
                 const committedBatches = await commitStockBatchAllocations(
                     order.workspaceId,
-                    item.productId,
-                    storageId,
-                    salePlan.allocations,
-                    {
-                        timestamp: now,
-                        skipRemoteSync: true,
-                        storageAccessPrevalidated: true
-                    }
+                    plan.productId,
+                    plan.storageId,
+                    plan.allocations,
+                    { timestamp: now, skipRemoteSync: true, storageAccessPrevalidated: true }
                 )
                 changedBatches.push(...committedBatches)
-                const inventoryQuantity = getOrderLineInventoryQuantity(item)
-
-                updatedItems[itemIndex] = {
-                    ...item,
-                    reservedQuantity: inventoryQuantity,
-                    fulfilledQuantity: inventoryQuantity,
-                    costPrice,
-                    convertedCostPrice,
-                    batchAllocations: salePlan.allocations.length > 0
-                        ? salePlan.allocations
-                        : item.stockSourceType === 'regular' ? [] : null
-                }
             }
 
             for (const deduction of inventoryDeductions.values()) {
@@ -1639,72 +1618,55 @@ async function deductInventoryForSalesOrder(
     )
 
     let remotelyCompletedOrder: SalesOrder | null = null
-    try {
-        // Inventory is the authoritative guard for a sale. Do not publish its
-        // matching batch deductions until the compare-and-set write succeeds.
-        const inventorySyncResult = await syncInventoryRowsBestEffort(changedInventoryRows, order.workspaceId, {
-            operationId: uuidv5(order.id, SALES_ORDER_INVENTORY_OPERATION_UUID_NAMESPACE),
-            operationKind: 'sales_order_completion',
-            expectedVersions,
-            ...(completeExistingPendingOrder && shouldUseCloudBusinessData(order.workspaceId) ? {
+    if (completeRemotely) {
+        const batchVersions = [...new Map(salePlans.flatMap((plan) => plan.batchVersions).map((batch) => [batch.id, batch])).values()]
+        let result: Awaited<ReturnType<typeof syncInventoryRowsBestEffort>>
+        try {
+            result = await syncInventoryRowsBestEffort(changedInventoryRows, order.workspaceId, {
+                operationId: uuidv5(order.id, SALES_ORDER_INVENTORY_OPERATION_UUID_NAMESPACE),
+                operationKind: 'sales_order_completion',
+                expectedVersions,
                 salesOrderCompletion: {
                     orderId: order.id,
                     expectedOrderVersion: Math.max(0, order.version - 1),
                     items: updatedItems,
-                    actualDeliveryDate: order.actualDeliveryDate ?? now
+                    actualDeliveryDate: order.actualDeliveryDate ?? now,
+                    batchVersions
                 }
-            } : {})
+            })
+        } catch (error) {
+            if (error instanceof InventorySnapshotConflictError && error.conflictReason !== 'sales_order_version'
+                && conflictRetryCount < SALES_ORDER_INVENTORY_CONFLICT_RETRY_LIMIT) {
+                await waitForInventoryConflictRetry(error.retryAfterMs)
+                return deductInventoryForSalesOrder(order, conflictRetryCount + 1, completionCatalog)
+            }
+            throw error
+        }
+        if (!result?.order || !result.completionStock) {
+            throw new Error(i18n.t('inventory.errors.authoritativeResultMissing'))
+        }
+        remotelyCompletedOrder = await persistAuthoritativeOrderStock(
+            db.sales_orders, order, { order: result.order, ...result.completionStock }
+        )
+    } else {
+        await syncInventoryRowsBestEffort(changedInventoryRows, order.workspaceId, {
+            operationId: uuidv5(order.id, SALES_ORDER_INVENTORY_OPERATION_UUID_NAMESPACE),
+            operationKind: 'sales_order_completion',
+            expectedVersions
         })
-
-        if (completeExistingPendingOrder && shouldUseCloudBusinessData(order.workspaceId)) {
-            if (!inventorySyncResult?.order) {
-                throw new Error('Sales order completion did not return the completed order')
-            }
-            remotelyCompletedOrder = {
-                ...(toCamelCase(inventorySyncResult.order) as unknown as SalesOrder),
-                syncStatus: 'synced',
-                lastSyncedAt: new Date().toISOString()
-            }
-        }
-    } catch (error) {
-        if (completeExistingPendingOrder && shouldUseCloudBusinessData(order.workspaceId)) {
-            // The local cache was optimistically adjusted before the RPC. If
-            // cancellation or a competing stock write won on the server, put
-            // the cache and batches back on the authoritative positions.
-            await Promise.allSettled([
-                ...Array.from(inventoryDeductions.values()).map(({ productId, storageId }) =>
-                    hydrateInventoryProductStoragesFromSupabase(
-                        order.workspaceId,
-                        productId,
-                        [storageId],
-                        { requireAuthoritative: true }
-                    )
-                ),
-                refreshStockBatchesFromSupabase(order.workspaceId)
-            ])
-            await Promise.all(Array.from(inventoryDeductions.values()).map(({ productId }) =>
-                syncProductStockSnapshot(productId, new Date().toISOString(), 'remote')
-            ))
-        }
-        if (
-            error instanceof InventorySnapshotConflictError
-            && error.conflictReason !== 'sales_order_version'
-            && conflictRetryCount < SALES_ORDER_INVENTORY_CONFLICT_RETRY_LIMIT
-        ) {
-            await waitForInventoryConflictRetry(error.retryAfterMs)
-            // The next attempt reloads inventory and batches from Supabase and
-            // rebuilds the deduction from that authoritative snapshot.
-            return deductInventoryForSalesOrder(order, conflictRetryCount + 1, completeExistingPendingOrder)
-        }
-        throw error
+        await syncStockBatchesBestEffort(changedBatches, order.workspaceId)
     }
 
-    await syncStockBatchesBestEffort(changedBatches, order.workspaceId)
-
-    const { evaluateReorderTransferRulesForProduct } = await awaitStockDependency(import('./reorderTransferRules'))
-    await Promise.all(Array.from(new Set(physicalItems.map(({ item }) => item.productId))).map((productId) =>
-        evaluateReorderTransferRulesForProduct(order.workspaceId, productId)
-    ))
+    const evaluateReorderRules = async () => {
+        const { evaluateReorderTransferRulesForProduct } = await awaitStockDependency(import('./reorderTransferRules'))
+        await Promise.all([...new Set(physicalItems.map(({ item }) => item.productId))]
+            .map((productId) => evaluateReorderTransferRulesForProduct(order.workspaceId, productId)))
+    }
+    if (remotelyCompletedOrder) {
+        await evaluateReorderRules().catch((error) => console.error('[Orders] Failed to evaluate reorder rules after completion:', error))
+    } else {
+        await evaluateReorderRules()
+    }
 
     return {
         updatedItems,
@@ -2376,10 +2338,27 @@ async function receivePurchaseOrderRemotely(
         throw normalizeSupabaseActionError(error)
     }
 
-    const result = asRemotePurchaseReceiptResult(data)
+    return persistAuthoritativeOrderStock(db.purchase_orders, order, asRemotePurchaseReceiptResult(data))
+}
+
+function canApplyOrderStockRow<T extends { workspaceId: string; version: number; updatedAt: string; syncStatus?: string }>(local: T | undefined, remote: T) {
+    return !local || (local.workspaceId === remote.workspaceId && (!local.syncStatus || local.syncStatus === 'synced')
+        && (remote.version > local.version || (remote.version === local.version && Date.parse(remote.updatedAt) >= Date.parse(local.updatedAt))))
+}
+
+async function persistAuthoritativeOrderStock<T extends SalesOrder | PurchaseOrder>(
+    orderTable: Table<T, string, InsertType<T, 'id'>>,
+    order: T,
+    result: {
+        order: Record<string, unknown>
+        inventory: Record<string, unknown>[]
+        inventory_transactions: Record<string, unknown>[]
+        stock_batches: Record<string, unknown>[]
+    }
+) {
     const syncedAt = new Date().toISOString()
     const remoteOrder = {
-        ...(toCamelCase(result.order) as unknown as PurchaseOrder),
+        ...(toCamelCase(result.order) as unknown as T),
         syncStatus: 'synced' as const,
         lastSyncedAt: syncedAt
     }
@@ -2398,11 +2377,15 @@ async function receivePurchaseOrderRemotely(
         syncStatus: 'synced' as const,
         lastSyncedAt: syncedAt
     }))
+    if (remoteOrder.id !== order.id || [remoteOrder, ...remoteInventory, ...remoteTransactions, ...remoteBatches]
+        .some((row) => row.workspaceId !== order.workspaceId || !Number.isSafeInteger(row.version))) {
+        throw new Error(i18n.t('inventory.errors.authoritativeResultMissing'))
+    }
 
     await db.transaction(
         'rw',
         [
-            db.purchase_orders,
+            orderTable,
             db.products,
             db.inventory,
             db.inventory_transactions,
@@ -2410,22 +2393,29 @@ async function receivePurchaseOrderRemotely(
             db.storages
         ],
         async () => {
+            const changedProducts = new Set<string>()
             for (const remoteRow of remoteInventory) {
                 const duplicateRows = await db.inventory
                     .where('[productId+storageId]')
                     .equals([remoteRow.productId, remoteRow.storageId])
+                    .and((row) => row.workspaceId === order.workspaceId)
                     .toArray()
+                if (duplicateRows.some((row) => !canApplyOrderStockRow(row, remoteRow))) continue
                 await Promise.all(duplicateRows
                     .filter((row) => row.id !== remoteRow.id)
                     .map((row) => db.inventory.delete(row.id)))
                 await db.inventory.put(remoteRow)
+                changedProducts.add(remoteRow.productId)
             }
-            await db.inventory_transactions.bulkPut(remoteTransactions)
-            await db.stock_batches.bulkPut(remoteBatches)
-            await db.purchase_orders.put(remoteOrder)
+            const localTransactions = await db.inventory_transactions.bulkGet(remoteTransactions.map((row) => row.id))
+            await db.inventory_transactions.bulkPut(remoteTransactions.filter((row, index) => canApplyOrderStockRow(localTransactions[index], row)))
+            const localBatches = await db.stock_batches.bulkGet(remoteBatches.map((row) => row.id))
+            await db.stock_batches.bulkPut(remoteBatches.filter((row, index) => canApplyOrderStockRow(localBatches[index], row)))
+            if (canApplyOrderStockRow(await orderTable.get(order.id), remoteOrder)) await orderTable.put(remoteOrder)
 
-            for (const productId of new Set(remoteInventory.map((row) => row.productId))) {
-                await syncProductStockSnapshot(productId, syncedAt, 'remote')
+            for (const productId of changedProducts) {
+                const product = await db.products.get(productId)
+                if (!product?.syncStatus || product.syncStatus === 'synced') await syncProductStockSnapshot(productId, syncedAt, 'remote')
             }
         }
     )
@@ -2915,7 +2905,7 @@ export function useSalesOrderLookup(orderId: string | undefined, refreshKey = 0)
                 () => db.sales_orders.get(orderId),
                 'crudDebugger.details.dexiePersistence'
             )
-            if (!order) return { status: 'not-found' }
+            if (!order || order.isDeleted) return { status: 'not-found' }
             trace?.setEntityId(order.id)
             trace?.setWorkspaceMode(getWorkspaceDataMode(order.workspaceId))
             if (!viewOwnScope.isCoachOwnOnly && !await canReadSalesOrderServices(order, serviceAccess.ids)) {
@@ -3112,7 +3102,7 @@ export function usePurchaseOrderLookup(orderId: string | undefined, refreshKey =
         try {
             if (!orderId) return { status: 'not-found' }
             const order = await db.purchase_orders.get(orderId)
-            if (!order) return { status: 'not-found' }
+            if (!order || order.isDeleted) return { status: 'not-found' }
 
             const visible = order.businessPartnerId
                 ? await canAccessBusinessPartnerInLocalCache(order.workspaceId, order.businessPartnerId, 'supplier')
@@ -4792,6 +4782,13 @@ const salesOrderStatusTransitionsInFlight = new Map<string, {
     promise: Promise<SalesOrder>
 }>()
 
+function assertExpectedCompletionVersion(order: SalesOrder | PurchaseOrder, expectedVersion?: number) {
+    if (expectedVersion === undefined) return
+    if (order.version !== expectedVersion || (order.syncStatus && order.syncStatus !== 'synced')) {
+        throw new InventorySnapshotConflictError(0, 'sales_order_version')
+    }
+}
+
 export function updateSalesOrderStatus(
     id: string,
     status: SalesOrderStatus,
@@ -4799,6 +4796,7 @@ export function updateSalesOrderStatus(
         allowUnpaidNonFinanced?: boolean
         actingUserRole?: UserRole
         minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
+        expectedVersion?: number
         trace?: CrudTraceHandle
     }
 ) {
@@ -4833,6 +4831,7 @@ async function updateSalesOrderStatusOnce(
         allowUnpaidNonFinanced?: boolean
         actingUserRole?: UserRole
         minimumPriceValidationItems?: MinimumSellingPriceCheckItem[]
+        expectedVersion?: number
         trace?: CrudTraceHandle
     }
 ): Promise<SalesOrder> {
@@ -4846,6 +4845,7 @@ async function updateSalesOrderStatusOnce(
     if (!existing || existing.isDeleted) {
         throw new Error('Sales order not found')
     }
+    assertExpectedCompletionVersion(existing, options?.expectedVersion)
     options?.trace?.setEntityId(existing.id)
     options?.trace?.setWorkspaceMode(getWorkspaceDataMode(existing.workspaceId))
 
@@ -4882,8 +4882,13 @@ async function updateSalesOrderStatusOnce(
         await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderCancellationGuard', 'application', () => assertNoPendingFinancedOrderCancellation(existing.workspaceId, existing.id))
     }
 
+    let completionCatalog: ReadonlyMap<string, Product> | undefined
+    if (status === 'completed' && shouldUseCloudBusinessData(existing.workspaceId)) {
+        assertInventoryMutationConnectivity(existing.workspaceId)
+        completionCatalog = await readOrderCatalogProducts(existing.workspaceId, existing.items.map((item) => item.productId))
+    }
     if (status === 'pending' || status === 'completed') {
-        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderMinimumPrices', 'application', () => assertSalesOrderMinimumPrices(existing, options))
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderMinimumPrices', 'application', () => assertSalesOrderMinimumPrices(existing, options, completionCatalog))
     }
 
     if (status === 'cancelled' && shouldUseCloudBusinessData(existing.workspaceId)
@@ -4924,7 +4929,7 @@ async function updateSalesOrderStatusOnce(
     }
 
     const now = new Date().toISOString()
-    const counterparty = await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderTransition', 'application', () => normalizeSalesOrderCounterparty({
+    const counterparty = completionCatalog ? {} : await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderTransition', 'application', () => normalizeSalesOrderCounterparty({
         businessPartnerId: workingOrder.businessPartnerId ?? null,
         customerId: workingOrder.businessPartnerId ?? workingOrder.customerId,
         customerName: workingOrder.customerName
@@ -4952,13 +4957,13 @@ async function updateSalesOrderStatusOnce(
 
     let completedRemotely = false
     if (status === 'completed') {
-        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesOrderProductsAvailable(updated))
-        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesStockAvailable(updated, workingOrder.id))
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesOrderProductsAvailable(updated, completionCatalog))
+        await measureSalesOrderStage(options?.trace, 'crudDebugger.stages.salesOrderPreparation', 'application', () => assertSalesStockAvailable(updated, workingOrder.id, undefined, completionCatalog))
         const fulfillment = await measureSalesOrderStage(
             options?.trace,
             'crudDebugger.stages.salesOrderInventory',
             'unknown',
-            () => deductInventoryForSalesOrder(updated, 0, true),
+            () => deductInventoryForSalesOrder(updated, 0, completionCatalog),
             'crudDebugger.details.salesOrderInventoryBoundary'
         )
         updated.items = fulfillment.updatedItems
@@ -4974,13 +4979,15 @@ async function updateSalesOrderStatusOnce(
         reservationConfirmedRemotely = true
         updated = { ...updated, syncStatus: 'synced', lastSyncedAt: now }
     }
-    await measureSalesOrderStage(
-        options?.trace,
-        'crudDebugger.stages.salesOrderLocalWrite',
-        'persistence',
-        () => db.sales_orders.put(updated),
-        'crudDebugger.details.dexiePersistence'
-    )
+    if (!completedRemotely) {
+        await measureSalesOrderStage(
+            options?.trace,
+            'crudDebugger.stages.salesOrderLocalWrite',
+            'persistence',
+            () => db.sales_orders.put(updated),
+            'crudDebugger.details.dexiePersistence'
+        )
+    }
 
     if (!completedRemotely && !reservationConfirmedRemotely) {
         await syncUpsertEntities('sales_orders', [updated as unknown as Record<string, unknown> & { id: string; version: number }], existing.workspaceId, { trace: options?.trace })
@@ -6895,13 +6902,16 @@ export async function updatePurchaseOrder(id: string, data: Partial<PurchaseOrde
     return updated
 }
 
-export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrderStatus): Promise<PurchaseOrder> {
+export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrderStatus, expectedVersion?: number): Promise<PurchaseOrder> {
     const offlineOrder = await db.purchase_orders.get(id)
-    if (offlineOrder && await needsOfflineStockOperation(offlineOrder.workspaceId)) return runOfflineStockOperation(offlineOrder.workspaceId, 'purchase_order', () => updatePurchaseOrderStatus(id, status))
+    if (offlineOrder && expectedVersion === undefined && await needsOfflineStockOperation(offlineOrder.workspaceId)) {
+        return runOfflineStockOperation(offlineOrder.workspaceId, 'purchase_order', () => updatePurchaseOrderStatus(id, status))
+    }
     const existing = await db.purchase_orders.get(id)
     if (!existing || existing.isDeleted) {
         throw new Error('Purchase order not found')
     }
+    assertExpectedCompletionVersion(existing, expectedVersion)
     if (status === 'received' || status === 'completed') {
         assertInventoryMutationConnectivity(existing.workspaceId)
     }
@@ -6959,7 +6969,8 @@ export async function updatePurchaseOrderStatus(id: string, status: PurchaseOrde
     }
 
     const now = new Date().toISOString()
-    const counterparty = await normalizePurchaseOrderCounterparty({
+    const completingRemotely = status === 'completed' && shouldUseCloudBusinessData(existing.workspaceId)
+    const counterparty = completingRemotely ? {} : await normalizePurchaseOrderCounterparty({
         businessPartnerId: workingOrder.businessPartnerId ?? null,
         supplierId: workingOrder.businessPartnerId ?? workingOrder.supplierId,
         supplierName: workingOrder.supplierName

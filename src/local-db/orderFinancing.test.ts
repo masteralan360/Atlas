@@ -1365,7 +1365,7 @@ describe('order-linked financing', () => {
         expect((await db.products.get(product.id))?.quantity).toBe(3)
     })
 
-    it('uses live availability instead of stale Hybrid inventory when completing a sales order', async () => {
+    it.each(['cloud', 'hybrid'] as const)('uses %s stock at completion and keeps Dexie untouched if the server rejects it', async dataMode => {
         const customer = await createCustomer()
         const { storage, product } = await createStockedSalesProduct(100)
         const draft = await createSalesOrder(
@@ -1400,38 +1400,68 @@ describe('order-linked financing', () => {
             }))
         })))
 
-        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode: 'hybrid' })
+        const cachedBatch = {
+            id: crypto.randomUUID(), workspaceId: WORKSPACE_ID, productId: product.id, storageId: storage.id,
+            batchNumber: 'batch', quantity: 8, version: 1, syncStatus: 'synced' as const,
+            isDeleted: false, createdAt: product.createdAt, updatedAt: product.updatedAt,
+            lastSyncedAt: null, currency: product.currency, price: 100, costPrice: 70,
+        }
+        await db.stock_batches.put(cachedBatch)
+        await db.products.delete(product.id)
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode })
         setNetworkStatus(true)
         const stockReservationData = await import('./stockReservationData')
         const minimumSellingPrice = await import('./minimumSellingPrice')
         const stockBatches = await import('./stockBatches')
+        const catalog = await import('./orderReturnCatalog')
+        const inventoryModule = await import('./inventory')
+        const catalogRead = vi.spyOn(catalog, 'readOrderCatalogProducts').mockResolvedValue(new Map([[product.id, product]]))
         const liveAvailabilityGuard = vi.spyOn(stockReservationData, 'assertStockDemands')
             .mockResolvedValueOnce()
         const minimumSellingPriceGuard = vi.spyOn(minimumSellingPrice, 'assertStaffMinimumSellingPrices')
             .mockResolvedValue()
-        const stockBatchRefresh = vi.spyOn(stockBatches, 'refreshStockBatchesFromSupabase')
-            .mockRejectedValue(new Error('stop after live availability check'))
+        const inventoryRead = vi.spyOn(inventoryModule, 'hydrateInventoryProductStoragesFromSupabase')
+            .mockResolvedValue([{ ...inventory!, quantity: 5, version: 3 }])
+        const batchPlan = vi.spyOn(stockBatches, 'getStockBatchSalePlansForWorkspace').mockResolvedValue([{
+            productId: product.id, storageId: storage.id, requestedQuantity: 1,
+            inventoryQuantity: 5, sellableQuantity: 5, batchQuantity: 4,
+            allocations: [{ batchId: cachedBatch.id, batchNumber: 'batch', quantity: 1, costPrice: 70, currency: product.currency }],
+            batchVersions: [{ id: cachedBatch.id, version: 2 }],
+        }])
+        const rejectCompletion = vi.spyOn(inventoryModule, 'syncInventoryRowsBestEffort').mockImplementationOnce(async () => {
+            expect(await db.inventory.get(inventory!.id)).toMatchObject({ quantity: 9, syncStatus: 'synced' })
+            expect(await db.stock_batches.get(cachedBatch.id)).toMatchObject({ quantity: 8, syncStatus: 'synced' })
+            throw new inventoryModule.InventorySnapshotConflictError(0, 'sales_order_version')
+        })
 
         try {
             await expect(updateSalesOrderStatus(pending.id, 'completed'))
-                .rejects.toThrow('stop after live availability check')
+                .rejects.toMatchObject({ conflictReason: 'sales_order_version' })
 
             expect(liveAvailabilityGuard).toHaveBeenCalledTimes(1)
             expect(liveAvailabilityGuard).toHaveBeenCalledWith(WORKSPACE_ID, [{
                 productId: product.id,
                 storageId: storage.id,
                 quantity: 1
-            }], pending.id)
-            expect(stockBatchRefresh).toHaveBeenCalledOnce()
+            }], pending.id, true)
+            expect(inventoryRead).toHaveBeenCalledWith(WORKSPACE_ID, product.id, [storage.id], { requireAuthoritative: true, cache: false })
+            expect(rejectCompletion).toHaveBeenCalledWith([expect.objectContaining({ quantity: 4 })], WORKSPACE_ID, expect.objectContaining({
+                expectedVersions: [{ productId: product.id, storageId: storage.id, version: 3 }],
+                salesOrderCompletion: expect.objectContaining({ batchVersions: [{ id: cachedBatch.id, version: 2 }] }),
+            }))
             expect(await db.sales_orders.get(pending.id)).toMatchObject({ status: 'pending' })
             expect((await db.inventory
                 .where('[productId+storageId]')
                 .equals([product.id, storage.id])
                 .first())?.quantity).toBe(9)
+            expect(await db.stock_batches.get(cachedBatch.id)).toEqual(cachedBatch)
         } finally {
             liveAvailabilityGuard.mockRestore()
             minimumSellingPriceGuard.mockRestore()
-            stockBatchRefresh.mockRestore()
+            catalogRead.mockRestore()
+            inventoryRead.mockRestore()
+            batchPlan.mockRestore()
+            rejectCompletion.mockRestore()
             setNetworkStatus(false)
         }
     })

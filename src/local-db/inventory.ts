@@ -133,6 +133,7 @@ export interface InventorySnapshotSyncOptions {
         expectedOrderVersion: number
         items: unknown[]
         actualDeliveryDate: string | null
+        batchVersions?: ReadonlyArray<{ id: string; version: number }>
     }
 }
 
@@ -142,6 +143,7 @@ export interface InventoryPositionHydrationOptions {
      * from a potentially stale local snapshot when the server read fails.
      */
     requireAuthoritative?: boolean
+    cache?: boolean
 }
 
 export class InventorySnapshotConflictError extends Error {
@@ -293,6 +295,8 @@ export async function hydrateInventoryProductStoragesFromSupabase(
         return localRow
     })
 
+    if (options.cache === false) return normalizedRemoteRows
+
     const remoteKeys = new Set(normalizedRemoteRows.map((row) =>
         buildInventoryPositionKey(row.workspaceId, row.productId, row.storageId)
     ))
@@ -423,7 +427,8 @@ export async function syncInventoryRowsBestEffort(
                 p_operation_id: operationId,
                 p_items: options.salesOrderCompletion.items,
                 p_actual_delivery_date: options.salesOrderCompletion.actualDeliveryDate,
-                p_changes: changes
+                p_changes: changes,
+                ...(options.salesOrderCompletion.batchVersions && { p_batch_versions: options.salesOrderCompletion.batchVersions })
             })
             : client.rpc('apply_inventory_snapshot_changes', {
                 p_operation_id: operationId,
@@ -465,6 +470,7 @@ export async function syncInventoryRowsBestEffort(
     const result = response.data as {
         inventory?: Record<string, unknown>[] | null
         inventory_transactions?: Record<string, unknown>[] | null
+        stock_batches?: Record<string, unknown>[] | null
         order?: Record<string, unknown> | null
         conflict?: boolean
         conflict_reason?: string
@@ -490,6 +496,17 @@ export async function syncInventoryRowsBestEffort(
         throw new Error(i18n.t('inventory.errors.authoritativeResultMissing'))
     }
     inventorySnapshotConflictCooldowns.delete(conflictKey)
+
+    if (options.salesOrderCompletion?.batchVersions) {
+        if (!result?.order || !Array.isArray(remoteRows) || !Array.isArray(result.inventory_transactions) || !Array.isArray(result.stock_batches)) {
+            throw new Error(i18n.t('inventory.errors.authoritativeResultMissing'))
+        }
+        return { order: result.order, completionStock: {
+            inventory: remoteRows,
+            inventory_transactions: result.inventory_transactions,
+            stock_batches: result.stock_batches
+        } }
+    }
 
     const syncedAt = new Date().toISOString()
     await reconcileInventoryRowsSynced(dedupedRows, remoteRows, syncedAt)

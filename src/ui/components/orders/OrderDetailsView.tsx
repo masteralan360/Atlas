@@ -14,7 +14,8 @@ import { useAuth } from '@/auth'
 import { useProfileData } from '@/hooks/useProfileData'
 import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { useCommerceOrderAttribution } from '@/local-db/commerceOperations'
-import { resolveOrderDetailsLookupStatus, type OrderDetailsRemoteLookupStatus } from '@/lib/orderDetailsLookup'
+import { resolveOrderDetailsLookupStatus } from '@/lib/orderDetailsLookup'
+import { refreshOrderDetails, useOrderDetailsRemoteLookup } from '@/local-db/orderDetailsData'
 import { runSalesOrderIntegrityAudit } from '@/lib/integrityAudit/salesOrderAudit'
 import { isPurchaseOrderIntegrityAuditEligible, runPurchaseOrderIntegrityAudit } from '@/lib/integrityAudit/purchaseOrderAudit'
 import type { IntegrityAuditResult } from '@/lib/integrityAudit/types'
@@ -47,7 +48,6 @@ import {
     createPostReturnSalesOrderAdjustment,
     deletePurchaseOrder,
     deleteSalesOrder,
-    fetchTableFromSupabase,
     findLatestUnreversedPaymentTransaction,
     getActiveSalesOrderAgentAssignments,
     getOrderBalanceAmount,
@@ -293,20 +293,16 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
         : '/orders'
     const { toast } = useToast()
     const isOnline = useNetworkStatus()
+    const revalidateCompletion = isOnline && !isLocalMode
     const [lookupRetryVersion, setLookupRetryVersion] = useState(0)
-    const lookupKey = `${workspaceId}:${orderId}:${lookupRetryVersion}:${isLocalMode ? 'local' : 'cloud'}`
-    const [remoteLookupState, setRemoteLookupState] = useState<{
-        key: string
-        status: OrderDetailsRemoteLookupStatus
-    }>(() => ({
-        key: lookupKey,
-        status: isLocalMode ? 'complete' : 'loading'
-    }))
+    const remoteLookup = useOrderDetailsRemoteLookup(workspaceId, orderId)
     const storages = useStorages(workspaceId)
     const salesOrderLookup = useSalesOrderLookup(orderId, lookupRetryVersion)
     const purchaseOrderLookup = usePurchaseOrderLookup(orderId, lookupRetryVersion)
-    const salesOrder = salesOrderLookup.status === 'found' ? salesOrderLookup.order : undefined
-    const purchaseOrder = purchaseOrderLookup.status === 'found' ? purchaseOrderLookup.order : undefined
+    const salesOrder = salesOrderLookup.status === 'found' && salesOrderLookup.order.workspaceId === workspaceId
+        ? salesOrderLookup.order : undefined
+    const purchaseOrder = purchaseOrderLookup.status === 'found' && purchaseOrderLookup.order.workspaceId === workspaceId
+        ? purchaseOrderLookup.order : undefined
     const commerceOperationsEnabled = hasFeature('commerce_operations')
     const commerceOrderAttribution = useCommerceOrderAttribution(workspaceId, salesOrder?.id, commerceOperationsEnabled)
     const salesOrderAgentAssignments = useSalesOrderAgentAssignments(workspaceId)
@@ -391,12 +387,13 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
             ? { kind: 'purchase' as const, order: purchaseOrder }
             : null,
         [purchaseOrder, salesOrder])
-    const remoteLookupStatus = remoteLookupState.key === lookupKey
-        ? remoteLookupState.status
-        : 'loading'
+    const remoteLookupStatus = isLocalMode ? 'complete'
+        : !isOnline ? 'error'
+        : remoteLookup.isPending ? 'loading'
+        : remoteLookup.isError ? 'error' : 'complete'
     const orderLookupStatus = resolveOrderDetailsLookupStatus({
-        salesOrderStatus: salesOrderLookup.status,
-        purchaseOrderStatus: purchaseOrderLookup.status,
+        salesOrderStatus: !salesOrder && salesOrderLookup.status === 'found' ? 'not-found' : salesOrderLookup.status,
+        purchaseOrderStatus: !purchaseOrder && purchaseOrderLookup.status === 'found' ? 'not-found' : purchaseOrderLookup.status,
         remoteStatus: remoteLookupStatus
     })
     const auditMode = getWorkspaceDataMode(workspaceId)
@@ -414,48 +411,10 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         runAudit: runOrderIntegrityAudit,
         getSeverity: result => getTransactionIntegritySeverity(result.summary)
     })
-    const retryOrderLookup = useCallback(() => {
+    const retryOrderLookup = () => {
         setLookupRetryVersion((version) => version + 1)
-    }, [])
-
-    useEffect(() => {
-        let cancelled = false
-
-        const setRemoteLookupStatus = (status: OrderDetailsRemoteLookupStatus) => {
-            if (!cancelled) {
-                setRemoteLookupState({ key: lookupKey, status })
-            }
-        }
-
-        const hydrateOrder = async () => {
-            if (resolved || isLocalMode) {
-                setRemoteLookupStatus('complete')
-                return
-            }
-
-            if (!isOnline) {
-                setRemoteLookupStatus('error')
-                return
-            }
-
-            setRemoteLookupStatus('loading')
-            try {
-                const results = await Promise.all([
-                    fetchTableFromSupabase('sales_orders', db.sales_orders, workspaceId),
-                    fetchTableFromSupabase('purchase_orders', db.purchase_orders, workspaceId)
-                ])
-                setRemoteLookupStatus(results.every(Boolean) ? 'complete' : 'error')
-            } catch (error) {
-                console.error('[Orders] Failed to hydrate order detail:', error)
-                setRemoteLookupStatus('error')
-            }
-        }
-
-        void hydrateOrder()
-        return () => {
-            cancelled = true
-        }
-    }, [isLocalMode, isOnline, lookupKey, resolved, workspaceId])
+        if (revalidateCompletion) void remoteLookup.refetch()
+    }
     const hasOrderStorageWriteAccess = useOrderStorageWriteAccess(
         orderId,
         resolved?.kind,
@@ -756,6 +715,34 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         } finally {
             activeWorkflowActionRef.current = null
             setActiveWorkflowAction(null)
+        }
+    }
+
+    const completeOrder = async (kind: 'sales' | 'purchase', shownOrder: SalesOrder | PurchaseOrder) => {
+        let expectedVersion: number | undefined
+        if (revalidateCompletion) {
+            const fresh = await refreshOrderDetails(workspaceId, shownOrder.id, kind)
+            if (!fresh || fresh.version !== shownOrder.version || Date.parse(fresh.updatedAt) !== Date.parse(shownOrder.updatedAt)
+                || fresh.status !== shownOrder.status) {
+                throw new Error(t('inventory.errors.orderChanged'))
+            }
+            expectedVersion = fresh.version
+        }
+        try {
+            if (kind === 'sales') {
+                await updateSalesOrderStatus(shownOrder.id, 'completed', { actingUserRole: user?.role, expectedVersion })
+            } else {
+                await updatePurchaseOrderStatus(shownOrder.id, 'completed', expectedVersion)
+            }
+        } catch (error) {
+            if (revalidateCompletion) {
+                const current = await refreshOrderDetails(workspaceId, shownOrder.id, kind).catch((refreshError) => {
+                    console.error('[Orders] Failed to refresh order after completion:', refreshError)
+                    return null
+                })
+                if (current?.status === 'completed') return
+            }
+            throw error
         }
     }
 
@@ -1293,7 +1280,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
         ? [
             isApprovalRequested && canApproveOrderRequests ? { key: 'approve', icon: BadgeCheck, label: t('orders.actions.approve', { defaultValue: 'Approve' }), onClick: () => runWorkflowAction('approve', () => approveSalesOrderRequest(order.id, user?.id ?? null), t('orders.actions.approveRequestSuccess', { defaultValue: 'Order request approved' })), variant: 'default' as const } : null,
             !isApprovalRequested && canManageOrder && order.status === 'draft' && salesOrderHidePermissions.isStatusAllowed('pending') ? { key: 'reserve', icon: PackageCheck, label: t('orders.actions.reserve') || 'Reserve', onClick: () => runWorkflowAction('reserve', () => updateSalesOrderStatus(order.id, 'pending', { actingUserRole: user?.role }), t('orders.details.messages.reserveSuccess') || 'Sales order reserved'), variant: 'default' as const } : null,
-            !isApprovalRequested && canManageOrder && order.status === 'pending' && salesOrderHidePermissions.isStatusAllowed('completed') ? { key: 'complete', icon: CircleCheck, label: t('orders.actions.complete') || 'Complete', onClick: () => runWorkflowAction('complete', () => updateSalesOrderStatus(order.id, 'completed', { actingUserRole: user?.role }), t('orders.details.messages.completeSuccess') || 'Sales order completed'), variant: 'default' as const } : null,
+            !isApprovalRequested && canManageOrder && order.status === 'pending' && salesOrderHidePermissions.isStatusAllowed('completed') ? { key: 'complete', icon: CircleCheck, label: t('orders.actions.complete') || 'Complete', onClick: () => runWorkflowAction('complete', () => completeOrder('sales', order), t('orders.details.messages.completeSuccess') || 'Sales order completed'), variant: 'default' as const } : null,
             !isApprovalRequested && canManageOrder && order.status === 'pending' ? { key: 'cancel', icon: XCircle, label: t('orders.actions.cancel') || 'Cancel', onClick: () => setCancelConfirm({ isOpen: true }), variant: 'outline' as const } : null,
             canArchiveOrder ? { key: 'archive', icon: Archive, label: t('orders.archive.archiveAction'), onClick: () => setArchiveConfirmation('archive'), variant: 'outline' as const } : null
         ].filter(Boolean)
@@ -1301,7 +1288,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
             isApprovalRequested && canApproveOrderRequests ? { key: 'approve', icon: BadgeCheck, label: t('orders.actions.approve', { defaultValue: 'Approve' }), onClick: () => runWorkflowAction('approve', () => approvePurchaseOrderRequest(order.id, user?.id ?? null), t('orders.actions.approveRequestSuccess', { defaultValue: 'Order request approved' })), variant: 'default' as const } : null,
             !isApprovalRequested && canManageOrder && order.status === 'draft' ? { key: 'order', icon: ShoppingCart, label: t('orders.actions.order') || 'Order', onClick: () => runWorkflowAction('order', () => updatePurchaseOrderStatus(order.id, 'ordered'), t('orders.details.messages.orderSuccess') || 'Purchase order sent'), variant: 'default' as const } : null,
             !isApprovalRequested && canManageOrder && order.status === 'ordered' ? { key: 'receive', icon: PackageCheck, label: t('orders.actions.receive') || 'Receive', onClick: () => runWorkflowAction('receive', () => updatePurchaseOrderStatus(order.id, 'received'), t('orders.details.messages.receiveSuccess') || 'Purchase order received'), variant: 'default' as const } : null,
-            !isApprovalRequested && canManageOrder && order.status === 'received' ? { key: 'complete', icon: CircleCheck, label: t('orders.actions.complete') || 'Complete', onClick: () => runWorkflowAction('complete', () => updatePurchaseOrderStatus(order.id, 'completed'), t('orders.details.messages.completeSuccess') || 'Purchase order completed'), variant: 'default' as const } : null,
+            !isApprovalRequested && canManageOrder && order.status === 'received' ? { key: 'complete', icon: CircleCheck, label: t('orders.actions.complete') || 'Complete', onClick: () => runWorkflowAction('complete', () => completeOrder('purchase', order), t('orders.details.messages.completeSuccess') || 'Purchase order completed'), variant: 'default' as const } : null,
             !isApprovalRequested && canManageOrder && (order.status === 'draft' || order.status === 'ordered') ? { key: 'cancel', icon: XCircle, label: t('orders.actions.cancel') || 'Cancel', onClick: () => setCancelConfirm({ isOpen: true }), variant: 'outline' as const } : null,
             canArchiveOrder ? { key: 'archive', icon: Archive, label: t('orders.archive.archiveAction'), onClick: () => setArchiveConfirmation('archive'), variant: 'outline' as const } : null
         ].filter(Boolean)
@@ -1669,6 +1656,8 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                         const ActionIcon = action.icon
                         const isActionLoading = activeWorkflowAction === action.key
                         const isProgressAction = action.key !== 'cancel' && action.key !== 'archive'
+                        const stockBlocked = isSales && reservationGuard.blocked
+                            && (action.key === 'reserve' || (action.key === 'complete' && !revalidateCompletion))
 
                         if (isProgressAction) {
                             return (
@@ -1676,7 +1665,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                                     <PressAndHoldButton
                                         variant={action.variant}
                                         icon={<ActionIcon className="mr-2 h-4 w-4" aria-hidden="true" />}
-                                        disabled={activeWorkflowAction !== null || (isSales && ['reserve', 'complete'].includes(action.key) && reservationGuard.blocked)}
+                                        disabled={activeWorkflowAction !== null || stockBlocked}
                                         onPressStart={handleWorkflowPressStart}
                                         onComplete={() => {
                                             handleWorkflowAdvanceComplete()
@@ -1706,7 +1695,7 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             <Button
                                 key={action.key}
                                 variant={action.variant}
-                                disabled={activeWorkflowAction !== null || (isSales && ['reserve', 'complete'].includes(action.key) && reservationGuard.blocked)}
+                                disabled={activeWorkflowAction !== null || stockBlocked}
                                 aria-busy={isActionLoading}
                                 onClick={action.onClick}
                             >

@@ -10,18 +10,19 @@ const remote = vi.hoisted(() => ({
   rows: [] as Array<{id:string;workspace_id:string;is_service:boolean}>,
   calls: [] as Array<{workspaceId:string;ids:string[]}>,
   error: null as Error | null,
-  select: vi.fn(),
+  rpc: vi.fn(),
 }))
 vi.mock('@/lib/supabaseSchema', () => ({
-  getSupabaseClientForTable: () => ({ from: () => ({
-    select: (columns:string) => {
-      remote.select(columns)
-      return {eq: (_field:string,workspaceId:string) => ({in: async (_field:string,ids:string[]) => {
-        remote.calls.push({workspaceId,ids})
-        return {data:remote.rows.filter(row => row.workspace_id===workspaceId && ids.includes(row.id)),error:remote.error}
-      }})}
-    },
-  })}),
+  getSupabaseClientForTable: () => ({ rpc: (name: string, args: { p_workspace_id: string; p_product_ids: string[] }) => {
+    remote.rpc(name)
+    const { p_workspace_id: workspaceId, p_product_ids: ids } = args
+    remote.calls.push({ workspaceId, ids })
+    return {
+      data: remote.rows.filter(row => row.workspace_id === workspaceId && ids.includes(row.id))
+        .map(product => ({ id: product.id, product })),
+      error: remote.error,
+    }
+  } }),
 }))
 vi.mock('@/lib/supabaseRequest', () => ({
   runSupabaseAction: (_label:string,run:()=>unknown) => run(),
@@ -33,7 +34,7 @@ describe('sales-order return catalog classification', () => {
   beforeEach(async () => {
     await db.delete()
     await db.open()
-    remote.rows=[]; remote.calls=[]; remote.error=null; remote.select.mockClear()
+    remote.rows=[]; remote.calls=[]; remote.error=null; remote.rpc.mockClear()
   })
   afterAll(async () => {await db.delete()})
 
@@ -45,7 +46,7 @@ describe('sales-order return catalog classification', () => {
       {id:'unrelated',workspace_id:'workspace',is_service:false},
       {id:'foreign',workspace_id:'other',is_service:false}]
     expect(await readOrderReturnStockProductIds('workspace',['service','product','service'])).toEqual(new Set(['product']))
-    expect(remote.select).toHaveBeenCalledWith('id,workspace_id,is_service')
+    expect(remote.rpc).toHaveBeenCalledWith('get_visible_products_for_current_user')
     expect(remote.calls).toEqual([{workspaceId:'workspace',ids:['service','product']}])
     expect(await db.products.get('service')).toMatchObject({isService:false})
     expect(await readOrderReturnStockProductIds('workspace',['service'])).toEqual(new Set())
