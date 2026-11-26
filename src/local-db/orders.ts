@@ -3325,7 +3325,7 @@ export async function rebuildOrderPaymentState(
     return updated
 }
 
-export async function recordOrderPayment(
+async function recordOrderPaymentInternal(
     workspaceId: string,
     input: {
         orderType: OrderType
@@ -3339,26 +3339,41 @@ export async function recordOrderPayment(
         createdBy?: string | null
         accountId?: string | null
         accountNameSnapshot?: string | null
-    }
+    },
+    trace?: CrudTraceHandle
 ) {
     const orderTable = input.orderType === 'sales' ? db.sales_orders : db.purchase_orders
     const sourceType = input.orderType === 'sales' ? 'sales_order' : 'purchase_order'
-    const order = await orderTable.get(input.orderId) as SalesOrder | PurchaseOrder | undefined
+    const order = await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderLocalRead',
+        'data',
+        () => orderTable.get(input.orderId) as Promise<SalesOrder | PurchaseOrder | undefined>,
+        'crudDebugger.details.dexiePersistence'
+    )
     if (!order || order.isDeleted || order.workspaceId !== workspaceId) {
         throw new Error('Order not found')
     }
-    if (input.orderType === 'sales') {
-        await assertSalesOrderHidePermissions(workspaceId, { paymentMethod: input.paymentMethod })
-    }
-    await assertNoPendingFinancedOrderCancellation(workspaceId, order.id)
-    if (isOrderFinancingMethod(order.paymentMethod) || order.linkedLoanId) {
-        throw new Error('financed_order_payments_managed_in_loan_module')
-    }
-    if (order.isLocked) {
-        throw new Error('locked_order_immutable')
-    }
+    await measureSalesOrderStage(trace, 'crudDebugger.stages.orderPaymentValidation', 'application', async () => {
+        if (input.orderType === 'sales') {
+            await assertSalesOrderHidePermissions(workspaceId, { paymentMethod: input.paymentMethod })
+        }
+        await assertNoPendingFinancedOrderCancellation(workspaceId, order.id)
+        if (isOrderFinancingMethod(order.paymentMethod) || order.linkedLoanId) {
+            throw new Error('financed_order_payments_managed_in_loan_module')
+        }
+        if (order.isLocked) {
+            throw new Error('locked_order_immutable')
+        }
+    })
 
-    const activePayments = await listActiveOrderPayments(workspaceId, sourceType, order.id)
+    const activePayments = await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.orderPaymentHistory',
+        'data',
+        () => listActiveOrderPayments(workspaceId, sourceType, order.id),
+        'crudDebugger.details.orderPaymentHistoryBoundary'
+    )
     const activePaidAmount = roundOrderAmount(
         activePayments.reduce((sum, payment) => sum + payment.amount, 0),
         order.currency
@@ -3366,84 +3381,132 @@ export async function recordOrderPayment(
     const total = roundOrderAmount(Math.max(0, Number(order.total || 0)), order.currency)
     const amount = roundOrderAmount(Number(input.amount || 0), order.currency)
     if (activePaidAmount - total > ORDER_AMOUNT_EPSILON) {
-        const repairedPayment = await repairStaleFullOrderPaymentAttempts(workspaceId, order, activePayments, {
-            amount,
-            installmentId: input.installmentId
-        })
+        const repairedPayment = await measureSalesOrderStage(
+            trace,
+            'crudDebugger.stages.orderPaymentRepair',
+            'application',
+            async () => {
+                const repaired = await repairStaleFullOrderPaymentAttempts(workspaceId, order, activePayments, {
+                    amount,
+                    installmentId: input.installmentId
+                })
+                if (!repaired) {
+                    throw new Error('Order payment total exceeds the order balance')
+                }
+                return repaired
+            },
+            'crudDebugger.details.orderPaymentRepairBoundary'
+        )
 
-        if (!repairedPayment) {
-            throw new Error('Order payment total exceeds the order balance')
-        }
-
-        const updatedOrder = await rebuildOrderPaymentState(input.orderType, order.id)
+        const updatedOrder = await measureSalesOrderStage(
+            trace,
+            'crudDebugger.stages.orderPaymentFinalize',
+            'response',
+            () => rebuildOrderPaymentState(input.orderType, order.id),
+            'crudDebugger.details.orderPaymentFinalizeBoundary'
+        )
         return { order: updatedOrder, transaction: repairedPayment }
     }
 
     const balanceAmount = roundOrderAmount(Math.max(total - activePaidAmount, 0), order.currency)
-    if (amount <= 0) {
-        throw new Error('Invalid payment amount')
-    }
-    if (balanceAmount <= ORDER_AMOUNT_EPSILON) {
-        const updatedOrder = await rebuildOrderPaymentState(input.orderType, order.id)
-        const latestPayment = activePayments.at(-1)
-        if (!latestPayment) {
+    await measureSalesOrderStage(trace, 'crudDebugger.stages.orderPaymentBalanceValidation', 'application', () => {
+        if (amount <= 0) {
+            throw new Error('Invalid payment amount')
+        }
+        if (balanceAmount > ORDER_AMOUNT_EPSILON && amount - balanceAmount > ORDER_AMOUNT_EPSILON) {
             throw new Error('Payment amount cannot exceed the remaining balance')
         }
+    })
+    if (balanceAmount <= ORDER_AMOUNT_EPSILON) {
+        const { updatedOrder, latestPayment } = await measureSalesOrderStage(
+            trace,
+            'crudDebugger.stages.orderPaymentFinalize',
+            'response',
+            async () => {
+                const updatedOrder = await rebuildOrderPaymentState(input.orderType, order.id)
+                const latestPayment = activePayments.at(-1)
+                if (!latestPayment) {
+                    throw new Error('Payment amount cannot exceed the remaining balance')
+                }
+                return { updatedOrder, latestPayment }
+            },
+            'crudDebugger.details.orderPaymentFinalizeBoundary'
+        )
         return { order: updatedOrder, transaction: latestPayment }
     }
-    if (amount - balanceAmount > ORDER_AMOUNT_EPSILON) {
-        throw new Error('Payment amount cannot exceed the remaining balance')
-    }
-
     let installment: OrderInstallment | undefined
     if (input.installmentId) {
-        installment = await db.order_installments.get(input.installmentId)
+        installment = await measureSalesOrderStage(
+            trace,
+            'crudDebugger.stages.orderPaymentInstallmentRead',
+            'data',
+            () => db.order_installments.get(input.installmentId!),
+            'crudDebugger.details.dexiePersistence'
+        )
         if (!installment || installment.isDeleted || installment.orderId !== order.id) {
             throw new Error('Order installment not found')
         }
     }
 
     const { appendPaymentTransaction } = await awaitStockDependency(import('./payments'))
-    const transaction = await appendPaymentTransaction(workspaceId, {
-        id: input.idempotencyKey || generateId(),
-        idempotent: true,
-        atomicOrderPayment: true,
-        sourceModule: 'orders',
-        sourceType,
-        sourceRecordId: order.id,
-        sourceSubrecordId: installment?.id || null,
-        direction: input.orderType === 'sales' ? 'incoming' : 'outgoing',
-        amount,
-        currency: order.currency,
-        paymentMethod: input.paymentMethod,
-        paidAt: input.paidAt,
-        counterpartyName: input.orderType === 'sales'
-            ? (order as SalesOrder).customerName
-            : (order as PurchaseOrder).supplierName,
-        referenceLabel: order.orderNumber,
-        note: input.note || null,
-        createdBy: input.createdBy || null,
-        accountId: input.accountId ?? null,
-        accountNameSnapshot: input.accountNameSnapshot ?? null,
-        metadata: {
-            orderStatus: order.status,
-            orderType: input.orderType,
-            installmentNo: installment?.installmentNo || null
-        }
-    })
+    const transaction = await measureSalesOrderStage(
+        trace,
+        'crudDebugger.stages.salesOrderPayment',
+        'unknown',
+        () => appendPaymentTransaction(workspaceId, {
+            id: input.idempotencyKey || generateId(),
+            idempotent: true,
+            atomicOrderPayment: true,
+            sourceModule: 'orders',
+            sourceType,
+            sourceRecordId: order.id,
+            sourceSubrecordId: installment?.id || null,
+            direction: input.orderType === 'sales' ? 'incoming' : 'outgoing',
+            amount,
+            currency: order.currency,
+            paymentMethod: input.paymentMethod,
+            paidAt: input.paidAt,
+            counterpartyName: input.orderType === 'sales'
+                ? (order as SalesOrder).customerName
+                : (order as PurchaseOrder).supplierName,
+            referenceLabel: order.orderNumber,
+            note: input.note || null,
+            createdBy: input.createdBy || null,
+            accountId: input.accountId ?? null,
+            accountNameSnapshot: input.accountNameSnapshot ?? null,
+            metadata: {
+                orderStatus: order.status,
+                orderType: input.orderType,
+                installmentNo: installment?.installmentNo || null
+            }
+        }),
+        'crudDebugger.details.salesOrderPaymentBoundary'
+    )
     try {
-        const updatedOrder = await rebuildOrderPaymentState(input.orderType, order.id, {
-            throwOnOrderSyncError: true,
-            preserveRemoteItemSnapshots: transaction.syncStatus === 'synced'
-        })
+        const updatedOrder = await measureSalesOrderStage(
+            trace,
+            'crudDebugger.stages.orderPaymentFinalize',
+            'response',
+            () => rebuildOrderPaymentState(input.orderType, order.id, {
+                throwOnOrderSyncError: true,
+                preserveRemoteItemSnapshots: transaction.syncStatus === 'synced'
+            }),
+            'crudDebugger.details.orderPaymentFinalizeBoundary'
+        )
         return { order: updatedOrder, transaction }
     } catch (error) {
         try {
             const { reversePaymentTransaction } = await awaitStockDependency(import('./payments'))
-            await reversePaymentTransaction(workspaceId, transaction.id, {
-                createdBy: input.createdBy || null,
-                note: 'Automatically reversed because the linked order could not be synced.'
-            })
+            await measureSalesOrderStage(
+                trace,
+                'crudDebugger.stages.orderPaymentRollback',
+                'unknown',
+                () => reversePaymentTransaction(workspaceId, transaction.id, {
+                    createdBy: input.createdBy || null,
+                    note: 'Automatically reversed because the linked order could not be synced.'
+                }),
+                'crudDebugger.details.salesOrderPaymentBoundary'
+            )
         } catch (reversalError) {
             console.error('[Orders] Failed to reverse payment after order sync failure:', reversalError)
             throw new Error(
@@ -3454,6 +3517,34 @@ export async function recordOrderPayment(
 
         throw error
     }
+}
+
+export function recordOrderPayment(
+    workspaceId: string,
+    input: {
+        orderType: OrderType
+        orderId: string
+        installmentId?: string | null
+        amount: number
+        paymentMethod: Exclude<OrderPaymentMethod, 'loan' | 'installments'>
+        paidAt: string
+        idempotencyKey?: string
+        note?: string | null
+        createdBy?: string | null
+        accountId?: string | null
+        accountNameSnapshot?: string | null
+    },
+    parentTrace?: CrudTraceHandle
+) {
+    const execute = (trace: CrudTraceHandle | undefined) => recordOrderPaymentInternal(workspaceId, input, trace)
+    if (parentTrace) return execute(parentTrace)
+    if (!isCrudDebuggerEnabled()) return execute(undefined)
+    return runCrudOperation({
+        action: 'update',
+        entityKey: input.orderType === 'sales' ? 'salesOrder' : 'purchaseOrder',
+        entityId: input.orderId,
+        workspaceId
+    }, execute)
 }
 
 async function buildSalesOrderEntity(

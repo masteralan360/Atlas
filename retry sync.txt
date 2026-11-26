@@ -4,7 +4,7 @@ PWA Faster
 
 simplify sale details for coach
 
-batch-only sales order can still be blocked
+Record Collection speed
 
 sidebar redesign mobile view
 

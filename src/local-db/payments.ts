@@ -30,6 +30,7 @@ import { nextDirectTransactionVoucherNumber } from '@/lib/directTransactionVouch
 import i18n from '@/i18n/config'
 import { resolveDirectCounterparty } from './directTransactionCounterparties'
 import { getDirectTransactionAccess } from './directTransactionAccess'
+import type { CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import { invalidateDirectTransactions } from './directTransactionReads'
 import { isReportablePaymentTransaction } from '@/lib/financialReportability'
 import {
@@ -3482,7 +3483,9 @@ export async function findLatestUnreversedPaymentTransaction(workspaceId: string
 export async function recordObligationSettlement(
   workspaceId: string,
   obligation: PaymentObligation,
-  input: RecordObligationSettlementInput
+    input: RecordObligationSettlementInput,
+    /** Parent UI trace, used to keep the settlement and shared order stages together. */
+    trace?: CrudTraceHandle
 ) {
   const paidAt = input.paidAt ? new Date(input.paidAt).toISOString() : new Date().toISOString()
   const note = input.note?.trim() || null
@@ -3612,7 +3615,7 @@ export async function recordObligationSettlement(
         createdBy,
         accountId: input.accountId ?? null,
         accountNameSnapshot: input.accountNameSnapshot ?? null
-      })
+      }, trace)
       return
     }
 
@@ -3687,7 +3690,7 @@ export async function recordObligationSettlement(
         createdBy,
         accountId: input.accountId ?? null,
         accountNameSnapshot: input.accountNameSnapshot ?? null
-      })
+      }, trace)
       return
     }
 

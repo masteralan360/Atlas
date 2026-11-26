@@ -51,6 +51,7 @@ import { convertCurrencyAmountWithLiveRates } from '@/lib/orderCurrency'
 import { cn, formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { isMobile } from '@/lib/platform'
 import { normalizeSupabaseActionError, runSupabaseAction } from '@/lib/supabaseRequest'
+import { runCrudOperation, type CrudStageLayer, type CrudTraceHandle } from '@/dev/crud-debugger/trace'
 import {
     MARKETPLACE_ORDER_REFRESH_EVENT,
     notifyMarketplaceOrdersChanged,
@@ -168,6 +169,16 @@ async function hydrateMarketplaceCollectionDependencies(workspaceId: string, sal
 
     const order = await db.sales_orders.get(salesOrderId)
     return order as SalesOrder | undefined
+}
+
+function measureMarketplaceCollectionStage<T>(
+    trace: CrudTraceHandle | undefined,
+    labelKey: string,
+    layer: CrudStageLayer,
+    work: () => Promise<T> | T,
+    detailsKey?: string
+) {
+    return trace ? trace.measure(labelKey, layer, work, detailsKey) : work()
 }
 
 function buildMarketplaceCollectionObligation(order: SalesOrder): PaymentObligation {
@@ -895,9 +906,9 @@ export function Ecommerce() {
         [detailProducts]
     )
 
-    const invalidateMarketplaceOrders = async () => {
-        if (!user?.workspaceId) return
-        await queryClient.invalidateQueries({ queryKey: queryKeys.ecommerce.all(user.workspaceId) })
+    const invalidateMarketplaceOrders = async (workspaceId = user?.workspaceId) => {
+        if (!workspaceId) return
+        await queryClient.invalidateQueries({ queryKey: queryKeys.ecommerce.all(workspaceId) })
     }
 
     useEffect(() => {
@@ -925,42 +936,95 @@ export function Ecommerce() {
         if (!user?.workspaceId) {
             return
         }
+        const workspaceId = user.workspaceId
 
         if (isOpeningCollectionRef.current) {
             return
         }
 
         isOpeningCollectionRef.current = true
-        setIsOpeningCollection(true)
-
         try {
-            let salesOrder = await db.sales_orders.get(salesOrderId)
+            await runCrudOperation({
+                action: 'read',
+                entityKey: 'salesOrder',
+                entityId: salesOrderId,
+                workspaceId
+            }, async (trace) => {
+                await measureMarketplaceCollectionStage(
+                    trace,
+                    'crudDebugger.stages.salesOrderCollectionOpen',
+                    'interaction',
+                    () => setIsOpeningCollection(true)
+                )
 
-            if (!salesOrder || salesOrder.isDeleted) {
-                await hydrateMarketplaceCollectionDependencies(user.workspaceId, salesOrderId)
-                salesOrder = await db.sales_orders.get(salesOrderId)
-            }
+                let salesOrder = await measureMarketplaceCollectionStage(
+                    trace,
+                    'crudDebugger.stages.salesOrderLocalRead',
+                    'data',
+                    () => db.sales_orders.get(salesOrderId),
+                    'crudDebugger.details.dexiePersistence'
+                )
 
-            if (!salesOrder || salesOrder.isDeleted) {
-                toast({
-                    title: t('common.error', { defaultValue: 'Error' }),
-                    description: t('ecommerce.salesOrderForCollectionUnavailable', {
-                        defaultValue: 'The sales order could not be loaded for collection.'
-                    }),
-                    variant: 'destructive'
-                })
-                return
-            }
+                if (!salesOrder || salesOrder.isDeleted) {
+                    await measureMarketplaceCollectionStage(
+                        trace,
+                        'crudDebugger.stages.salesOrderCollectionHydration',
+                        'network',
+                        () => hydrateMarketplaceCollectionDependencies(workspaceId, salesOrderId),
+                        'crudDebugger.details.salesOrderCollectionHydrationBoundary'
+                    )
+                    salesOrder = await measureMarketplaceCollectionStage(
+                        trace,
+                        'crudDebugger.stages.salesOrderLocalRead',
+                        'data',
+                        () => db.sales_orders.get(salesOrderId),
+                        'crudDebugger.details.dexiePersistence'
+                    )
+                }
 
-            if (salesOrder.isPaid) {
-                toast({
-                    title: t('common.success', { defaultValue: 'Success' }),
-                    description: t('orders.details.fullySettled', { defaultValue: 'Fully settled' })
-                })
-                return
-            }
+                if (!salesOrder || salesOrder.isDeleted) {
+                    await measureMarketplaceCollectionStage(
+                        trace,
+                        'crudDebugger.stages.salesOrderCollectionUnavailable',
+                        'application',
+                        () => toast({
+                            title: t('common.error', { defaultValue: 'Error' }),
+                            description: t('ecommerce.salesOrderForCollectionUnavailable', {
+                                defaultValue: 'The sales order could not be loaded for collection.'
+                            }),
+                            variant: 'destructive'
+                        })
+                    )
+                    return
+                }
 
-            setSettlementTarget(buildMarketplaceCollectionObligation(salesOrder))
+                const collectionOrder = salesOrder
+                if (collectionOrder.isPaid) {
+                    await measureMarketplaceCollectionStage(
+                        trace,
+                        'crudDebugger.stages.salesOrderCollectionAlreadyPaid',
+                        'application',
+                        () => toast({
+                            title: t('common.success', { defaultValue: 'Success' }),
+                            description: t('orders.details.fullySettled', { defaultValue: 'Fully settled' })
+                        })
+                    )
+                    return
+                }
+
+                const obligation = await measureMarketplaceCollectionStage(
+                    trace,
+                    'crudDebugger.stages.salesOrderCollectionPreparation',
+                    'application',
+                    () => buildMarketplaceCollectionObligation(collectionOrder)
+                )
+                await measureMarketplaceCollectionStage(
+                    trace,
+                    'crudDebugger.stages.salesOrderCollectionDialog',
+                    'interaction',
+                    () => setSettlementTarget(obligation)
+                )
+            })
         } catch (error) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
@@ -984,27 +1048,43 @@ export function Ecommerce() {
         if (!user?.workspaceId || !settlementTarget) {
             return
         }
+        const workspaceId = user.workspaceId
+        const createdBy = user.id || null
+        const target = settlementTarget
 
         setIsSubmittingSettlement(true)
         try {
-            await recordObligationSettlement(user.workspaceId, settlementTarget, {
-                ...input,
-                createdBy: user?.id || null
-            })
+            await runCrudOperation({
+                action: 'update',
+                entityKey: 'salesOrder',
+                entityId: target.sourceRecordId,
+                workspaceId
+            }, async (trace) => {
+                await measureMarketplaceCollectionStage(
+                    trace,
+                    'crudDebugger.stages.salesOrderCollectionSubmit',
+                    'application',
+                    () => recordObligationSettlement(workspaceId, target, {
+                        ...input,
+                        createdBy
+                    }, trace),
+                    'crudDebugger.details.salesOrderCollectionSubmitBoundary'
+                )
 
-            toast({
-                title: t('common.success', { defaultValue: 'Success' }),
-                description: t('ecommerce.collectionRecorded', { defaultValue: 'Collection recorded and the order is now marked as paid.' })
-            })
-
-            setSettlementTarget(null)
-            await invalidateMarketplaceOrders()
-            if (user?.workspaceId) {
-                notifyMarketplaceOrdersChanged({
-                    workspaceId: user.workspaceId,
-                    source: 'local'
+                toast({
+                    title: t('common.success', { defaultValue: 'Success' }),
+                    description: t('ecommerce.collectionRecorded', { defaultValue: 'Collection recorded and the order is now marked as paid.' })
                 })
-            }
+                setSettlementTarget(null)
+                await measureMarketplaceCollectionStage(
+                    trace,
+                    'crudDebugger.stages.salesOrderCollectionRefresh',
+                    'response',
+                    () => invalidateMarketplaceOrders(workspaceId),
+                    'crudDebugger.details.salesOrderCollectionRefreshBoundary'
+                )
+                notifyMarketplaceOrdersChanged({ workspaceId, source: 'local' })
+            })
         } catch (error) {
             toast({
                 title: t('common.error', { defaultValue: 'Error' }),
