@@ -76,7 +76,8 @@ import {
     type WorkspacePaymentMethod,
     type StockBatch,
     type StockBatchAllocation,
-    SelectedStockBatchInsufficientError
+    SelectedStockBatchInsufficientError,
+    SelectedRegularStockInsufficientError
 } from '@/local-db'
 import { useWorkspace } from '@/workspace/WorkspaceContext'
 import { useOrderEditorLiveData } from '@/hooks/useOrderEditorLiveData'
@@ -1424,6 +1425,26 @@ export function SalesOrderFormPage({
     const initialPayment = roundFormAmount(Math.max(0, Number(initialPaymentAmount || 0)))
     const isFinanced = paymentMethod === 'loan' || paymentMethod === 'installments'
     const isInstallmentBased = paymentMethod === 'installments'
+    const hasSelectedStockSourceShortage = items.some((item) => {
+        if (!item.productId || !item.storageId) return false
+        const product = products.find((entry) => entry.id === item.productId)
+        const sourceAvailability = stockSourceAvailabilityByPosition.get(`${item.productId}:${item.storageId}`)
+        const unitOption = product ? getFormUnitOption(item, product) : null
+        if (!product || isService(product) || !sourceAvailability || !unitOption) return false
+
+        const requiredQuantity = soldQuantityToInventoryQuantity(Number(item.quantity) || 0, unitOption.factor)
+            + soldQuantityToInventoryQuantity(
+                canUseFreeBonus ? Number(item.freeBonusQuantity) || 0 : 0,
+                unitOption.factor
+            )
+        if (!isPositiveQuantity(requiredQuantity)) return false
+
+        const selectedBatchId = item.batchId && item.batchId !== PRODUCT_STOCK_SELECTION ? item.batchId : null
+        const availableQuantity = selectedBatchId
+            ? sourceAvailability.batches.find((batch) => batch.id === selectedBatchId)?.availableQuantity ?? 0
+            : sourceAvailability.regularAvailableQuantity
+        return requiredQuantity - availableQuantity > 0.0000005
+    })
     const canSubmit = Boolean(selectedCustomer) &&
         !salesOrderHidePermissions.isLoading &&
         salesOrderHidePermissions.isPaymentMethodAllowed(paymentMethod) &&
@@ -1434,7 +1455,7 @@ export function SalesOrderFormPage({
         (!isInstallmentBased || (
             Number(installmentCount) >= 1
             && Boolean(firstDueDate)
-        )) && minimumPriceViolations.length === 0
+        )) && minimumPriceViolations.length === 0 && !hasSelectedStockSourceShortage
 
     const finishSavedOrder = useCallback((orderId: string) => {
         if (finalizedOrderIdRef.current === orderId) return
@@ -1548,17 +1569,21 @@ export function SalesOrderFormPage({
                 return [{
                     item,
                     quantity,
+                    productName: product.name,
+                    unitLabel: item.baseUnitNameSnapshot || unitOption.baseUnitCode || unitOption.unitCode,
                     selectedBatchAllocations: item.batchId && item.batchId !== PRODUCT_STOCK_SELECTION
                         ? [{ batchId: item.batchId, quantity }]
                         : []
                 }]
             })
             const selectedBatchPlans = stockSourceItems.length > 0
-                ? await getStockBatchSalePlansForWorkspace(workspaceId, stockSourceItems.map(({ item, quantity, selectedBatchAllocations }) => ({
+                ? await getStockBatchSalePlansForWorkspace(workspaceId, stockSourceItems.map(({ item, quantity, productName, unitLabel, selectedBatchAllocations }) => ({
                     requestId: item.clientId,
                     productId: item.productId,
                     storageId: item.storageId,
                     quantity,
+                    productName,
+                    unitLabel,
                     selectedBatchAllocations,
                 })), editingOrderId)
                 : []
@@ -1875,6 +1900,7 @@ export function SalesOrderFormPage({
             const selectedBatchShortage = error instanceof SelectedStockBatchInsufficientError
                 ? error
                 : null
+            const selectedRegularStockShortage = error instanceof SelectedRegularStockInsufficientError
             const selectedBatchLine = selectedBatchShortage
                 ? items.find((item) => selectedBatchShortage.requestId
                     ? item.clientId === selectedBatchShortage.requestId
@@ -1922,7 +1948,7 @@ export function SalesOrderFormPage({
                 title: t('common.error') || 'Error',
                 description: message,
                 variant: 'destructive',
-                action: selectedBatchShortage ? undefined : (
+                action: selectedBatchShortage || selectedRegularStockShortage ? undefined : (
                     <ToastAction altText={t('orders.form.saveProgressRetry')} onClick={() => void submitOrder()}>
                         {t('orders.form.saveProgressRetry')}
                     </ToastAction>
@@ -2358,7 +2384,7 @@ export function SalesOrderFormPage({
                                                             <Select value={batchSelectionValue} onValueChange={(value) => updateItem(item.clientId, { batchId: value })}>
                                                                 <SelectTrigger className="h-9 text-xs"><SelectValue /></SelectTrigger>
                                                                 <SelectContent>
-                                                                    <SelectItem value={PRODUCT_STOCK_SELECTION} disabled={regularStockQuantity <= 0 && lineBatches.length > 0 && batchSelectionValue !== PRODUCT_STOCK_SELECTION}>
+                                                                    <SelectItem value={PRODUCT_STOCK_SELECTION} disabled={regularStockQuantity <= 0 && lineBatches.length > 0}>
                                                                          {t('orders.form.productStock', { defaultValue: 'Product stock' })} · {formatProductAvailability(item.productId, regularStockQuantity)} {t('orders.form.available', { defaultValue: 'available' })}
                                                                         {selectedSourceReservedQuantity > 0 && !selectedBatch ? ` · ${t('stockReservations.reservedQuantity', { quantity: formatProductAvailability(item.productId, selectedSourceReservedQuantity) })}` : ''}
                                                                     </SelectItem>

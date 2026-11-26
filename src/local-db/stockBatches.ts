@@ -96,6 +96,8 @@ export interface StockBatchSaleRequest {
     productId: string
     storageId: string
     quantity: number
+    productName?: string
+    unitLabel?: string
     /**
      * `undefined` keeps the legacy automatic FEFO allocation. An empty array
      * explicitly uses regular (non-batch) stock; otherwise only these batches
@@ -130,6 +132,37 @@ export class SelectedStockBatchInsufficientError extends Error {
         this.batchId = details.batchId
         this.batchNumber = details.batchNumber
         this.requestedQuantity = details.requestedQuantity
+        this.availableQuantity = details.availableQuantity
+    }
+}
+
+export class SelectedRegularStockInsufficientError extends Error {
+    readonly code = 'insufficient_regular_stock'
+    readonly requestId?: string
+    readonly productId: string
+    readonly storageId: string
+    readonly productName?: string
+    readonly unitLabel?: string
+    readonly requiredQuantity: number
+    readonly availableQuantity: number
+
+    constructor(details: {
+        requestId?: string
+        productId: string
+        storageId: string
+        productName?: string
+        unitLabel?: string
+        requiredQuantity: number
+        availableQuantity: number
+    }) {
+        super('Insufficient regular stock in source storage')
+        this.name = 'SelectedRegularStockInsufficientError'
+        this.requestId = details.requestId
+        this.productId = details.productId
+        this.storageId = details.storageId
+        this.productName = details.productName
+        this.unitLabel = details.unitLabel
+        this.requiredQuantity = details.requiredQuantity
         this.availableQuantity = details.availableQuantity
     }
 }
@@ -1126,6 +1159,8 @@ async function buildStockBatchSalePlans(
             productId: request.productId,
             storageId: request.storageId,
             quantity: roundQuantity(quantity),
+            productName: request.productName,
+            unitLabel: request.unitLabel,
             selectedBatchAllocations: request.selectedBatchAllocations === undefined
                 ? undefined
                 : request.selectedBatchAllocations.map((selection) => ({
@@ -1204,7 +1239,15 @@ async function buildStockBatchSalePlans(
                 remaining = roundQuantity(remaining - allocatedQuantity)
             }
             if (remaining - state.regularRemainingQuantity > QUANTITY_EPSILON) {
-                throw new Error('Insufficient regular stock in source storage')
+                throw new SelectedRegularStockInsufficientError({
+                    requestId: request.requestId,
+                    productId: request.productId,
+                    storageId: request.storageId,
+                    productName: request.productName,
+                    unitLabel: request.unitLabel,
+                    requiredQuantity: remaining,
+                    availableQuantity: state.regularRemainingQuantity
+                })
             }
             regularQuantity = remaining
         } else {
@@ -1249,7 +1292,15 @@ async function buildStockBatchSalePlans(
 
             regularQuantity = roundQuantity(request.quantity - selectedQuantity)
             if (regularQuantity - state.regularRemainingQuantity > QUANTITY_EPSILON) {
-                throw new Error('Insufficient regular stock in source storage')
+                throw new SelectedRegularStockInsufficientError({
+                    requestId: request.requestId,
+                    productId: request.productId,
+                    storageId: request.storageId,
+                    productName: request.productName,
+                    unitLabel: request.unitLabel,
+                    requiredQuantity: regularQuantity,
+                    availableQuantity: state.regularRemainingQuantity
+                })
             }
         }
 

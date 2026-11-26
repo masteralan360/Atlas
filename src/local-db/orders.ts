@@ -1503,9 +1503,12 @@ async function deductInventoryForSalesOrder(
         version: authoritativePositions.get(buildInventoryReservationKey(productId, storageId))?.version ?? 0
     }))
     const salePlans = await getStockBatchSalePlansForWorkspace(order.workspaceId, physicalItems.map(({ item }) => ({
+        requestId: item.id,
         productId: item.productId,
         storageId: resolveSalesOrderItemStorageId(order, item) as string,
         quantity: getOrderLineInventoryQuantity(item),
+        productName: item.productName,
+        unitLabel: item.baseUnitNameSnapshot || item.baseUnitCode || item.unit || undefined,
         selectedBatchAllocations: item.batchAllocations?.map((allocation) => ({
             batchId: allocation.batchId,
             quantity: allocation.quantity

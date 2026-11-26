@@ -1,8 +1,13 @@
 import { normalizeStockReservationError } from './stockReservationConflict'
+import i18n from '@/i18n/config'
 
 type OrderErrorTranslator = (key: string, options?: Record<string, unknown>) => string
 
 const ORDER_ERROR_TRANSLATIONS: Record<string, { key: string; fallback: string }> = {
+    'One or more selected batches are no longer available': {
+        key: 'orders.form.errors.selectedBatchesUnavailable',
+        fallback: 'Some batches reserved on this order are no longer available. Edit the order, choose an available batch or regular stock for each affected item, save your changes, then try completing it again.'
+    },
     return_request_identity_mismatch: {
         key: 'orders.form.errors.returnRequestIdentityMismatch',
         fallback: 'This return request changed. Refresh the order before trying again.'
@@ -120,6 +125,26 @@ const ORDER_ERROR_TRANSLATIONS: Record<string, { key: string; fallback: string }
 export function getLocalizedOrderError(error: unknown, t: OrderErrorTranslator, fallback = 'Action failed') {
     const reservationError = normalizeStockReservationError(error)
     if (reservationError) return reservationError.message
+    if (error instanceof Error && (error as Error & { code?: string }).code === 'insufficient_regular_stock') {
+        const stockError = error as Error & {
+            productName?: string
+            unitLabel?: string
+            requiredQuantity?: number
+            availableQuantity?: number
+        }
+        const formatQuantity = (quantity: number | undefined) => {
+            const formatted = new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 6 })
+                .format(Number.isFinite(quantity) ? quantity as number : 0)
+            const unit = stockError.unitLabel?.trim()
+            return unit ? `${formatted} ${t(`products.units.${unit}`, { defaultValue: unit })}` : formatted
+        }
+        return t('orders.form.errors.selectedRegularStockInsufficient', {
+            productName: stockError.productName || t('products.title', { defaultValue: 'product' }),
+            available: formatQuantity(stockError.availableQuantity),
+            required: formatQuantity(stockError.requiredQuantity),
+            defaultValue: 'Regular stock for {{productName}} has {{available}} available; {{required}} is required. Edit the order and select an available batch or reduce the quantity.'
+        })
+    }
     const message = error instanceof Error
         ? error.message
         : typeof error === 'string'

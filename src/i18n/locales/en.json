@@ -4728,6 +4728,8 @@
         "batchNotAvailable": "The selected batch for {{productName}} is no longer available.",
         "batchQuantityExceeded": "The selected source does not have enough stock for {{productName}}.",
         "selectedBatchInsufficient": "Line {{lineNumber}}: {{sourceName}} for {{productName}} has {{available}} available; {{required}} is required. Choose another source or reduce the quantity.",
+        "selectedBatchesUnavailable": "Some batches reserved on this order are no longer available. Edit the order, choose an available batch or regular stock for each affected item, save your changes, then try completing it again.",
+        "selectedRegularStockInsufficient": "Regular stock for {{productName}} has {{available}} available; {{required}} is required. Edit the order and select an available batch or reduce the quantity.",
         "non_financed_order_must_be_paid": "This order must be paid in full before it can be reserved. To reserve it with an outstanding balance, select Loans or Installments as the payment method.",
         "salesOrderReturnNotAllowed": "You do not have permission to return this sales order.",
         "firstInstallmentDueDateRequired": "Select the first installment due date.",
