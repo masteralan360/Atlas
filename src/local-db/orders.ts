@@ -540,6 +540,8 @@ type SyncUpsertOptions = {
     skipOrderPaymentReferenceSync?: boolean
     /** Fields intentionally kept server-authoritative during narrow updates. */
     omitFields?: readonly string[]
+    /** Avoid returning immutable order lines when the local snapshot is already acknowledged. */
+    includeRemoteOrderItems?: boolean
     /** Optional trace propagated only for a user-initiated sales order operation. */
     trace?: CrudTraceHandle
 }
@@ -598,7 +600,9 @@ async function syncUpsertEntities(
 
         const shouldReceiveOrderNumber = tableName === 'sales_orders' || tableName === 'purchase_orders'
         const request = async () => shouldReceiveOrderNumber
-            ? runMutation(`${tableName}.sync`, () => client.from(tableName).upsert(payload).select('id, order_number, items'))
+            ? runMutation(`${tableName}.sync`, () => client.from(tableName).upsert(payload).select(
+                options.includeRemoteOrderItems === false ? 'id, order_number' : 'id, order_number, items'
+            ))
             : runMutation(`${tableName}.sync`, () => client.from(tableName).upsert(payload))
         const result = await measureSalesOrderStage(
             options.trace,
@@ -631,7 +635,7 @@ async function syncUpsertEntities(
             if (typeof remoteOrder.id === 'string' && typeof remoteOrder.order_number === 'string') {
                 orderNumbers.set(remoteOrder.id, remoteOrder.order_number)
             }
-            if (typeof remoteOrder.id === 'string' && Array.isArray(remoteOrder.items)) {
+            if (options.includeRemoteOrderItems !== false && typeof remoteOrder.id === 'string' && Array.isArray(remoteOrder.items)) {
                 orderItems.set(remoteOrder.id, remoteOrder.items)
             }
         }
@@ -3174,25 +3178,51 @@ export function useWorkspaceOrderInstallments(workspaceId: string | undefined) {
     return installments ?? []
 }
 
+function hasSameRebuiltOrderInstallmentState(existing: OrderInstallment, rebuilt: OrderInstallment) {
+    return existing.orderId === rebuilt.orderId
+        && existing.orderType === rebuilt.orderType
+        && existing.installmentNo === rebuilt.installmentNo
+        && existing.dueDate === rebuilt.dueDate
+        && Math.abs(Number(existing.plannedAmount) - Number(rebuilt.plannedAmount)) <= ORDER_AMOUNT_EPSILON
+        && Math.abs(Number(existing.paidAmount) - Number(rebuilt.paidAmount)) <= ORDER_AMOUNT_EPSILON
+        && Math.abs(Number(existing.balanceAmount) - Number(rebuilt.balanceAmount)) <= ORDER_AMOUNT_EPSILON
+        && existing.status === rebuilt.status
+        && (existing.paidAt ?? null) === (rebuilt.paidAt ?? null)
+}
+
 export async function rebuildOrderPaymentState(
     orderType: OrderType,
     orderId: string,
     options: {
         throwOnOrderSyncError?: boolean
+        /** Customer payment state does not affect commission eligibility. */
         skipCommissionReconcile?: boolean
         deferOrderSync?: boolean
         preserveRemoteItemSnapshots?: boolean
+        trace?: CrudTraceHandle
     } = {}
 ) {
     const orderTable = orderType === 'sales' ? db.sales_orders : db.purchase_orders
     const sourceType = orderType === 'sales' ? 'sales_order' : 'purchase_order'
-    const order = await orderTable.get(orderId) as SalesOrder | PurchaseOrder | undefined
+    const order = await measureSalesOrderStage(
+        options.trace,
+        'crudDebugger.stages.salesOrderLocalRead',
+        'data',
+        () => orderTable.get(orderId) as Promise<SalesOrder | PurchaseOrder | undefined>,
+        'crudDebugger.details.dexiePersistence'
+    )
     if (!order || order.isDeleted) {
         throw new Error('Order not found')
     }
 
     const now = new Date().toISOString()
-    const activePayments = await listActiveOrderPayments(order.workspaceId, sourceType, order.id)
+    const activePayments = await measureSalesOrderStage(
+        options.trace,
+        'crudDebugger.stages.orderPaymentHistory',
+        'data',
+        () => listActiveOrderPayments(order.workspaceId, sourceType, order.id),
+        'crudDebugger.details.orderPaymentHistoryBoundary'
+    )
     const paidAmount = roundOrderAmount(
         activePayments.reduce((sum, payment) => sum + payment.amount, 0),
         order.currency
@@ -3210,11 +3240,17 @@ export async function rebuildOrderPaymentState(
             ? 'partial'
             : 'unpaid'
     const latestPayment = activePayments.at(-1)
-    const installmentRows = await db.order_installments
-        .where('orderId')
-        .equals(order.id)
-        .and((item) => !item.isDeleted)
-        .sortBy('installmentNo')
+    const installmentRows = await measureSalesOrderStage(
+        options.trace,
+        'crudDebugger.stages.orderPaymentInstallmentRead',
+        'data',
+        () => db.order_installments
+            .where('orderId')
+            .equals(order.id)
+            .and((item) => !item.isDeleted)
+            .sortBy('installmentNo'),
+        'crudDebugger.details.dexiePersistence'
+    )
     const allocatablePayments = activePayments
         .filter((payment) => payment.metadata?.isDownPayment !== true)
         .map((payment) => ({
@@ -3223,18 +3259,32 @@ export async function rebuildOrderPaymentState(
             paidAt: payment.paidAt,
             targetInstallmentId: payment.sourceSubrecordId || null
         }))
-    const rebuiltInstallments = rebuildOrderInstallmentsFromPayments(
+    const rebuiltInstallmentRows = rebuildOrderInstallmentsFromPayments(
         installmentRows,
         allocatablePayments,
         order.currency,
         now
-    ).map((item) => ({
-        ...item,
-        updatedAt: now,
-        version: item.version + 1,
-        ...getSyncMetadata(order.workspaceId, now)
-    }))
-    const nextDueDate = rebuiltInstallments.find((item) => item.balanceAmount > 0)?.dueDate || null
+    )
+    const existingInstallmentsById = new Map(installmentRows.map((item) => [item.id, item]))
+    const installmentsToPersist: OrderInstallment[] = []
+    const installmentsToSync: OrderInstallment[] = []
+    for (const rebuilt of rebuiltInstallmentRows) {
+        const existing = existingInstallmentsById.get(rebuilt.id)
+        const hasSameState = existing ? hasSameRebuiltOrderInstallmentState(existing, rebuilt) : false
+        if (hasSameState && existing?.syncStatus === 'synced') {
+            continue
+        }
+
+        const updatedInstallment = {
+            ...rebuilt,
+            updatedAt: now,
+            version: rebuilt.version + 1,
+            ...getSyncMetadata(order.workspaceId, now)
+        }
+        installmentsToPersist.push(updatedInstallment)
+        installmentsToSync.push(updatedInstallment)
+    }
+    const nextDueDate = rebuiltInstallmentRows.find((item) => item.balanceAmount > 0)?.dueDate || null
     const hasRemoteOrderSnapshot = options.preserveRemoteItemSnapshots
         ?? (order.syncStatus === 'synced' || activePayments.some((payment) => payment.syncStatus === 'synced'))
     const preserveRemoteItemSnapshots = order.status !== 'draft' && hasRemoteOrderSnapshot
@@ -3268,57 +3318,93 @@ export async function rebuildOrderPaymentState(
         ...getSyncMetadata(order.workspaceId, now)
     } as SalesOrder | PurchaseOrder
 
-    await db.transaction('rw', [orderTable, db.order_installments], async () => {
-        await orderTable.put(updated as SalesOrder & PurchaseOrder)
-        if (rebuiltInstallments.length > 0) {
-            await db.order_installments.bulkPut(rebuiltInstallments)
+    await measureSalesOrderStage(options.trace, 'crudDebugger.stages.salesOrderLocalWrite', 'persistence', async () => {
+        if (installmentsToPersist.length > 0) {
+            await db.transaction('rw', [orderTable, db.order_installments], async () => {
+                await orderTable.put(updated as SalesOrder & PurchaseOrder)
+                await db.order_installments.bulkPut(installmentsToPersist)
+            })
+            return
         }
-    })
 
-    await Promise.all([
-        // A return must persist its audit rows before the order can become
-        // fully returned on the server; its INSERT policy checks the old state.
-        ...(options.deferOrderSync ? [] : [syncUpsertEntities(
-            orderType === 'sales' ? 'sales_orders' : 'purchase_orders',
-            [updated as unknown as Record<string, unknown> & { id: string; version: number }],
-            order.workspaceId,
-            {
-                throwOnNonRetriableError: options.throwOnOrderSyncError,
-                // A synced order past Draft has immutable lines. Payment-state
-                // writes should keep those server snapshots; unsynced orders
-                // still need their pending item payload.
-                ...(preserveRemoteItemSnapshots ? { omitFields: ['items'] } : {})
-            }
-        )]),
-        syncUpsertEntities(
+        await orderTable.put(updated as SalesOrder & PurchaseOrder)
+    }, 'crudDebugger.details.dexiePersistence')
+
+    const syncTasks: Array<Promise<unknown>> = []
+    if (!options.deferOrderSync) {
+        syncTasks.push(Promise.resolve(measureSalesOrderStage(
+            options.trace,
+            'crudDebugger.stages.orderPaymentOrderSync',
+            'network',
+            () => syncUpsertEntities(
+                orderType === 'sales' ? 'sales_orders' : 'purchase_orders',
+                [updated as unknown as Record<string, unknown> & { id: string; version: number }],
+                order.workspaceId,
+                {
+                    throwOnNonRetriableError: options.throwOnOrderSyncError,
+                    trace: options.trace,
+                    // A synced order past Draft has immutable lines. Payment-state
+                    // writes keep that server snapshot and only need the assigned number.
+                    ...(preserveRemoteItemSnapshots ? { omitFields: ['items'] } : {}),
+                    includeRemoteOrderItems: !(preserveRemoteItemSnapshots && order.syncStatus === 'synced')
+                }
+            ),
+            'crudDebugger.details.salesOrderRemoteRoundTrip'
+        )))
+    }
+    syncTasks.push(Promise.resolve(measureSalesOrderStage(
+        options.trace,
+        'crudDebugger.stages.orderPaymentInstallmentSync',
+        'network',
+        () => syncUpsertEntities(
             'order_installments',
-            rebuiltInstallments as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
-            order.workspaceId
-        )
-    ])
+            installmentsToSync as unknown as Array<Record<string, unknown> & { id: string; version: number }>,
+            order.workspaceId,
+            { trace: options.trace }
+        ),
+        'crudDebugger.details.salesOrderRemoteRoundTrip'
+    )))
+    await Promise.all(syncTasks)
 
     if (!options.deferOrderSync) invalidateOrdersList(order.workspaceId, orderType)
 
     if (orderType === 'sales') {
         const salesOrder = updated as SalesOrder
         if (!options.skipCommissionReconcile) {
-            await reconcileSalesOrderCommissionBestEffort(
-                order.workspaceId,
-                salesOrder.id,
-                latestPayment?.createdBy ?? null
+            await measureSalesOrderStage(
+                options.trace,
+                'crudDebugger.stages.orderPaymentCommission',
+                'data',
+                () => reconcileSalesOrderCommissionBestEffort(
+                    order.workspaceId,
+                    salesOrder.id,
+                    latestPayment?.createdBy ?? null
+                )
             )
         }
-        await recalculateCustomerAndPartnerSummaries(
-            order.workspaceId,
-            salesOrder.customerId,
-            salesOrder.businessPartnerId
+        await measureSalesOrderStage(
+            options.trace,
+            'crudDebugger.stages.salesOrderSummary',
+            'response',
+            () => recalculateCustomerAndPartnerSummaries(
+                order.workspaceId,
+                salesOrder.customerId,
+                salesOrder.businessPartnerId
+            ),
+            'crudDebugger.details.salesOrderSummaryBoundary'
         )
     } else {
         const purchaseOrder = updated as PurchaseOrder
-        await recalculateSupplierAndPartnerSummaries(
-            order.workspaceId,
-            purchaseOrder.supplierId,
-            purchaseOrder.businessPartnerId
+        await measureSalesOrderStage(
+            options.trace,
+            'crudDebugger.stages.salesOrderSummary',
+            'response',
+            () => recalculateSupplierAndPartnerSummaries(
+                order.workspaceId,
+                purchaseOrder.supplierId,
+                purchaseOrder.businessPartnerId
+            ),
+            'crudDebugger.details.salesOrderSummaryBoundary'
         )
     }
 
@@ -3402,7 +3488,10 @@ async function recordOrderPaymentInternal(
             trace,
             'crudDebugger.stages.orderPaymentFinalize',
             'response',
-            () => rebuildOrderPaymentState(input.orderType, order.id),
+            () => rebuildOrderPaymentState(input.orderType, order.id, {
+                skipCommissionReconcile: true,
+                trace
+            }),
             'crudDebugger.details.orderPaymentFinalizeBoundary'
         )
         return { order: updatedOrder, transaction: repairedPayment }
@@ -3423,7 +3512,10 @@ async function recordOrderPaymentInternal(
             'crudDebugger.stages.orderPaymentFinalize',
             'response',
             async () => {
-                const updatedOrder = await rebuildOrderPaymentState(input.orderType, order.id)
+                const updatedOrder = await rebuildOrderPaymentState(input.orderType, order.id, {
+                    skipCommissionReconcile: true,
+                    trace
+                })
                 const latestPayment = activePayments.at(-1)
                 if (!latestPayment) {
                     throw new Error('Payment amount cannot exceed the remaining balance')
@@ -3489,7 +3581,9 @@ async function recordOrderPaymentInternal(
             'response',
             () => rebuildOrderPaymentState(input.orderType, order.id, {
                 throwOnOrderSyncError: true,
-                preserveRemoteItemSnapshots: transaction.syncStatus === 'synced'
+                preserveRemoteItemSnapshots: transaction.syncStatus === 'synced',
+                skipCommissionReconcile: true,
+                trace
             }),
             'crudDebugger.details.orderPaymentFinalizeBoundary'
         )
