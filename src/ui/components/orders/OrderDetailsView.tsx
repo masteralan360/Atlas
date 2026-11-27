@@ -350,6 +350,7 @@ export function OrderDetailsView({ workspaceId, orderId }: { workspaceId: string
     }, [workspaceContacts])
     const [viewMode, setViewMode] = useState<'table' | 'grid'>(readViewMode)
     const [auditOpen, setAuditOpen] = useState(false)
+    const [previousAuditRun, setPreviousAuditRun] = useState<{ auditKey: string; result: IntegrityAuditResult } | null>(null)
     const [deleteOpen, setDeleteOpen] = useState(false)
     const [isDeleting, setIsDeleting] = useState(false)
 const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(null)
@@ -399,6 +400,8 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     const auditMode = getWorkspaceDataMode(workspaceId)
     const orderAuditEligible = resolved?.kind === 'sales'
         || (resolved?.kind === 'purchase' && isPurchaseOrderIntegrityAuditEligible(resolved.order))
+    const orderIntegrityAuditKey = `${workspaceId}:${orderId}:${auditMode}`
+    useEffect(() => { setPreviousAuditRun(null) }, [orderIntegrityAuditKey])
     const runOrderIntegrityAudit = useCallback(
         async (): Promise<IntegrityAuditResult> => resolved?.kind === 'sales'
             ? runSalesOrderIntegrityAudit(workspaceId, orderId, auditMode)
@@ -407,10 +410,16 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
     )
     const orderIntegrityAudit = useDeferredTransactionIntegrityAudit({
         enabled: orderAuditEligible && orderLookupStatus === 'found' && remoteLookupStatus !== 'loading',
-        auditKey: `${workspaceId}:${orderId}:${auditMode}`,
+        auditKey: orderIntegrityAuditKey,
         runAudit: runOrderIntegrityAudit,
         getSeverity: result => getTransactionIntegritySeverity(result.summary)
     })
+    const runOrderIntegrityAuditAgain = () => {
+        setPreviousAuditRun(orderIntegrityAudit.result
+            ? { auditKey: orderIntegrityAuditKey, result: orderIntegrityAudit.result }
+            : null)
+        void orderIntegrityAudit.runNow()
+    }
     const retryOrderLookup = () => {
         setLookupRetryVersion((version) => version + 1)
         if (revalidateCompletion) void remoteLookup.refetch()
@@ -1609,8 +1618,8 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                             <SalesOrderAuditBreadcrumbAction
                                 phase={orderIntegrityAudit.phase}
                                 onClick={() => {
-                                    void orderIntegrityAudit.runNow()
                                     setAuditOpen(true)
+                                    if (!orderIntegrityAudit.result) void orderIntegrityAudit.runNow()
                                 }}
                             />
                         )}
@@ -2851,6 +2860,8 @@ const [activeWorkflowAction, setActiveWorkflowAction] = useState<string | null>(
                 orderId={order.id}
                 orderType={isSales ? 'sales' : 'purchase'}
                 result={orderIntegrityAudit.result} errorKey={orderIntegrityAudit.errorKey}
+                previousResult={previousAuditRun?.auditKey === orderIntegrityAuditKey ? previousAuditRun.result : null}
+                onRunAgain={runOrderIntegrityAuditAgain}
                 loading={orderIntegrityAudit.phase === 'scheduled' || orderIntegrityAudit.phase === 'running'} />
             <PrintFlow
                 isOpen={showPrintPreview && !order.isArchived}

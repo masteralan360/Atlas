@@ -4,8 +4,6 @@ PWA Faster
 
 simplify sale details for coach
 
-Record Collection speed
-
 sidebar redesign mobile view
 
 Post Service Notification
@@ -32,8 +30,6 @@ Ai Assistance Payment maker with Transaction send to admin dashboard
 User Plan Control in Billing
 
 #
-
-Maintenence Mode
 
 prompt manager with admin, staff options
 

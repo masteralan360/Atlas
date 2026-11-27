@@ -25,6 +25,8 @@ export interface ModuleWideIntegrityAuditAdapter<TTransaction, TAuditResult> {
   getTransactionReference(transaction: TTransaction): string
   auditTransaction(transaction: TTransaction): Promise<TAuditResult>
   getSummary(result: TAuditResult): IntegrityAuditCounts
+  beginAudit?(): void
+  endAudit?(): void
 }
 
 export interface ModuleWideIntegrityAuditProgress {
@@ -81,7 +83,12 @@ export async function runModuleWideIntegrityAudit<TTransaction, TAuditResult>(
     }
   }
 
-  await Promise.all(Array.from({ length: workerCount }, () => runWorker()))
-  if (hasError) throw firstError
-  return rows.filter((row): row is ModuleWideIntegrityAuditRow => row !== undefined)
+  adapter.beginAudit?.()
+  try {
+    await Promise.all(Array.from({ length: workerCount }, () => runWorker()))
+    if (hasError) throw firstError
+    return rows.filter((row): row is ModuleWideIntegrityAuditRow => row !== undefined)
+  } finally {
+    adapter.endAudit?.()
+  }
 }

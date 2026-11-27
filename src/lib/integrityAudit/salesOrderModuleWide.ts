@@ -3,6 +3,7 @@ import type { SalesOrder } from '@/local-db/models'
 import { runSalesOrderIntegrityAudit } from './salesOrderAudit'
 import type { AuditCategory, IntegrityAuditResult } from './types'
 import type { ModuleWideIntegrityAuditAdapter, ModuleWideIntegrityAuditGroupSummary } from './moduleWide'
+import type { SalesOrderTransactionGraphReadCache } from './salesOrderGraph'
 
 function summarizeGroups(result: IntegrityAuditResult): ModuleWideIntegrityAuditGroupSummary[] {
   const groups = new Map<AuditCategory, { warnings: number; failed: number }>()
@@ -22,10 +23,15 @@ export function createSalesOrderModuleWideIntegrityAuditAdapter(
   workspaceId: string,
   mode: WorkspaceDataMode
 ): ModuleWideIntegrityAuditAdapter<SalesOrder, IntegrityAuditResult> {
+  let readCache: SalesOrderTransactionGraphReadCache | null = null
   return {
     getTransactionId: order => order.id,
     getTransactionReference: order => order.orderNumber,
-    auditTransaction: order => runSalesOrderIntegrityAudit(workspaceId, order.id, mode),
-    getSummary: result => ({ ...result.summary, groups: summarizeGroups(result) })
+    auditTransaction: order => readCache
+      ? runSalesOrderIntegrityAudit(workspaceId, order.id, mode, readCache)
+      : runSalesOrderIntegrityAudit(workspaceId, order.id, mode),
+    getSummary: result => ({ ...result.summary, groups: summarizeGroups(result) }),
+    beginAudit: () => { readCache = new Map() },
+    endAudit: () => { readCache = null }
   }
 }

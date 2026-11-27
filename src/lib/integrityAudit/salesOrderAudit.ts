@@ -3,7 +3,7 @@ import { getOrderAdjustmentNetAmount, isPostReturnOrderAdjustment, normalizeOrde
 import { ORDER_AMOUNT_EPSILON, roundOrderValue } from '@/lib/orderPrecision'
 import { roundQuantity } from '@/lib/quantity'
 import type { PaymentTransaction } from '@/local-db/models'
-import type { SalesOrderTransactionGraph } from './salesOrderGraph'
+import type { SalesOrderTransactionGraph, SalesOrderTransactionGraphReadCache } from './salesOrderGraph'
 import { IntegrityAuditReadError, type AuditCategory, type AuditStatus, type IntegrityAuditCheck, type IntegrityAuditResult } from './types'
 
 export { IntegrityAuditReadError } from './types'
@@ -409,13 +409,16 @@ function summarize(checks: IntegrityAuditCheck[]): IntegrityAuditResult['summary
 const statusOf = (checks: IntegrityAuditCheck[]): AuditStatus => checks.some(row => row.status === 'FAIL') ? 'FAIL' : checks.some(row => row.status === 'WARNING') ? 'WARNING' : 'PASS'
 
 export async function runSalesOrderIntegrityAudit(
-  workspaceId: string, orderId: string, mode: 'cloud' | 'hybrid' | 'local' | 'demo'
+  workspaceId: string, orderId: string, mode: 'cloud' | 'hybrid' | 'local' | 'demo', readCache?: SalesOrderTransactionGraphReadCache
 ): Promise<IntegrityAuditResult<SalesOrderTransactionGraph>> {
   const { resolveSalesOrderTransactionGraph } = await import('./salesOrderGraph')
   const sourceOfTruth = mode === 'local' || mode === 'demo' ? 'sqlite' : 'supabase'
+  const resolveGraph = (source: 'supabase' | 'sqlite') => readCache
+    ? resolveSalesOrderTransactionGraph(workspaceId, orderId, source, readCache)
+    : resolveSalesOrderTransactionGraph(workspaceId, orderId, source)
   let actual: SalesOrderTransactionGraph
   try {
-    actual = await resolveSalesOrderTransactionGraph(workspaceId, orderId, sourceOfTruth)
+    actual = await resolveGraph(sourceOfTruth)
   } catch (error) {
     throw new IntegrityAuditReadError(sourceOfTruth, error)
   }
@@ -424,7 +427,7 @@ export async function runSalesOrderIntegrityAudit(
   let mirrorActual: SalesOrderTransactionGraph | null = null
   if (mode === 'hybrid') {
     try {
-      const mirror = await resolveSalesOrderTransactionGraph(workspaceId, orderId, 'sqlite')
+      const mirror = await resolveGraph('sqlite')
       mirrorActual = mirror
       const entityKeys: Array<keyof SalesOrderTransactionGraph> = [
         'order', 'inventoryMovements', 'payments', 'accountMovements', 'paymentAccounts', 'loans', 'loanPayments',

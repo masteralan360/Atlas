@@ -28,6 +28,9 @@ export interface SalesOrderTransactionGraph {
   productCommissions: AgentProductCommissionEntry[]
 }
 
+/** Request cache scoped to one module-wide audit run; never retained between reruns. */
+export type SalesOrderTransactionGraphReadCache = Map<string, Promise<unknown[]>>
+
 type Row = Record<string, unknown>
 
 /** No cache hydration, mutation or sync is allowed in this resolver. */
@@ -48,28 +51,45 @@ async function readCloud(table: string, workspaceId: string, column: string, val
   }
 }
 
-async function readSqliteWorkspace(workspaceId: string): Promise<Map<string, Row[]>> {
-  const connection = await getExistingLocalModeSqliteConnectionForAudit()
-  if (!connection) throw new Error('The local SQLite database is unavailable for this audit.')
-  const rows = await connection.select<Array<{ entity_type: string; payload: string }>>(
-    'SELECT entity_type, payload FROM local_entities WHERE workspace_id = $1', [workspaceId]
-  )
-  const result = new Map<string, Row[]>()
-  for (const row of rows) {
-    const bucket = result.get(row.entity_type) ?? []
-    bucket.push(JSON.parse(row.payload) as Row)
-    result.set(row.entity_type, bucket)
+async function readSqliteRows(
+  connection: NonNullable<Awaited<ReturnType<typeof getExistingLocalModeSqliteConnectionForAudit>>>,
+  workspaceId: string,
+  table: string,
+  column: string,
+  values: string[]
+): Promise<Row[]> {
+  if (!values.length) return []
+  const rows: Row[] = []
+  const safeColumn = /^[a-zA-Z][a-zA-Z0-9]*$/.test(column) ? column : 'id'
+  const expression = safeColumn === 'id' ? 'entity_id' : `json_extract(payload, '$.${safeColumn}')`
+  for (let offset = 0; offset < values.length; offset += 400) {
+    const batch = values.slice(offset, offset + 400)
+    const placeholders = batch.map(() => '?').join(', ')
+    const matches = await connection.select<Array<{ payload: string }>>(
+      `SELECT payload FROM local_entities WHERE entity_type = ? AND workspace_id = ? AND ${expression} IN (${placeholders})`,
+      [table, workspaceId, ...batch]
+    )
+    rows.push(...matches.map(row => JSON.parse(row.payload) as Row))
   }
-  return result
+  return rows
 }
 
 export async function resolveSalesOrderTransactionGraph(
-  workspaceId: string, orderId: string, source: 'supabase' | 'sqlite'
+  workspaceId: string, orderId: string, source: 'supabase' | 'sqlite', readCache?: SalesOrderTransactionGraphReadCache
 ): Promise<SalesOrderTransactionGraph> {
-  const local = source === 'sqlite' ? await readSqliteWorkspace(workspaceId) : null
+  const local = source === 'sqlite' ? await getExistingLocalModeSqliteConnectionForAudit() : null
+  if (source === 'sqlite' && !local) throw new Error('The local SQLite database is unavailable for this audit.')
   const read = async <T>(table: string, column: string, values: string[]): Promise<T[]> => {
-    if (local) return (local.get(table) ?? []).filter(row => values.includes(String(row[column] ?? ''))) as T[]
-    return readCloud(table, workspaceId, column.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`), values) as Promise<T[]>
+    const loadRows = () => local
+      ? readSqliteRows(local, workspaceId, table, column, values)
+      : readCloud(table, workspaceId, column.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`), values)
+    if (!readCache) return loadRows() as Promise<T[]>
+    const key = JSON.stringify([source, workspaceId, table, column, [...values].sort()])
+    const cached = readCache.get(key)
+    if (cached) return cached as Promise<T[]>
+    const request = loadRows()
+    readCache.set(key, request)
+    return request as Promise<T[]>
   }
   const order = (await read<SalesOrder>('sales_orders', 'id', [orderId]))[0] ?? null
   const returns = await read<OrderReturn>('order_returns', 'orderId', [orderId])

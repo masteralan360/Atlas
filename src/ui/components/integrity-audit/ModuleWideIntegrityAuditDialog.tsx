@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AlertTriangle, CheckCircle2, ClipboardCheck, Download, Loader2, X, XCircle } from 'lucide-react'
+import { AlertTriangle, ArrowUpRight, CheckCircle2, ClipboardCheck, Download, Loader2, X, XCircle } from 'lucide-react'
 import {
   runModuleWideIntegrityAudit,
   type ModuleWideIntegrityAuditAdapter,
@@ -33,7 +33,10 @@ function StatusIcon({ status }: { status: ModuleWideIntegrityAuditRow['status'] 
   return <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
 }
 
-export function ModuleWideIntegrityAuditResults({ rows }: { rows: readonly ModuleWideIntegrityAuditRow[] }) {
+export function ModuleWideIntegrityAuditResults({ rows, onOpenTransaction }: {
+  rows: readonly ModuleWideIntegrityAuditRow[]
+  onOpenTransaction?: (transactionId: string) => void
+}) {
   const { t } = useTranslation()
   return <div role="list" aria-label={t('moduleWideIntegrityAudit.results')} className="space-y-2">
     {rows.map(row => (
@@ -55,6 +58,9 @@ export function ModuleWideIntegrityAuditResults({ rows }: { rows: readonly Modul
           </div>
           <GroupIssueIcons groups={row.groups ?? []} />
         </div>
+        {onOpenTransaction && <Button type="button" variant="outline" size="sm" onClick={() => onOpenTransaction(row.transactionId)} className="gap-1.5">
+          {t('moduleWideIntegrityAudit.openTransaction')}<ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+        </Button>}
       </div>
     ))}
   </div>
@@ -99,7 +105,8 @@ export function ModuleWideIntegrityAuditDialog<TTransaction, TAuditResult>({
   adapter,
   transactionLabel,
   scopeMessageKey = 'moduleWideIntegrityAudit.scope',
-  emptyMessageKey = 'moduleWideIntegrityAudit.empty'
+  emptyMessageKey = 'moduleWideIntegrityAudit.empty',
+  onOpenTransaction
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -108,8 +115,9 @@ export function ModuleWideIntegrityAuditDialog<TTransaction, TAuditResult>({
   transactionLabel: string
   scopeMessageKey?: string
   emptyMessageKey?: string
+  onOpenTransaction?: (transactionId: string) => void
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [rows, setRows] = useState<ModuleWideIntegrityAuditRow[] | null>(null)
   const [progress, setProgress] = useState<ModuleWideIntegrityAuditProgress | null>(null)
   const [running, setRunning] = useState(false)
@@ -117,6 +125,7 @@ export function ModuleWideIntegrityAuditDialog<TTransaction, TAuditResult>({
   const [cancelled, setCancelled] = useState(false)
   const [errorKey, setErrorKey] = useState<string | null>(null)
   const [exportErrorKey, setExportErrorKey] = useState<string | null>(null)
+  const [resultFilter, setResultFilter] = useState<'issues' | 'all' | 'FAIL' | 'WARNING' | 'PASS'>('issues')
   const controllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -128,6 +137,7 @@ export function ModuleWideIntegrityAuditDialog<TTransaction, TAuditResult>({
     setCancelled(false)
     setErrorKey(null)
     setExportErrorKey(null)
+    setResultFilter('issues')
     return () => controllerRef.current?.abort()
   }, [open])
 
@@ -193,6 +203,12 @@ export function ModuleWideIntegrityAuditDialog<TTransaction, TAuditResult>({
     { type: 'failures', labelKey: 'moduleWideIntegrityAudit.exportFailures' },
     { type: 'warnings-and-failures', labelKey: 'moduleWideIntegrityAudit.exportWarningsAndFailures' }
   ]
+  const resultCounts = (rows ?? []).reduce((counts, row) => {
+    counts[row.status] += 1
+    return counts
+  }, { PASS: 0, WARNING: 0, FAIL: 0 })
+  const visibleRows = (rows ?? []).filter(row => resultFilter === 'all'
+    || (resultFilter === 'issues' ? row.status !== 'PASS' : row.status === resultFilter))
 
   return <AppDialog open={open} onOpenChange={next => { if (!running) onOpenChange(next) }}>
     <AppDialogContent
@@ -256,7 +272,23 @@ export function ModuleWideIntegrityAuditDialog<TTransaction, TAuditResult>({
           })}
         </div>}
 
-        {rows && rows.length > 0 && <ModuleWideIntegrityAuditResults rows={rows} />}
+        {rows && rows.length > 0 && <>
+          <div className="flex flex-wrap gap-2" role="group" aria-label={t('moduleWideIntegrityAudit.filterResults')}>
+            {([
+              ['issues', 'filterIssues', resultCounts.FAIL + resultCounts.WARNING],
+              ['FAIL', 'status.FAIL', resultCounts.FAIL],
+              ['WARNING', 'status.WARNING', resultCounts.WARNING],
+              ['PASS', 'status.PASS', resultCounts.PASS],
+              ['all', 'filterAll', rows.length]
+            ] as const).map(([filter, labelKey, count]) => <Button key={filter} type="button" size="sm"
+              variant={resultFilter === filter ? 'default' : 'outline'} onClick={() => setResultFilter(filter)}>
+              {t(`moduleWideIntegrityAudit.${labelKey}`)} ({count.toLocaleString(i18n.resolvedLanguage || i18n.language)})
+            </Button>)}
+          </div>
+          {visibleRows.length > 0
+            ? <ModuleWideIntegrityAuditResults rows={visibleRows} onOpenTransaction={onOpenTransaction} />
+            : <p className="rounded-lg border border-dashed p-5 text-center text-sm text-muted-foreground">{t('moduleWideIntegrityAudit.noFilteredResults')}</p>}
+        </>}
       </AppDialogBody>
       <AppDialogFooter>
         {running && <Button type="button" variant="outline"

@@ -3491,6 +3491,11 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     transactions={(ordersForAudit || []).filter((order): order is SalesOrder => 'customerName' in order)}
                     adapter={moduleWideAuditAdapter}
                     transactionLabel={t('orders.tabs.sales')}
+                    onOpenTransaction={(transactionId) => {
+                        setModuleWideAuditOpen(false)
+                        setOrdersForAudit(null)
+                        navigate(`/orders/${transactionId}`)
+                    }}
                 />
             )}
             {activeTab === 'purchase' && !isMobile() && (
@@ -3505,6 +3510,11 @@ function OrdersListView({ workspaceId, initialTab = 'sales' }: { workspaceId: st
                     transactionLabel={t('orders.tabs.purchase')}
                     scopeMessageKey="moduleWideIntegrityAudit.purchaseScope"
                     emptyMessageKey="moduleWideIntegrityAudit.purchaseEmpty"
+                    onOpenTransaction={(transactionId) => {
+                        setModuleWideAuditOpen(false)
+                        setOrdersForAudit(null)
+                        navigate(`/orders/${transactionId}`)
+                    }}
                 />
             )}
         </div>
