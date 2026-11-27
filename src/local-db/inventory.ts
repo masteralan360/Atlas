@@ -144,6 +144,7 @@ export interface InventoryPositionHydrationOptions {
      */
     requireAuthoritative?: boolean
     cache?: boolean
+    signal?: AbortSignal
 }
 
 export class InventorySnapshotConflictError extends Error {
@@ -280,7 +281,9 @@ export async function hydrateInventoryProductStoragesFromSupabase(
             .eq('product_id', productId)
             .in('storage_id', normalizedStorageIds)
 
-    const { data: remoteRows, error } = await runSupabaseAction('inventory.position.fetch', () => query)
+    const { data: remoteRows, error } = await runSupabaseAction('inventory.position.fetch', () => query, {
+        signal: options.signal
+    })
     if (error || !remoteRows) {
         if (options.requireAuthoritative) {
             throw new Error(i18n.t('inventory.errors.authoritativeReadFailed'))
@@ -1132,6 +1135,32 @@ export async function getInventoryQuantityForProductStorage(productId: string, s
         .first()
 
     return row?.quantity ?? 0
+}
+
+export async function fetchInventoryQuantityForProductStorage(
+    workspaceId: string,
+    productId: string,
+    storageId: string,
+    signal?: AbortSignal
+) {
+    if (!isOnline(workspaceId)) {
+        throw new Error(i18n.t('inventory.errors.onlineRequired'))
+    }
+
+    const [position] = await hydrateInventoryProductStoragesFromSupabase(workspaceId, productId, [storageId], {
+        requireAuthoritative: true,
+        cache: false,
+        signal
+    })
+
+    if (!position || position.isDeleted) return 0
+
+    const rawQuantity: unknown = position.quantity
+    const quantity = typeof rawQuantity === 'string' && rawQuantity.trim() ? Number(rawQuantity) : rawQuantity
+    if (typeof quantity !== 'number' || !Number.isFinite(quantity)) {
+        throw new Error(i18n.t('inventory.errors.authoritativeReadFailed'))
+    }
+    return quantity
 }
 
 export async function getInventoryRowsForProduct(productId: string) {

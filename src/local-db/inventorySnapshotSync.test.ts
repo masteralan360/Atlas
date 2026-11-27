@@ -79,8 +79,9 @@ import { clearWorkspaceModeSnapshot, writeWorkspaceModeSnapshot } from '@/worksp
 
 import { db } from './database'
 import {
-  getInventoryVersionForProductStorage,
-  hydrateInventoryProductStoragesFromSupabase,
+    fetchInventoryQuantityForProductStorage,
+    getInventoryVersionForProductStorage,
+    hydrateInventoryProductStoragesFromSupabase,
     InventorySnapshotConflictError,
     syncInventoryRowsBestEffort
 } from './inventory'
@@ -612,6 +613,53 @@ describe('authoritative inventory snapshot sync', () => {
             version: 4,
             syncStatus: 'pending'
         })
+    })
+
+    it.each([
+        { dataMode: 'cloud', syncStatus: 'pending', remoteQuantity: 165 },
+        { dataMode: 'hybrid', syncStatus: 'conflict', remoteQuantity: '165.000000' }
+    ] as const)('reads the live quantity in $dataMode with a $syncStatus local row', async ({ dataMode, syncStatus, remoteQuantity }) => {
+        writeWorkspaceModeSnapshot({ workspaceId: WORKSPACE_ID, dataMode })
+        const localPosition = { ...inventoryRow(4), quantity: 172, syncStatus }
+        await db.inventory.put(localPosition)
+        supabaseMock.setQueryResult({
+            data: [{
+                id: INVENTORY_ID,
+                workspace_id: WORKSPACE_ID,
+                product_id: PRODUCT_ID,
+                storage_id: STORAGE_ID,
+                quantity: remoteQuantity,
+                is_deleted: false
+            }],
+            error: null
+        })
+
+        await expect(fetchInventoryQuantityForProductStorage(WORKSPACE_ID, PRODUCT_ID, STORAGE_ID)).resolves.toBe(165)
+        expect(await db.inventory.get(INVENTORY_ID)).toEqual(localPosition)
+        expect(supabaseMock.filters).toEqual([
+            ['workspace_id', WORKSPACE_ID],
+            ['product_id', PRODUCT_ID],
+            ['storage_id', STORAGE_ID]
+        ])
+    })
+
+    it('returns zero only after a successful read for a missing or deleted position', async () => {
+        await db.inventory.put({ ...inventoryRow(4), quantity: 172 })
+        const readQuantity = () => fetchInventoryQuantityForProductStorage(WORKSPACE_ID, PRODUCT_ID, STORAGE_ID)
+
+        await expect(readQuantity()).resolves.toBe(0)
+        supabaseMock.setQueryResult({ data: [{ quantity: 172, is_deleted: true }], error: null })
+        await expect(readQuantity()).resolves.toBe(0)
+
+        supabaseMock.setQueryResult({ data: [{ quantity: null, is_deleted: false }], error: null })
+        await expect(readQuantity()).rejects.toThrow("Couldn't verify the latest stock")
+
+        supabaseMock.setQueryResult({ data: null, error: { message: 'network request failed' } })
+        await expect(readQuantity()).rejects.toThrow("Couldn't verify the latest stock")
+
+        setNetworkStatus(false)
+        await expect(readQuantity()).rejects.toThrow()
+        expect(supabaseMock.from).toHaveBeenCalledTimes(4)
     })
 
     it('honors the server conflict envelope and suppresses an immediate replay', async () => {

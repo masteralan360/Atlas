@@ -1,21 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Package } from "lucide-react";
+import { ArrowDown, ArrowUp, Package, RotateCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
     createStockAdjustment,
+    fetchInventoryQuantityForProductStorage,
     getInventoryQuantityForProductStorage,
     getProductStockSnapshot,
-    hydrateInventoryProductStoragesFromSupabase,
     type Product,
     type StockAdjustmentReason,
     type Storage,
 } from "@/local-db";
+import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { isNonNegativeQuantity, quantitiesEqual, QUANTITY_EPSILON, roundQuantity } from "@/lib/quantity";
 import { cn, formatNumericInput, parseFormattedNumber, sanitizeNumericInput } from "@/lib/utils";
 import { getProductImageDisplayUrl } from "@/lib/productImageStorage";
 import { ProductAutocompleteInput } from "@/ui/components/orders/ProductAutocompleteInput";
 import { ProductsViewModal, ProductsViewModalTrigger } from "@/ui/components/ProductsViewModal";
+import { isLocalWorkspaceMode } from "@/workspace/workspaceMode";
 import { Input } from "@/ui/components/input";
 import {
   Button,
@@ -39,7 +41,7 @@ import {
 type AdjustmentFormState = {
     productId: string;
     storageId: string;
-    quantity: string;
+    quantity: string | null;
     reason: StockAdjustmentReason;
     notes: string;
 };
@@ -47,7 +49,7 @@ type AdjustmentFormState = {
 const emptyAdjustmentForm: AdjustmentFormState = {
     productId: "",
     storageId: "",
-    quantity: "",
+    quantity: null,
     reason: "purchase",
     notes: "",
 };
@@ -108,14 +110,16 @@ export function StockAdjustmentDialog({
 }: StockAdjustmentDialogProps) {
     const { t } = useTranslation();
     const { toast } = useToast();
+    const isOnline = useNetworkStatus();
+    const useRemoteQuantity = isOnline && !isLocalWorkspaceMode(workspaceId);
 
     const reasonOptions = useMemo(() => getAdjustmentReasonOptions(t), [t]);
 
     const [search, setSearch] = useState("");
     const [form, setForm] = useState<AdjustmentFormState>(emptyAdjustmentForm);
     const [isSaving, setIsSaving] = useState(false);
-    const [isLoadingCurrentQuantity, setIsLoadingCurrentQuantity] = useState(false);
-    const [loadedQuantity, setLoadedQuantity] = useState<number | null>(null);
+    const [quantityAttempt, setQuantityAttempt] = useState(0);
+    const [quantityResult, setQuantityResult] = useState<{ key: string; quantity: number | null } | null>(null);
     const [productsViewOpen, setProductsViewOpen] = useState(false);
     const userPickedStorageRef = useRef(false);
     const autoStorageIdRef = useRef<string | null>(null);
@@ -134,12 +138,6 @@ export function StockAdjustmentDialog({
             ),
         [inventory],
     );
-    const inventoryByKeyRef = useRef(inventoryByKey);
-
-    useEffect(() => {
-        inventoryByKeyRef.current = inventoryByKey;
-    }, [inventoryByKey]);
-
     useEffect(() => {
         if (preselectedProductId && open && !form.productId) {
             const product = productsById.get(preselectedProductId);
@@ -200,16 +198,20 @@ export function StockAdjustmentDialog({
         }
 
         autoStorageIdRef.current = desiredStorageId;
-        setForm((current) => ({ ...current, storageId: desiredStorageId }));
+        setForm((current) => ({ ...current, storageId: desiredStorageId, quantity: null }));
     }, [open, form.productId, form.storageId, storageOptions, allowAnyStorage, storages, inventoryByKey]);
 
-    const selectionKey =
-        form.productId && form.storageId
-            ? groupKey(form.productId, form.storageId)
-            : "";
-    const availableQuantity = selectionKey ? loadedQuantity : null;
+    const { productId, storageId } = form;
+    const quantityRequestKey = open && workspaceId && productId && storageId
+        ? JSON.stringify([workspaceId, userId, productId, storageId, useRemoteQuantity, quantityAttempt])
+        : null;
+    const currentQuantityResult = quantityResult?.key === quantityRequestKey ? quantityResult : null;
+    const isLoadingCurrentQuantity = Boolean(quantityRequestKey && !currentQuantityResult);
+    const hasQuantityLoadError = currentQuantityResult?.quantity === null;
+    const availableQuantity = currentQuantityResult?.quantity ?? null;
+    const quantityInput = availableQuantity === null ? "" : (form.quantity ?? String(availableQuantity));
     const targetQuantity =
-        form.quantity === "" ? null : parseFormattedNumber(form.quantity);
+        quantityInput === "" ? null : parseFormattedNumber(quantityInput);
     const quantityDelta =
         availableQuantity === null ||
         targetQuantity === null ||
@@ -234,56 +236,49 @@ export function StockAdjustmentDialog({
                 };
     const isIncrease = quantityDelta !== null && quantityDelta > 0;
 
-    useEffect(() => {
-        if (!open || !selectionKey) {
-            setIsLoadingCurrentQuantity(false);
-            setLoadedQuantity(null);
-            return;
+    let quantityHint: string | undefined;
+    if (!quantityRequestKey) {
+        quantityHint = t("stockAdjustments.dialog.adjustment.selectPrompt");
+    } else if (isLoadingCurrentQuantity) {
+        quantityHint = t("stockAdjustments.dialog.adjustment.loadingCurrent");
+    } else if (!hasQuantityLoadError) {
+        if (quantityDelta === null) {
+            quantityHint = t("stockAdjustments.dialog.adjustment.enterQuantity");
+        } else if (quantitiesEqual(quantityDelta, 0)) {
+            quantityHint = t("stockAdjustments.dialog.adjustment.noChange");
+        } else {
+            quantityHint = t(isIncrease
+                ? "stockAdjustments.dialog.adjustment.increaseBy"
+                : "stockAdjustments.dialog.adjustment.decreaseBy", {
+                delta: formatNumericInput(String(Math.abs(quantityDelta))),
+                available: formatNumericInput(String(availableQuantity)),
+                target: formatNumericInput(String(targetQuantity)),
+            });
         }
+    }
 
-        const [productId, storageId] = [form.productId, form.storageId];
-        let cancelled = false;
+    useEffect(() => {
+        setQuantityResult(null);
+        if (!quantityRequestKey) return;
 
-        setIsLoadingCurrentQuantity(true);
-        setLoadedQuantity(null);
-        setForm((current) => ({ ...current, quantity: "" }));
-
+        const controller = new AbortController();
         void (async () => {
             try {
-                // Fetch the selected position before showing a value. The page-level
-                // inventory fetch can still be in flight immediately after a refresh.
-                await hydrateInventoryProductStoragesFromSupabase(workspaceId, productId, [storageId]);
-                const quantity = await getInventoryQuantityForProductStorage(productId, storageId);
-                if (cancelled) return;
+                const quantity = useRemoteQuantity
+                    ? await fetchInventoryQuantityForProductStorage(workspaceId, productId, storageId, controller.signal)
+                    : await getInventoryQuantityForProductStorage(productId, storageId);
+                if (controller.signal.aborted) return;
 
-                setLoadedQuantity(quantity);
-                setForm((current) => (
-                    current.productId === productId && current.storageId === storageId
-                        ? { ...current, quantity: String(quantity) }
-                        : current
-                ));
+                setQuantityResult({ key: quantityRequestKey, quantity });
             } catch (error) {
+                if (controller.signal.aborted) return;
                 console.warn("[StockAdjustmentDialog] Could not refresh the current inventory position:", error);
-                if (cancelled) return;
-
-                const fallbackQuantity = inventoryByKeyRef.current.get(selectionKey) ?? 0;
-                setLoadedQuantity(fallbackQuantity);
-                setForm((current) => (
-                    current.productId === productId && current.storageId === storageId
-                        ? { ...current, quantity: String(fallbackQuantity) }
-                        : current
-                ));
-            } finally {
-                if (!cancelled) {
-                    setIsLoadingCurrentQuantity(false);
-                }
+                setQuantityResult({ key: quantityRequestKey, quantity: null });
             }
         })();
 
-        return () => {
-            cancelled = true;
-        };
-    }, [open, selectionKey, form.productId, form.storageId, workspaceId]);
+        return () => controller.abort();
+    }, [quantityRequestKey, productId, storageId, useRemoteQuantity, workspaceId]);
 
     const canSave =
         !!form.productId &&
@@ -291,8 +286,7 @@ export function StockAdjustmentDialog({
         targetQuantity !== null &&
         isNonNegativeQuantity(targetQuantity) &&
         quantityDelta !== null &&
-        !quantitiesEqual(quantityDelta, 0) &&
-        !isLoadingCurrentQuantity;
+        !quantitiesEqual(quantityDelta, 0);
     const canOpenProductsView = Boolean(form.storageId) && storages.length > 0;
 
     const resetForm = () => {
@@ -300,23 +294,19 @@ export function StockAdjustmentDialog({
         setSearch("");
         setProductsViewOpen(false);
         setIsSaving(false);
-        setIsLoadingCurrentQuantity(false);
-        setLoadedQuantity(null);
+        setQuantityResult(null);
     };
 
     const handleSave = async () => {
-        if (!workspaceId || availableQuantity === null || targetQuantity === null || !isNonNegativeQuantity(targetQuantity)) return;
-
-        const delta = roundQuantity(targetQuantity - availableQuantity);
-        if (quantitiesEqual(delta, 0)) return;
+        if (isSaving || !canSave || targetQuantity === null || quantityDelta === null) return;
 
         setIsSaving(true);
         try {
             await createStockAdjustment(workspaceId, {
                 productId: form.productId,
                 storageId: form.storageId,
-                adjustmentType: delta > 0 ? "increase" : "decrease",
-                quantity: Math.abs(delta),
+                adjustmentType: quantityDelta > 0 ? "increase" : "decrease",
+                quantity: Math.abs(quantityDelta),
                 targetQuantity,
                 reason: form.reason,
                 notes: form.notes,
@@ -353,15 +343,15 @@ export function StockAdjustmentDialog({
         void handleSave();
     };
 
+    const handleOpenChange = (nextOpen: boolean) => {
+        if (isSaving) return;
+        onOpenChange(nextOpen);
+        if (!nextOpen) resetForm();
+    };
+
     return (
-        <Dialog
-            open={open}
-            onOpenChange={(open) => {
-                onOpenChange(open);
-                if (!open) resetForm();
-            }}
-        >
-            <DialogContent layout="structured" className="max-w-3xl">
+        <Dialog open={open} onOpenChange={handleOpenChange}>
+            <DialogContent layout="structured" className="max-w-3xl" showCloseButton={!isSaving}>
                 <DialogHeader layout="structured">
                     <DialogTitle>{t("stockAdjustments.dialog.adjustment.title", "New Stock Adjustment")}</DialogTitle>
                     <DialogDescription>
@@ -410,10 +400,10 @@ export function StockAdjustmentDialog({
                                                 value={search}
                                                 onChange={(value) => {
                                                     setSearch(value);
-                                                    setForm((current) => ({ ...current, productId: "" }));
+                                                    setForm((current) => ({ ...current, productId: "", quantity: null }));
                                                 }}
                                                 onSelectProduct={(product) => {
-                                                    setForm((current) => ({ ...current, productId: product.id }));
+                                                    setForm((current) => ({ ...current, productId: product.id, quantity: null }));
                                                     setSearch(product.name);
                                                 }}
 
@@ -429,7 +419,7 @@ export function StockAdjustmentDialog({
                                         value={form.storageId}
                                         onValueChange={(value) => {
                                             userPickedStorageRef.current = true;
-                                            setForm((current) => ({ ...current, storageId: value }));
+                                            setForm((current) => ({ ...current, storageId: value, quantity: null }));
                                         }}
                                     >
                                         <SelectTrigger className="rounded-xl">
@@ -463,8 +453,8 @@ export function StockAdjustmentDialog({
                                             type="text"
                                             inputMode="decimal"
                                             placeholder="0"
-                                            disabled={!selectionKey || isLoadingCurrentQuantity}
-                                            value={formatNumericInput(form.quantity)}
+                                            disabled={availableQuantity === null || isSaving}
+                                            value={formatNumericInput(quantityInput)}
                                             onChange={(event) =>
                                                 setForm((current) => ({
                                                     ...current,
@@ -491,19 +481,27 @@ export function StockAdjustmentDialog({
                                             </span>
                                         ) : null}
                                     </div>
-                                    <div className={cn("text-xs", deltaMeta?.textClassName || "text-muted-foreground")}>
-                                        {!selectionKey
-                                            ? t("stockAdjustments.dialog.adjustment.selectPrompt", "Select a product and storage to load the current quantity.")
-                                            : isLoadingCurrentQuantity
-                                                ? t("stockAdjustments.dialog.adjustment.loadingCurrent", "Loading the current quantity...")
-                                            : targetQuantity === null
-                                                ? t("stockAdjustments.dialog.adjustment.enterQuantity", "Enter the final quantity you want after this adjustment.")
-: quantitiesEqual(quantityDelta ?? 0, 0)
-                                                     ? t("stockAdjustments.dialog.adjustment.noChange", "No change yet. Adjust the quantity above to create an entry.")
-                                                     : quantityDelta && quantityDelta > 0
-                                                        ? t("stockAdjustments.dialog.adjustment.increaseBy", "Increase by {{delta}}. {{available}} -> {{target}}.", { delta: formatNumericInput(String(quantityDelta)), available: formatNumericInput(String(availableQuantity ?? 0)), target: formatNumericInput(String(targetQuantity)) })
-                                                        : t("stockAdjustments.dialog.adjustment.decreaseBy", "Decrease by {{delta}}. {{available}} -> {{target}}.", { delta: formatNumericInput(String(Math.abs(quantityDelta ?? 0))), available: formatNumericInput(String(availableQuantity ?? 0)), target: formatNumericInput(String(targetQuantity ?? 0)) })}
-                                    </div>
+                                    {hasQuantityLoadError ? (
+                                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                                            <p role="alert" className="text-destructive">
+                                                {t("stockAdjustments.dialog.adjustment.loadCurrentFailed")}
+                                            </p>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                disabled={isSaving}
+                                                onClick={() => setQuantityAttempt((current) => current + 1)}
+                                            >
+                                                <RotateCw className="h-3.5 w-3.5" />
+                                                {t("common.retry")}
+                                            </Button>
+                                        </div>
+                                    ) : (
+                                        <div role="status" className={cn("text-xs", deltaMeta?.textClassName || "text-muted-foreground")}>
+                                            {quantityHint}
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="grid gap-2">
                                     <Label>{t("stockAdjustments.dialog.adjustment.reason", "Reason")}</Label>
@@ -544,7 +542,7 @@ export function StockAdjustmentDialog({
                             type="button"
                             variant="outline"
                             className="w-full sm:w-auto"
-                            onClick={() => onOpenChange(false)}
+                            onClick={() => handleOpenChange(false)}
                             disabled={isSaving}
                         >
                             {t("stockAdjustments.dialog.adjustment.cancel", "Cancel")}
@@ -552,7 +550,7 @@ export function StockAdjustmentDialog({
                         <Button
                             type="submit"
                             className="w-full sm:w-auto"
-                            disabled={!canSave || isSaving || isLoadingCurrentQuantity}
+                            disabled={!canSave || isSaving}
                         >
                             {isSaving
                                 ? t("stockAdjustments.dialog.adjustment.saving", "Saving...")
@@ -595,7 +593,7 @@ export function StockAdjustmentDialog({
                     }}
                     onSelectProduct={(product, storageId) => {
                         userPickedStorageRef.current = true;
-                        setForm((current) => ({ ...current, productId: product.id, storageId }));
+                        setForm((current) => ({ ...current, productId: product.id, storageId, quantity: null }));
                         setSearch(product.name);
                     }}
                 />

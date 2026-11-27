@@ -1294,6 +1294,7 @@
   "common": {
     "and": "and",
     "loading": "Loading...",
+    "retry": "Try again",
     "save": "Save",
     "cancel": "Cancel",
     "close": "Close",
@@ -8386,6 +8387,8 @@
         "saving": "Saving...",
         "save": "Save Adjustment",
         "selectPrompt": "Select a product and storage to load the current quantity.",
+        "loadingCurrent": "Loading the current quantity…",
+        "loadCurrentFailed": "Couldn't load the current quantity.",
         "enterQuantity": "Enter the final quantity you want after this adjustment.",
         "noChange": "No change yet. Adjust the quantity above to create an entry.",
         "increaseBy": "Increase by {{delta}}. {{available}} -> {{target}}.",
