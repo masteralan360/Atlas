@@ -46,7 +46,9 @@ export const requestFirebaseTokenSync = async (): Promise<string | null> => {
     if (!msg) return null
 
     try {
-        const permission = await Notification.requestPermission()
+        const permission = Notification.permission === 'granted'
+            ? 'granted'
+            : await Notification.requestPermission()
         if (permission === 'granted') {
             const vapidKey = import.meta.env.VITE_FIREBASE_VAPID_KEY?.trim()
 

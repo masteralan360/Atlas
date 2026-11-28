@@ -1237,6 +1237,17 @@
     "extraDaysPendingDescription_other": "{{count}} temporary days are active. Their use is tracked continuously, and only the unused remainder will be deducted when the next subscription is approved."
   },
   "notifications": {
+    "merchantGate": {
+      "title": "Notifications Required",
+      "message": "Notifications are mandatory for merchant accounts to ensure you receive important updates. Please enable notifications to continue using the application.",
+      "enable": "Enable Notifications",
+      "defaultHint": "Tap Enable Notifications and choose Allow in the system prompt to continue.",
+      "deniedIos": "Open iPhone Settings, choose Notifications, then select Atlas or its Home Screen app name and turn on Allow Notifications. Return to Atlas when finished.",
+      "deniedAndroid": "Open Android Settings > Apps > Atlas > Notifications and allow notifications. If Atlas is not listed, open Chrome Settings > Site settings > Notifications, select this site, and allow notifications. Return to Atlas when finished.",
+      "unsupportedIos": "Web Push requires iOS 16.4 or later and an Atlas app added to the Home Screen. Update iOS, add Atlas to the Home Screen if needed, then open Atlas from its Home Screen icon.",
+      "unsupportedAndroid": "This Android app environment does not support Web Push. Update Android and Chrome, then open Atlas from its installed Home Screen app. If the issue continues, use a supported browser that provides notifications, service workers, and push messaging.",
+      "requestFailed": "Notifications could not be enabled. Check your device settings and try again."
+    },
     "tabs": {
       "all": "All",
       "unread": "Unread",

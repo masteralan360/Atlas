@@ -10,6 +10,7 @@ import { TitleBar } from "@/ui/components/TitleBar";
 import { PatchNoteModal } from "@/ui/components/modals/PatchNoteModal";
 import { Progress } from "@/ui/components/ui/progress";
 import { DeviceTokenBootstrap } from "@/ui/components/DeviceTokenBootstrap";
+import { MerchantNotificationPermissionGate } from "@/ui/components/MerchantNotificationPermissionGate";
 import { SubscriptionExpiryWarningModal } from "@/ui/components/SubscriptionExpiryWarningModal";
 import { WorkspacePaymentController, WorkspacePaymentStatusDialog } from "@/ui/components/WorkspacePaymentDialog";
 import { WorkspaceExtraDaysDialog } from "@/ui/components/WorkspaceExtraDaysDialog";
@@ -1468,6 +1469,7 @@ function App() {
         <QueryScopeBoundary />
         <ClinicalRegistryLocaleSync />
         <WorkspacePermissionsProvider>
+          <MerchantNotificationPermissionGate />
           <FleetLocationSharingProvider>
             <UiAccessProvider>
             <DateRangeProvider>

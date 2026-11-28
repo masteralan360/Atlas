@@ -64,6 +64,12 @@ async function readWebPushToken(): Promise<string | null> {
         return null
     }
 
+    // Background token registration must never trigger a native permission prompt.
+    // Permission requests belong to an explicit user gesture in the UI.
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+        return null
+    }
+
     return await requestFirebaseTokenSync()
 }
 

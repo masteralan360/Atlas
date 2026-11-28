@@ -569,13 +569,13 @@ export function SalesOrderFormPage({
         (stockSourceAvailability.data ?? []).map((row) => [`${row.productId}:${row.storageId}`, row] as const)
     ), [stockSourceAvailability.data])
     const warehouseAvailability = useStockAvailability(
-        hasRemoteStockAuthority ? workspaceId : undefined,
+        workspaceId,
         stockSourcePositions,
-        undefined,
-        { requireAuthoritative: true }
+        editingOrderId,
+        { requireAuthoritative: hasRemoteStockAuthority }
     )
-    const remoteOnHandByPosition = useMemo(() => new Map(
-        (warehouseAvailability.data ?? []).map((row) => [stockPositionKey(row), row.onHand] as const)
+    const availableByPosition = useMemo(() => new Map(
+        (warehouseAvailability.data ?? []).map((row) => [stockPositionKey(row), row.available] as const)
     ), [warehouseAvailability.data])
     const displayedItems = useMemo(() => getSalesOrderLinesNewestFirst(items), [items])
     const requiresApprovalRequest = user?.role === 'staff' && permissionKeys.includes('orders.requireSalesOrderRequest')
@@ -2305,9 +2305,9 @@ export function SalesOrderFormPage({
                                         const hasSourceReservationData = stockSourceAvailabilityByPosition.has(`${item.productId}:${item.storageId}`)
                                         const selectedSourceExceeded = Boolean(item.productId && item.storageId && inventoryQuantity > selectedSourceQuantity)
                                             && (hasSourceReservationData || !hasRemoteStockAuthority)
-                                        const warehouseOnHand = hasRemoteStockAuthority
-                                            ? (warehouseAvailability.error ? undefined : remoteOnHandByPosition.get(stockPositionKey(item)))
-                                            : getAvailableQuantity(item.productId, item.storageId)
+                                        const warehouseAvailable = warehouseAvailability.error
+                                            ? undefined
+                                            : availableByPosition.get(stockPositionKey(item))
                                         const canOpenProductsView = Boolean(item.storageId)
                                             && !(priceBooksEnabled && (!isPriceBookCatalogReady || !selectedCustomer))
 
@@ -2464,8 +2464,8 @@ export function SalesOrderFormPage({
                                                         <p className="break-words text-xs text-muted-foreground" role="status">
                                                             {!item.storageId || !item.productId
                                                                 ? t('orders.form.chooseSourceStorageForLine', { defaultValue: 'Choose a source storage for this line.' })
-                                                                : warehouseOnHand !== undefined
-                                                                    ? t('orders.form.availableQuantity', { quantity: formatProductAvailability(item.productId, warehouseOnHand) })
+                                                                : warehouseAvailable !== undefined
+                                                                    ? t('orders.form.availableQuantity', { quantity: formatProductAvailability(item.productId, warehouseAvailable) })
                                                                     : t(warehouseAvailability.isLoading ? 'stockReservations.checking' : 'stockReservations.loadFailed')}
                                                         </p>
                                                     </div>
