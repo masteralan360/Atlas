@@ -40,8 +40,6 @@ const KINDS: readonly PostalStatementKind[] = postalStatementDisplayConfig.showR
   ? ['all', 'delivery_accrual', 'collection', 'settlement', 'delivery_fee']
   : ['all', 'delivery_accrual', 'settlement', 'delivery_fee']
 const kindKeys = { all: 'postal.statement.allTransactions', delivery_accrual: 'postal.statement.deliveryAccrual', collection: 'postal.statement.recipientMovements', settlement: 'postal.settlementEvent', delivery_fee: 'postal.deliveryFeeCollection' } as const
-const NUMERIC_COLUMNS = new Set(['cash', 'debit', 'credit', 'balance'])
-
 export function OrganizationAccountStatement({ scope }: { scope: PostalScope }) {
   // Remount on workspace/viewer/permission changes so selections cannot leak scopes.
   return <StatementContent key={JSON.stringify(scope)} scope={scope} />
@@ -86,43 +84,43 @@ function StatementContent({ scope }: { scope: PostalScope }) {
     const money = (value: string) => new Intl.NumberFormat(i18n.language).format(BigInt(value))
     return [
       { id: 'date', header: t('postal.statement.transactionDate'), cell: ({ row }) => (
-        <bdi dir="ltr" className="whitespace-nowrap text-xs text-muted-foreground">{new Date(row.original.created_at).toLocaleString(i18n.language)}</bdi>
+        <bdi dir="ltr" className="whitespace-nowrap text-sm text-muted-foreground">{new Date(row.original.created_at).toLocaleString(i18n.language)}</bdi>
       ) },
       { id: 'shipment', header: t('postal.shipmentId'), cell: ({ row }) => {
         const entry = row.original
         const id = formatPostalShipmentId({ shipment_number: entry.shipment_number, created_at: entry.shipment_created_at })
-        return <div className="flex min-w-40 flex-col items-start gap-1 text-start">
-          <Button variant="link" className="h-auto p-0 font-mono" onClick={() => navigate(`/post-service/shipments/${id}`)}><bdi dir="ltr">{id}</bdi></Button>
-          <p className="text-xs font-medium"><bdi>{entry.recipient_name}</bdi></p>
-          <p className="text-xs text-muted-foreground"><bdi dir="ltr">{entry.primary_phone}</bdi></p>
+        return <div className="flex min-w-40 flex-col items-center gap-1 text-center">
+          <Button variant="link" className="h-auto p-0 font-mono text-sm" onClick={() => navigate(`/post-service/shipments/${id}`)}><bdi dir="ltr">{id}</bdi></Button>
+          <p className="text-sm font-medium"><bdi>{entry.recipient_name}</bdi></p>
+          <p className="text-sm text-muted-foreground"><bdi dir="ltr">{entry.primary_phone}</bdi></p>
           <Badge variant="secondary">{t(`postal.states.${entry.shipment_state}`)}</Badge>
         </div>
       } },
       { id: 'description', header: t('postal.statement.transaction'), cell: ({ row }) => {
         const entry = row.original
-        return <div className="min-w-48 space-y-1 text-start">
-          <p className="font-medium">{t(entry.kind === 'collection'
+        return <div className="min-w-48 space-y-1 text-center">
+          <p className="text-sm font-semibold">{t(entry.kind === 'collection'
             ? BigInt(entry.signed_amount) < 0n ? 'postal.collectionPayRecipient' : 'postal.collectionEvent'
             : entry.kind === 'settlement' && BigInt(entry.signed_amount) < 0n
               ? 'postal.settlementReceiveFromMerchant' : kindKeys[entry.kind])}</p>
-          {entry.payment_method && <p className="text-xs text-muted-foreground">{getPaymentMethodLabel(entry.payment_method as PaymentMethodOption, t)}</p>}
-          {entry.account_name_snapshot && <p className="text-xs text-muted-foreground"><bdi>{entry.account_name_snapshot}</bdi></p>}
-          {entry.payment_transaction_id && <p className="break-all font-mono text-[10px] text-muted-foreground" title={t('postal.statement.paymentReference')}><bdi dir="ltr">{entry.payment_transaction_id}</bdi></p>}
-          {entry.notes && <p className="max-w-64 whitespace-pre-wrap break-words text-xs text-muted-foreground"><bdi>{entry.notes}</bdi></p>}
+          {entry.payment_method && <p className="text-sm text-muted-foreground">{getPaymentMethodLabel(entry.payment_method as PaymentMethodOption, t)}</p>}
+          {entry.account_name_snapshot && <p className="text-sm text-muted-foreground"><bdi>{entry.account_name_snapshot}</bdi></p>}
+          {entry.payment_transaction_id && <p className="break-all font-mono text-xs text-muted-foreground" title={t('postal.statement.paymentReference')}><bdi dir="ltr">{entry.payment_transaction_id}</bdi></p>}
+          {entry.notes && <p className="mx-auto max-w-64 whitespace-pre-wrap break-words text-sm text-muted-foreground"><bdi>{entry.notes}</bdi></p>}
         </div>
       } },
       { id: 'cash', header: t('postal.statement.cashMovement'), cell: ({ row }) => {
         const entry = row.original
-        if (entry.kind === 'delivery_accrual') return <span className="text-xs text-muted-foreground">{t('postal.statement.noCashMovement')}</span>
+        if (entry.kind === 'delivery_accrual') return <span className="text-sm text-muted-foreground">{t('postal.statement.noCashMovement')}</span>
         const amount = BigInt(entry.signed_amount)
-        return <div className="min-w-32 space-y-1 text-end tabular-nums">
-          <p><bdi dir="ltr">{money(String(amount < 0n ? -amount : amount))}</bdi></p>
-          <p className="text-xs text-muted-foreground">{entry.payment_direction ? t(`postal.${entry.payment_direction}`) : '—'}</p>
+        return <div className="min-w-32 space-y-1 text-center tabular-nums">
+          <p className="text-base font-semibold"><bdi dir="ltr">{money(String(amount < 0n ? -amount : amount))}</bdi></p>
+          <p className="text-sm text-muted-foreground">{entry.payment_direction ? t(`postal.${entry.payment_direction}`) : '—'}</p>
         </div>
       } },
       ...(['debit', 'credit', 'balance'] as const).map((field): ColumnDef<PostalStatementEntry> => ({
         id: field, header: t(`postal.statement.${field}`), cell: ({ row }) => (
-          <span className={`block min-w-28 text-end font-semibold tabular-nums ${field === 'balance' ? 'text-primary' : ''}`}><bdi dir="ltr">{money(row.original[field])}</bdi></span>
+          <span className={`block min-w-28 text-center text-base font-semibold tabular-nums ${field === 'balance' ? 'text-primary' : ''}`}><bdi dir="ltr">{money(row.original[field])}</bdi></span>
         ),
       })),
     ]
@@ -342,16 +340,16 @@ function StatementContent({ scope }: { scope: PostalScope }) {
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>{table.getHeaderGroups().map((group) => <TableRow key={group.id} className="bg-muted/30 hover:bg-muted/30">
-                    {group.headers.map((header) => <TableHead key={header.id} className={`whitespace-nowrap ${NUMERIC_COLUMNS.has(header.id) ? 'text-end' : 'text-start'}`}>{flexRender(header.column.columnDef.header, header.getContext())}</TableHead>)}
+                    {group.headers.map((header) => <TableHead key={header.id} className="whitespace-nowrap text-center">{flexRender(header.column.columnDef.header, header.getContext())}</TableHead>)}
                   </TableRow>)}</TableHeader>
                   <TableBody>
-                    {statement && <TableRow className="bg-muted/10 font-semibold"><TableCell colSpan={6} className="text-start">{t('postal.statement.openingBalance')}</TableCell><TableCell className="text-end tabular-nums"><bdi dir="ltr">{display(statement.summary.opening_balance)}</bdi></TableCell></TableRow>}
+                    {statement && <TableRow className="bg-muted/10 font-semibold"><TableCell colSpan={6} className="text-center">{t('postal.statement.openingBalance')}</TableCell><TableCell className="text-center text-base tabular-nums"><bdi dir="ltr">{display(statement.summary.opening_balance)}</bdi></TableCell></TableRow>}
                     {!statement?.entries.length && <TableRow><TableCell colSpan={7} className="h-40 text-center text-muted-foreground">{t('postal.empty')}</TableCell></TableRow>}
-                    {table.getRowModel().rows.map((row) => <TableRow key={row.id}>{row.getVisibleCells().map((cell) => <TableCell key={cell.id} className={NUMERIC_COLUMNS.has(cell.column.id) ? 'text-end' : 'text-start'}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>)}</TableRow>)}
-                    {statement && <TableRow className="bg-muted/20 font-bold"><TableCell colSpan={4} className="text-start">{t('postal.statement.periodTotals')}</TableCell>
-                      <TableCell className="text-end tabular-nums"><bdi dir="ltr">{display(statement.summary.debit_total)}</bdi></TableCell>
-                      <TableCell className="text-end tabular-nums"><bdi dir="ltr">{display(statement.summary.credit_total)}</bdi></TableCell>
-                      <TableCell className="text-end tabular-nums"><bdi dir="ltr">{display(statement.summary.closing_balance)}</bdi></TableCell>
+                    {table.getRowModel().rows.map((row) => <TableRow key={row.id}>{row.getVisibleCells().map((cell) => <TableCell key={cell.id} className="text-center">{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>)}</TableRow>)}
+                    {statement && <TableRow className="bg-muted/20 font-bold"><TableCell colSpan={4} className="text-center">{t('postal.statement.periodTotals')}</TableCell>
+                      <TableCell className="text-center text-base tabular-nums"><bdi dir="ltr">{display(statement.summary.debit_total)}</bdi></TableCell>
+                      <TableCell className="text-center text-base tabular-nums"><bdi dir="ltr">{display(statement.summary.credit_total)}</bdi></TableCell>
+                      <TableCell className="text-center text-base tabular-nums"><bdi dir="ltr">{display(statement.summary.closing_balance)}</bdi></TableCell>
                     </TableRow>}
                   </TableBody>
                 </Table>

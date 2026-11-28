@@ -519,6 +519,52 @@ export function usePostalPage<T>(input: PostalPageInput, enabled = true) {
     },
   })
 }
+
+/** Fetches the complete filtered shipment list in the server's maximum page batches for printing. */
+export async function fetchPostalShipmentsForPrint(
+  input: PostalSummaryInput,
+  signal: AbortSignal,
+): Promise<PostalPage<PostalShipment & { organization_name: string | null }>> {
+  const pageSize = 100
+  return tracked(
+    input,
+    ['postal_shipments', 'postal_organizations'],
+    signal,
+    async () => {
+      const rows: Array<PostalShipment & { organization_name: string | null }> = []
+      let total: number | null = null
+
+      for (let page = 1; page <= 1_000_000; page += 1) {
+        const { data, error } = await supabase.rpc('postal_shipment_page', {
+          p_workspace_id: input.workspaceId,
+          p_page: page,
+          p_page_size: pageSize,
+          p_search: sanitizePostalSearch(input.search),
+          p_status: input.status ?? 'all',
+          p_start: input.start ?? null,
+          p_end: input.end ?? null,
+        }).abortSignal(signal)
+        if (error) return { data: null, error }
+
+        const result = normalizePostalShipmentPage(data)
+        if (total !== null && result.total !== total) {
+          throw new Error('postal_results_changed')
+        }
+        total = result.total
+        rows.push(...result.rows)
+
+        if (rows.length >= total || result.rows.length === 0) break
+      }
+
+      if (rows.length < (total ?? 0)) throw new Error('postal_results_incomplete')
+      return { data: { rows, total: total ?? 0 }, error: null }
+    },
+    (result, table) => table === 'postal_organizations'
+      ? new Set(result.rows.map((shipment) => shipment.organization_id)).size
+      : result.rows.length,
+  )
+}
+
 export function usePrimaryPostalBranch(scope: PostalScope, enabled = true) {
   return useQuery({
     queryKey: queryKeys.postal.primaryBranch(scope),

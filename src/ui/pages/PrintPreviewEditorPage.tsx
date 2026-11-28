@@ -900,9 +900,13 @@ export function PrintPreviewEditorPage() {
         0,
         templatePreview?.measurementRoundingToleranceMm || 0
     )
+    // Stacked native pages can measure a fraction of a millimeter over an
+    // exact page boundary because scrollHeight is rounded to whole pixels.
+    const measuredPageHeightMm = Math.max(1, templatePageHeight || A4_PAGE_HEIGHT_MM)
+    const nearestMeasuredPageHeightMm = Math.round(measuredTemplateHeightMm / measuredPageHeightMm) * measuredPageHeightMm
     const measuredTemplateHeightForPagination = measurementRoundingToleranceMm > 0
-        && measuredTemplateHeightMm <= templatePageHeight + measurementRoundingToleranceMm
-        ? templatePageHeight
+        && Math.abs(measuredTemplateHeightMm - nearestMeasuredPageHeightMm) <= measurementRoundingToleranceMm
+        ? nearestMeasuredPageHeightMm
         : measuredTemplateHeightMm
     const templateContentHeightMm = isBulkLabelPreview
         ? templatePageHeight || A4_PAGE_HEIGHT_MM

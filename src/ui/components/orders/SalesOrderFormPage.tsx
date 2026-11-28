@@ -6,7 +6,7 @@ import { AlertTriangle, ArrowLeft, BadgeDollarSign, CalendarDays, Check, CreditC
 import { useAuth } from '@/auth'
 import { useUiAccess } from '@/context/UiAccessContext'
 import { isMobile } from '@/lib/platform'
-import { isOnline } from '@/lib/network'
+import { useNetworkStatus } from '@/hooks/useNetworkStatus'
 import { isLocalWorkspaceMode } from '@/workspace/workspaceMode'
 import { getPrioritizedPaymentMethod, setPrioritizedPaymentMethod } from '@/lib/prioritizedPaymentMethod'
 import { ORDER_FINANCING_PAYMENT_METHODS, STANDARD_PAYMENT_METHODS, getPaymentMethodLabel, type PaymentMethodOption } from '@/lib/paymentMethods'
@@ -161,7 +161,7 @@ import {
 import { OrderEditorLoadingSection, OrderEditorReadOnlyScope } from './OrderEditorLoadingOverlay'
 import { ProgressToast } from '@/ui/components/ProgressToast'
 import { ToastAction } from '@/ui/components/toast'
-import { useStockDemandGuard } from '@/local-db/stockReservations'
+import { stockPositionKey, useStockAvailability, useStockDemandGuard } from '@/local-db/stockReservations'
 import { StockDemandNotice } from '@/ui/components/inventory/StockReservationInfo'
 
 interface SalesOrderFormPageProps {
@@ -305,7 +305,8 @@ export function SalesOrderFormPage({
     const salesOrderHidePermissions = useSalesOrderHidePermissions()
     const hideCosts = useHideCosts()
     const { features, hasCapability, hasFeature } = useWorkspace()
-    const hasRemoteStockAuthority = !isLocalWorkspaceMode(workspaceId) && isOnline(workspaceId)
+    const online = useNetworkStatus()
+    const hasRemoteStockAuthority = online && !isLocalWorkspaceMode(workspaceId)
     const { permissionKeys } = useWorkspacePermissions()
     const isSellingPriceReadOnly = user?.role !== 'admin' && permissionKeys.includes('pos.hideModifyPriceButton')
     const { exchangeData, eurRates, tryRates } = useExchangeRate()
@@ -567,6 +568,15 @@ export function SalesOrderFormPage({
     const stockSourceAvailabilityByPosition = useMemo(() => new Map(
         (stockSourceAvailability.data ?? []).map((row) => [`${row.productId}:${row.storageId}`, row] as const)
     ), [stockSourceAvailability.data])
+    const warehouseAvailability = useStockAvailability(
+        hasRemoteStockAuthority ? workspaceId : undefined,
+        stockSourcePositions,
+        undefined,
+        { requireAuthoritative: true }
+    )
+    const remoteOnHandByPosition = useMemo(() => new Map(
+        (warehouseAvailability.data ?? []).map((row) => [stockPositionKey(row), row.onHand] as const)
+    ), [warehouseAvailability.data])
     const displayedItems = useMemo(() => getSalesOrderLinesNewestFirst(items), [items])
     const requiresApprovalRequest = user?.role === 'staff' && permissionKeys.includes('orders.requireSalesOrderRequest')
     const canUseFreeBonus = hasCapability('orderFreeBonus')
@@ -2295,6 +2305,9 @@ export function SalesOrderFormPage({
                                         const hasSourceReservationData = stockSourceAvailabilityByPosition.has(`${item.productId}:${item.storageId}`)
                                         const selectedSourceExceeded = Boolean(item.productId && item.storageId && inventoryQuantity > selectedSourceQuantity)
                                             && (hasSourceReservationData || !hasRemoteStockAuthority)
+                                        const warehouseOnHand = hasRemoteStockAuthority
+                                            ? (warehouseAvailability.error ? undefined : remoteOnHandByPosition.get(stockPositionKey(item)))
+                                            : getAvailableQuantity(item.productId, item.storageId)
                                         const canOpenProductsView = Boolean(item.storageId)
                                             && !(priceBooksEnabled && (!isPriceBookCatalogReady || !selectedCustomer))
 
@@ -2448,13 +2461,12 @@ export function SalesOrderFormPage({
                                                                 )}
                                                             </SelectContent>
                                                         </Select>
-                                                        <p className="break-words text-xs text-muted-foreground">
-                                                            {item.storageId && item.productId
-                                                                ? t('orders.form.availableQuantity', {
-                                                                     quantity: formatProductAvailability(item.productId, getAvailableQuantity(item.productId, item.storageId)),
-                                                                     defaultValue: `Available: ${formatProductAvailability(item.productId, getAvailableQuantity(item.productId, item.storageId))}`
-                                                                })
-                                                                : t('orders.form.chooseSourceStorageForLine', { defaultValue: 'Choose a source storage for this line.' })}
+                                                        <p className="break-words text-xs text-muted-foreground" role="status">
+                                                            {!item.storageId || !item.productId
+                                                                ? t('orders.form.chooseSourceStorageForLine', { defaultValue: 'Choose a source storage for this line.' })
+                                                                : warehouseOnHand !== undefined
+                                                                    ? t('orders.form.availableQuantity', { quantity: formatProductAvailability(item.productId, warehouseOnHand) })
+                                                                    : t(warehouseAvailability.isLoading ? 'stockReservations.checking' : 'stockReservations.loadFailed')}
                                                         </p>
                                                     </div>
                                                 )}

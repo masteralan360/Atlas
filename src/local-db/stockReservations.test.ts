@@ -1,4 +1,13 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+type AvailabilityQuery = {
+    queryKey: readonly unknown[]
+    queryFn: (context: { signal: AbortSignal }) => Promise<unknown>
+}
+
+const availabilityQueries = vi.hoisted(() => vi.fn<(query: AvailabilityQuery) => void>())
 
 const stockAvailabilityMock = vi.hoisted(() => {
     let cachedRows: Array<Record<string, unknown>> = []
@@ -36,18 +45,32 @@ vi.mock('@/permissions/useViewOwnRecordScope', () => ({ useViewOwnRecordScope: (
 vi.mock('@/permissions/workspacePermissionsState', () => ({ useOptionalWorkspacePermissions: () => ({ permissionKeys: [] }) }))
 vi.mock('./storagePermissions', () => ({ useStorageAccess: () => ({ signature: '' }) }))
 vi.mock('@/workspace/workspaceMode', () => ({ isLocalWorkspaceMode: () => false }))
+vi.mock('@tanstack/react-query', () => ({
+    useQuery: (query: AvailabilityQuery) => {
+        availabilityQueries(query)
+        return { data: undefined, error: null, isLoading: true }
+    }
+}))
+vi.mock('dexie-react-hooks', () => ({ useLiveQuery: () => undefined }))
 
 import { StockReservationConflictError } from '@/lib/stockReservationConflict'
 import { assertStockDemands } from './stockReservationData'
+import { useStockAvailability } from './stockReservations'
 
 const WORKSPACE_ID = '30000000-0000-4000-8000-000000000001'
 const PRODUCT_ID = '30000000-0000-4000-8000-000000000002'
 const STORAGE_ID = '30000000-0000-4000-8000-000000000003'
 const ORDER_ID = '30000000-0000-4000-8000-000000000004'
 
+function AvailabilityProbe({ requireAuthoritative }: { requireAuthoritative: boolean }) {
+    useStockAvailability(WORKSPACE_ID, [{ productId: PRODUCT_ID, storageId: STORAGE_ID }], ORDER_ID, { requireAuthoritative })
+    return null
+}
+
 describe('sales stock availability checks', () => {
     beforeEach(() => {
         stockAvailabilityMock.reset()
+        availabilityQueries.mockClear()
         stockAvailabilityMock.setCachedRows([{
             productId: PRODUCT_ID,
             storageId: STORAGE_ID,
@@ -117,5 +140,39 @@ describe('sales stock availability checks', () => {
                 available: 0
             }
         } satisfies Partial<StockReservationConflictError>)
+    })
+
+    it('keeps the warehouse on-hand query separate from projected stock', async () => {
+        const position = { productId: PRODUCT_ID, storageId: STORAGE_ID }
+        const server = { ...position, onHand: 165, reserved: 14, available: 151 }
+        const projected = { ...position, onHand: 172, reserved: 14, available: 158 }
+        stockAvailabilityMock.rpc.mockReturnValue({
+            abortSignal: vi.fn().mockResolvedValue({ data: [server], error: null })
+        })
+        stockAvailabilityMock.readOfflineStockAvailability.mockResolvedValueOnce([projected])
+
+        renderToStaticMarkup(createElement(AvailabilityProbe, { requireAuthoritative: false }))
+        renderToStaticMarkup(createElement(AvailabilityProbe, { requireAuthoritative: true }))
+        const [[projectedQuery], [warehouseQuery]] = availabilityQueries.mock.calls
+        const { signal } = new AbortController()
+
+        expect(warehouseQuery.queryKey).not.toEqual(projectedQuery.queryKey)
+        await expect(Promise.all([
+            projectedQuery.queryFn({ signal }),
+            warehouseQuery.queryFn({ signal })
+        ])).resolves.toEqual([[projected], [server]])
+        expect(stockAvailabilityMock.readOfflineStockAvailability).toHaveBeenCalledTimes(1)
+    })
+
+    it('reports a failed online warehouse read without returning local stock', async () => {
+        const error = new Error('Stock request failed')
+        stockAvailabilityMock.rpc.mockReturnValue({
+            abortSignal: vi.fn().mockResolvedValue({ data: null, error })
+        })
+        renderToStaticMarkup(createElement(AvailabilityProbe, { requireAuthoritative: true }))
+        const [[warehouseQuery]] = availabilityQueries.mock.calls
+
+        await expect(warehouseQuery.queryFn({ signal: new AbortController().signal })).rejects.toBe(error)
+        expect(stockAvailabilityMock.readOfflineStockAvailability).not.toHaveBeenCalled()
     })
 })

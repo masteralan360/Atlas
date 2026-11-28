@@ -70,12 +70,14 @@ import {
   usePostalPage,
   usePostalSummary,
   usePostalLocationCatalog,
+  fetchPostalShipmentsForPrint,
   postalSummaryTables,
   postalTables,
   resolvePostalQr,
   getPostalOrganization,
   postalCommand,
 } from '@/local-db/postal'
+import type { PostalSummaryInput } from '@/local-db/postal'
 import { PostalDashboardCards } from '@/postal/PostalDashboardCards'
 import { ShipmentArchiveDialog } from '@/postal/ShipmentArchiveDialog'
 import { ShipmentRestoreDialog } from '@/postal/ShipmentRestoreDialog'
@@ -118,6 +120,10 @@ import {
 } from '@/postal/autoScanSettings'
 import { loadPostalShipmentLabelTemplates } from '@/lib/postalShipmentLabelTemplates'
 import { buildPostalLabelPdf } from '@/postal/printing'
+import { createPostalShipmentListTemplatePreview } from '@/postal/ShipmentListPrintTemplate'
+import { PrintSelectionModal } from '@/ui/components/PrintSelectionModal'
+import { setPrintPreviewEditorSource } from '@/lib/printPreviewEditorStore'
+import { printPdfBlob } from '@/services/pdfPrintService'
 import {
   printService,
   AutoScanNativePrintingUnavailableError,
@@ -157,8 +163,9 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
   const { user } = useAuth()
   const [, navigate] = useLocation()
   const { toast } = useToast()
-  const { workspaceName } = useWorkspace()
+  const { workspaceName, features } = useWorkspace()
   const { permissionKeys } = useWorkspacePermissions()
+  const canPrintShipments = !permissionKeys.includes('global.NOprint')
   const shipmentAction = usePostalAction()
   const canAccessAutoScan = user?.role === 'admin'
     || (user?.role === 'staff' && permissionKeys.includes('postService.officeEmployee'))
@@ -175,6 +182,9 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
   })
   autoScanContextRef.current = { scope, workspaceName, language: i18n.language, t, toast, locationCatalog }
   const [tab, setTab] = useState<PostalServiceTab>('shipments')
+  const [shipmentPrintOpen, setShipmentPrintOpen] = useState(false)
+  const [preparingShipmentPrint, setPreparingShipmentPrint] = useState(false)
+  const preparingShipmentPrintRef = useRef(false)
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState('all')
   const [codKind, setCodKind] = useState<
@@ -678,6 +688,63 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
     },
     !accountStatement && !qrBatches && tab === 'shipments',
   )
+  const shipmentPrintInput: PostalSummaryInput = {
+    ...scope,
+    search,
+    status,
+    start: dates.start?.toISOString(),
+    end: dates.end?.toISOString(),
+  }
+  const prepareShipmentPrint = async () => {
+    if (preparingShipmentPrintRef.current || !canPrintShipments) return
+    preparingShipmentPrintRef.current = true
+    setPreparingShipmentPrint(true)
+    try {
+      const controller = new AbortController()
+      const [summaryResult, locationResult, shipmentPage] = await Promise.all([
+        summary.refetch(),
+        locationCatalogQuery.refetch(),
+        fetchPostalShipmentsForPrint(shipmentPrintInput, controller.signal),
+      ])
+      if (summaryResult.error || !summaryResult.data) throw summaryResult.error || new Error('postal_summary_unavailable')
+      if (shipmentPage.rows.length !== shipmentPage.total) throw new Error('postal_results_incomplete')
+
+      const title = t(scope.role === 'merchant' ? 'postal.myShipments' : 'postal.shipments')
+      const templatePreview = createPostalShipmentListTemplatePreview({
+        rows: shipmentPage.rows,
+        summary: summaryResult.data,
+        isAdmin: scope.role === 'admin',
+        titleKey: scope.role === 'merchant' ? 'postal.myShipments' : 'postal.shipments',
+        status,
+        start: shipmentPrintInput.start,
+        end: shipmentPrintInput.end,
+        generatedAt: new Date().toISOString(),
+        locationCatalog: locationResult.data ?? locationCatalog,
+      }, workspaceName, i18n.language, features.logo_url)
+
+      setPrintPreviewEditorSource({
+        title,
+        workspaceId: scope.workspaceId,
+        printFormat: 'a4',
+        effectiveId: `postal-shipments-${Date.now()}`,
+        templatePreview,
+        showStandardPdfActions: true,
+        onPrint: (blob) => printPdfBlob(blob, { title }),
+      })
+      setShipmentPrintOpen(false)
+      navigate('/print-preview-editor')
+    } catch (error) {
+      console.error('[PostalServicePage] Could not prepare shipment print:', error)
+      toast({
+        title: t('postal.shipmentsPrintErrorTitle'),
+        description: t('postal.shipmentsPrintFailed'),
+        variant: 'destructive',
+      })
+    } finally {
+      preparingShipmentPrintRef.current = false
+      setPreparingShipmentPrint(false)
+    }
+  }
   const bounds = usePaginationBounds({
     ...pagination,
     totalCount: query.data?.total,
@@ -1107,12 +1174,6 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
               {t('postal.createShipment')}
             </Button>
           )}
-          {scope.role === 'admin' && tab === 'shipments' && !accountStatement && !qrBatches && (
-            <Button variant="outline" onClick={() => setArchivesOpen(true)}>
-              <Archive className="me-2 h-4 w-4" />
-              {t('postal.archive.open')}
-            </Button>
-          )}
           <Button
             variant="outline"
             onClick={() => {
@@ -1197,6 +1258,26 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
+          )}
+          {tab === 'shipments' && !accountStatement && !qrBatches && (
+            <>
+              {scope.role === 'admin' && (
+                <Button variant="outline" onClick={() => setArchivesOpen(true)}>
+                  <Archive className="me-2 h-4 w-4" />
+                  {t('postal.archive.open')}
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                disabled={!canPrintShipments || preparingShipmentPrint}
+                onClick={() => setShipmentPrintOpen(true)}
+              >
+                {preparingShipmentPrint
+                  ? <Loader2 className="me-2 h-4 w-4 animate-spin" />
+                  : <Printer className="me-2 h-4 w-4" />}
+                {t('common.print')}
+              </Button>
+            </>
           )}
           {tab === 'shipments' && (
             <Select value={status} onValueChange={setStatus}>
@@ -1538,6 +1619,25 @@ export default function PostalServicePage({ accountStatement = false, qrBatches 
           }}
         />
       )}
+      <PrintSelectionModal
+        isOpen={shipmentPrintOpen}
+        onClose={() => {
+          if (!preparingShipmentPrint) setShipmentPrintOpen(false)
+        }}
+        nativeOptions={[
+          {
+            format: 'a4',
+            label: t(scope.role === 'merchant' ? 'postal.myShipments' : 'postal.shipments'),
+            description: t('postal.shipmentsPrintDescription'),
+            nativeTemplateKey: 'postal-shipment-list-a4',
+            allowA4Document: true,
+          },
+        ]}
+        allowA4Document
+        isLoading={preparingShipmentPrint}
+        loadingMessage={t('postal.shipmentsPrintPreparing')}
+        onSelect={() => void prepareShipmentPrint()}
+      />
       {scanner && (
         <CameraBarcodeScannerModal
           open

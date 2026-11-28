@@ -29,8 +29,14 @@ export interface PostalStatementPrintEntry extends PostalStatementEntry {
   shipment: PostalStatementPrintShipment
 }
 
-export interface PostalStatementPrintData extends Omit<PostalStatement, 'entries'> {
+export type PostalStatementPrintSummary = PostalStatement['summary'] & {
+  cod_amount_total: string
+  delivery_fee_total: string
+}
+
+export interface PostalStatementPrintData extends Omit<PostalStatement, 'entries' | 'summary'> {
   entries: PostalStatementPrintEntry[]
+  summary: PostalStatementPrintSummary
   shipment_counts: { total: number; baghdad: number; provinces: number }
   start?: string
   end?: string
@@ -167,6 +173,12 @@ export function usePostalStatementPrint(input: PostalStatementPrintInput | null)
           if (!shipment) throw new Error('postal_invalid_result')
           return { ...entry, shipment }
         })
+        const shipmentDetails = [...shipmentMap.values()]
+        const sumAmounts = (values: Iterable<string | null>) => {
+          let total = 0n
+          for (const value of values) if (value !== null) total += BigInt(value)
+          return total.toString()
+        }
         const shipments = new Map<string, string>()
         for (const entry of printEntries) shipments.set(entry.shipment_id, entry.shipment.governorate.toLowerCase())
         const shipmentLocations = [...shipments.values()]
@@ -179,7 +191,11 @@ export function usePostalStatementPrint(input: PostalStatementPrintInput | null)
             provinces: shipmentLocations.filter((location) => location !== 'baghdad').length,
           },
           total: firstPage.total,
-          summary: firstPage.summary,
+          summary: {
+            ...firstPage.summary,
+            cod_amount_total: firstPage.summary.cod_amount_total ?? sumAmounts(shipmentDetails.map((shipment) => shipment.cod_amount)),
+            delivery_fee_total: firstPage.summary.delivery_fee_total ?? sumAmounts(shipmentDetails.map((shipment) => shipment.delivery_fee)),
+          },
           ...(queryInput.start ? { start: queryInput.start } : {}),
           ...(queryInput.end ? { end: queryInput.end } : {}),
           search: queryInput.search,

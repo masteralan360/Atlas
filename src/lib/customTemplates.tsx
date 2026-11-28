@@ -2418,7 +2418,8 @@ const SAMPLE_POSTAL_ACCOUNT_STATEMENT_DATA: PostalStatementPrintData = {
     shipment_counts: { total: 1, baghdad: 1, provinces: 0 },
     summary: {
         opening_balance: '0', debit_total: '0', credit_total: '170000', closing_balance: '170000',
-        collections: '0', settlements: '0', delivery_fees: '5000', current_due_to: '170000',
+        collections: '0', settlements: '0', delivery_fees: '5000', cod_amount_total: '170000',
+        delivery_fee_total: '5000', current_due_to: '170000',
         current_due_from: '0', recipient_due: '170000', recipient_refund_due: '0', missing_tariffs: 0
     },
     search: '',

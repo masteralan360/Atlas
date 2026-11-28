@@ -98,9 +98,9 @@ export function PostalStatementPrintPage({
   const isRtlPrintLanguage = printLang.startsWith('ar') || printLang.startsWith('ku')
   const resolvedLogoUrl = resolveWorkspaceLogoSrc(logoUrl)
   const fillPageHeight = data.entries.length >= 6
-  const cell = 'border border-slate-300 px-1 py-1 align-middle text-start'
-  const headerCell = 'border border-slate-300 px-1 py-1 align-middle'
-  const numericCell = `${cell} text-end tabular-nums whitespace-nowrap`
+  const cell = 'border border-slate-300 px-1 py-1 align-middle text-center break-words'
+  const headerCell = 'border border-slate-300 px-1 py-1.5 align-middle text-center break-words'
+  const numericCell = `${cell} tabular-nums whitespace-normal`
   const visibleColumns = POSTAL_ACCOUNT_STATEMENT_PRINT_COLUMNS.filter((column) => !hiddenFields[column.key])
   const visibleColumnWidthTotal = visibleColumns.reduce((total, column) => total + column.width, 0)
   const columnCell = (key: typeof POSTAL_ACCOUNT_STATEMENT_PRINT_COLUMNS[number]['key'], entry: PostalStatementPrintData['entries'][number], index: number) => {
@@ -120,7 +120,7 @@ export function PostalStatementPrintPage({
 
     switch (key) {
       case 'row_number':
-        return <td className={`${cell} text-center tabular-nums`}>{new Intl.NumberFormat(printLang).format(data.rowOffset + index + 1)}</td>
+        return <td className={`${cell} tabular-nums`}>{new Intl.NumberFormat(printLang).format(data.rowOffset + index + 1)}</td>
       case 'organization':
         return <td className={`${cell} font-medium`}><bdi>{data.organization.name}</bdi></td>
       case 'recipient_phone':
@@ -134,8 +134,8 @@ export function PostalStatementPrintPage({
           <div className="line-clamp-2 font-semibold"><bdi>{destination || '—'}</bdi></div>
         </td>
       case 'receipt_number':
-        return <td className={`${cell} text-center`}>
-          <bdi dir="ltr" className="block whitespace-nowrap font-mono text-[6px]">{shipmentId}</bdi>
+        return <td className={cell}>
+          <bdi dir="ltr" className="block break-all font-mono font-semibold">{shipmentId}</bdi>
           <div className="mx-auto mt-0.5 h-[9mm] w-[9mm] bg-white p-0.5"><ShipmentQr qrId={entry.shipment.qr_id} size={160} /></div>
         </td>
       case 'cod_amount':
@@ -153,33 +153,32 @@ export function PostalStatementPrintPage({
       case 'balance':
         return <td className={`${numericCell} font-semibold`}>{money(entry.balance, printLang)}</td>
       case 'pieces':
-        return <td className={`${cell} text-center tabular-nums`}>{entry.shipment.pieces === null ? '—' : new Intl.NumberFormat(printLang).format(entry.shipment.pieces)}</td>
+        return <td className={`${cell} tabular-nums`}>{entry.shipment.pieces === null ? '—' : new Intl.NumberFormat(printLang).format(entry.shipment.pieces)}</td>
       case 'status':
         return <td className={cell}>
           <div className="line-clamp-2 font-medium">{t(`postal.states.${entry.shipment_state}`)}</div>
-          <div className="mt-0.5 line-clamp-2 text-[6px] text-slate-600">{movementLabel}</div>
+          <div className="mt-0.5 line-clamp-2 text-slate-600">{movementLabel}</div>
         </td>
       case 'notes':
-        return <td className={`${cell} line-clamp-3 break-words text-[6px] text-slate-600`}><bdi>{entry.notes || '—'}</bdi></td>
+        return <td className={`${cell} text-slate-600`}><div className="line-clamp-3"><bdi>{entry.notes || '—'}</bdi></div></td>
       case 'transaction_date':
-        return <td className={`${cell} whitespace-nowrap text-[6px]`}><bdi dir="ltr">{dateOnly(entry.created_at, printLang)}</bdi></td>
+        return <td className={cell}><bdi dir="ltr">{dateOnly(entry.created_at, printLang)}</bdi></td>
     }
   }
   const renderSummaryCells = (kind: 'opening' | 'closing') => {
     return visibleColumns.map((column, index) => {
-      const value = column.key === 'debit'
-        ? money(data.summary.debit_total, printLang)
-        : column.key === 'credit'
-          ? money(data.summary.credit_total, printLang)
-          : column.key === 'balance'
-            ? money(kind === 'opening' ? data.summary.opening_balance : data.summary.closing_balance, printLang)
-            : null
+      let value: string | null = null
+      if (kind === 'closing' && column.key === 'cod_amount') value = money(data.summary.cod_amount_total, printLang)
+      else if (kind === 'closing' && column.key === 'delivery_fee') value = money(data.summary.delivery_fee_total, printLang)
+      else if (column.key === 'debit') value = money(data.summary.debit_total, printLang)
+      else if (column.key === 'credit') value = money(data.summary.credit_total, printLang)
+      else if (column.key === 'balance') value = money(kind === 'opening' ? data.summary.opening_balance : data.summary.closing_balance, printLang)
       const isBalance = column.key === 'balance'
       const isFirst = index === 0
-      const label = kind === 'opening' ? t('postal.statement.openingBalance') : t('postal.statement.periodTotals')
+      const label = kind === 'opening' ? t('postal.statement.openingBalanceShort') : t('postal.statement.periodTotals')
       const content = value
-        ? <>{isFirst ? <span className="mb-0.5 block text-[6px]">{label}</span> : null}{value}{isBalance ? ` ${t('postal.iqd')}` : null}</>
-        : isFirst ? label : null
+        ? <>{isFirst ? <span className="mb-0.5 block text-[7px]">{label}</span> : null}{value}{isBalance ? ` ${t('postal.iqd')}` : null}</>
+        : isFirst ? <span className="text-[7px]">{label}</span> : null
       return <td key={column.key} className={value ? numericCell : cell}>{content}</td>
     })
   }
@@ -234,17 +233,14 @@ export function PostalStatementPrintPage({
         <p className="col-span-3 text-[6px] leading-3 text-slate-600">{t('postal.statement.printSummaryHint')}</p>
       </div>
 
-      {visibleColumns.length > 0 ? <table dir={isRtlPrintLanguage ? 'rtl' : 'ltr'} data-pdf-page-chunk className={`mt-2 w-full table-fixed border-collapse text-[7px] leading-[1.2] ${fillPageHeight ? 'min-h-0 flex-1' : ''}`}>
+      {visibleColumns.length > 0 ? <table dir={isRtlPrintLanguage ? 'rtl' : 'ltr'} data-pdf-page-chunk className={`mt-2 w-full table-fixed border-collapse text-[8px] leading-[1.25] ${fillPageHeight ? 'min-h-0 flex-1' : ''}`}>
         <colgroup>
           {visibleColumns.map((column) => <col key={column.key} style={{ width: `${(column.width / visibleColumnWidthTotal) * 100}%` }} />)}
         </colgroup>
         <thead>
           <tr className="bg-slate-200 font-bold">
             {visibleColumns.map((column) => {
-              const isCentered = ['row_number', 'receipt_number', 'pieces'].includes(column.key)
-              const isNumeric = ['cod_amount', 'delivery_fee', 'cash_movement', 'debit', 'credit', 'balance'].includes(column.key)
-              const alignment = isCentered ? 'text-center' : isNumeric ? 'text-right' : isRtlPrintLanguage ? 'text-right' : 'text-left'
-              return <th key={column.key} dir={isRtlPrintLanguage ? 'rtl' : 'ltr'} className={`${headerCell} ${alignment}`}>{column.key === 'row_number' ? '#' : t(column.label)}</th>
+              return <th key={column.key} dir={isRtlPrintLanguage ? 'rtl' : 'ltr'} className={headerCell}>{column.key === 'row_number' ? '#' : t(column.label)}</th>
             })}
           </tr>
         </thead>

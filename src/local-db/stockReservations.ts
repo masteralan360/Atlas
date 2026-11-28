@@ -50,12 +50,20 @@ function isNonRetryableStockAvailabilityError(error: unknown): boolean {
 }
 
 /** Coalesce simultaneously mounted catalog cards into bounded remote requests. */
-type AvailabilityWaiter = { workspaceId: string; positions: readonly StockPosition[]; excludeOrderId?: string; signal?: AbortSignal; resolve: (rows: StockAvailability[]) => void; reject: (error: unknown) => void }
+type AvailabilityWaiter = {
+  workspaceId: string
+  positions: readonly StockPosition[]
+  excludeOrderId?: string
+  requireAuthoritative: boolean
+  signal?: AbortSignal
+  resolve: (rows: StockAvailability[]) => void
+  reject: (error: unknown) => void
+}
 let availabilityWaiters: AvailabilityWaiter[] = []
 let batchScheduled = false
-function fetchBatchedAvailability(workspaceId: string, positions: readonly StockPosition[], excludeOrderId?: string, signal?: AbortSignal) {
+function fetchBatchedAvailability(workspaceId: string, positions: readonly StockPosition[], excludeOrderId: string | undefined, requireAuthoritative: boolean, signal?: AbortSignal) {
   return new Promise<StockAvailability[]>((resolve, reject) => {
-    availabilityWaiters.push({ workspaceId, positions, excludeOrderId, signal, resolve, reject })
+    availabilityWaiters.push({ workspaceId, positions, excludeOrderId, requireAuthoritative, signal, resolve, reject })
     if (batchScheduled) return
     batchScheduled = true
     setTimeout(() => {
@@ -65,7 +73,7 @@ function fetchBatchedAvailability(workspaceId: string, positions: readonly Stock
       const groups = new Map<string, AvailabilityWaiter[]>()
       for (const waiter of waiters) {
         if (waiter.signal?.aborted) { waiter.reject(new DOMException('Aborted', 'AbortError')); continue }
-        const key = `${waiter.workspaceId}:${waiter.excludeOrderId ?? ''}`
+        const key = `${waiter.workspaceId}:${waiter.excludeOrderId ?? ''}:${waiter.requireAuthoritative}`
         groups.set(key, [...(groups.get(key) ?? []), waiter])
       }
       for (const group of groups.values()) {
@@ -73,7 +81,8 @@ function fetchBatchedAvailability(workspaceId: string, positions: readonly Stock
         const abort = () => { if (group.every(waiter => waiter.signal?.aborted)) controller.abort() }
         group.forEach(waiter => waiter.signal?.addEventListener('abort', abort, { once: true }))
         const positions = [...new Map(group.flatMap(waiter => waiter.positions).map(p => [stockPositionKey(p), p])).values()]
-        void fetchStockAvailability(group[0].workspaceId, positions, group[0].excludeOrderId, controller.signal)
+        const { workspaceId, excludeOrderId, requireAuthoritative } = group[0]
+        void fetchStockAvailability(workspaceId, positions, excludeOrderId, controller.signal, requireAuthoritative)
           .then(rows => group.forEach(waiter => {
             const keys = new Set(waiter.positions.map(stockPositionKey))
             waiter.resolve(rows.filter(row => keys.has(stockPositionKey(row))))
@@ -99,7 +108,12 @@ export function useStockDemandGuard(workspaceId: string | undefined, demands: re
     assert: () => workspaceId ? assertStockDemands(workspaceId, [...grouped.values()], excludeOrderId) : Promise.resolve() }
 }
 
-export function useStockAvailability(workspaceId: string | undefined, positions: readonly StockPosition[], excludeOrderId?: string) {
+export function useStockAvailability(
+  workspaceId: string | undefined,
+  positions: readonly StockPosition[],
+  excludeOrderId?: string,
+  { requireAuthoritative = false }: { requireAuthoritative?: boolean } = {}
+) {
   const online = useNetworkStatus()
   const user = useOptionalAuth()?.user
   const permissions = useOptionalWorkspacePermissions()
@@ -116,8 +130,8 @@ export function useStockAvailability(workspaceId: string | undefined, positions:
     } catch (error) { return { rows: undefined, error: error instanceof Error ? error : new Error(i18n.t('inventory.offline.prepareRequired')) } }
   }, [workspaceId, signature, excludeOrderId, local])
   const query = useQuery({
-    queryKey: [...queryKeys.stockReservations.availability(workspaceId, scopedPositions, excludeOrderId, user?.id, user?.role), permissionScope],
-    queryFn: ({ signal }) => fetchBatchedAvailability(workspaceId!, scopedPositions, excludeOrderId, signal),
+    queryKey: [...queryKeys.stockReservations.availability(workspaceId, scopedPositions, excludeOrderId, user?.id, user?.role, requireAuthoritative), permissionScope],
+    queryFn: ({ signal }) => fetchBatchedAvailability(workspaceId!, scopedPositions, excludeOrderId, requireAuthoritative, signal),
     enabled: !!workspaceId && !local && scopedPositions.length > 0,
     staleTime: 5000,
     retry: (failureCount, error) => !isNonRetryableStockAvailabilityError(error) && failureCount < 1,

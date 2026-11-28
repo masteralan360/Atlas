@@ -44,11 +44,16 @@ const moneyFields = [
   'collections', 'settlements', 'delivery_fees', 'current_due_to',
   'current_due_from', 'recipient_due', 'recipient_refund_due',
 ] as const
+type PostalStatementSummary = Record<(typeof moneyFields)[number], string> & {
+  cod_amount_total?: string
+  delivery_fee_total?: string
+  missing_tariffs: number
+}
 export interface PostalStatement {
   organization: PostalOrganization
   entries: PostalStatementEntry[]
   total: number
-  summary: Record<(typeof moneyFields)[number], string> & { missing_tariffs: number }
+  summary: PostalStatementSummary
 }
 const invalid = () => new Error('postal_invalid_result')
 function record(value: unknown): Record<string, unknown> {
@@ -91,6 +96,8 @@ export function normalizePostalStatement(value: unknown, workspaceId: string, or
   if (!Number.isSafeInteger(rawSummary.missing_tariffs) || Number(rawSummary.missing_tariffs) < 0) throw invalid()
   const summary: PostalStatement['summary'] = {
     ...Object.fromEntries(moneyFields.map((key) => [key, money(rawSummary[key])])) as Record<(typeof moneyFields)[number], string>,
+    ...(rawSummary.cod_amount_total === undefined ? {} : { cod_amount_total: money(rawSummary.cod_amount_total) }),
+    ...(rawSummary.delivery_fee_total === undefined ? {} : { delivery_fee_total: money(rawSummary.delivery_fee_total) }),
     missing_tariffs: Number(rawSummary.missing_tariffs),
   }
   if (BigInt(summary.opening_balance) + BigInt(summary.credit_total) - BigInt(summary.debit_total) !== BigInt(summary.closing_balance)) throw invalid()

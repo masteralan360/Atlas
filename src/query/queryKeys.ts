@@ -79,8 +79,8 @@ export const queryKeys = {
   },
   stockReservations: {
     all: (workspaceId?: string) => ['atlas', 'workspace', workspaceId ?? 'unscoped', 'stock-reservations'] as const,
-    availability: (workspaceId: string | undefined, positions: readonly { productId: string; storageId: string }[], excludeOrderId?: string, userId?: string, role?: string) =>
-      [...queryKeys.stockReservations.all(workspaceId), 'availability', positions, excludeOrderId ?? null, userId ?? null, role ?? null] as const,
+    availability: (workspaceId: string | undefined, positions: readonly { productId: string; storageId: string }[], excludeOrderId?: string, userId?: string, role?: string, requireAuthoritative = false) =>
+      [...queryKeys.stockReservations.all(workspaceId), 'availability', positions, excludeOrderId ?? null, userId ?? null, role ?? null, requireAuthoritative] as const,
     sourceAvailability: (workspaceId: string | undefined, positions: readonly { productId: string; storageId: string }[], excludeOrderId?: string, userId?: string, role?: string) =>
       [...queryKeys.stockReservations.all(workspaceId), 'source-availability', positions, excludeOrderId ?? null, userId ?? null, role ?? null] as const,
     details: (workspaceId: string, productId: string, storageId: string, page: number, userId?: string, role?: string) =>
